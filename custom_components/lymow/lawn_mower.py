@@ -7,7 +7,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    WORK_STATUS_DOCKED_GROUP,
+    WORK_STATUS_ERROR_GROUP,
+    WORK_STATUS_MOWING_GROUP,
+    WORK_STATUS_OFFLINE,
+    WORK_STATUS_PAUSED_GROUP,
+    WORK_STATUS_RETURNING_GROUP,
+)
 from .coordinator import LymowCoordinator
 
 
@@ -19,8 +27,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
-    # No control features until MQTT is implemented.
-    _attr_supported_features = LawnMowerEntityFeature(0)
+    _attr_supported_features = (
+        LawnMowerEntityFeature.START_MOWING
+        | LawnMowerEntityFeature.PAUSE
+        | LawnMowerEntityFeature.DOCK
+    )
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
@@ -35,8 +46,29 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
 
     @property
     def activity(self) -> LawnMowerActivity:
-        # Real mowing state comes via MQTT — for now reflect connectivity only.
-        device_state = self._device_data.get("deviceState", "")
-        if device_state == "online":
+        if not self._device_data.get("isOnline", True):
+            return LawnMowerActivity.ERROR
+
+        ws = self._device_data.get("workStatus", WORK_STATUS_OFFLINE)
+
+        if ws in WORK_STATUS_MOWING_GROUP:
+            return LawnMowerActivity.MOWING
+        if ws in WORK_STATUS_RETURNING_GROUP:
+            return LawnMowerActivity.MOWING  # HA has no "returning" — closest is still active
+        if ws in WORK_STATUS_DOCKED_GROUP:
             return LawnMowerActivity.DOCKED
+        if ws in WORK_STATUS_PAUSED_GROUP:
+            return LawnMowerActivity.PAUSED
+        if ws in WORK_STATUS_ERROR_GROUP:
+            return LawnMowerActivity.ERROR
+        # Offline or unknown
         return LawnMowerActivity.ERROR
+
+    async def async_start_mowing(self) -> None:
+        await self.coordinator.async_start_mowing(self._thing_name)
+
+    async def async_pause(self) -> None:
+        await self.coordinator.async_pause(self._thing_name)
+
+    async def async_dock(self) -> None:
+        await self.coordinator.async_dock(self._thing_name)
