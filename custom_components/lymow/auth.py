@@ -168,6 +168,7 @@ class LymowAuth:
             "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
         }
 
+        client_id = REGION_CONFIG[region].get("client_id") or ""
         srp = SRPClient(username, password, pool_id)
         payload = {
             "AuthFlow": "USER_SRP_AUTH",
@@ -215,6 +216,28 @@ class LymowAuth:
                 raise ValueError(f"HTTP {resp.status}: {body}")
             data = await resp.json(content_type=None)
 
+        return data["AuthenticationResult"]
+
+    async def refresh_tokens(self, refresh_token: str, region: str) -> dict[str, Any]:
+        """Use a RefreshToken to obtain a fresh AccessToken + IdToken."""
+        cfg = REGION_CONFIG[region]
+        pool_id   = cfg["user_pool_id"]
+        client_id = cfg.get("client_id") or ""
+        url = self._COGNITO_IDP.format(region=region)
+        headers = {
+            "Content-Type": "application/x-amz-json-1.1",
+            "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
+        }
+        payload = {
+            "AuthFlow": "REFRESH_TOKEN_AUTH",
+            "AuthParameters": {"REFRESH_TOKEN": refresh_token},
+            "ClientId": client_id,
+        }
+        async with self._session.post(url, json=payload, headers=headers) as resp:
+            if not resp.ok:
+                body = await resp.text()
+                raise ValueError(f"Token refresh failed HTTP {resp.status}: {body}")
+            data = await resp.json(content_type=None)
         return data["AuthenticationResult"]
 
     async def get_aws_credentials(self, id_token: str, region: str) -> dict[str, Any]:
