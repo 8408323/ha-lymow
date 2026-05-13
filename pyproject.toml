@@ -5,6 +5,7 @@ requires-python = ">=3.13"
 dependencies = [
     "aiohttp>=3.13",
     "aiomqtt>=2.5.1",
+    "websockets>=16.0",
 ]
 
 
