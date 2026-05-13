@@ -24,3 +24,4 @@ def _load_lymow_module(name: str) -> None:
 _load_lymow_module("const")
 _load_lymow_module("auth")
 _load_lymow_module("api")
+_load_lymow_module("mqtt")

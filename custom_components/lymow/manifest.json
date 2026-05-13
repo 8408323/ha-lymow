@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "documentation": "https://github.com/8408323/ha-lymow",
   "issue_tracker": "https://github.com/8408323/ha-lymow/issues",
-  "requirements": ["warrant-lite==0.1.1"],
+  "requirements": ["aiomqtt>=2.5.1"],
   "dependencies": [],
   "codeowners": [],
-  "iot_class": "cloud_polling"
+  "iot_class": "cloud_push"
 }
