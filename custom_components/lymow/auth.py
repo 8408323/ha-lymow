@@ -137,14 +137,14 @@ class LymowAuth:
         """Attempt login against all known regions, return tokens + region."""
         # eu-west-1 client_id is confirmed; use it as fallback for regions where it
         # hasn't been individually extracted yet (all regions share the same app)
-        fallback_client_id = REGION_CONFIG["eu-west-1"]["client_id"]
+        fallback_client_id: str = REGION_CONFIG["eu-west-1"]["client_id"]  # type: ignore[assignment]
         for region in ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]:
             cfg = REGION_CONFIG[region]
             pool_id = cfg.get("user_pool_id")
             if pool_id is None:
                 _LOGGER.debug("[%s] skipped — user_pool_id not configured", region)
                 continue
-            client_id = cfg.get("client_id") or fallback_client_id
+            client_id: str = cfg.get("client_id") or fallback_client_id
             try:
                 result = await self._srp_login(username, password, region, pool_id, client_id)
                 result["region"] = region
@@ -168,7 +168,6 @@ class LymowAuth:
             "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
         }
 
-        client_id = REGION_CONFIG[region].get("client_id") or ""
         srp = SRPClient(username, password, pool_id)
         payload = {
             "AuthFlow": "USER_SRP_AUTH",
