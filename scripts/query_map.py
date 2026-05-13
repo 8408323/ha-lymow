@@ -55,7 +55,6 @@ for _m in ("const", "auth", "api", "protocol", "mqtt"):
     _load(f"lymow.{_m}", os.path.join(_base, f"{_m}.py"))
 
 import aiomqtt  # noqa: E402
-
 from lymow.auth import LymowAuth  # noqa: E402
 from lymow.const import REGION_CONFIG  # noqa: E402
 from lymow.mqtt import build_presigned_ws_path  # noqa: E402
@@ -84,7 +83,6 @@ def _dump_fields(data: bytes, indent: int = 0, max_depth: int = 4) -> None:
         print(f"{prefix}(decode error: {e})")
         return
     for fn, wt, val in fields:
-        wt_name = {0: "varint", 1: "i64", 2: "bytes", 5: "i32"}.get(wt, f"wt{wt}")
         if isinstance(val, bytes):
             floats = ""
             if len(val) > 0 and len(val) % 4 == 0 and len(val) <= 128:
