@@ -11,7 +11,7 @@ The integration connects directly to AWS IoT MQTT. Use the debug scripts to
 send commands and dump raw protobuf responses without touching the phone at all.
 
 ```bash
-cd /home/joha/projects/ha-lymow
+# From the repo root:
 
 # Query current robot state + try all map query variants
 uv run python scripts/query_map.py
@@ -52,22 +52,22 @@ usbipd attach --wsl --busid 1-3
 
 **In WSL (once per session after attaching):**
 ```bash
-ADB=/home/joha/android-sdk/platform-tools/adb
-$ADB devices          # should show the phone serial
+adb devices          # should show the phone serial
 ```
+
+If `adb` is not in PATH, add the Android SDK platform-tools directory to PATH first.
 
 If the phone shows "unauthorized" — tap "Allow" on the phone's USB debugging prompt.
 
 ### Environment details
 - usbipd-win: installed at `C:\Program Files\usbipd-win\`
-- adb binary: `/home/joha/android-sdk/platform-tools/adb`
 - Phone (OnePlus): USB bus ID **1-3** (confirm with `usbipd list` each session — bus IDs can change)
 - Phone WiFi IP: **192.168.1.45** (may vary — check router if stale)
 
 ### Run the capture script
 
 ```bash
-cd /home/joha/projects/ha-lymow
+# From the repo root:
 bash scripts/adb_capture.sh
 ```
 
@@ -80,36 +80,33 @@ Then open the Lymow app on the phone and navigate to the map screen. Press Ctrl-
 ### Controlling the app via UIAutomator (tap automation)
 
 ```bash
-ADB=/home/joha/android-sdk/platform-tools/adb
-
 # Find the Lymow app package name
-$ADB shell pm list packages | grep -i lymow
+adb shell pm list packages | grep -i lymow
 
 # Launch the app
-$ADB shell monkey -p <package.name> -c android.intent.category.LAUNCHER 1
+adb shell monkey -p <package.name> -c android.intent.category.LAUNCHER 1
 
 # Dump current UI hierarchy (find button coordinates)
-$ADB shell uiautomator dump /sdcard/ui.xml && $ADB pull /sdcard/ui.xml /tmp/ui.xml
+adb shell uiautomator dump /sdcard/ui.xml && adb pull /sdcard/ui.xml /tmp/ui.xml
 grep -i "map\|zone\|area" /tmp/ui.xml
 
 # Tap a screen coordinate (x y)
-$ADB shell input tap 540 1200
+adb shell input tap 540 1200
 ```
 
 ### tcpdump on device (captures raw MQTT WebSocket bytes)
 
 If the device has `tcpdump` (rooted, or install via Magisk):
 ```bash
-ADB=/home/joha/android-sdk/platform-tools/adb
 IOT_HOST="a3j5zqqo5iuph9-ats.iot.eu-west-1.amazonaws.com"
 
 # Start capture
-$ADB shell "tcpdump -i any -w /sdcard/lymow.pcap host $IOT_HOST" &
+adb shell "tcpdump -i any -w /sdcard/lymow.pcap host $IOT_HOST" &
 
 # ... use the app ...
 
 # Pull and inspect
-$ADB pull /sdcard/lymow.pcap tools/capture-adb.pcap
+adb pull /sdcard/lymow.pcap tools/capture-adb.pcap
 tshark -r tools/capture-adb.pcap -Y "tcp.port==443" -x | head -100
 ```
 
@@ -130,7 +127,7 @@ MQTT WebSocket upgrade. Requires installing the mitmproxy CA cert on the phone.
 ### Run the proxy
 
 ```bash
-cd /home/joha/projects/ha-lymow
+# From the repo root:
 mitmdump -s tools/capture.py --listen-host 0.0.0.0 --listen-port 8888 --ssl-insecure
 ```
 

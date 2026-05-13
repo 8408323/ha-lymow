@@ -101,7 +101,7 @@ Three methods — pick what fits:
   usbipd bind --busid 1-3
   usbipd attach --wsl --busid 1-3
   ```
-- adb binary: `/home/joha/android-sdk/platform-tools/adb`
+- adb binary: wherever `adb` is in PATH (Android SDK platform-tools)
 - Phone: OnePlus, USB bus **1-3**, WiFi IP **192.168.1.45**
 - If phone shows "unauthorized" after attach: tap Allow on phone screen
 

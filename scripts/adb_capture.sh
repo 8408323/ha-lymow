@@ -9,7 +9,11 @@
 #   2. tcpdump on the phone — raw TCP to/from the AWS IoT host (port 443)
 #      Saved to tools/capture-adb.pcap (gitignored), readable with wireshark/tshark.
 
-ADB=/home/joha/android-sdk/platform-tools/adb
+ADB=$(which adb 2>/dev/null || find "$HOME/android-sdk" "$HOME/Android/Sdk" /opt/android-sdk -name adb -type f 2>/dev/null | head -1)
+if [ -z "$ADB" ]; then
+    echo "Error: adb not found. Add Android SDK platform-tools to PATH."
+    exit 1
+fi
 IOT_HOST="a3j5zqqo5iuph9-ats.iot.eu-west-1.amazonaws.com"
 OUT_DIR="$(dirname "$0")/../tools"
 mkdir -p "$OUT_DIR"
