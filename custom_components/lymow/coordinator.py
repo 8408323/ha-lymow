@@ -106,19 +106,19 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         return -1
 
     async def async_start_mowing(self, thing_name: str) -> None:
-        self._mqtt.publish_command(thing_name, encode_userctrl(USER_CTRL_CLEAN))
+        await self._mqtt.async_publish_command(thing_name, encode_userctrl(USER_CTRL_CLEAN))
 
     async def async_pause(self, thing_name: str) -> None:
         ws = self._current_work_status(thing_name)
         ctrl = USER_CTRL_PAUSE_DOCK if ws == WORK_STATUS_DOCKING else USER_CTRL_PAUSE
-        self._mqtt.publish_command(thing_name, encode_userctrl(ctrl))
+        await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
 
     async def async_dock(self, thing_name: str) -> None:
         ws = self._current_work_status(thing_name)
         ctrl = USER_CTRL_RESUME_DOCK if ws == WORK_STATUS_PAUSE_DOCKING else USER_CTRL_RECHARGE_DOCK
-        self._mqtt.publish_command(thing_name, encode_userctrl(ctrl))
+        await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
 
     async def async_resume(self, thing_name: str) -> None:
         ws = self._current_work_status(thing_name)
         ctrl = USER_CTRL_RESUME_DOCK if ws == WORK_STATUS_PAUSE_DOCKING else USER_CTRL_RESUME
-        self._mqtt.publish_command(thing_name, encode_userctrl(ctrl))
+        await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
