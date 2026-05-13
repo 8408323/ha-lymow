@@ -236,7 +236,7 @@ async def main() -> None:
 
         # Summary
         large = [(lbl, pb) for lbl, pb in all_payloads if len(pb) > 150]
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Total messages: {len(all_payloads)}, large (>150B): {len(large)}")
 
         if large:
