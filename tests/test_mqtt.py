@@ -1,14 +1,14 @@
 """Tests for Lymow MQTT client."""
 from __future__ import annotations
 
+import importlib
 import logging
-import sys
 
 import pytest
 
 from lymow.mqtt import LymowMqttClient
 
-mqtt_module = sys.modules["lymow.mqtt"]
+mqtt_module = importlib.import_module("lymow.mqtt")
 
 
 @pytest.mark.asyncio
