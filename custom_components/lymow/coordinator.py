@@ -60,6 +60,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_shutdown(self) -> None:
         """Disconnect MQTT and stop polling."""
+        await super().async_shutdown()
         await self._mqtt.disconnect()
 
     # ------------------------------------------------------------------
