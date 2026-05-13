@@ -1,6 +1,7 @@
 """Tests for Lymow MQTT client."""
 from __future__ import annotations
 
+import logging
 import sys
 
 import pytest
@@ -11,7 +12,7 @@ mqtt_module = sys.modules["lymow.mqtt"]
 
 
 @pytest.mark.asyncio
-async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypatch):
+async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypatch, caplog):
     events: dict[str, object] = {}
     topics: list[str] = []
 
@@ -55,4 +56,6 @@ async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypat
         "/device/mower-001/pboutput",
         "/device/mower-001/notify-app",
     ]
-    assert client._client is None
+    with caplog.at_level(logging.WARNING):
+        client.publish_command("mower-001", b"payload")
+    assert "MQTT not connected" in caplog.text
