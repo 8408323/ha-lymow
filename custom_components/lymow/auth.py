@@ -11,9 +11,13 @@ import base64
 from datetime import UTC, datetime
 from typing import Any
 
+import logging
+
 import aiohttp
 
 from .const import REGION_CONFIG
+
+_LOGGER = logging.getLogger(__name__)
 
 # SRP constants
 N_HEX = (
@@ -131,20 +135,22 @@ class LymowAuth:
 
     async def login(self, username: str, password: str) -> dict[str, Any]:
         """Attempt login against all known regions, return tokens + region."""
-        # Try eu-west-1 first (most likely for EU users), then others
+        # eu-west-1 client_id is confirmed; use it as fallback for regions where it
+        # hasn't been individually extracted yet (all regions share the same app)
+        fallback_client_id = REGION_CONFIG["eu-west-1"]["client_id"]
         for region in ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]:
             cfg = REGION_CONFIG[region]
             pool_id = cfg.get("user_pool_id")
-            client_id = cfg.get("client_id")
-            if pool_id is None or client_id is None:
-                print(f"  [{region}] skipped — Cognito configuration incomplete")
+            if pool_id is None:
+                _LOGGER.debug("[%s] skipped — user_pool_id not configured", region)
                 continue
+            client_id = cfg.get("client_id") or fallback_client_id
             try:
                 result = await self._srp_login(username, password, region, pool_id, client_id)
                 result["region"] = region
                 return result
             except Exception as exc:
-                print(f"  [{region}] failed: {exc}")
+                _LOGGER.debug("[%s] login failed: %s", region, exc)
                 continue
         raise ValueError("Login failed for all regions")
 
