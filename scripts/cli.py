@@ -91,6 +91,7 @@ async def main() -> None:
 
         print("\n--- Getting AWS credentials ---")
         creds_data = await auth.get_aws_credentials(tokens["IdToken"], tokens["region"])
+        aws = creds_data["credentials"]
         print(f"Identity ID: {creds_data['identity_id']}")
 
         client = LymowApiClient(
@@ -98,6 +99,11 @@ async def main() -> None:
             access_token=tokens["AccessToken"],
             region=tokens["region"],
             identity_id=creds_data["identity_id"],
+        )
+        client.update_aws_credentials(
+            access_key=aws["AccessKeyId"],
+            secret_key=aws["SecretKey"],
+            session_token=aws["SessionToken"],
         )
 
         print("\n--- Device list ---")
@@ -115,10 +121,22 @@ async def main() -> None:
             feature = await client.get_device_feature(thing)
             print(json.dumps(feature, indent=2))
 
-            print(f"\n--- Map: {thing} ---")
+            print(f"\n--- Clean history (page 1): {thing} ---")
             try:
-                map_data = await client.get_map(thing)
-                print(json.dumps(map_data, indent=2))
+                history = await client.get_clean_history(thing)
+                print(json.dumps(history, indent=2))
+            except Exception as exc:
+                print(f"  (error: {exc})")
+
+            print(f"\n--- Backup map key: {thing} ---")
+            try:
+                s3_key = await client.get_backup_map_key(thing)
+                print(f"  S3 key: {s3_key}")
+                if s3_key:
+                    print(f"\n--- Downloading map bytes: {thing} ---")
+                    map_bytes = await client.download_map_bytes(s3_key)
+                    print(f"  Downloaded {len(map_bytes)} bytes")
+                    print(f"  First 32 bytes (hex): {map_bytes[:32].hex()}")
             except Exception as exc:
                 print(f"  (error: {exc})")
 
