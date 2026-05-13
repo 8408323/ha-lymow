@@ -14,21 +14,15 @@ import hashlib
 import hmac
 import json
 import logging
-import ssl
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
+import aiomqtt
+
 _LOGGER = logging.getLogger(__name__)
-
-# Lazy import of paho to keep HA startup fast
-try:
-    import paho.mqtt.client as mqtt
-except ImportError:
-    mqtt = None  # type: ignore[assignment]
-
 
 # ---------------------------------------------------------------------------
 # SigV4 presigned WebSocket URL
@@ -83,7 +77,6 @@ def build_presigned_ws_path(
         for k, v in sorted(canonical_qs_parts.items())
     )
 
-    # SigV4 canonical request: headers block must end with \n, then signed_headers, then payload hash
     canonical_request = (
         f"{method}\n"
         f"{uri}\n"
@@ -115,7 +108,11 @@ OnlineCallback = Callable[[str, bool], None]            # (thing_name, is_online
 
 
 class LymowMqttClient:
-    """Manages a single AWS IoT WebSocket MQTT connection for all devices."""
+    """Manages a single AWS IoT WebSocket MQTT connection for all devices.
+
+    Uses aiomqtt for a fully async message loop — no background thread,
+    no call_soon_threadsafe marshalling needed.
+    """
 
     def __init__(
         self,
@@ -129,10 +126,9 @@ class LymowMqttClient:
         self._on_state = on_state
         self._on_online = on_online
 
-        self._client: mqtt.Client | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
         self._things: list[str] = []
-        self._connected = asyncio.Event()
+        self._client: aiomqtt.Client | None = None
+        self._listen_task: asyncio.Task | None = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -145,43 +141,32 @@ class LymowMqttClient:
         secret_key: str,
         session_token: str | None,
     ) -> None:
-        """Connect to AWS IoT and subscribe to all device topics."""
-        if mqtt is None:
-            raise RuntimeError("paho-mqtt is not installed")
-
+        """Connect to AWS IoT and start the async message listener."""
         self._things = things
-        self._loop = asyncio.get_running_loop()
-        self._connected.clear()
 
         ws_path = build_presigned_ws_path(
             self._host, self._region, access_key, secret_key, session_token
         )
 
-        client = mqtt.Client(
-            client_id=f"lymow-ha-{uuid.uuid4().hex[:8]}",
+        self._client = aiomqtt.Client(
+            hostname=self._host,
+            port=443,
+            identifier=f"lymow-ha-{uuid.uuid4().hex[:8]}",
             transport="websockets",
-            protocol=mqtt.MQTTv311,
-            clean_session=True,
+            websocket_path=ws_path,
+            websocket_headers={"Host": self._host},
+            tls_params=aiomqtt.TLSParameters(),
+            keepalive=30,
         )
-        ssl_ctx = ssl.create_default_context()
-        client.tls_set_context(ssl_ctx)
-        client.ws_set_options(path=ws_path, headers={"Host": self._host})
 
-        client.on_connect = self._on_connect
-        client.on_disconnect = self._on_disconnect
-        client.on_message = self._on_message
+        await self._client.__aenter__()
 
-        self._client = client
+        for thing in things:
+            await self._client.subscribe(f"/device/{thing}/pboutput", qos=1)
+            await self._client.subscribe(f"/device/{thing}/notify-app", qos=1)
 
-        await self._loop.run_in_executor(None, lambda: client.connect(self._host, 443, keepalive=30))
-        client.loop_start()
-
-        try:
-            await asyncio.wait_for(self._connected.wait(), timeout=15)
-        except asyncio.TimeoutError:
-            client.loop_stop()
-            self._client = None
-            raise RuntimeError(f"MQTT connection to {self._host} timed out")
+        self._listen_task = asyncio.create_task(self._listen_loop())
+        _LOGGER.debug("MQTT connected to %s", self._host)
 
     async def reconnect(
         self,
@@ -194,44 +179,58 @@ class LymowMqttClient:
         await self.connect(self._things, access_key, secret_key, session_token)
 
     async def disconnect(self) -> None:
+        if self._listen_task:
+            self._listen_task.cancel()
+            try:
+                await self._listen_task
+            except asyncio.CancelledError:
+                pass
+            self._listen_task = None
         if self._client:
-            self._client.loop_stop()
-            await asyncio.get_running_loop().run_in_executor(None, self._client.disconnect)
+            await self._client.__aexit__(None, None, None)
             self._client = None
 
     def publish_command(self, thing_name: str, pb_bytes: bytes) -> None:
-        """Publish a protobuf command to the device's pbinput topic."""
+        """Schedule a protobuf command publish (fire-and-forget from sync context)."""
+        if not self._client:
+            _LOGGER.warning("MQTT not connected — command dropped")
+            return
+        asyncio.ensure_future(self._publish(thing_name, pb_bytes))
+
+    async def async_publish_command(self, thing_name: str, pb_bytes: bytes) -> None:
+        """Publish a protobuf command and await completion."""
         from .protocol import wrap_envelope
         if not self._client:
             _LOGGER.warning("MQTT not connected — command dropped")
             return
         topic = f"/device/{thing_name}/pbinput"
-        payload = wrap_envelope(pb_bytes)
-        self._client.publish(topic, payload, qos=1)
+        await self._client.publish(topic, wrap_envelope(pb_bytes), qos=1)
 
     # ------------------------------------------------------------------
-    # Internal paho callbacks (called from paho's thread)
+    # Internal
     # ------------------------------------------------------------------
 
-    def _on_connect(self, client: mqtt.Client, _userdata: Any, _flags: Any, rc: int) -> None:
-        if rc != 0:
-            _LOGGER.error("MQTT connect failed: rc=%d", rc)
+    async def _publish(self, thing_name: str, pb_bytes: bytes) -> None:
+        from .protocol import wrap_envelope
+        if not self._client:
             return
-        _LOGGER.debug("MQTT connected")
-        for thing in self._things:
-            client.subscribe(f"/device/{thing}/pboutput", qos=1)
-            client.subscribe(f"/device/{thing}/notify-app", qos=1)
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._connected.set)
+        topic = f"/device/{thing_name}/pbinput"
+        await self._client.publish(topic, wrap_envelope(pb_bytes), qos=1)
 
-    def _on_disconnect(self, _client: mqtt.Client, _userdata: Any, rc: int) -> None:
-        _LOGGER.warning("MQTT disconnected: rc=%d", rc)
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._connected.clear)
+    async def _listen_loop(self) -> None:
+        if not self._client:
+            return
+        try:
+            async for message in self._client.messages:
+                self._dispatch(message)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            _LOGGER.exception("MQTT listen loop exited unexpectedly")
 
-    def _on_message(self, _client: mqtt.Client, _userdata: Any, msg: mqtt.MQTTMessage) -> None:
-        topic = msg.topic
-        payload = msg.payload
+    def _dispatch(self, message: aiomqtt.Message) -> None:
+        topic = str(message.topic)
+        payload = message.payload
 
         thing_name: str | None = None
         for thing in self._things:
@@ -249,18 +248,16 @@ class LymowMqttClient:
         except Exception:
             _LOGGER.exception("Error handling MQTT message on %s", topic)
 
-    def _handle_pboutput(self, thing_name: str, payload: bytes) -> None:
+    def _handle_pboutput(self, thing_name: str, payload: bytes | str) -> None:
         from .protocol import decode_pboutput, unwrap_envelope
         pb_bytes = unwrap_envelope(payload)
         state = decode_pboutput(pb_bytes)
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._on_state, thing_name, state)
+        self._on_state(thing_name, state)
 
-    def _handle_notify(self, thing_name: str, payload: bytes) -> None:
+    def _handle_notify(self, thing_name: str, payload: bytes | str) -> None:
         try:
             data = json.loads(payload)
             is_online = str(data.get("robotState", "")).lower() == "online"
         except Exception:
             return
-        if self._loop:
-            self._loop.call_soon_threadsafe(self._on_online, thing_name, is_online)
+        self._on_online(thing_name, is_online)
