@@ -49,3 +49,10 @@ class LymowApiClient:
         async with self._session.get(url, headers=self._headers, params=params) as resp:
             resp.raise_for_status()
             return await resp.json(content_type=None)
+
+    async def get_map(self, thing_name: str) -> Any:
+        url = _api_url(self._region, "api_map", "/prod/get-map")
+        params = {"deviceThingName": thing_name}
+        async with self._session.get(url, headers=self._headers, params=params) as resp:
+            resp.raise_for_status()
+            return await resp.json(content_type=None)

@@ -106,6 +106,7 @@ async def main() -> None:
 
         for device in devices if isinstance(devices, list) else []:
             thing = device.get("deviceThingName") or device.get("thingName") or list(device.values())[0]
+
             print(f"\n--- Device info: {thing} ---")
             info = await client.get_device_info(thing)
             print(json.dumps(info, indent=2))
@@ -113,6 +114,13 @@ async def main() -> None:
             print(f"\n--- Device feature: {thing} ---")
             feature = await client.get_device_feature(thing)
             print(json.dumps(feature, indent=2))
+
+            print(f"\n--- Map: {thing} ---")
+            try:
+                map_data = await client.get_map(thing)
+                print(json.dumps(map_data, indent=2))
+            except Exception as exc:
+                print(f"  (error: {exc})")
 
 
 def main_sync() -> None:
