@@ -1,14 +1,11 @@
 """Tests for Lymow MQTT client."""
 from __future__ import annotations
 
-import importlib
 import logging
 
 import pytest
 
-from lymow.mqtt import LymowMqttClient
-
-mqtt_module = importlib.import_module("lymow.mqtt")
+from lymow.mqtt import LymowMqttClient, aiomqtt
 
 
 @pytest.mark.asyncio
@@ -31,12 +28,12 @@ async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypat
         async def subscribe(self, topic, qos):
             topics.append(topic)
             if topic.endswith("/notify-app"):
-                raise mqtt_module.aiomqtt.MqttError("subscribe failed")
+                raise aiomqtt.MqttError("subscribe failed")
 
         async def publish(self, topic, payload, qos):
             publish_attempts.append((topic, payload, qos))
 
-    monkeypatch.setattr(mqtt_module.aiomqtt, "Client", FakeClient)
+    monkeypatch.setattr(aiomqtt, "Client", FakeClient)
 
     client = LymowMqttClient(
         host="example.amazonaws.com",
@@ -45,7 +42,7 @@ async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypat
         on_online=lambda _thing, _online: None,
     )
 
-    with pytest.raises(mqtt_module.aiomqtt.MqttError, match="subscribe failed"):
+    with pytest.raises(aiomqtt.MqttError, match="subscribe failed"):
         await client.connect(
             ["mower-001"],
             access_key="access",
