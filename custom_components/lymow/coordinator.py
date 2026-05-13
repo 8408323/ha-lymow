@@ -1,4 +1,5 @@
 """Data update coordinator for Lymow."""
+
 from __future__ import annotations
 
 import logging
@@ -12,7 +13,6 @@ from .api import LymowApiClient
 from .const import (
     DOMAIN,
     POLLING_INTERVAL,
-    REGION_CONFIG,
     USER_CTRL_CLEAN,
     USER_CTRL_PAUSE,
     USER_CTRL_PAUSE_DOCK,

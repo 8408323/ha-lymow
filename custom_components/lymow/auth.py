@@ -1,17 +1,14 @@
 """AWS Cognito SRP authentication for Lymow."""
+
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
+import logging
 import os
-import re
-import struct
-import time
-import base64
 from datetime import UTC, datetime
 from typing import Any
-
-import logging
 
 import aiohttp
 
@@ -88,7 +85,9 @@ class SRPClient:
     def srp_a(self) -> str:
         return _long_to_hex(self.A)
 
-    def process_challenge(self, username: str, salt_hex: str, srp_b_hex: str, secret_block_b64: str, timestamp: str) -> str:
+    def process_challenge(
+        self, username: str, salt_hex: str, srp_b_hex: str, secret_block_b64: str, timestamp: str
+    ) -> str:
         B = _hex_to_long(srp_b_hex)
         if B % self.N == 0:
             raise ValueError("SRP B is invalid")
@@ -97,9 +96,7 @@ class SRPClient:
         if u == 0:
             raise ValueError("U cannot be zero")
 
-        username_password_hash = _hash_sha256(
-            (self.pool_name + username + ":" + self.password).encode("utf-8")
-        )
+        username_password_hash = _hash_sha256((self.pool_name + username + ":" + self.password).encode("utf-8"))
         x = _hex_to_long(_hex_hash(_pad_hex(_hex_to_long(salt_hex)) + username_password_hash))
 
         g_mod_pow_xn = pow(self.g, x, self.N)
@@ -251,20 +248,28 @@ class LymowAuth:
         }
         login_key = f"cognito-idp.{region}.amazonaws.com/{pool_id}"
 
-        async with self._session.post(url, json={
-            "IdentityPoolId": identity_pool_id,
-            "Logins": {login_key: id_token},
-        }, headers=headers) as resp:
+        async with self._session.post(
+            url,
+            json={
+                "IdentityPoolId": identity_pool_id,
+                "Logins": {login_key: id_token},
+            },
+            headers=headers,
+        ) as resp:
             resp.raise_for_status()
             get_id = await resp.json(content_type=None)
 
         identity_id = get_id["IdentityId"]
 
         headers["X-Amz-Target"] = "AWSCognitoIdentityService.GetCredentialsForIdentity"
-        async with self._session.post(url, json={
-            "IdentityId": identity_id,
-            "Logins": {login_key: id_token},
-        }, headers=headers) as resp:
+        async with self._session.post(
+            url,
+            json={
+                "IdentityId": identity_id,
+                "Logins": {login_key: id_token},
+            },
+            headers=headers,
+        ) as resp:
             resp.raise_for_status()
             creds = await resp.json(content_type=None)
 

@@ -1,11 +1,12 @@
 """Tests for Lymow API client."""
+
 from __future__ import annotations
 
 import re
+
+import aiohttp
 import pytest
 from aioresponses import aioresponses
-import aiohttp
-
 from lymow.api import LymowApiClient
 from lymow.const import REGION_CONFIG
 

@@ -1,4 +1,5 @@
 """Lymow sensors."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -16,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ERROR_DESCRIPTIONS, RTK_STATUS_FIXED, RTK_STATUS_FLOAT_FIX
+from .const import DOMAIN, ERROR_DESCRIPTIONS
 from .coordinator import LymowCoordinator
 
 

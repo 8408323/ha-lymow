@@ -1,21 +1,22 @@
 """Config flow for Lymow integration."""
+
 from __future__ import annotations
 
 from typing import Any
 
-import aiohttp
 import voluptuous as vol
-
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .auth import LymowAuth
 from .const import CONF_PASSWORD, CONF_USERNAME, DOMAIN
 
-STEP_USER_SCHEMA = vol.Schema({
-    vol.Required(CONF_USERNAME): str,
-    vol.Required(CONF_PASSWORD): str,
-})
+STEP_USER_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_USERNAME): str,
+        vol.Required(CONF_PASSWORD): str,
+    }
+)
 
 
 class LymowConfigFlow(ConfigFlow, domain=DOMAIN):

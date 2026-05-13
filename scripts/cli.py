@@ -7,6 +7,7 @@ automatically — no need to export variables each time.
 Usage:
     uv run python scripts/cli.py
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -65,8 +66,8 @@ _load("lymow.const", os.path.join(_base, "const.py"))
 _load("lymow.auth", os.path.join(_base, "auth.py"))
 _load("lymow.api", os.path.join(_base, "api.py"))
 
-from lymow.auth import LymowAuth  # noqa: E402
 from lymow.api import LymowApiClient  # noqa: E402
+from lymow.auth import LymowAuth  # noqa: E402
 
 
 async def main() -> None:
@@ -103,7 +104,7 @@ async def main() -> None:
         devices = await client.get_devices()
         print(json.dumps(devices, indent=2))
 
-        for device in (devices if isinstance(devices, list) else []):
+        for device in devices if isinstance(devices, list) else []:
             thing = device.get("deviceThingName") or device.get("thingName") or list(device.values())[0]
             print(f"\n--- Device info: {thing} ---")
             info = await client.get_device_info(thing)

@@ -1,10 +1,10 @@
 """Tests for Lymow MQTT client."""
+
 from __future__ import annotations
 
 import logging
 
 import pytest
-
 from lymow.mqtt import LymowMqttClient, aiomqtt
 
 

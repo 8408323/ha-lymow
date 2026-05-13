@@ -1,9 +1,10 @@
 """Pytest configuration — make lymow submodules importable without the HA stack."""
+
 from __future__ import annotations
 
 import importlib.util
-import sys
 import os
+import sys
 
 _BASE = os.path.join(os.path.dirname(__file__), "..", "custom_components", "lymow")
 

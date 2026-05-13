@@ -7,6 +7,7 @@ delivers decoded state updates via a callback.
 All AWS endpoint details were determined from traffic capture of the Android
 app — specifically the WebSocket upgrade request to the IoT MQTT endpoint.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +29,7 @@ _LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # SigV4 presigned WebSocket URL
 # ---------------------------------------------------------------------------
+
 
 def _hmac_sha256(key: bytes, data: str) -> bytes:
     return hmac.new(key, data.encode("utf-8"), hashlib.sha256).digest()
@@ -73,25 +75,20 @@ def build_presigned_ws_path(
     if session_token:
         canonical_qs_parts["X-Amz-Security-Token"] = session_token
 
-    canonical_qs = "&".join(
-        f"{quote(k, safe='')}={quote(v, safe='')}"
-        for k, v in sorted(canonical_qs_parts.items())
-    )
+    canonical_qs = "&".join(f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in sorted(canonical_qs_parts.items()))
 
     canonical_request = (
-        f"{method}\n"
-        f"{uri}\n"
-        f"{canonical_qs}\n"
-        f"host:{host}\n"
-        f"\n"
-        f"{signed_headers}\n"
-        f"{hashlib.sha256(b'').hexdigest()}"
+        f"{method}\n{uri}\n{canonical_qs}\nhost:{host}\n\n{signed_headers}\n{hashlib.sha256(b'').hexdigest()}"
     )
 
-    string_to_sign = "\n".join([
-        "AWS4-HMAC-SHA256", amz_date, credential_scope,
-        hashlib.sha256(canonical_request.encode()).hexdigest(),
-    ])
+    string_to_sign = "\n".join(
+        [
+            "AWS4-HMAC-SHA256",
+            amz_date,
+            credential_scope,
+            hashlib.sha256(canonical_request.encode()).hexdigest(),
+        ]
+    )
 
     sig = _signing_key(secret_key, date_str, region, service)
     signature = hmac.new(sig, string_to_sign.encode(), hashlib.sha256).hexdigest()
@@ -104,8 +101,8 @@ def build_presigned_ws_path(
 # MQTT client
 # ---------------------------------------------------------------------------
 
-StateCallback = Callable[[str, dict[str, Any]], None]   # (thing_name, state_patch)
-OnlineCallback = Callable[[str, bool], None]            # (thing_name, is_online)
+StateCallback = Callable[[str, dict[str, Any]], None]  # (thing_name, state_patch)
+OnlineCallback = Callable[[str, bool], None]  # (thing_name, is_online)
 
 
 class LymowMqttClient:
@@ -145,9 +142,7 @@ class LymowMqttClient:
         """Connect to AWS IoT and start the async message listener."""
         self._things = things
 
-        ws_path = build_presigned_ws_path(
-            self._host, self._region, access_key, secret_key, session_token
-        )
+        ws_path = build_presigned_ws_path(self._host, self._region, access_key, secret_key, session_token)
 
         client = aiomqtt.Client(
             hostname=self._host,
@@ -207,6 +202,7 @@ class LymowMqttClient:
     async def async_publish_command(self, thing_name: str, pb_bytes: bytes) -> None:
         """Publish a protobuf command and await completion."""
         from .protocol import wrap_envelope
+
         if not self._client:
             _LOGGER.warning("MQTT not connected — command dropped")
             return
@@ -219,6 +215,7 @@ class LymowMqttClient:
 
     async def _publish(self, thing_name: str, pb_bytes: bytes) -> None:
         from .protocol import wrap_envelope
+
         if not self._client:
             return
         topic = f"/device/{thing_name}/pbinput"
@@ -257,6 +254,7 @@ class LymowMqttClient:
 
     def _handle_pboutput(self, thing_name: str, payload: bytes | str) -> None:
         from .protocol import decode_pboutput, unwrap_envelope
+
         pb_bytes = unwrap_envelope(payload)
         state = decode_pboutput(pb_bytes)
         self._on_state(thing_name, state)

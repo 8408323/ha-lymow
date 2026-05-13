@@ -1,12 +1,12 @@
 """Tests for Lymow auth module."""
+
 from __future__ import annotations
 
 import base64
 import hashlib
+
 import pytest
-
-from lymow.auth import SRPClient, _pad_hex, _hex_hash, _hash_sha256, _hex_to_long
-
+from lymow.auth import SRPClient, _hash_sha256, _hex_hash, _hex_to_long, _pad_hex
 
 POOL_ID = "eu-west-1_6qNPbnrrd"
 

@@ -7,6 +7,7 @@ envelope format on /device/{thing}/pbinput.
 All field numbers and wire types were determined from traffic capture of the
 Android app communicating with the robot over MQTT.
 """
+
 from __future__ import annotations
 
 import base64
@@ -20,6 +21,7 @@ PB_VERSION = 40
 # ---------------------------------------------------------------------------
 # Varint helpers
 # ---------------------------------------------------------------------------
+
 
 def _encode_varint(value: int) -> bytes:
     if value < 0:
@@ -63,6 +65,7 @@ def _decode_packed_int32s(data: bytes) -> list[int]:
 # Field encoding helpers
 # ---------------------------------------------------------------------------
 
+
 def _field_i32(field_no: int, value: int) -> bytes:
     """Encode a signed/unsigned int32 field (wire type 0 = varint)."""
     tag = _encode_varint((field_no << 3) | 0)
@@ -82,6 +85,7 @@ def _field_str(field_no: int, value: str) -> bytes:
 # ---------------------------------------------------------------------------
 # Envelope
 # ---------------------------------------------------------------------------
+
 
 def wrap_envelope(pb_bytes: bytes) -> str:
     """Encode protobuf bytes as a JSON envelope string ready for MQTT publish."""
@@ -103,6 +107,7 @@ def unwrap_envelope(payload: str | bytes) -> bytes:
 # Protobuf decoder (minimal — handles varint, length-delimited, 32/64-bit)
 # ---------------------------------------------------------------------------
 
+
 def _decode_fields(data: bytes) -> list[tuple[int, int, Any]]:
     """Return list of (field_no, wire_type, value) tuples from a protobuf blob."""
     pos = 0
@@ -120,7 +125,7 @@ def _decode_fields(data: bytes) -> list[tuple[int, int, Any]]:
             fields.append((field_no, wire_type, value))
         elif wire_type == 2:  # length-delimited
             length, pos = _decode_varint(data, pos)
-            value = data[pos: pos + length]
+            value = data[pos : pos + length]
             pos += length
             fields.append((field_no, wire_type, value))
         elif wire_type == 5:  # 32-bit
@@ -154,6 +159,7 @@ def _signed32(v: int) -> int:
 # ---------------------------------------------------------------------------
 # PbOutput decoder — maps to a flat state dict
 # ---------------------------------------------------------------------------
+
 
 def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     """Decode a PbOutput protobuf blob into a flat state dict.
@@ -205,8 +211,7 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     profile_raw = _first(fields, 10)
     if isinstance(profile_raw, bytes):
         dp = _decode_fields(profile_raw)
-        for field_no, key in ((1, "fwVersion"), (2, "mcuVersion"), (5, "ipAddress"),
-                               (6, "macAddress"), (7, "sn")):
+        for field_no, key in ((1, "fwVersion"), (2, "mcuVersion"), (5, "ipAddress"), (6, "macAddress"), (7, "sn")):
             val = _first(dp, field_no)
             if isinstance(val, bytes):
                 state[key] = val.decode("utf-8", errors="replace")
@@ -217,6 +222,7 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # PbInput encoders — commands sent to the robot
 # ---------------------------------------------------------------------------
+
 
 def encode_userctrl(command: int) -> bytes:
     """Encode a simple user control command."""

@@ -1,11 +1,11 @@
 """Unit tests for protocol.py — protobuf encode/decode."""
+
 from __future__ import annotations
 
 import base64
 import json
 
 import pytest
-
 from lymow.protocol import (
     _decode_fields,
     _decode_packed_int32s,
@@ -22,10 +22,10 @@ from lymow.protocol import (
     wrap_envelope,
 )
 
-
 # ---------------------------------------------------------------------------
 # Varint round-trip
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("value", [0, 1, 127, 128, 255, 300, 16383, 16384, 2**21, 2**28])
 def test_varint_roundtrip(value: int) -> None:
@@ -59,6 +59,7 @@ def test_varint_two_bytes() -> None:
 # _signed32
 # ---------------------------------------------------------------------------
 
+
 def test_signed32_positive() -> None:
     assert _signed32(0) == 0
     assert _signed32(1) == 1
@@ -79,6 +80,7 @@ def test_signed32_truncates_high_bits() -> None:
 # ---------------------------------------------------------------------------
 # _decode_packed_int32s
 # ---------------------------------------------------------------------------
+
 
 def test_decode_packed_empty() -> None:
     assert _decode_packed_int32s(b"") == []
@@ -111,6 +113,7 @@ def test_decode_packed_mixed_signs() -> None:
 # ---------------------------------------------------------------------------
 # Field encoding helpers
 # ---------------------------------------------------------------------------
+
 
 def test_field_i32_zero() -> None:
     out = _field_i32(1, 0)
@@ -147,6 +150,7 @@ def test_field_str_roundtrip() -> None:
 # ---------------------------------------------------------------------------
 # Envelope
 # ---------------------------------------------------------------------------
+
 
 def test_wrap_envelope_produces_valid_json() -> None:
     pb = b"\x01\x02\x03"
@@ -190,8 +194,10 @@ def test_wrap_unwrap_roundtrip() -> None:
 # encode_userctrl
 # ---------------------------------------------------------------------------
 
+
 def test_encode_userctrl_structure() -> None:
     from lymow.protocol import PB_VERSION
+
     pb = encode_userctrl(1)
     fields = _decode_fields(pb)
     by_field = {fn: val for fn, _wt, val in fields}
@@ -201,11 +207,22 @@ def test_encode_userctrl_structure() -> None:
 
 def test_encode_userctrl_all_commands() -> None:
     from lymow.const import (
-        USER_CTRL_CLEAN, USER_CTRL_PAUSE, USER_CTRL_RESUME,
-        USER_CTRL_RECHARGE_DOCK, USER_CTRL_PAUSE_DOCK, USER_CTRL_RESUME_DOCK,
+        USER_CTRL_CLEAN,
+        USER_CTRL_PAUSE,
+        USER_CTRL_PAUSE_DOCK,
+        USER_CTRL_RECHARGE_DOCK,
+        USER_CTRL_RESUME,
+        USER_CTRL_RESUME_DOCK,
     )
-    for cmd in (USER_CTRL_CLEAN, USER_CTRL_PAUSE, USER_CTRL_RESUME,
-                USER_CTRL_RECHARGE_DOCK, USER_CTRL_PAUSE_DOCK, USER_CTRL_RESUME_DOCK):
+
+    for cmd in (
+        USER_CTRL_CLEAN,
+        USER_CTRL_PAUSE,
+        USER_CTRL_RESUME,
+        USER_CTRL_RECHARGE_DOCK,
+        USER_CTRL_PAUSE_DOCK,
+        USER_CTRL_RESUME_DOCK,
+    ):
         pb = encode_userctrl(cmd)
         fields = _decode_fields(pb)
         by_field = {fn: val for fn, _wt, val in fields}
@@ -216,8 +233,10 @@ def test_encode_userctrl_all_commands() -> None:
 # encode_start_zones
 # ---------------------------------------------------------------------------
 
+
 def test_encode_start_zones_empty() -> None:
     from lymow.protocol import PB_VERSION
+
     pb = encode_start_zones([])
     fields = _decode_fields(pb)
     by_field = {fn: val for fn, _wt, val in fields}
@@ -249,6 +268,7 @@ def test_encode_start_zones_multiple() -> None:
 # ---------------------------------------------------------------------------
 # decode_pboutput — full integration
 # ---------------------------------------------------------------------------
+
 
 def _build_pboutput(
     *,
@@ -375,12 +395,19 @@ def test_decode_pboutput_empty_bytes() -> None:
 
 def test_decode_pboutput_work_status_all_known() -> None:
     from lymow.const import (
-        WORK_STATUS_MOWING_GROUP, WORK_STATUS_RETURNING_GROUP,
-        WORK_STATUS_DOCKED_GROUP, WORK_STATUS_PAUSED_GROUP, WORK_STATUS_ERROR_GROUP,
+        WORK_STATUS_DOCKED_GROUP,
+        WORK_STATUS_ERROR_GROUP,
+        WORK_STATUS_MOWING_GROUP,
+        WORK_STATUS_PAUSED_GROUP,
+        WORK_STATUS_RETURNING_GROUP,
     )
+
     all_known = (
-        WORK_STATUS_MOWING_GROUP | WORK_STATUS_RETURNING_GROUP |
-        WORK_STATUS_DOCKED_GROUP | WORK_STATUS_PAUSED_GROUP | WORK_STATUS_ERROR_GROUP
+        WORK_STATUS_MOWING_GROUP
+        | WORK_STATUS_RETURNING_GROUP
+        | WORK_STATUS_DOCKED_GROUP
+        | WORK_STATUS_PAUSED_GROUP
+        | WORK_STATUS_ERROR_GROUP
     )
     for ws in all_known:
         pb = _build_pboutput(work_status=ws)

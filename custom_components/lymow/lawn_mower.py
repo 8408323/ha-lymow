@@ -1,4 +1,5 @@
 """Lymow lawn mower entity."""
+
 from __future__ import annotations
 
 from homeassistant.components.lawn_mower import LawnMowerActivity, LawnMowerEntity, LawnMowerEntityFeature
@@ -21,16 +22,12 @@ from .coordinator import LymowCoordinator
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        LymowMower(coordinator, device) for device in coordinator.devices
-    )
+    async_add_entities(LymowMower(coordinator, device) for device in coordinator.devices)
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
     _attr_supported_features = (
-        LawnMowerEntityFeature.START_MOWING
-        | LawnMowerEntityFeature.PAUSE
-        | LawnMowerEntityFeature.DOCK
+        LawnMowerEntityFeature.START_MOWING | LawnMowerEntityFeature.PAUSE | LawnMowerEntityFeature.DOCK
     )
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
