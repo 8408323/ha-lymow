@@ -13,7 +13,7 @@ from typing import Any
 
 import aiohttp
 
-from .const import COGNITO_CLIENT_ID, REGION_CONFIG
+from .const import REGION_CONFIG
 
 # SRP constants
 N_HEX = (
@@ -135,11 +135,12 @@ class LymowAuth:
         for region in ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]:
             cfg = REGION_CONFIG[region]
             pool_id = cfg.get("user_pool_id")
-            if pool_id is None:
-                print(f"  [{region}] skipped — user pool ID not known")
+            client_id = cfg.get("client_id")
+            if pool_id is None or client_id is None:
+                print(f"  [{region}] skipped — Cognito configuration incomplete")
                 continue
             try:
-                result = await self._srp_login(username, password, region, pool_id)
+                result = await self._srp_login(username, password, region, pool_id, client_id)
                 result["region"] = region
                 return result
             except Exception as exc:
@@ -147,7 +148,14 @@ class LymowAuth:
                 continue
         raise ValueError("Login failed for all regions")
 
-    async def _srp_login(self, username: str, password: str, region: str, pool_id: str) -> dict[str, Any]:
+    async def _srp_login(
+        self,
+        username: str,
+        password: str,
+        region: str,
+        pool_id: str,
+        client_id: str,
+    ) -> dict[str, Any]:
         url = self._COGNITO_IDP.format(region=region)
         headers = {
             "Content-Type": "application/x-amz-json-1.1",
@@ -161,7 +169,7 @@ class LymowAuth:
                 "USERNAME": username,
                 "SRP_A": srp.srp_a,
             },
-            "ClientId": COGNITO_CLIENT_ID,
+            "ClientId": client_id,
         }
 
         async with self._session.post(url, json=payload, headers=headers) as resp:
@@ -192,7 +200,7 @@ class LymowAuth:
                 "TIMESTAMP": timestamp,
                 "PASSWORD_CLAIM_SIGNATURE": signature,
             },
-            "ClientId": COGNITO_CLIENT_ID,
+            "ClientId": client_id,
         }
 
         async with self._session.post(url, json=payload, headers=headers) as resp:
