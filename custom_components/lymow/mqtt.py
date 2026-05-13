@@ -148,7 +148,7 @@ class LymowMqttClient:
             self._host, self._region, access_key, secret_key, session_token
         )
 
-        self._client = aiomqtt.Client(
+        client = aiomqtt.Client(
             hostname=self._host,
             port=443,
             identifier=f"lymow-ha-{uuid.uuid4().hex[:8]}",
@@ -157,13 +157,18 @@ class LymowMqttClient:
             websocket_headers={"Host": self._host},
             tls_params=aiomqtt.TLSParameters(),
             keepalive=30,
+            timeout=15,
         )
 
-        await self._client.__aenter__()
-
-        for thing in things:
-            await self._client.subscribe(f"/device/{thing}/pboutput", qos=1)
-            await self._client.subscribe(f"/device/{thing}/notify-app", qos=1)
+        try:
+            await client.__aenter__()
+            for thing in things:
+                await client.subscribe(f"/device/{thing}/pboutput", qos=1)
+                await client.subscribe(f"/device/{thing}/notify-app", qos=1)
+        except Exception:
+            await client.__aexit__(None, None, None)
+            raise
+        self._client = client
 
         self._listen_task = asyncio.create_task(self._listen_loop())
         _LOGGER.debug("MQTT connected to %s", self._host)
