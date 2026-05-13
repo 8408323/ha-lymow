@@ -40,7 +40,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     things = [d["deviceThingName"] for d in devices]
 
     cfg = REGION_CONFIG[region]
-    iot_host = cfg["iot_host"]
+    iot_host = cfg.get("iot_host")
+    if not iot_host:
+        raise ValueError(f"No IoT endpoint configured for region {region}")
 
     mqtt_client = LymowMqttClient(
         host=iot_host,
@@ -67,10 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    coordinator: LymowCoordinator = hass.data[DOMAIN].get(entry.entry_id)
-    if coordinator:
-        await coordinator.async_shutdown()
-
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
+        coordinator: LymowCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
+        await coordinator.async_shutdown()
     return unload_ok
