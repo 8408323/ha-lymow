@@ -21,13 +21,13 @@ PLATFORMS = [Platform.LAWN_MOWER, Platform.SENSOR]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
-    auth    = LymowAuth(session)
+    auth = LymowAuth(session)
 
     tokens = await auth.login(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
     region = tokens["region"]
 
     creds = await auth.get_aws_credentials(tokens["IdToken"], region)
-    aws   = creds["credentials"]
+    aws = creds["credentials"]
 
     client = LymowApiClient(
         session=session,
@@ -37,9 +37,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     devices = await client.get_devices()
-    things  = [d["deviceThingName"] for d in devices]
+    things = [d["deviceThingName"] for d in devices]
 
-    cfg      = REGION_CONFIG[region]
+    cfg = REGION_CONFIG[region]
     iot_host = cfg["iot_host"]
 
     mqtt_client = LymowMqttClient(
@@ -59,6 +59,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session_token=aws.get("SessionToken"),
     )
 
+    _LOGGER.debug("Lymow setup complete: %d device(s) in region %s", len(devices), region)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -68,7 +69,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator: LymowCoordinator = hass.data[DOMAIN].get(entry.entry_id)
     if coordinator:
-        await coordinator._mqtt.disconnect()
+        await coordinator.async_shutdown()
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)

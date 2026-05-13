@@ -28,7 +28,7 @@ from .protocol import encode_userctrl
 _LOGGER = logging.getLogger(__name__)
 
 
-class LymowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Coordinator that merges REST polling with live MQTT state.
 
     coordinator.data is a dict keyed by deviceThingName.  Each value is a
@@ -49,11 +49,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=DOMAIN,
             update_interval=timedelta(seconds=POLLING_INTERVAL),
         )
-        self._client      = client
-        self._mqtt        = mqtt_client
-        self.devices      = devices
-        # Live MQTT state patches, merged into data on each REST poll
+        self._client = client
+        self._mqtt = mqtt_client
+        self.devices = devices
         self._mqtt_state: dict[str, dict[str, Any]] = {}
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    async def async_shutdown(self) -> None:
+        """Disconnect MQTT and stop polling."""
+        await self._mqtt.disconnect()
 
     # ------------------------------------------------------------------
     # MQTT callbacks (called from mqtt.py via loop.call_soon_threadsafe)
@@ -64,7 +71,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if thing_name not in self._mqtt_state:
             self._mqtt_state[thing_name] = {}
         self._mqtt_state[thing_name].update(patch)
-        # Merge into current coordinator data and notify listeners immediately
         if self.data and thing_name in self.data:
             merged = {**self.data[thing_name], **patch}
             self.async_set_updated_data({**self.data, thing_name: merged})
@@ -78,13 +84,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     # REST polling
     # ------------------------------------------------------------------
 
-    async def _async_update_data(self) -> dict[str, Any]:
+    async def _async_update_data(self) -> dict[str, dict[str, Any]]:
         try:
-            result: dict[str, Any] = {}
+            result: dict[str, dict[str, Any]] = {}
             for device in self.devices:
                 thing = device["deviceThingName"]
                 rest_data = await self._client.get_device_info(thing)
-                # Overlay any live MQTT state on top of the REST snapshot
                 merged = {**rest_data, **self._mqtt_state.get(thing, {})}
                 result[thing] = merged
             return result
