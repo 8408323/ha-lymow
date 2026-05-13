@@ -221,7 +221,6 @@ class LymowAuth:
     async def refresh_tokens(self, refresh_token: str, region: str) -> dict[str, Any]:
         """Use a RefreshToken to obtain a fresh AccessToken + IdToken."""
         cfg = REGION_CONFIG[region]
-        pool_id   = cfg["user_pool_id"]
         client_id = cfg.get("client_id") or ""
         url = self._COGNITO_IDP.format(region=region)
         headers = {
