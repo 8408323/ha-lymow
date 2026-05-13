@@ -54,7 +54,7 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
         if ws in WORK_STATUS_MOWING_GROUP:
             return LawnMowerActivity.MOWING
         if ws in WORK_STATUS_RETURNING_GROUP:
-            return LawnMowerActivity.MOWING  # HA has no "returning" — closest is still active
+            return LawnMowerActivity.RETURNING
         if ws in WORK_STATUS_DOCKED_GROUP:
             return LawnMowerActivity.DOCKED
         if ws in WORK_STATUS_PAUSED_GROUP:
