@@ -7,14 +7,22 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectSelectorMode
 
 from .auth import LymowAuth
-from .const import CONF_PASSWORD, CONF_USERNAME, DOMAIN
+from .const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME, DOMAIN, REGION_AUTO, REGION_CHOICES
 
 STEP_USER_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_USERNAME): str,
         vol.Required(CONF_PASSWORD): str,
+        vol.Optional(CONF_REGION, default=REGION_AUTO): SelectSelector(
+            SelectSelectorConfig(
+                options=REGION_CHOICES,
+                mode=SelectSelectorMode.DROPDOWN,
+                translation_key="region",
+            )
+        ),
     }
 )
 
@@ -28,8 +36,16 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             session = async_get_clientsession(self.hass)
             auth = LymowAuth(session)
+            region_override = user_input.get(CONF_REGION, REGION_AUTO)
             try:
-                tokens = await auth.login(user_input[CONF_USERNAME], user_input[CONF_PASSWORD])
+                if region_override == REGION_AUTO:
+                    tokens = await auth.login(user_input[CONF_USERNAME], user_input[CONF_PASSWORD])
+                else:
+                    tokens = await auth.login_region(
+                        user_input[CONF_USERNAME],
+                        user_input[CONF_PASSWORD],
+                        region_override,
+                    )
             except Exception:
                 errors["base"] = "invalid_auth"
             else:
@@ -40,7 +56,7 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
                     data={
                         CONF_USERNAME: user_input[CONF_USERNAME],
                         CONF_PASSWORD: user_input[CONF_PASSWORD],
-                        "region": tokens["region"],
+                        CONF_REGION: tokens["region"],
                         "refresh_token": tokens["RefreshToken"],
                     },
                 )

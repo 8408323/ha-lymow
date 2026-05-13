@@ -5,7 +5,11 @@
         "title": "Connect to Lymow",
         "data": {
           "username": "Email",
-          "password": "Password"
+          "password": "Password",
+          "region": "AWS Region"
+        },
+        "data_description": {
+          "region": "Leave on Auto-detect unless you know your account is in a specific region."
         }
       }
     },
@@ -14,6 +18,17 @@
     },
     "abort": {
       "already_configured": "Account already configured"
+    }
+  },
+  "selector": {
+    "region": {
+      "options": {
+        "auto": "Auto-detect",
+        "eu-west-1": "EU West (Ireland)",
+        "us-east-2": "US East (Ohio)",
+        "ap-southeast-2": "Asia Pacific (Sydney)",
+        "ap-east-1": "Asia Pacific (Hong Kong)"
+      }
     }
   }
 }

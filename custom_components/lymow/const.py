@@ -4,6 +4,10 @@ DOMAIN = "lymow"
 
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
+CONF_REGION = "region"
+
+REGION_AUTO = "auto"
+REGION_CHOICES = [REGION_AUTO, "eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]
 
 # How often to poll REST device state (MQTT keeps live state between polls)
 POLLING_INTERVAL = 30  # seconds

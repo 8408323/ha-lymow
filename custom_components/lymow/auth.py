@@ -151,6 +151,18 @@ class LymowAuth:
                 continue
         raise ValueError("Login failed for all regions")
 
+    async def login_region(self, username: str, password: str, region: str) -> dict[str, Any]:
+        """Attempt login against a specific region (user-selected override)."""
+        fallback_client_id: str = REGION_CONFIG["eu-west-1"]["client_id"]  # type: ignore[assignment]
+        cfg = REGION_CONFIG[region]
+        pool_id = cfg.get("user_pool_id")
+        if pool_id is None:
+            raise ValueError(f"Region {region} has no user_pool_id configured")
+        client_id: str = cfg.get("client_id") or fallback_client_id
+        result = await self._srp_login(username, password, region, pool_id, client_id)
+        result["region"] = region
+        return result
+
     async def _srp_login(
         self,
         username: str,

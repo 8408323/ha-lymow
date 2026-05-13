@@ -11,7 +11,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import LymowApiClient
 from .auth import LymowAuth
-from .const import CONF_PASSWORD, CONF_USERNAME, DOMAIN, REGION_CONFIG
+from .const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME, DOMAIN, REGION_CONFIG
 from .coordinator import LymowCoordinator
 from .mqtt import LymowMqttClient
 
@@ -24,7 +24,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = async_get_clientsession(hass)
     auth = LymowAuth(session)
 
-    tokens = await auth.login(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
+    # Use stored region if available (set during config flow), else auto-detect.
+    stored_region: str | None = entry.data.get(CONF_REGION)
+    if stored_region:
+        tokens = await auth.login_region(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD], stored_region)
+    else:
+        tokens = await auth.login(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
+
     region = tokens["region"]
 
     creds = await auth.get_aws_credentials(tokens["IdToken"], region)
