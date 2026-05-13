@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import logging
+import sys
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -166,7 +167,7 @@ class LymowMqttClient:
                 await client.subscribe(f"/device/{thing}/pboutput", qos=1)
                 await client.subscribe(f"/device/{thing}/notify-app", qos=1)
         except (aiomqtt.MqttError, asyncio.TimeoutError, OSError):
-            await client.__aexit__(None, None, None)
+            await client.__aexit__(*sys.exc_info())
             raise
         self._client = client
 

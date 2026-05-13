@@ -15,6 +15,7 @@ mqtt_module = importlib.import_module("lymow.mqtt")
 async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypatch, caplog):
     events: dict[str, object] = {}
     topics: list[str] = []
+    publish_attempts: list[tuple[str, str, int]] = []
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -31,6 +32,9 @@ async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypat
             topics.append(topic)
             if topic.endswith("/notify-app"):
                 raise mqtt_module.aiomqtt.MqttError("subscribe failed")
+
+        async def publish(self, topic, payload, qos):
+            publish_attempts.append((topic, payload, qos))
 
     monkeypatch.setattr(mqtt_module.aiomqtt, "Client", FakeClient)
 
@@ -59,3 +63,4 @@ async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypat
     with caplog.at_level(logging.WARNING):
         client.publish_command("mower-001", b"payload")
     assert "MQTT not connected" in caplog.text
+    assert publish_attempts == []
