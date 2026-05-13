@@ -19,15 +19,12 @@ import aiohttp
 
 
 def _load_dotenv() -> None:
-    """Load key=value pairs from scripts/.env (or ../.env) into os.environ.
+    """Load key=value pairs from scripts/.env into os.environ.
 
     Does not override variables that are already set. Exits with an error
     message if the file exists but cannot be read.
     """
-    candidates = [
-        os.path.join(os.path.dirname(__file__), ".env"),
-        os.path.join(os.path.dirname(__file__), "..", ".env"),
-    ]
+    candidates = [os.path.join(os.path.dirname(__file__), ".env")]
     for path in candidates:
         if not os.path.isfile(path):
             continue
