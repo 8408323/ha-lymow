@@ -65,7 +65,15 @@ uv run pytest tests/ -v
 - Stack branches on each other when they share dependencies to avoid
   cross-PR "missing symbol" false alarms from AI reviewers
   Correct merge order: mqtt-protocol → coordinator-commands → entities → auth-refresh
-- After pushing, comment `@copilot please review again` and `@codex[agent] review`
+- After pushing, resolve the comment thread for each fixed comment using the
+  GitHub GraphQL API:
+  ```
+  # Get thread node IDs
+  gh api repos/<owner>/<repo>/pulls/<n>/comments --jq '.[] | {id, node_id, body}'
+  # Resolve a thread
+  gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_NODE_ID"}) { thread { isResolved } } }'
+  ```
+- Then comment `@copilot please review again` and `@codex[agent] review`
   on each PR; wait ~5 minutes for re-review
 - Cross-PR false alarms (reviewer sees each PR in isolation): explain in a comment,
   do not duplicate code across PRs
