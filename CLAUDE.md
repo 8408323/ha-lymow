@@ -26,7 +26,12 @@ custom_components/lymow/   # HA integration (the actual product)
   manifest.json            # HA integration manifest
 scripts/
   cli.py                   # Dev CLI — loads scripts/.env automatically
+  query_map.py             # MQTT: send userCtrl=19 and dump zone/map response
+  debug_mqtt.py            # MQTT: full debug dump (IoT REST shadow + connect + raw fields)
+  adb_capture.sh           # ADB: logcat + optional tcpdump capture via USB
   .env.example             # Credential template (copy to scripts/.env)
+docs/
+  reverse_engineering.md   # Capture methods: MQTT CLI / ADB / mitmproxy
 tests/
   conftest.py              # Loads lymow modules via importlib (no HA import chain)
   test_auth.py             # SRP unit tests
@@ -77,6 +82,33 @@ uv run pytest tests/ -v
   on each PR; wait ~5 minutes for re-review
 - Cross-PR false alarms (reviewer sees each PR in isolation): explain in a comment,
   do not duplicate code across PRs
+
+## Traffic capture / reverse engineering
+
+Full instructions: **[docs/reverse_engineering.md](docs/reverse_engineering.md)**
+
+Three methods — pick what fits:
+
+1. **MQTT CLI** (no phone needed): `uv run python scripts/query_map.py`
+2. **ADB + logcat** (USB, no proxy cert): `bash scripts/adb_capture.sh`
+3. **mitmproxy** (full HTTPS): `mitmdump -s tools/capture.py --listen-host 0.0.0.0 --listen-port 8888 --ssl-insecure`
+
+### ADB quick reference (WSL2)
+- usbipd-win installed at `C:\Program Files\usbipd-win\`
+- Run as **Administrator** in Windows PowerShell:
+  ```powershell
+  usbipd list                       # find phone bus ID (OnePlus = 1-3, but confirm)
+  usbipd bind --busid 1-3
+  usbipd attach --wsl --busid 1-3
+  ```
+- adb binary: wherever `adb` is in PATH (Android SDK platform-tools)
+- Phone: OnePlus, USB bus **1-3**, WiFi IP **192.168.1.45**
+- If phone shows "unauthorized" after attach: tap Allow on phone screen
+
+### mitmproxy quick reference
+- Proxy: **192.168.1.147:8888** (WSL2 machine), phone proxy → same
+- CA cert: browse to `http://mitm.it` on phone while proxy active → install Android cert
+- Output: `tools/capture-lymow.txt` (gitignored)
 
 ## Sensitive data
 
