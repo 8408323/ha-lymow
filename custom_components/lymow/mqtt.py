@@ -165,7 +165,7 @@ class LymowMqttClient:
             for thing in things:
                 await client.subscribe(f"/device/{thing}/pboutput", qos=1)
                 await client.subscribe(f"/device/{thing}/notify-app", qos=1)
-        except Exception:
+        except (aiomqtt.MqttError, asyncio.TimeoutError, OSError):
             await client.__aexit__(None, None, None)
             raise
         self._client = client

@@ -13,6 +13,7 @@ mqtt_module = sys.modules["lymow.mqtt"]
 @pytest.mark.asyncio
 async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypatch):
     events: dict[str, object] = {}
+    topics: list[str] = []
 
     class FakeClient:
         def __init__(self, **kwargs):
@@ -26,8 +27,9 @@ async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypat
             events["exited"] = True
 
         async def subscribe(self, topic, qos):
-            events["topic"] = topic
-            raise RuntimeError("subscribe failed")
+            topics.append(topic)
+            if topic.endswith("/notify-app"):
+                raise mqtt_module.aiomqtt.MqttError("subscribe failed")
 
     monkeypatch.setattr(mqtt_module.aiomqtt, "Client", FakeClient)
 
@@ -38,7 +40,7 @@ async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypat
         on_online=lambda _thing, _online: None,
     )
 
-    with pytest.raises(RuntimeError, match="subscribe failed"):
+    with pytest.raises(mqtt_module.aiomqtt.MqttError, match="subscribe failed"):
         await client.connect(
             ["mower-001"],
             access_key="access",
@@ -49,4 +51,8 @@ async def test_connect_uses_timeout_and_cleans_up_on_subscribe_failure(monkeypat
     assert events["entered"] is True
     assert events["exited"] is True
     assert events["kwargs"]["timeout"] == 15
+    assert topics == [
+        "/device/mower-001/pboutput",
+        "/device/mower-001/notify-app",
+    ]
     assert client._client is None
