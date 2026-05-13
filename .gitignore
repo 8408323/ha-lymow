@@ -17,3 +17,6 @@ venv/
 # Editor
 .vscode/
 *.swp
+
+# Local AI session task tracking
+.todo
