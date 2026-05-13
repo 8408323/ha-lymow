@@ -65,6 +65,8 @@ def build_presigned_ws_path(
     credential = f"{access_key}/{credential_scope}"
 
     signed_headers = "host"
+    # X-Amz-Security-Token must NOT be in the canonical query string — it is appended
+    # after the signature. Signing it causes AWS IoT to return HTTP 403 on WebSocket upgrade.
     canonical_qs_parts: dict[str, str] = {
         "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
         "X-Amz-Credential": credential,
@@ -72,8 +74,6 @@ def build_presigned_ws_path(
         "X-Amz-Expires": "86400",
         "X-Amz-SignedHeaders": signed_headers,
     }
-    if session_token:
-        canonical_qs_parts["X-Amz-Security-Token"] = session_token
 
     canonical_qs = "&".join(f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in sorted(canonical_qs_parts.items()))
 
@@ -94,6 +94,8 @@ def build_presigned_ws_path(
     signature = hmac.new(sig, string_to_sign.encode(), hashlib.sha256).hexdigest()
 
     final_qs = canonical_qs + f"&X-Amz-Signature={signature}"
+    if session_token:
+        final_qs += f"&X-Amz-Security-Token={quote(session_token, safe='')}"
     return f"{uri}?{final_qs}"
 
 
