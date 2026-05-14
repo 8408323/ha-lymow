@@ -9,8 +9,7 @@ from unittest.mock import AsyncMock, patch
 import aiohttp
 import pytest
 from aioresponses import aioresponses
-
-from lymow.auth import LymowAuth, N_HEX, SRPClient, _hash_sha256, _hex_hash, _hex_to_long, _pad_hex
+from lymow.auth import N_HEX, LymowAuth, SRPClient, _hash_sha256, _hex_hash, _hex_to_long, _pad_hex
 
 _COGNITO_IDP_EU = "https://cognito-idp.eu-west-1.amazonaws.com/"
 _COGNITO_IDENTITY_EU = "https://cognito-identity.eu-west-1.amazonaws.com/"
