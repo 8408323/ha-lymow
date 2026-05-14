@@ -1,5 +1,6 @@
 """Tests for lawn_mower.py — LymowMower and async_setup_entry."""
 
+# ruff: noqa: I001
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -273,7 +274,7 @@ async def test_handle_delete_zone_valid_zone_calls_coordinator() -> None:
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = "entry-1"
-    handlers = await _setup_and_get_handlers(hass, entry, coord)
+    await _setup_and_get_handlers(hass, entry, coord)
 
     # We need an entity with a known entity_id
     from lymow.const import DOMAIN

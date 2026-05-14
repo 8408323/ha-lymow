@@ -1327,7 +1327,6 @@ def test_encode_nogo_zone_with_polygon() -> None:
 
 def test_delete_zone_from_raw_content_preserves_varint_fields() -> None:
     """Cover wt=0 (varint) re-encode branch (line 247)."""
-    import struct as _struct
 
     from lymow.protocol import delete_zone_from_raw_content
 
@@ -1350,7 +1349,6 @@ def test_delete_zone_from_raw_content_preserves_varint_fields() -> None:
 
 def test_delete_zone_from_raw_content_preserves_32bit_float_fields() -> None:
     """Cover wt=5 (32-bit fixed) re-encode branch (lines 252-253)."""
-    import struct as _struct
 
     from lymow.protocol import delete_zone_from_raw_content
 
