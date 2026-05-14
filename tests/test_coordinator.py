@@ -368,3 +368,119 @@ async def test_current_work_status_returns_value_from_data() -> None:
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 4}}
     assert coord._current_work_status(THING) == 4
+
+
+# ---------------------------------------------------------------------------
+# Query commands
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_query_map_publishes_correct_command() -> None:
+    from lymow.protocol import decode_pboutput, _decode_fields
+    from lymow.const import USER_CTRL_QUERY_MAP
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_query_map(THING)
+
+    assert mqtt.async_publish_command.await_count == 1
+    _, pb_bytes = mqtt.async_publish_command.call_args[0]
+    fields = _decode_fields(pb_bytes)
+    by_field = {fn: val for fn, _wt, val in fields}
+    # field 5 = userCtrl = QUERY_MAP = 19
+    assert by_field.get(5) == USER_CTRL_QUERY_MAP
+
+
+@pytest.mark.asyncio
+async def test_async_query_all_maps_sends_one_command_per_device() -> None:
+    devices = [
+        {"deviceThingName": "mower-001", "deviceName": "A"},
+        {"deviceThingName": "mower-002", "deviceName": "B"},
+    ]
+    coord, mqtt, api = _make_coordinator(devices=devices)
+    api.get_device_info = AsyncMock(return_value={"workStatus": 5, "battery": 100})
+    await coord._async_update_data()  # initialise data
+    await coord.async_query_all_maps()
+    assert mqtt.async_publish_command.await_count == 2
+    called_things = [c[0][0] for c in mqtt.async_publish_command.call_args_list]
+    assert "mower-001" in called_things
+    assert "mower-002" in called_things
+
+
+@pytest.mark.asyncio
+async def test_async_query_schedules_publishes_correct_command() -> None:
+    from lymow.protocol import _decode_fields
+    from lymow.const import USER_CTRL_QUERY_SCHEDULES
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_query_schedules(THING)
+
+    assert mqtt.async_publish_command.await_count == 1
+    _, pb_bytes = mqtt.async_publish_command.call_args[0]
+    fields = _decode_fields(pb_bytes)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert by_field.get(5) == USER_CTRL_QUERY_SCHEDULES
+
+
+# ---------------------------------------------------------------------------
+# Work status transition notifications
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_work_status_transition_fires_event_bus() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5}}  # docked
+
+    # Seed the previous work status so the transition is 5 → 1
+    coord._prev_work_status[THING] = 5
+
+    # Transition to mowing
+    coord.on_mqtt_state(THING, {"workStatus": 1})
+
+    coord.hass.bus.async_fire.assert_called()
+    call_args = coord.hass.bus.async_fire.call_args[0]
+    assert call_args[0] == "lymow_work_status_changed"
+    payload = call_args[1]
+    assert payload["work_status"] == 1
+    assert payload["prev_work_status"] == 5
+
+
+@pytest.mark.asyncio
+async def test_work_status_error_transition_fires_notification() -> None:
+    from lymow.const import WORK_STATUS_ERROR_GROUP
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 1}}  # mowing
+
+    error_status = next(iter(WORK_STATUS_ERROR_GROUP))
+    coord.on_mqtt_state(THING, {"workStatus": error_status})
+
+    coord.hass.components.persistent_notification.async_create.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_work_status_mow_complete_fires_notification() -> None:
+    from lymow.const import WORK_STATUS_MOWING_GROUP, WORK_STATUS_DOCKED_GROUP
+
+    coord, _, _ = _make_coordinator()
+    mow_status = next(iter(WORK_STATUS_MOWING_GROUP))
+    docked_status = next(iter(WORK_STATUS_DOCKED_GROUP))
+    coord.data = {THING: {"workStatus": mow_status}}
+    coord._prev_work_status[THING] = mow_status
+
+    coord.on_mqtt_state(THING, {"workStatus": docked_status})
+
+    coord.hass.components.persistent_notification.async_create.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_on_mqtt_offline_fires_persistent_notification() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5, "isOnline": True}}
+
+    coord.on_mqtt_online(THING, False)
+
+    coord.hass.components.persistent_notification.async_create.assert_called()
+    call_kwargs = coord.hass.components.persistent_notification.async_create.call_args[1]
+    assert "offline" in call_kwargs.get("title", "").lower()
