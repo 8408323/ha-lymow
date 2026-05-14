@@ -1129,9 +1129,7 @@ def test_delete_zone_from_raw_content_removes_target_zone() -> None:
 
     # Decode result and collect go-zone hashes (fn=1)
     remaining_hashes = [
-        _zone_hash_from_raw(val)
-        for fn, _wt, val in _decode_fields(result)
-        if fn == 1 and isinstance(val, bytes)
+        _zone_hash_from_raw(val) for fn, _wt, val in _decode_fields(result) if fn == 1 and isinstance(val, bytes)
     ]
     assert "zoneA" not in remaining_hashes
     assert "zoneB" in remaining_hashes
@@ -1183,7 +1181,7 @@ def test_encode_sync_map_raw_contains_sync_map_command() -> None:
 def test_encode_sync_map_raw_embeds_content_in_f23() -> None:
     from lymow.protocol import encode_sync_map_raw
 
-    raw_content = b"\xAB\xCD\xEF"
+    raw_content = b"\xab\xcd\xef"
     pb = encode_sync_map_raw(raw_content)
     fields = _decode_fields(pb)
     by_field = {fn: val for fn, _wt, val in fields}
@@ -1427,4 +1425,3 @@ def test_decode_map_response_skips_non_bytes_nogo_zone_field() -> None:
 
     result = decode_map_response(pb)
     assert result.get("nogoZones", []) == []
-

@@ -119,6 +119,7 @@ class TestSRPClientEdgeCases:
     def test_process_challenge_raises_on_zero_u(self):
         """Force u == 0 by patching _hex_hash to return all-zeros."""
         import sys
+
         srp = SRPClient("user", "pass", "eu-west-1_6qNPbnrrd")
         auth_mod = sys.modules["lymow.auth"]
         with patch.object(auth_mod, "_hex_hash", return_value="0" * 64):
@@ -194,8 +195,11 @@ class TestLymowAuthSrpLogin:
             m.post(_COGNITO_IDP_EU, payload=_FAKE_CHALLENGE)
             m.post(_COGNITO_IDP_EU, payload=_FAKE_AUTH_RESULT)
             result = await auth_client._srp_login(
-                "user@example.com", "password",
-                "eu-west-1", "eu-west-1_6qNPbnrrd", "test-client-id",
+                "user@example.com",
+                "password",
+                "eu-west-1",
+                "eu-west-1_6qNPbnrrd",
+                "test-client-id",
             )
         assert result["AccessToken"] == "access"
 
@@ -204,8 +208,11 @@ class TestLymowAuthSrpLogin:
             m.post(_COGNITO_IDP_EU, status=400, body="Bad Request")
             with pytest.raises(ValueError, match="HTTP 400"):
                 await auth_client._srp_login(
-                    "user@example.com", "password",
-                    "eu-west-1", "eu-west-1_6qNPbnrrd", "test-client-id",
+                    "user@example.com",
+                    "password",
+                    "eu-west-1",
+                    "eu-west-1_6qNPbnrrd",
+                    "test-client-id",
                 )
 
     async def test_srp_login_raises_on_second_http_error(self, auth_client):
@@ -214,8 +221,11 @@ class TestLymowAuthSrpLogin:
             m.post(_COGNITO_IDP_EU, status=400, body="Bad Request")
             with pytest.raises(ValueError, match="HTTP 400"):
                 await auth_client._srp_login(
-                    "user@example.com", "password",
-                    "eu-west-1", "eu-west-1_6qNPbnrrd", "test-client-id",
+                    "user@example.com",
+                    "password",
+                    "eu-west-1",
+                    "eu-west-1_6qNPbnrrd",
+                    "test-client-id",
                 )
 
 

@@ -628,4 +628,3 @@ async def test_async_start_zones_publishes_command() -> None:
     assert mqtt.async_publish_command.await_count == 1
     thing, _ = mqtt.async_publish_command.call_args[0]
     assert thing == THING
-

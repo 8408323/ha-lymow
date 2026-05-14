@@ -91,4 +91,3 @@ class TestGetDeviceFeature:
             m.get(RE_FEATURE, status=403)
             with pytest.raises(aiohttp.ClientResponseError):
                 await client.get_device_feature("mower-001")
-
