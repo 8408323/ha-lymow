@@ -27,3 +27,4 @@ venv/
 
 # Local AI session task tracking
 .todo
+plan.md

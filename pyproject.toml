@@ -21,6 +21,7 @@ dev = [
     "pytest-asyncio>=0.25",
     "aioresponses>=0.7",
     "ruff>=0.9",
+    "pytest-cov>=7.1.0",
 ]
 
 [tool.ruff]
