@@ -458,6 +458,46 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             if isinstance(val, bytes):
                 state[key] = val.decode("utf-8", errors="replace")
 
+    # GPS / RTK (field 6 of outer PbOutput):
+    #   f1=satellites(int), f2=eastM(float32), f3=northM(float32), f4=rtkStatus(int)
+    rtk_raw = _first(fields, 6)
+    if isinstance(rtk_raw, bytes):
+        rtk = _decode_fields(rtk_raw)
+        sats = _first(rtk, 1)
+        if sats is not None:
+            state["rtkSatellites"] = _signed32(sats)
+        east = _first(rtk, 2)
+        if east is not None:
+            state["rtkEastM"] = _decode_f32(east)
+        north = _first(rtk, 3)
+        if north is not None:
+            state["rtkNorthM"] = _decode_f32(north)
+        rtk_status = _first(rtk, 4)
+        if rtk_status is not None:
+            state["rtkStatus"] = _signed32(rtk_status)
+
+    # Area info (field 12): f2=totalAreaM2(float32)
+    area_raw = _first(fields, 12)
+    if isinstance(area_raw, bytes):
+        area_fields = _decode_fields(area_raw)
+        total_area = _first(area_fields, 2)
+        if total_area is not None:
+            state["totalAreaM2"] = _decode_f32(total_area)
+
+    # Robot pose ENU (field 14): f1=eastM, f2=northM, f3=thetaRad (all float32)
+    pose_raw = _first(fields, 14)
+    if isinstance(pose_raw, bytes):
+        pose_fields = _decode_fields(pose_raw)
+        east_m = _first(pose_fields, 1)
+        north_m = _first(pose_fields, 2)
+        theta_rad = _first(pose_fields, 3)
+        if east_m is not None:
+            state["poseEastM"] = _decode_f32(east_m)
+        if north_m is not None:
+            state["poseNorthM"] = _decode_f32(north_m)
+        if theta_rad is not None:
+            state["poseThetaRad"] = _decode_f32(theta_rad)
+
     return state
 
 

@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE
+from homeassistant.const import PERCENTAGE, UnitOfArea, UnitOfLength
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -87,6 +87,24 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:ip-network",
         entity_registry_enabled_default=False,
     ),
+    # Live MQTT sensors decoded from additional pboutput fields
+    LymowSensorDescription(
+        key="rtk_satellites",
+        name="RTK satellites",
+        value_key="rtkSatellites",
+        icon="mdi:satellite-variant",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="total_area_m2",
+        name="Total mowed area",
+        value_key="totalAreaM2",
+        native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:grass",
+        entity_registry_enabled_default=False,
+    ),
 )
 
 
@@ -152,3 +170,13 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         if status is None:
             return None
         return self._RTK_LABELS.get(int(status), f"Unknown ({status})")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data.get(self._thing_name, {})
+        attrs: dict[str, Any] = {}
+        for key in ("rtkSatellites", "rtkEastM", "rtkNorthM", "poseEastM", "poseNorthM", "poseThetaRad"):
+            val = data.get(key)
+            if val is not None:
+                attrs[key] = val
+        return attrs
