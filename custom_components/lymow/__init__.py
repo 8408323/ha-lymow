@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -16,11 +18,21 @@ from .coordinator import LymowCoordinator
 from .mqtt import LymowMqttClient
 
 _LOGGER = logging.getLogger(__name__)
+_WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
 
 PLATFORMS = [Platform.LAWN_MOWER, Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    # Register www/ static directory for the Lovelace map card (once per HA run)
+    if not hass.data.get(_WWW_REGISTERED_KEY):
+        www_path = Path(__file__).parent / "www"
+        if www_path.is_dir():
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
+            )
+        hass.data[_WWW_REGISTERED_KEY] = True
+
     session = async_get_clientsession(hass)
     auth = LymowAuth(session)
 

@@ -110,7 +110,7 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list[LymowSensor | LymowErrorSensor | LymowRtkSensor] = []
+    entities: list[LymowSensor | LymowErrorSensor | LymowRtkSensor | LymowMapSensor] = []
     for device in coordinator.devices:
         for description in SENSORS:
             if description.key == "error_code":
@@ -118,6 +118,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             else:
                 entities.append(LymowSensor(coordinator, device, description))
         entities.append(LymowRtkSensor(coordinator, device))
+        entities.append(LymowMapSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -186,6 +187,55 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         data = self.coordinator.data.get(self._thing_name, {})
         attrs: dict[str, Any] = {}
         for key in ("rtkSatellites", "rtkEastM", "rtkNorthM", "poseEastM", "poseNorthM", "poseThetaRad"):
+            val = data.get(key)
+            if val is not None:
+                attrs[key] = val
+        return attrs
+
+
+class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Sensor that exposes the full mowing map (zone polygons, GPS origin) as attributes.
+
+    The state value is the number of go-zones currently loaded.  The
+    extra_state_attributes contain the full JSON-serialisable map data that the
+    ``lymow-map-card`` Lovelace card reads to draw the SVG map.
+
+    This sensor is enabled by default so the card works out of the box, but the
+    attribute payload can be large; users may disable it if it causes issues.
+    """
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_unique_id = f"{self._thing_name}_map"
+        self._attr_name = f"{device_label} Map"
+        self._attr_icon = "mdi:map"
+
+    @property
+    def native_value(self) -> int | None:
+        """Number of go-zones loaded, or None if map data is not yet available."""
+        map_data = self.coordinator.data.get(self._thing_name, {}).get("mapData")
+        if not map_data:
+            return None
+        return len(map_data.get("goZones", []))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Full map data for the Lovelace card."""
+        map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
+        data = self.coordinator.data.get(self._thing_name) or {}
+        attrs: dict[str, Any] = {}
+        if "goZones" in map_data:
+            attrs["go_zones"] = map_data["goZones"]
+        if "nogoZones" in map_data:
+            attrs["nogo_zones"] = map_data["nogoZones"]
+        if "gpsOrigin" in map_data:
+            attrs["gps_origin"] = map_data["gpsOrigin"]
+        if "chargingStation" in map_data:
+            attrs["charging_station"] = map_data["chargingStation"]
+        # Include live robot position so the card updates without a separate entity
+        for key in ("poseEastM", "poseNorthM", "poseThetaRad"):
             val = data.get(key)
             if val is not None:
                 attrs[key] = val
