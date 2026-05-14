@@ -138,12 +138,22 @@ class LymowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
 
 class LymowErrorSensor(LymowSensor):
-    """Error code sensor that also exposes a human-readable description."""
+    """Error code sensor that also exposes a human-readable description and warning codes."""
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data.get(self._thing_name, {})
         code = self.native_value or 0
-        return {"description": ERROR_DESCRIPTIONS.get(int(code), f"Unknown ({code})")}
+        attrs: dict[str, Any] = {
+            "description": ERROR_DESCRIPTIONS.get(int(code), f"Unknown ({code})"),
+        }
+        warning_codes = data.get("warningCodes")
+        if warning_codes is not None:
+            attrs["warning_codes"] = warning_codes
+        all_error_codes = data.get("errorCodes")
+        if all_error_codes is not None:
+            attrs["error_codes"] = all_error_codes
+        return attrs
 
 
 class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):

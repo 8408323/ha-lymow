@@ -896,3 +896,99 @@ def test_encode_delete_zone_no_nogo_zones() -> None:
     pb_map = _decode_fields(pb_map_raw)
     assert _first(pb_map, 2) is None, "PbMap must not have nogoZones for a goZone delete"
 
+
+
+# ---------------------------------------------------------------------------
+# decode_pboutput — RTK / GPS / pose / area fields
+# ---------------------------------------------------------------------------
+
+
+def _build_pboutput_with_extras(
+    *,
+    rtk_satellites: int | None = None,
+    rtk_east_m: float | None = None,
+    rtk_north_m: float | None = None,
+    rtk_status: int | None = None,
+    total_area_m2: float | None = None,
+    pose_east_m: float | None = None,
+    pose_north_m: float | None = None,
+    pose_theta_rad: float | None = None,
+) -> bytes:
+    """Build a PbOutput blob with GPS/RTK, area and pose fields."""
+    from lymow.protocol import PB_VERSION
+
+    out = _field_i32(2, PB_VERSION)
+
+    # GPS/RTK field (field 6 of outer PbOutput)
+    if any(v is not None for v in (rtk_satellites, rtk_east_m, rtk_north_m, rtk_status)):
+        rtk = b""
+        if rtk_satellites is not None:
+            rtk += _field_i32(1, rtk_satellites)
+        if rtk_east_m is not None:
+            rtk += _field_f32(2, rtk_east_m)
+        if rtk_north_m is not None:
+            rtk += _field_f32(3, rtk_north_m)
+        if rtk_status is not None:
+            rtk += _field_i32(4, rtk_status)
+        out += _field_bytes(6, rtk)
+
+    # Area info (field 12)
+    if total_area_m2 is not None:
+        area = _field_f32(2, total_area_m2)
+        out += _field_bytes(12, area)
+
+    # Robot pose ENU (field 14)
+    if any(v is not None for v in (pose_east_m, pose_north_m, pose_theta_rad)):
+        pose = b""
+        if pose_east_m is not None:
+            pose += _field_f32(1, pose_east_m)
+        if pose_north_m is not None:
+            pose += _field_f32(2, pose_north_m)
+        if pose_theta_rad is not None:
+            pose += _field_f32(3, pose_theta_rad)
+        out += _field_bytes(14, pose)
+
+    return out
+
+
+def test_decode_pboutput_rtk_satellites() -> None:
+    pb = _build_pboutput_with_extras(rtk_satellites=12)
+    state = decode_pboutput(pb)
+    assert state["rtkSatellites"] == 12
+
+
+def test_decode_pboutput_rtk_status() -> None:
+    pb = _build_pboutput_with_extras(rtk_status=2)
+    state = decode_pboutput(pb)
+    assert state["rtkStatus"] == 2
+
+
+def test_decode_pboutput_rtk_east_north() -> None:
+    pb = _build_pboutput_with_extras(rtk_east_m=1.5, rtk_north_m=2.5)
+    state = decode_pboutput(pb)
+    assert abs(state["rtkEastM"] - 1.5) < 0.001
+    assert abs(state["rtkNorthM"] - 2.5) < 0.001
+
+
+def test_decode_pboutput_total_area() -> None:
+    pb = _build_pboutput_with_extras(total_area_m2=1234.5)
+    state = decode_pboutput(pb)
+    assert abs(state["totalAreaM2"] - 1234.5) < 1.0
+
+
+def test_decode_pboutput_pose_enu() -> None:
+    import math
+    pb = _build_pboutput_with_extras(pose_east_m=3.0, pose_north_m=4.0, pose_theta_rad=math.pi / 2)
+    state = decode_pboutput(pb)
+    assert abs(state["poseEastM"] - 3.0) < 0.001
+    assert abs(state["poseNorthM"] - 4.0) < 0.001
+    assert abs(state["poseThetaRad"] - math.pi / 2) < 0.001
+
+
+def test_decode_pboutput_no_rtk_when_absent() -> None:
+    pb = _build_pboutput()
+    state = decode_pboutput(pb)
+    assert "rtkSatellites" not in state
+    assert "rtkEastM" not in state
+    assert "totalAreaM2" not in state
+    assert "poseEastM" not in state
