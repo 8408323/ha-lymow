@@ -603,3 +603,28 @@ async def test_update_zone_enabled_raises_when_no_map_data() -> None:
 
     with pytest.raises(HomeAssistantError):
         await coord.async_update_zone_enabled(THING, "zone0001", False)
+
+
+# ---------------------------------------------------------------------------
+# Zone commands — async_delete_zone / async_start_zones
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_delete_zone_publishes_command() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_delete_zone(THING, "zone0001")
+
+    assert mqtt.async_publish_command.await_count == 1
+    thing, _ = mqtt.async_publish_command.call_args[0]
+    assert thing == THING
+
+
+@pytest.mark.asyncio
+async def test_async_start_zones_publishes_command() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_start_zones(THING, ["zone0001", "zone0002"])
+
+    assert mqtt.async_publish_command.await_count == 1
+    thing, _ = mqtt.async_publish_command.call_args[0]
+    assert thing == THING

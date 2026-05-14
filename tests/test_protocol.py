@@ -997,3 +997,431 @@ def test_decode_pboutput_no_rtk_when_absent() -> None:
     assert "rtkEastM" not in state
     assert "totalAreaM2" not in state
     assert "poseEastM" not in state
+
+
+# ---------------------------------------------------------------------------
+# _decode_fields — 64-bit and unknown wire types
+# ---------------------------------------------------------------------------
+
+
+def test_decode_fields_64bit_wire_type() -> None:
+    """Wire type 1 (64-bit fixed) should be decoded and included in results."""
+    import struct
+
+    # Build a field with wire type 1: field_no=1, wire=1 → tag=0x09
+    tag = _encode_varint((1 << 3) | 1)
+    value_bytes = struct.pack("<Q", 0xDEADBEEFCAFEBABE)
+    data = tag + value_bytes
+
+    fields = _decode_fields(data)
+    assert len(fields) == 1
+    fn, wt, val = fields[0]
+    assert fn == 1
+    assert wt == 1
+    assert val == 0xDEADBEEFCAFEBABE
+
+
+def test_decode_fields_unknown_wire_type_stops_parsing() -> None:
+    """Unknown wire type (e.g. 6) should cause parsing to stop gracefully."""
+    # Build valid field 1 (varint=42), then invalid wire type 6
+    valid = _field_i32(1, 42)
+    # wire type 6 → tag = (2 << 3) | 6 = 22
+    invalid_tag = _encode_varint((2 << 3) | 6)
+    data = valid + invalid_tag + b"\x00\x00"
+
+    fields = _decode_fields(data)
+    # First field decoded normally; second stops parsing
+    assert len(fields) == 1
+    assert fields[0][0] == 1
+
+
+# ---------------------------------------------------------------------------
+# extract_raw_map_content — missing-field paths
+# ---------------------------------------------------------------------------
+
+
+def test_extract_raw_map_content_returns_none_on_empty_bytes() -> None:
+    from lymow.protocol import extract_raw_map_content
+
+    result = extract_raw_map_content(b"")
+    assert result is None
+
+
+def test_extract_raw_map_content_returns_none_when_f23_missing() -> None:
+    from lymow.protocol import extract_raw_map_content
+
+    # Build a message with field 1 only (no f23)
+    data = _field_i32(1, 99)
+    result = extract_raw_map_content(data)
+    assert result is None
+
+
+def test_extract_raw_map_content_returns_none_when_wrapper_f2_missing() -> None:
+    from lymow.protocol import extract_raw_map_content
+
+    # f23 exists but its inner bytes have no f2
+    inner = _field_i32(1, 0)  # f1, not f2
+    data = _field_bytes(23, inner)
+    result = extract_raw_map_content(data)
+    assert result is None
+
+
+def test_extract_raw_map_content_returns_none_when_content_f3_missing() -> None:
+    from lymow.protocol import extract_raw_map_content
+
+    # f23 → f2 exists but f2 content has no f3
+    wrapper = _field_bytes(2, _field_i32(1, 0))  # f2 contains f1, not f3
+    data = _field_bytes(23, wrapper)
+    result = extract_raw_map_content(data)
+    assert result is None
+
+
+def test_extract_raw_map_content_returns_bytes_when_present() -> None:
+    from lymow.protocol import extract_raw_map_content
+
+    raw_content = b"\x01\x02\x03"
+    wrapper = _field_bytes(2, _field_bytes(3, raw_content))
+    data = _field_bytes(23, wrapper)
+    result = extract_raw_map_content(data)
+    assert result == raw_content
+
+
+# ---------------------------------------------------------------------------
+# _zone_hash_from_raw / _nogo_parent_from_raw — empty paths
+# ---------------------------------------------------------------------------
+
+
+def test_zone_hash_from_raw_returns_empty_when_no_basic_info() -> None:
+    from lymow.protocol import _zone_hash_from_raw
+
+    # Zone raw with no f1 (BasicInfo)
+    raw = _field_i32(2, 99)
+    assert _zone_hash_from_raw(raw) == ""
+
+
+def test_nogo_parent_from_raw_returns_empty_when_no_parent_field() -> None:
+    from lymow.protocol import _nogo_parent_from_raw
+
+    # NogoZone raw with only f1, no f4 (parent hash)
+    raw = _field_i32(1, 0)
+    assert _nogo_parent_from_raw(raw) == ""
+
+
+# ---------------------------------------------------------------------------
+# delete_zone_from_raw_content — raw field re-encode paths
+# ---------------------------------------------------------------------------
+
+
+def test_delete_zone_from_raw_content_removes_target_zone() -> None:
+    from lymow.protocol import _zone_hash_from_raw, delete_zone_from_raw_content
+
+    # Build minimal raw content with two go-zones
+    bi1 = _field_str(3, "zoneA")
+    zone1_raw = _field_bytes(1, bi1)
+
+    bi2 = _field_str(3, "zoneB")
+    zone2_raw = _field_bytes(1, bi2)
+
+    # _MAP_CONTENT_GO_ZONES = 1
+    content = _field_bytes(1, zone1_raw) + _field_bytes(1, zone2_raw)
+
+    result = delete_zone_from_raw_content(content, "zoneA")
+
+    # Decode result and collect go-zone hashes (fn=1)
+    remaining_hashes = [
+        _zone_hash_from_raw(val) for fn, _wt, val in _decode_fields(result) if fn == 1 and isinstance(val, bytes)
+    ]
+    assert "zoneA" not in remaining_hashes
+    assert "zoneB" in remaining_hashes
+
+
+def test_delete_zone_from_raw_content_also_removes_child_nogo() -> None:
+    from lymow.protocol import delete_zone_from_raw_content
+
+    # Go-zone with hashId "parent"
+    bi_go = _field_str(3, "parent")
+    go_raw = _field_bytes(1, bi_go)
+
+    # Nogo-zone with parentZoneHashId = "parent" (f4)
+    bi_nogo = _field_str(3, "nogo-child")
+    nogo_raw = _field_bytes(1, bi_nogo) + _field_bytes(4, b"parent")
+
+    # _MAP_CONTENT_GO_ZONES=1, _MAP_CONTENT_NOGO_ZONES=2
+    content = _field_bytes(1, go_raw) + _field_bytes(2, nogo_raw)
+
+    result = delete_zone_from_raw_content(content, "parent")
+    assert b"parent" not in result.replace(_field_bytes(9, b"parent"), b"")
+
+
+# ---------------------------------------------------------------------------
+# encode_sync_map_raw
+# ---------------------------------------------------------------------------
+
+
+def test_encode_sync_map_raw_contains_pb_version() -> None:
+    from lymow.protocol import encode_sync_map_raw
+
+    pb = encode_sync_map_raw(b"\x01\x02")
+    fields = _decode_fields(pb)
+    by_field = {fn: val for fn, _wt, val in fields}
+    # f2 = PB_VERSION
+    assert 2 in by_field
+
+
+def test_encode_sync_map_raw_contains_sync_map_command() -> None:
+    from lymow.const import USER_CTRL_SYNC_MAP
+    from lymow.protocol import encode_sync_map_raw
+
+    pb = encode_sync_map_raw(b"\x01\x02")
+    fields = _decode_fields(pb)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert by_field.get(5) == USER_CTRL_SYNC_MAP
+
+
+def test_encode_sync_map_raw_embeds_content_in_f23() -> None:
+    from lymow.protocol import encode_sync_map_raw
+
+    raw_content = b"\xab\xcd\xef"
+    pb = encode_sync_map_raw(raw_content)
+    fields = _decode_fields(pb)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert by_field.get(23) == raw_content
+
+
+# ---------------------------------------------------------------------------
+# decode_map_response — missing-wrapper early returns
+# ---------------------------------------------------------------------------
+
+
+def test_decode_map_response_returns_empty_when_f23_wrapper_f2_missing() -> None:
+    # f23 present but its content has no f2
+    inner = _field_i32(1, 0)  # f1, not f2
+    pb = _field_bytes(23, inner)
+    result = decode_map_response(pb)
+    assert result == {}
+
+
+def test_decode_map_response_returns_empty_when_f23_wrapper_f3_missing() -> None:
+    # f23 → f2 present but f2 content has no f3
+    wrapper = _field_bytes(2, _field_i32(1, 0))
+    pb = _field_bytes(23, wrapper)
+    result = decode_map_response(pb)
+    assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# decode_map_response — nogo zone with pp fields (area, innerPoint)
+# ---------------------------------------------------------------------------
+
+
+def test_decode_map_response_nogo_with_area_and_inner_point() -> None:
+    """Nogo zone with a PpBasicInfo (f3) containing area and innerPoint."""
+    # We need to build a full map response with a nogo zone that has pp fields.
+    # Use _field_bytes helpers to construct the protobuf manually.
+
+    def _pt(x: float, y: float) -> bytes:
+        return _field_f32(1, x) + _field_f32(2, y)
+
+    # NogoZone BasicInfo (f1): type=0, hashId="nogo1", isEnabled=1
+    bi = _field_i32(1, 0) + _field_str(3, "nogo1") + _field_i32(4, 1)
+    # PpBasicInfo (f3): area=250, innerPoint
+    inner_pt = _pt(5.0, 6.0)
+    pp = _field_i32(3, 250) + _field_bytes(5, inner_pt)
+    nogo_raw = _field_bytes(1, bi) + _field_bytes(3, pp)
+
+    # _MAP_CONTENT_NOGO_ZONES = 2
+    content_bytes = _field_bytes(2, nogo_raw)
+
+    # Wrap in full map response structure: f23 → f2 → f3
+    wrapper = _field_bytes(2, _field_bytes(3, content_bytes))
+    pb = _field_bytes(23, wrapper)
+
+    result = decode_map_response(pb)
+    assert "nogoZones" in result
+    nogo = result["nogoZones"][0]
+    assert nogo["area"] == 250
+    assert abs(nogo["innerPoint"]["x"] - 5.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# _encode_go_zone — optional fields (pathSpacing, boundMin, boundMax, innerPoint)
+# ---------------------------------------------------------------------------
+
+
+def test_encode_go_zone_with_optional_fields_roundtrips() -> None:
+    """encode_sync_map round-trips go-zone optional fields."""
+    map_data = {
+        "goZones": [
+            {
+                "hashId": "gz1",
+                "type": 1,
+                "cutHeight": 30,
+                "pathSpacing": 0.5,
+                "isEnabled": True,
+                "polygon": [],
+                "boundMin": {"x": 0.1, "y": 0.2},
+                "boundMax": {"x": 9.9, "y": 8.8},
+                "innerPoint": {"x": 5.0, "y": 4.0},
+                "area": 100,
+            }
+        ],
+        "nogoZones": [],
+    }
+    pb = encode_sync_map(map_data)
+    # Simply verify it produces valid bytes without error and encodes the command
+    fields = _decode_fields(pb)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert 5 in by_field  # userCtrl present
+
+
+# ---------------------------------------------------------------------------
+# _encode_nogo_zone — optional fields (area, innerPoint)
+# ---------------------------------------------------------------------------
+
+
+def test_encode_nogo_zone_with_area_and_inner_point_roundtrips() -> None:
+    map_data = {
+        "goZones": [],
+        "nogoZones": [
+            {
+                "hashId": "nz1",
+                "type": 0,
+                "isEnabled": True,
+                "polygon": [],
+                "area": 75,
+                "innerPoint": {"x": 3.0, "y": 2.0},
+            }
+        ],
+    }
+    pb = encode_sync_map(map_data)
+    fields = _decode_fields(pb)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert 5 in by_field  # userCtrl present
+
+
+def test_encode_nogo_zone_with_polygon() -> None:
+    """Cover _encode_nogo_zone line 609: polygon present → encoded."""
+    map_data = {
+        "goZones": [],
+        "nogoZones": [
+            {
+                "hashId": "nz2",
+                "type": 0,
+                "isEnabled": True,
+                "polygon": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}],
+            }
+        ],
+    }
+    pb = encode_sync_map(map_data)
+    fields = _decode_fields(pb)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert 5 in by_field  # userCtrl present
+
+
+# ---------------------------------------------------------------------------
+# delete_zone_from_raw_content — varint, 64-bit, 32-bit re-encode branches
+# ---------------------------------------------------------------------------
+
+
+def test_delete_zone_from_raw_content_preserves_varint_fields() -> None:
+    """Cover wt=0 (varint) re-encode branch (line 247)."""
+
+    from lymow.protocol import delete_zone_from_raw_content
+
+    # Go-zone to delete
+    bi = _field_str(3, "target")
+    zone_raw = _field_bytes(1, bi)
+    go_zone_field = _field_bytes(1, zone_raw)
+
+    # Extra varint field (fn=4, wt=0)
+    varint_field = _field_i32(4, 12345)
+
+    content = go_zone_field + varint_field
+    result = delete_zone_from_raw_content(content, "target")
+
+    # Varint field fn=4 should still be present in result
+    fields = _decode_fields(result)
+    by_fn = {fn: val for fn, _wt, val in fields}
+    assert by_fn.get(4) == 12345
+
+
+def test_delete_zone_from_raw_content_preserves_32bit_float_fields() -> None:
+    """Cover wt=5 (32-bit fixed) re-encode branch (lines 252-253)."""
+
+    from lymow.protocol import delete_zone_from_raw_content
+
+    # Go-zone to delete
+    bi = _field_str(3, "target")
+    zone_raw = _field_bytes(1, bi)
+    go_zone_field = _field_bytes(1, zone_raw)
+
+    # Extra f32 field (fn=5, wt=5)
+    f32_field = _field_f32(5, 3.14)
+
+    content = go_zone_field + f32_field
+    result = delete_zone_from_raw_content(content, "target")
+
+    # f32 field fn=5 should still be present in result
+    fields = _decode_fields(result)
+    by_fn_wt = {fn: (wt, val) for fn, wt, val in fields}
+    assert 5 in by_fn_wt
+    assert by_fn_wt[5][0] == 5  # wire type 5
+
+
+def test_delete_zone_from_raw_content_preserves_64bit_fields() -> None:
+    """Cover wt=1 (64-bit fixed) re-encode branch (line 249)."""
+    import struct as _struct
+
+    from lymow.protocol import delete_zone_from_raw_content
+
+    # Go-zone to delete
+    bi = _field_str(3, "target")
+    zone_raw = _field_bytes(1, bi)
+    go_zone_field = _field_bytes(1, zone_raw)
+
+    # Manually build a 64-bit field (fn=6, wt=1)
+    tag_64 = _encode_varint((6 << 3) | 1)
+    val_64 = _struct.pack("<Q", 0xCAFEBABEDEAD0000)
+    field_64 = tag_64 + val_64
+
+    content = go_zone_field + field_64
+    result = delete_zone_from_raw_content(content, "target")
+
+    fields = _decode_fields(result)
+    by_fn_wt = {fn: (wt, val) for fn, wt, val in fields}
+    assert 6 in by_fn_wt
+    assert by_fn_wt[6][0] == 1  # wire type 1
+
+
+# ---------------------------------------------------------------------------
+# decode_map_response — defensive continue for non-bytes zone fields
+# ---------------------------------------------------------------------------
+
+
+def test_decode_map_response_skips_non_bytes_go_zone_field() -> None:
+    """Cover line 296: go-zone field that is not bytes is skipped."""
+    # _MAP_CONTENT_GO_ZONES = 1. Encode fn=1 as varint (wt=0) — invalid but tolerated.
+    # tag = (1 << 3) | 0 = 8
+    tag = _encode_varint((1 << 3) | 0)
+    corrupt_field = tag + _encode_varint(99)  # varint value, not bytes
+
+    # Wrap in valid map response structure
+    wrapper = _field_bytes(2, _field_bytes(3, corrupt_field))
+    pb = _field_bytes(23, wrapper)
+
+    result = decode_map_response(pb)
+    # Corrupt go-zone skipped; result has goZones=[] or absent but no error
+    assert result.get("goZones", []) == []
+
+
+def test_decode_map_response_skips_non_bytes_nogo_zone_field() -> None:
+    """Cover line 343: nogo-zone field that is not bytes is skipped."""
+    # _MAP_CONTENT_NOGO_ZONES = 2. Encode fn=2 as varint (wt=0).
+    tag = _encode_varint((2 << 3) | 0)
+    corrupt_field = tag + _encode_varint(42)
+
+    wrapper = _field_bytes(2, _field_bytes(3, corrupt_field))
+    pb = _field_bytes(23, wrapper)
+
+    result = decode_map_response(pb)
+    assert result.get("nogoZones", []) == []

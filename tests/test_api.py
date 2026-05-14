@@ -74,3 +74,20 @@ class TestGetDeviceInfo:
             request = list(m.requests.values())[0][0]
 
         assert request.kwargs["headers"]["Authorization"] == "new-access-token"
+
+
+class TestGetDeviceFeature:
+    async def test_returns_feature_data(self, client):
+        payload = {"thingName": "mower-001", "featureVersion": "1.0", "features": []}
+
+        with aioresponses() as m:
+            m.get(RE_FEATURE, payload=payload)
+            feature = await client.get_device_feature("mower-001")
+
+        assert feature == payload
+
+    async def test_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.get(RE_FEATURE, status=403)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.get_device_feature("mower-001")
