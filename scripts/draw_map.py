@@ -13,8 +13,7 @@ from protocol import decode_map_response  # noqa: E402
 try:
     import matplotlib.patches as mpatches
     import matplotlib.pyplot as plt
-    from matplotlib.patches import FancyArrowPatch, Polygon as MplPolygon
-    from matplotlib.collections import PatchCollection
+    from matplotlib.patches import Polygon as MplPolygon
 except ImportError:
     sys.exit("Run with: uv run --with matplotlib scripts/draw_map.py")
 

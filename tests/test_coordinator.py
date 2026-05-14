@@ -385,8 +385,8 @@ async def test_current_work_status_returns_value_from_data() -> None:
 
 @pytest.mark.asyncio
 async def test_async_query_map_publishes_correct_command() -> None:
-    from lymow.protocol import decode_pboutput, _decode_fields
     from lymow.const import USER_CTRL_QUERY_MAP
+    from lymow.protocol import _decode_fields
 
     coord, mqtt, _ = _make_coordinator()
     await coord.async_query_map(THING)
@@ -417,8 +417,8 @@ async def test_async_query_all_maps_sends_one_command_per_device() -> None:
 
 @pytest.mark.asyncio
 async def test_async_query_schedules_publishes_correct_command() -> None:
-    from lymow.protocol import _decode_fields
     from lymow.const import USER_CTRL_QUERY_SCHEDULES
+    from lymow.protocol import _decode_fields
 
     coord, mqtt, _ = _make_coordinator()
     await coord.async_query_schedules(THING)
@@ -469,7 +469,7 @@ async def test_work_status_error_transition_fires_notification() -> None:
 
 @pytest.mark.asyncio
 async def test_work_status_mow_complete_fires_notification() -> None:
-    from lymow.const import WORK_STATUS_MOWING_GROUP, WORK_STATUS_DOCKED_GROUP
+    from lymow.const import WORK_STATUS_DOCKED_GROUP, WORK_STATUS_MOWING_GROUP
 
     coord, _, _ = _make_coordinator()
     mow_status = next(iter(WORK_STATUS_MOWING_GROUP))
@@ -534,7 +534,6 @@ async def test_update_zone_cut_height_raises_when_no_map_data() -> None:
 async def test_update_zone_cut_height_only_modifies_target_zone() -> None:
     """The other zone's cutHeight must not change."""
     import copy
-    from lymow.protocol import _decode_fields, decode_map_response
 
     coord, mqtt, _ = _make_coordinator()
     orig = copy.deepcopy(_SAMPLE_MAP_DATA)

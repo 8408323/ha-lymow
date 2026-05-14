@@ -7,9 +7,9 @@ import json
 
 import pytest
 from lymow.protocol import (
-    _decode_fields,
+    _all,
     _decode_f32,
-    _decode_map_point,
+    _decode_fields,
     _decode_packed_int32s,
     _decode_varint,
     _encode_varint,
@@ -18,14 +18,13 @@ from lymow.protocol import (
     _field_i32,
     _field_str,
     _first,
-    _all,
     _signed32,
     decode_map_response,
     decode_pboutput,
     delete_zone,
+    encode_delete_zone,
     encode_start_zones,
     encode_sync_map,
-    encode_delete_zone,
     encode_userctrl,
     unwrap_envelope,
     wrap_envelope,
@@ -530,16 +529,18 @@ def test_decode_map_response_missing_f23() -> None:
 
 def test_decode_map_response_go_zone_basic() -> None:
     pb = _build_map_response(
-        go_zones=[{
-            "hashId": "abc12345",
-            "type": 1,
-            "isEnabled": True,
-            "polygon": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}],
-            "area": 50,
-            "boundMin": {"x": 1.0, "y": 2.0},
-            "boundMax": {"x": 3.0, "y": 4.0},
-            "innerPoint": {"x": 2.0, "y": 3.0},
-        }]
+        go_zones=[
+            {
+                "hashId": "abc12345",
+                "type": 1,
+                "isEnabled": True,
+                "polygon": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}],
+                "area": 50,
+                "boundMin": {"x": 1.0, "y": 2.0},
+                "boundMax": {"x": 3.0, "y": 4.0},
+                "innerPoint": {"x": 2.0, "y": 3.0},
+            }
+        ]
     )
     result = decode_map_response(pb)
     assert len(result["goZones"]) == 1
@@ -554,21 +555,21 @@ def test_decode_map_response_go_zone_basic() -> None:
 
 
 def test_decode_map_response_go_zone_disabled() -> None:
-    pb = _build_map_response(
-        go_zones=[{"hashId": "zonexyz1", "type": 1, "isEnabled": False}]
-    )
+    pb = _build_map_response(go_zones=[{"hashId": "zonexyz1", "type": 1, "isEnabled": False}])
     result = decode_map_response(pb)
     assert result["goZones"][0]["isEnabled"] is False
 
 
 def test_decode_map_response_go_zone_config() -> None:
     pb = _build_map_response(
-        go_zones=[{
-            "hashId": "cfgzone1",
-            "type": 1,
-            "cutHeight": 55,
-            "pathSpacing": 0.35,
-        }]
+        go_zones=[
+            {
+                "hashId": "cfgzone1",
+                "type": 1,
+                "cutHeight": 55,
+                "pathSpacing": 0.35,
+            }
+        ]
     )
     result = decode_map_response(pb)
     zone = result["goZones"][0]
@@ -592,13 +593,15 @@ def test_decode_map_response_multiple_go_zones() -> None:
 
 def test_decode_map_response_nogo_zone() -> None:
     pb = _build_map_response(
-        nogo_zones=[{
-            "hashId": "nogo0001",
-            "type": 2,
-            "isEnabled": True,
-            "polygon": [{"x": 0.5, "y": 1.5}, {"x": 0.6, "y": 1.6}],
-            "parentZoneHashId": "zone0001",
-        }]
+        nogo_zones=[
+            {
+                "hashId": "nogo0001",
+                "type": 2,
+                "isEnabled": True,
+                "polygon": [{"x": 0.5, "y": 1.5}, {"x": 0.6, "y": 1.6}],
+                "parentZoneHashId": "zone0001",
+            }
+        ]
     )
     result = decode_map_response(pb)
     assert len(result["nogoZones"]) == 1
@@ -617,9 +620,7 @@ def test_decode_map_response_nogo_no_parent() -> None:
 
 
 def test_decode_map_response_charging_station() -> None:
-    pb = _build_map_response(
-        charging_station={"x": -0.0832, "y": -0.1065, "theta": -1.5713}
-    )
+    pb = _build_map_response(charging_station={"x": -0.0832, "y": -0.1065, "theta": -1.5713})
     result = decode_map_response(pb)
     cs = result["chargingStation"]
     assert pytest.approx(cs["x"], abs=1e-3) == -0.0832
@@ -661,6 +662,7 @@ def test_decode_map_response_full() -> None:
 # delete_zone helpers
 # ---------------------------------------------------------------------------
 
+
 def _sample_map() -> dict:
     """Build a minimal map_data dict for delete_zone tests."""
     pb = _build_map_response(
@@ -682,6 +684,7 @@ def _sample_map() -> dict:
 # delete_zone tests
 # ---------------------------------------------------------------------------
 
+
 def test_delete_go_zone_removes_zone() -> None:
     """Deleting a goZone removes it from goZones."""
     m = _sample_map()
@@ -697,7 +700,7 @@ def test_delete_go_zone_cascades_nogo() -> None:
     result = delete_zone(m, "gozone01")
     nogo_ids = [n["hashId"] for n in result["nogoZones"]]
     assert "nogo0001" not in nogo_ids  # cascade-deleted
-    assert "nogo0002" in nogo_ids      # unrelated — kept
+    assert "nogo0002" in nogo_ids  # unrelated — kept
 
 
 def test_delete_nogo_zone() -> None:
@@ -728,6 +731,7 @@ def test_delete_zone_does_not_mutate_original() -> None:
 # encode_sync_map tests
 # ---------------------------------------------------------------------------
 
+
 def test_encode_sync_map_has_pb_version() -> None:
     """Field 2 of the encoded message must equal PB_VERSION (49)."""
     raw = encode_sync_map({})
@@ -738,6 +742,7 @@ def test_encode_sync_map_has_pb_version() -> None:
 def test_encode_sync_map_has_correct_command_number() -> None:
     """Field 5 of the encoded message must equal USER_CTRL_SYNC_MAP."""
     from lymow.const import USER_CTRL_SYNC_MAP
+
     raw = encode_sync_map({})
     fields = {fn: v for fn, _wt, v in _decode_fields(raw)}
     assert fields.get(5) == USER_CTRL_SYNC_MAP
@@ -897,7 +902,6 @@ def test_encode_delete_zone_no_nogo_zones() -> None:
     assert _first(pb_map, 2) is None, "PbMap must not have nogoZones for a goZone delete"
 
 
-
 # ---------------------------------------------------------------------------
 # decode_pboutput — RTK / GPS / pose / area fields
 # ---------------------------------------------------------------------------
@@ -978,6 +982,7 @@ def test_decode_pboutput_total_area() -> None:
 
 def test_decode_pboutput_pose_enu() -> None:
     import math
+
     pb = _build_pboutput_with_extras(pose_east_m=3.0, pose_north_m=4.0, pose_theta_rad=math.pi / 2)
     state = decode_pboutput(pb)
     assert abs(state["poseEastM"] - 3.0) < 0.001

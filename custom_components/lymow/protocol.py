@@ -639,7 +639,9 @@ def _encode_map_content(map_data: dict) -> bytes:
         out += _field_bytes(2, _encode_nogo_zone(nogo))
     cs = map_data.get("chargingStation")
     if cs:
-        cs_bytes = _field_f32(1, cs.get("x", 0.0)) + _field_f32(2, cs.get("y", 0.0)) + _field_f32(3, cs.get("theta", 0.0))
+        cs_bytes = (
+            _field_f32(1, cs.get("x", 0.0)) + _field_f32(2, cs.get("y", 0.0)) + _field_f32(3, cs.get("theta", 0.0))
+        )
         out += _field_bytes(4, cs_bytes)
     gps = map_data.get("gpsOrigin")
     if gps:
@@ -706,8 +708,7 @@ def delete_zone(map_data: dict, hash_id: str) -> dict:
     result["goZones"] = [z for z in result.get("goZones", []) if z.get("hashId") != hash_id]
     # Also cascade-delete no-go zones that belonged to the deleted go zone
     result["nogoZones"] = [
-        n for n in result.get("nogoZones", [])
-        if n.get("hashId") != hash_id and n.get("parentZoneHashId") != hash_id
+        n for n in result.get("nogoZones", []) if n.get("hashId") != hash_id and n.get("parentZoneHashId") != hash_id
     ]
     # Signal to the robot which zones changed (required for the robot to process the deletion)
     result["modifyHashs"] = [hash_id]

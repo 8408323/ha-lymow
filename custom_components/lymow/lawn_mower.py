@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import voluptuous as vol
-
 from homeassistant.components.lawn_mower import LawnMowerActivity, LawnMowerEntity, LawnMowerEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -23,8 +23,6 @@ from .const import (
     WORK_STATUS_PAUSED_GROUP,
     WORK_STATUS_RETURNING_GROUP,
 )
-from typing import Any
-
 from .coordinator import LymowCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,9 +68,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             map_data = coordinator.data.get(thing_name, {}).get("mapData") or {}
             go_ids = {z.get("hashId") for z in map_data.get("goZones", [])}
             if go_ids and hash_id not in go_ids:
-                raise ServiceValidationError(
-                    f"Zone {hash_id!r} not found in map. Known go zones: {sorted(go_ids)}"
-                )
+                raise ServiceValidationError(f"Zone {hash_id!r} not found in map. Known go zones: {sorted(go_ids)}")
             await coordinator.async_delete_zone(thing_name, hash_id)
 
     async def handle_start_zone(call: ServiceCall) -> None:

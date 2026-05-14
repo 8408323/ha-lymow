@@ -14,17 +14,16 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 import os
 import struct
 import sys
 
 import aiohttp
 
-
 # ---------------------------------------------------------------------------
 # .env loader (identical to cli.py / delete_zone.py)
 # ---------------------------------------------------------------------------
+
 
 def _load_dotenv() -> None:
     candidates = [
@@ -68,15 +67,16 @@ from lymow.const import REGION_CONFIG  # noqa: E402
 from lymow.mqtt import build_presigned_ws_path  # noqa: E402
 from lymow.protocol import unwrap_envelope  # noqa: E402
 
-
 # ---------------------------------------------------------------------------
 # Minimal protobuf decoder — enough to extract field 5 (userCtrl)
 # ---------------------------------------------------------------------------
 
+
 def _decode_varint(data: bytes, pos: int) -> tuple[int, int]:
     result, shift = 0, 0
     while pos < len(data):
-        b = data[pos]; pos += 1
+        b = data[pos]
+        pos += 1
         result |= (b & 0x7F) << shift
         if not (b & 0x80):
             return result, pos
@@ -92,15 +92,18 @@ def decode_fields(data: bytes) -> dict[int, list]:
         tag, pos = _decode_varint(data, pos)
         field_no = tag >> 3
         wire_type = tag & 7
-        if wire_type == 0:   # varint
+        if wire_type == 0:  # varint
             val, pos = _decode_varint(data, pos)
         elif wire_type == 1:  # 64-bit
-            val = struct.unpack_from("<Q", data, pos)[0]; pos += 8
+            val = struct.unpack_from("<Q", data, pos)[0]
+            pos += 8
         elif wire_type == 2:  # length-delimited
             length, pos = _decode_varint(data, pos)
-            val = data[pos:pos+length]; pos += length
+            val = data[pos : pos + length]
+            pos += length
         elif wire_type == 5:  # 32-bit
-            val = struct.unpack_from("<I", data, pos)[0]; pos += 4
+            val = struct.unpack_from("<I", data, pos)[0]
+            pos += 4
         else:
             break  # unknown wire type — stop
         out.setdefault(field_no, []).append(val)
@@ -142,11 +145,15 @@ async def run() -> None:
         iot_host = cfg["iot_host"]
 
         import uuid
+
         import aiomqtt
 
         ws_path = build_presigned_ws_path(
-            iot_host, region,
-            aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"),
+            iot_host,
+            region,
+            aws["AccessKeyId"],
+            aws["SecretKey"],
+            aws.get("SessionToken"),
         )
         tls = aiomqtt.TLSParameters()
         client_id = f"lymow-sniff-{uuid.uuid4().hex[:8]}"

@@ -19,15 +19,22 @@ from .const import (
     USER_CTRL_RECHARGE_DOCK,
     USER_CTRL_RESUME,
     USER_CTRL_RESUME_DOCK,
-    WORK_STATUS_DOCKING,
     WORK_STATUS_DOCKED_GROUP,
+    WORK_STATUS_DOCKING,
     WORK_STATUS_ERROR_GROUP,
     WORK_STATUS_MOWING_GROUP,
     WORK_STATUS_PAUSE_DOCKING,
     WORK_STATUS_RETURNING_GROUP,
 )
 from .mqtt import LymowMqttClient
-from .protocol import encode_userctrl, encode_sync_map, encode_delete_zone, encode_start_zones, encode_query_map, encode_query_schedules
+from .protocol import (
+    encode_delete_zone,
+    encode_query_map,
+    encode_query_schedules,
+    encode_start_zones,
+    encode_sync_map,
+    encode_userctrl,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,7 +99,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._prev_work_status[thing_name] = new_ws
 
         device_label = next(
-            (d.get("deviceName") or d.get("sn") or thing_name for d in self.devices if d["deviceThingName"] == thing_name),
+            (
+                d.get("deviceName") or d.get("sn") or thing_name
+                for d in self.devices
+                if d["deviceThingName"] == thing_name
+            ),
             thing_name,
         )
 
@@ -109,10 +120,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 title=f"Lymow — {device_label} error",
                 notification_id=f"{DOMAIN}_{thing_name}_error",
             )
-        elif (
-            prev_ws in WORK_STATUS_MOWING_GROUP | WORK_STATUS_RETURNING_GROUP
-            and new_ws in WORK_STATUS_DOCKED_GROUP
-        ):
+        elif prev_ws in WORK_STATUS_MOWING_GROUP | WORK_STATUS_RETURNING_GROUP and new_ws in WORK_STATUS_DOCKED_GROUP:
             self.hass.components.persistent_notification.async_create(
                 message=f"{device_label} has finished mowing and returned to the dock.",
                 title=f"Lymow — {device_label} done",
@@ -125,7 +133,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.on_mqtt_state(thing_name, patch)
         if not is_online:
             device_label = next(
-                (d.get("deviceName") or d.get("sn") or thing_name for d in self.devices if d["deviceThingName"] == thing_name),
+                (
+                    d.get("deviceName") or d.get("sn") or thing_name
+                    for d in self.devices
+                    if d["deviceThingName"] == thing_name
+                ),
                 thing_name,
             )
             self.hass.components.persistent_notification.async_create(

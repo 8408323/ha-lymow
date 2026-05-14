@@ -15,7 +15,6 @@ import asyncio
 import importlib.util
 import os
 import sys
-import struct
 
 import aiohttp
 
@@ -71,7 +70,6 @@ from lymow.protocol import (  # noqa: E402
     unwrap_envelope,
     wrap_envelope,
 )
-
 
 TARGET_ZONE = "5ilVIZvD"
 
@@ -129,8 +127,10 @@ async def run() -> None:
         aws = creds_data["credentials"]
 
         client = LymowApiClient(
-            session=session, access_token=tokens["AccessToken"],
-            region=region, identity_id=creds_data["identity_id"],
+            session=session,
+            access_token=tokens["AccessToken"],
+            region=region,
+            identity_id=creds_data["identity_id"],
         )
         devices = await client.get_devices()
         things = [d["deviceThingName"] for d in devices]
@@ -140,23 +140,33 @@ async def run() -> None:
         cfg = REGION_CONFIG[region]
         iot_host = cfg["iot_host"]
 
-        import uuid, aiomqtt
+        import uuid
+
+        import aiomqtt
 
         ws_path = build_presigned_ws_path(
-            iot_host, region,
-            aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"),
+            iot_host,
+            region,
+            aws["AccessKeyId"],
+            aws["SecretKey"],
+            aws.get("SessionToken"),
         )
         tls = aiomqtt.TLSParameters()
         client_id = f"lymow-brute-{uuid.uuid4().hex[:8]}"
 
         async with aiomqtt.Client(
-            hostname=iot_host, port=443, identifier=client_id,
-            transport="websockets", websocket_path=ws_path,
+            hostname=iot_host,
+            port=443,
+            identifier=client_id,
+            transport="websockets",
+            websocket_path=ws_path,
             websocket_headers={"Host": iot_host},
-            tls_params=tls, keepalive=30, timeout=15,
+            tls_params=tls,
+            keepalive=30,
+            timeout=15,
         ) as mqtt:
             pbout = f"/device/{thing}/pboutput"
-            pbin  = f"/device/{thing}/pbinput"
+            pbin = f"/device/{thing}/pbinput"
             await mqtt.subscribe(pbout, qos=1)
 
             # --- Get base map ---

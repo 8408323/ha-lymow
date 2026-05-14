@@ -18,16 +18,15 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-import json
 import os
 import sys
 
 import aiohttp
 
-
 # ---------------------------------------------------------------------------
 # Minimal .env loader (same as cli.py)
 # ---------------------------------------------------------------------------
+
 
 def _load_dotenv() -> None:
     candidates = [
@@ -68,7 +67,7 @@ for _m in ("const", "auth", "api", "protocol", "mqtt"):
 from lymow.api import LymowApiClient  # noqa: E402
 from lymow.auth import LymowAuth  # noqa: E402
 from lymow.const import REGION_CONFIG  # noqa: E402
-from lymow.mqtt import LymowMqttClient, build_presigned_ws_path  # noqa: E402
+from lymow.mqtt import build_presigned_ws_path  # noqa: E402
 from lymow.protocol import (  # noqa: E402
     decode_map_response,
     delete_zone,
@@ -78,10 +77,10 @@ from lymow.protocol import (  # noqa: E402
     wrap_envelope,
 )
 
-
 # ---------------------------------------------------------------------------
 # Core logic
 # ---------------------------------------------------------------------------
+
 
 async def run(target_hash_id: str) -> None:
     username = os.environ.get("LYMOW_USER")
@@ -127,11 +126,15 @@ async def run(target_hash_id: str) -> None:
         # --- MQTT connect ---
         print(f"Connecting to MQTT ({iot_host})…")
         import uuid
+
         import aiomqtt
 
         ws_path = build_presigned_ws_path(
-            iot_host, region,
-            aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"),
+            iot_host,
+            region,
+            aws["AccessKeyId"],
+            aws["SecretKey"],
+            aws.get("SessionToken"),
         )
         tls = aiomqtt.TLSParameters()
         client_id = f"lymow-del-{uuid.uuid4().hex[:8]}"
@@ -148,7 +151,7 @@ async def run(target_hash_id: str) -> None:
             timeout=15,
         ) as mqtt:
             pbout_topic = f"/device/{thing}/pboutput"
-            pbin_topic  = f"/device/{thing}/pbinput"
+            pbin_topic = f"/device/{thing}/pbinput"
 
             await mqtt.subscribe(pbout_topic, qos=1)
             print("  subscribed to pboutput")
@@ -177,7 +180,7 @@ async def run(target_hash_id: str) -> None:
                 print("ERROR: no map response received within 15 s.", file=sys.stderr)
                 sys.exit(1)
 
-            go_ids  = [z["hashId"] for z in map_data.get("goZones", [])]
+            go_ids = [z["hashId"] for z in map_data.get("goZones", [])]
             nogo_ids = [n["hashId"] for n in map_data.get("nogoZones", [])]
             print(f"  live map: {len(go_ids)} go zones, {len(nogo_ids)} nogo zones")
             for z in map_data.get("goZones", []):
@@ -191,22 +194,30 @@ async def run(target_hash_id: str) -> None:
                 sys.exit(1)
 
             updated = delete_zone(map_data, target_hash_id)
-            removed_go   = [z for z in map_data.get("goZones",   []) if z["hashId"] == target_hash_id]
+            removed_go = [z for z in map_data.get("goZones", []) if z["hashId"] == target_hash_id]
             removed_nogo = [n for n in map_data.get("nogoZones", []) if n.get("parentZoneHashId") == target_hash_id]
             print(f"\nDeleting zone '{target_hash_id}':")
             for z in removed_go:
                 print(f"  - goZone  {z['hashId']}  area={z.get('area')} m²")
             for n in removed_nogo:
                 print(f"  - nogoZone {n['hashId']} (child of {target_hash_id})")
-            print(f"  Remaining: {len(updated.get('goZones',[]))} go zones, {len(updated.get('nogoZones',[]))} nogo zones")
+            print(
+                f"  Remaining: {len(updated.get('goZones', []))} go zones, {len(updated.get('nogoZones', []))} nogo zones"
+            )
 
             # --- Send delete command (USER_CTRL_CLEAR_ZONE=8, field 12=map, single zone only) ---
             from lymow.const import USER_CTRL_CLEAR_ZONE
+
             if target_hash_id in go_ids:
                 delete_pb = encode_delete_zone(target_hash_id)
-                print(f"\nSending delete_zone (USER_CTRL_CLEAR_ZONE={USER_CTRL_CLEAR_ZONE}, field 12=map, hashId={target_hash_id!r}, {len(delete_pb)} B)…")
+                print(
+                    f"\nSending delete_zone (USER_CTRL_CLEAR_ZONE={USER_CTRL_CLEAR_ZONE}, field 12=map, hashId={target_hash_id!r}, {len(delete_pb)} B)…"
+                )
             else:
-                print(f"ERROR: zone '{target_hash_id}' is a nogoZone or channel — only goZone deletion is implemented.", file=sys.stderr)
+                print(
+                    f"ERROR: zone '{target_hash_id}' is a nogoZone or channel — only goZone deletion is implemented.",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
             delete_payload = wrap_envelope(delete_pb)
             await mqtt.publish(pbin_topic, delete_payload, qos=1)
