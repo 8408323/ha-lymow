@@ -27,7 +27,7 @@ from .const import (
     WORK_STATUS_RETURNING_GROUP,
 )
 from .mqtt import LymowMqttClient
-from .protocol import encode_userctrl, encode_sync_map, encode_delete_zone, encode_start_zones, encode_query_map
+from .protocol import encode_userctrl, encode_sync_map, encode_delete_zone, encode_start_zones, encode_query_map, encode_query_schedules
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -197,6 +197,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Request map data for every registered device."""
         for device in self.devices:
             await self.async_query_map(device["deviceThingName"])
+
+    async def async_query_schedules(self, thing_name: str) -> None:
+        """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot."""
+        await self._mqtt.async_publish_command(thing_name, encode_query_schedules())
 
     async def async_update_zone_cut_height(self, thing_name: str, hash_id: str, mm: int) -> None:
         """Update cut height for a go-zone and push the map back to the robot."""

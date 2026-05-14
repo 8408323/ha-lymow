@@ -27,3 +27,15 @@ start_zone:
       example: ["wsmjco1T", "KX1kGyat"]
       selector:
         object:
+
+query_map:
+  name: Refresh map
+  description: >
+    Request a fresh map and zone list from the robot (USER_CTRL_QUERY_MAP=19).
+    Useful when zone entities are stale or not yet populated.
+
+query_schedules:
+  name: Query schedules
+  description: >
+    Request schedule data from the robot (USER_CTRL_QUERY_SCHEDULES=20).
+    Currently returns an empty result if no schedules are configured in the app.

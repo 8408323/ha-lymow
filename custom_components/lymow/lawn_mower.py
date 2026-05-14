@@ -33,7 +33,10 @@ _SERVICE_DELETE_ZONE = "delete_zone"
 _ATTR_ZONE_HASH_ID = "zone_hash_id"
 _SERVICE_START_ZONE = "start_zone"
 _ATTR_ZONE_HASH_IDS = "zone_hash_ids"
+_SERVICE_QUERY_MAP = "query_map"
+_SERVICE_QUERY_SCHEDULES = "query_schedules"
 
+_ENTITY_ID_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids})
 _DELETE_ZONE_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
@@ -84,8 +87,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             thing_name = entity._thing_name
             await coordinator.async_start_zones(thing_name, zone_hash_ids)
 
+    async def handle_query_map(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_query_map(entity._thing_name)
+
+    async def handle_query_schedules(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_query_schedules(entity._thing_name)
+
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_ZONE, handle_delete_zone, schema=_DELETE_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_START_ZONE, handle_start_zone, schema=_START_ZONE_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_QUERY_MAP, handle_query_map, schema=_ENTITY_ID_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_QUERY_SCHEDULES, handle_query_schedules, schema=_ENTITY_ID_SCHEMA)
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
