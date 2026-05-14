@@ -22,6 +22,7 @@ dev = [
     "aioresponses>=0.7",
     "ruff>=0.9",
     "pytest-cov>=7.1.0",
+    "voluptuous>=0.15",
 ]
 
 [tool.ruff]
