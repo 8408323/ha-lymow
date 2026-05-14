@@ -158,9 +158,7 @@ async def test_step_user_with_region_override_calls_login_region() -> None:
         with patch.object(_config_flow_mod, "LymowAuth", return_value=mock_auth):
             await flow.async_step_user(user_input)
 
-    mock_auth.login_region.assert_called_once_with(
-        "user@example.com", "secret", "eu-west-1"
-    )
+    mock_auth.login_region.assert_called_once_with("user@example.com", "secret", "eu-west-1")
 
 
 # ---------------------------------------------------------------------------
