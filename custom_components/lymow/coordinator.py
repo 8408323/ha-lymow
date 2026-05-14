@@ -20,7 +20,11 @@ from .const import (
     USER_CTRL_RESUME,
     USER_CTRL_RESUME_DOCK,
     WORK_STATUS_DOCKING,
+    WORK_STATUS_DOCKED_GROUP,
+    WORK_STATUS_ERROR_GROUP,
+    WORK_STATUS_MOWING_GROUP,
     WORK_STATUS_PAUSE_DOCKING,
+    WORK_STATUS_RETURNING_GROUP,
 )
 from .mqtt import LymowMqttClient
 from .protocol import encode_userctrl, encode_sync_map, encode_delete_zone, encode_start_zones, encode_query_map
@@ -53,6 +57,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._mqtt = mqtt_client
         self.devices = devices
         self._mqtt_state: dict[str, dict[str, Any]] = {}
+        # Track work status per device to detect important transitions.
+        self._prev_work_status: dict[str, int] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -75,11 +81,58 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self.data and thing_name in self.data:
             merged = {**self.data[thing_name], **patch}
             self.async_set_updated_data({**self.data, thing_name: merged})
+        self._check_work_status_transition(thing_name, patch)
+
+    def _check_work_status_transition(self, thing_name: str, patch: dict[str, Any]) -> None:
+        """Fire HA event bus events and persistent notifications on notable work status changes."""
+        new_ws = patch.get("workStatus")
+        if new_ws is None:
+            return
+        prev_ws = self._prev_work_status.get(thing_name, -1)
+        self._prev_work_status[thing_name] = new_ws
+
+        device_label = next(
+            (d.get("deviceName") or d.get("sn") or thing_name for d in self.devices if d["deviceThingName"] == thing_name),
+            thing_name,
+        )
+
+        # Always fire the event bus event so automations can react.
+        self.hass.bus.async_fire(
+            f"{DOMAIN}_work_status_changed",
+            {"thing_name": thing_name, "device_name": device_label, "work_status": new_ws, "prev_work_status": prev_ws},
+        )
+
+        # Fire persistent notifications for error and mow-complete transitions.
+        if new_ws in WORK_STATUS_ERROR_GROUP and prev_ws not in WORK_STATUS_ERROR_GROUP:
+            self.hass.components.persistent_notification.async_create(
+                message=f"{device_label} has reported an error (status {new_ws}). Please check the robot.",
+                title=f"Lymow — {device_label} error",
+                notification_id=f"{DOMAIN}_{thing_name}_error",
+            )
+        elif (
+            prev_ws in WORK_STATUS_MOWING_GROUP | WORK_STATUS_RETURNING_GROUP
+            and new_ws in WORK_STATUS_DOCKED_GROUP
+        ):
+            self.hass.components.persistent_notification.async_create(
+                message=f"{device_label} has finished mowing and returned to the dock.",
+                title=f"Lymow — {device_label} done",
+                notification_id=f"{DOMAIN}_{thing_name}_done",
+            )
 
     def on_mqtt_online(self, thing_name: str, is_online: bool) -> None:
         """Receive an online/offline notification from MQTT."""
         patch = {"isOnline": is_online, "deviceState": "online" if is_online else "offline"}
         self.on_mqtt_state(thing_name, patch)
+        if not is_online:
+            device_label = next(
+                (d.get("deviceName") or d.get("sn") or thing_name for d in self.devices if d["deviceThingName"] == thing_name),
+                thing_name,
+            )
+            self.hass.components.persistent_notification.async_create(
+                message=f"{device_label} has gone offline.",
+                title=f"Lymow — {device_label} offline",
+                notification_id=f"{DOMAIN}_{thing_name}_offline",
+            )
 
     # ------------------------------------------------------------------
     # REST polling
