@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-pytest.importorskip("homeassistant.components.number")
-
-from lymow.number import ZoneCutHeightNumber, async_setup_entry  # noqa: E402
+from lymow.number import ZoneCutHeightNumber, async_setup_entry
 
 # ---------------------------------------------------------------------------
 # Helpers

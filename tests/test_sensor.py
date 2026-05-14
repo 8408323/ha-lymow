@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
-pytest.importorskip("homeassistant.components.sensor")
-
-from lymow.sensor import (  # noqa: E402
+from lymow.sensor import (
     SENSORS,
     LymowErrorSensor,
     LymowMapSensor,

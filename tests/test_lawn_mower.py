@@ -1,18 +1,13 @@
 """Tests for lawn_mower.py — LymowMower and async_setup_entry."""
 
-# ruff: noqa: I001
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-
-pytest.importorskip("homeassistant.components.lawn_mower")
-
-from homeassistant.components.lawn_mower import LawnMowerActivity  # noqa: E402
-from homeassistant.exceptions import ServiceValidationError  # noqa: E402
-
-from lymow.const import (  # noqa: E402
+from homeassistant.components.lawn_mower import LawnMowerActivity
+from homeassistant.exceptions import ServiceValidationError
+from lymow.const import (
     WORK_STATUS_CHARGING,
     WORK_STATUS_DOCKING,
     WORK_STATUS_ERROR,
@@ -20,7 +15,7 @@ from lymow.const import (  # noqa: E402
     WORK_STATUS_OFFLINE,
     WORK_STATUS_PAUSE,
 )
-from lymow.lawn_mower import LymowMower, async_setup_entry  # noqa: E402
+from lymow.lawn_mower import LymowMower, async_setup_entry
 
 # ---------------------------------------------------------------------------
 # Helpers
