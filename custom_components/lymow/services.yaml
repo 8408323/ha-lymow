@@ -1,0 +1,41 @@
+delete_zone:
+  name: Delete zone
+  description: >
+    Delete a mowing zone from the robot’s map using USER_CTRL_CLEAR_ZONE.
+    Only go-zones can be targeted; child no-go zones are removed server-side.
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: >
+        The 8-character hash ID of the go-zone to delete.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+
+start_zone:
+  name: Start zone mow
+  description: >
+    Start mowing one or more specific zones by hash ID.
+    The robot will mow only the listed zones instead of all zones.
+  fields:
+    zone_hash_ids:
+      name: Zone hash IDs
+      description: >
+        List of 8-character hash IDs of the go-zones to mow.
+      required: true
+      example: ["wsmjco1T", "KX1kGyat"]
+      selector:
+        object:
+
+query_map:
+  name: Refresh map
+  description: >
+    Request a fresh map and zone list from the robot (USER_CTRL_QUERY_MAP=19).
+    Useful when zone entities are stale or not yet populated.
+
+query_schedules:
+  name: Query schedules
+  description: >
+    Request schedule data from the robot (USER_CTRL_QUERY_SCHEDULES=20).
+    Currently returns an empty result if no schedules are configured in the app.

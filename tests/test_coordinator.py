@@ -55,6 +55,14 @@ def _make_ha_stubs() -> None:
     ha_coord.UpdateFailed = _UpdateFailed
     sys.modules.setdefault("homeassistant.helpers.update_coordinator", ha_coord)
 
+    # homeassistant.exceptions (needed by async_update_zone_* at call time)
+    class _HomeAssistantError(Exception):
+        pass
+
+    ha_exc = types.ModuleType("homeassistant.exceptions")
+    ha_exc.HomeAssistantError = _HomeAssistantError
+    sys.modules.setdefault("homeassistant.exceptions", ha_exc)
+
 
 _make_ha_stubs()
 
@@ -368,3 +376,230 @@ async def test_current_work_status_returns_value_from_data() -> None:
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 4}}
     assert coord._current_work_status(THING) == 4
+
+
+# ---------------------------------------------------------------------------
+# Query commands
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_query_map_publishes_correct_command() -> None:
+    from lymow.const import USER_CTRL_QUERY_MAP
+    from lymow.protocol import _decode_fields
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_query_map(THING)
+
+    assert mqtt.async_publish_command.await_count == 1
+    _, pb_bytes = mqtt.async_publish_command.call_args[0]
+    fields = _decode_fields(pb_bytes)
+    by_field = {fn: val for fn, _wt, val in fields}
+    # field 5 = userCtrl = QUERY_MAP = 19
+    assert by_field.get(5) == USER_CTRL_QUERY_MAP
+
+
+@pytest.mark.asyncio
+async def test_async_query_all_maps_sends_one_command_per_device() -> None:
+    devices = [
+        {"deviceThingName": "mower-001", "deviceName": "A"},
+        {"deviceThingName": "mower-002", "deviceName": "B"},
+    ]
+    coord, mqtt, api = _make_coordinator(devices=devices)
+    api.get_device_info = AsyncMock(return_value={"workStatus": 5, "battery": 100})
+    await coord._async_update_data()  # initialise data
+    await coord.async_query_all_maps()
+    assert mqtt.async_publish_command.await_count == 2
+    called_things = [c[0][0] for c in mqtt.async_publish_command.call_args_list]
+    assert "mower-001" in called_things
+    assert "mower-002" in called_things
+
+
+@pytest.mark.asyncio
+async def test_async_query_schedules_publishes_correct_command() -> None:
+    from lymow.const import USER_CTRL_QUERY_SCHEDULES
+    from lymow.protocol import _decode_fields
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_query_schedules(THING)
+
+    assert mqtt.async_publish_command.await_count == 1
+    _, pb_bytes = mqtt.async_publish_command.call_args[0]
+    fields = _decode_fields(pb_bytes)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert by_field.get(5) == USER_CTRL_QUERY_SCHEDULES
+
+
+# ---------------------------------------------------------------------------
+# Work status transition notifications
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_work_status_transition_fires_event_bus() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5}}  # docked
+
+    # Seed the previous work status so the transition is 5 → 1
+    coord._prev_work_status[THING] = 5
+
+    # Transition to mowing
+    coord.on_mqtt_state(THING, {"workStatus": 1})
+
+    coord.hass.bus.async_fire.assert_called()
+    call_args = coord.hass.bus.async_fire.call_args[0]
+    assert call_args[0] == "lymow_work_status_changed"
+    payload = call_args[1]
+    assert payload["work_status"] == 1
+    assert payload["prev_work_status"] == 5
+
+
+@pytest.mark.asyncio
+async def test_work_status_error_transition_fires_notification() -> None:
+    from lymow.const import WORK_STATUS_ERROR_GROUP
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 1}}  # mowing
+
+    error_status = next(iter(WORK_STATUS_ERROR_GROUP))
+    coord.on_mqtt_state(THING, {"workStatus": error_status})
+
+    coord.hass.components.persistent_notification.async_create.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_work_status_mow_complete_fires_notification() -> None:
+    from lymow.const import WORK_STATUS_DOCKED_GROUP, WORK_STATUS_MOWING_GROUP
+
+    coord, _, _ = _make_coordinator()
+    mow_status = next(iter(WORK_STATUS_MOWING_GROUP))
+    docked_status = next(iter(WORK_STATUS_DOCKED_GROUP))
+    coord.data = {THING: {"workStatus": mow_status}}
+    coord._prev_work_status[THING] = mow_status
+
+    coord.on_mqtt_state(THING, {"workStatus": docked_status})
+
+    coord.hass.components.persistent_notification.async_create.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_on_mqtt_offline_fires_persistent_notification() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5, "isOnline": True}}
+
+    coord.on_mqtt_online(THING, False)
+
+    coord.hass.components.persistent_notification.async_create.assert_called()
+    call_kwargs = coord.hass.components.persistent_notification.async_create.call_args[1]
+    assert "offline" in call_kwargs.get("title", "").lower()
+
+
+# ---------------------------------------------------------------------------
+# Zone update commands — async_update_zone_cut_height
+# ---------------------------------------------------------------------------
+
+_SAMPLE_MAP_DATA = {
+    "goZones": [
+        {"hashId": "zone0001", "cutHeight": 40, "area": 349, "isEnabled": True, "polygon": []},
+        {"hashId": "zone0002", "cutHeight": 50, "area": 100, "isEnabled": True, "polygon": []},
+    ],
+    "nogoZones": [],
+}
+
+
+@pytest.mark.asyncio
+async def test_update_zone_cut_height_publishes_sync_map() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5, "mapData": _SAMPLE_MAP_DATA}}
+
+    await coord.async_update_zone_cut_height(THING, "zone0001", 60)
+
+    assert mqtt.async_publish_command.await_count == 1
+    thing, _ = mqtt.async_publish_command.call_args[0]
+    assert thing == THING
+
+
+@pytest.mark.asyncio
+async def test_update_zone_cut_height_raises_when_no_map_data() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5}}  # no mapData
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    with pytest.raises(HomeAssistantError):
+        await coord.async_update_zone_cut_height(THING, "zone0001", 60)
+
+
+@pytest.mark.asyncio
+async def test_update_zone_cut_height_only_modifies_target_zone() -> None:
+    """The other zone's cutHeight must not change."""
+    import copy
+
+    coord, mqtt, _ = _make_coordinator()
+    orig = copy.deepcopy(_SAMPLE_MAP_DATA)
+    coord.data = {THING: {"workStatus": 5, "mapData": orig}}
+
+    await coord.async_update_zone_cut_height(THING, "zone0001", 75)
+
+    # zone0001 updated; zone0002 unchanged — verify the deep-copy didn't mutate original
+    assert orig["goZones"][0]["cutHeight"] == 40  # original not mutated
+
+
+# ---------------------------------------------------------------------------
+# Zone update commands — async_update_zone_enabled
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_update_zone_enabled_publishes_sync_map() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5, "mapData": _SAMPLE_MAP_DATA}}
+
+    await coord.async_update_zone_enabled(THING, "zone0001", False)
+
+    assert mqtt.async_publish_command.await_count == 1
+    thing, _ = mqtt.async_publish_command.call_args[0]
+    assert thing == THING
+
+
+@pytest.mark.asyncio
+async def test_update_zone_enabled_also_updates_child_nogo_zones() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    nogo_map = {
+        "goZones": [{"hashId": "zone0001", "isEnabled": True, "polygon": []}],
+        "nogoZones": [
+            {"hashId": "nogo0001", "parentZoneHashId": "zone0001", "isEnabled": True, "polygon": []},
+            {"hashId": "nogo0002", "parentZoneHashId": "zone0002", "isEnabled": True, "polygon": []},
+        ],
+    }
+    coord.data = {THING: {"workStatus": 5, "mapData": nogo_map}}
+
+    # Spy on async_sync_map to capture what map_data was passed
+    sent_maps: list[dict] = []
+
+    async def _capture_sync(thing_name: str, map_data: dict) -> None:  # type: ignore[override]
+        sent_maps.append(map_data)
+
+    coord.async_sync_map = _capture_sync  # type: ignore[method-assign]
+
+    await coord.async_update_zone_enabled(THING, "zone0001", False)
+
+    assert len(sent_maps) == 1
+    updated = sent_maps[0]
+    # go-zone disabled
+    assert updated["goZones"][0]["isEnabled"] is False
+    # nogo child of zone0001 disabled
+    assert updated["nogoZones"][0]["isEnabled"] is False
+    # nogo child of zone0002 unchanged
+    assert updated["nogoZones"][1]["isEnabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_zone_enabled_raises_when_no_map_data() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5}}
+
+    from homeassistant.exceptions import HomeAssistantError
+
+    with pytest.raises(HomeAssistantError):
+        await coord.async_update_zone_enabled(THING, "zone0001", False)

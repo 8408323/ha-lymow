@@ -15,8 +15,8 @@ import json
 import struct
 from typing import Any
 
-# Protocol version used in all outgoing PbInput messages (v4.9 = 40)
-PB_VERSION = 40
+# Protocol version used in all outgoing PbInput messages (confirmed from ADB capture: field 2 = 49)
+PB_VERSION = 49
 
 # ---------------------------------------------------------------------------
 # Varint helpers
@@ -80,6 +80,12 @@ def _field_bytes(field_no: int, data: bytes) -> bytes:
 
 def _field_str(field_no: int, value: str) -> bytes:
     return _field_bytes(field_no, value.encode("utf-8"))
+
+
+def _field_f32(field_no: int, value: float) -> bytes:
+    """Encode a float32 field (wire type 5 = 32-bit fixed)."""
+    tag = _encode_varint((field_no << 3) | 5)
+    return tag + struct.pack("<f", value)
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +162,242 @@ def _signed32(v: int) -> int:
     return v
 
 
+def _decode_f32(raw: int) -> float:
+    """Decode a raw uint32 (from wire type 5) as an IEEE 754 single-precision float."""
+    return struct.unpack("<f", struct.pack("<I", raw & 0xFFFFFFFF))[0]
+
+
+def _decode_map_point(data: bytes) -> dict[str, float]:
+    """Decode an x/y point sub-message where f1=x and f2=y are i32 floats."""
+    f = _decode_fields(data)
+    x_raw = _first(f, 1)
+    y_raw = _first(f, 2)
+    return {
+        "x": _decode_f32(x_raw) if x_raw is not None else 0.0,
+        "y": _decode_f32(y_raw) if y_raw is not None else 0.0,
+    }
+
+
+def _decode_map_polygon(data: bytes) -> list[dict[str, float]]:
+    """Decode a polygon sub-message containing repeated f1 point sub-messages."""
+    f = _decode_fields(data)
+    return [_decode_map_point(p) for p in _all(f, 1) if isinstance(p, bytes)]
+
+
+# ---------------------------------------------------------------------------
+# PbMapResponse decoder — extracts zones, no-go zones, base station, GPS
+# ---------------------------------------------------------------------------
+
+# Map content field numbers (inside the double-wrapped f23→f2→f3 structure)
+_MAP_CONTENT_GO_ZONES = 1
+_MAP_CONTENT_NOGO_ZONES = 2
+_MAP_CONTENT_CHARGING_STATION = 4
+_MAP_CONTENT_GPS_ORIGIN = 7
+
+
+def extract_raw_map_content(pb_bytes: bytes) -> bytes | None:
+    """Extract raw PbMap content bytes from a map-response PbOutput blob.
+
+    Navigation path: PbOutput.f23 → f2 → f3 = raw PbMap content.
+    Returns None if the map response is not present in the message.
+    """
+    top = _decode_fields(pb_bytes)
+    outer_raw = _first(top, 23)
+    if not isinstance(outer_raw, bytes):
+        return None
+    wrapper_raw = _first(_decode_fields(outer_raw), 2)
+    if not isinstance(wrapper_raw, bytes):
+        return None
+    content_raw = _first(_decode_fields(wrapper_raw), 3)
+    return content_raw if isinstance(content_raw, bytes) else None
+
+
+def _zone_hash_from_raw(zone_raw: bytes) -> str:
+    """Extract hashId from a raw goZone or nogoZone sub-message (f1=BasicInfo, f3=hashId)."""
+    bi_raw = _first(_decode_fields(zone_raw), 1)
+    if not isinstance(bi_raw, bytes):
+        return ""
+    h = _first(_decode_fields(bi_raw), 3)
+    return h.decode("utf-8", errors="replace") if isinstance(h, bytes) else ""
+
+
+def _nogo_parent_from_raw(nogo_raw: bytes) -> str:
+    """Extract parentZoneHashId from a raw nogoZone sub-message (f4=parentZoneHashId)."""
+    p = _first(_decode_fields(nogo_raw), 4)
+    return p.decode("utf-8", errors="replace") if isinstance(p, bytes) else ""
+
+
+def delete_zone_from_raw_content(content_bytes: bytes, hash_id: str) -> bytes:
+    """Surgically remove a zone (and its child nogoZones) from raw PbMap content bytes.
+
+    All other fields are preserved byte-for-byte.  modifyHashs (f9) is appended
+    with the deleted zone's hash so the robot knows what changed.
+    """
+    result = b""
+    for fn, wt, val in _decode_fields(content_bytes):
+        if fn == _MAP_CONTENT_GO_ZONES and isinstance(val, bytes):
+            if _zone_hash_from_raw(val) == hash_id:
+                continue  # drop deleted goZone
+        if fn == _MAP_CONTENT_NOGO_ZONES and isinstance(val, bytes):
+            if _nogo_parent_from_raw(val) == hash_id:
+                continue  # drop child nogoZone
+        # Re-encode field with original wire type
+        tag = _encode_varint((fn << 3) | wt)
+        if wt == 0:  # varint
+            result += tag + _encode_varint(val)
+        elif wt == 1:  # 64-bit fixed
+            result += tag + struct.pack("<Q", val)
+        elif wt == 2:  # length-delimited
+            result += tag + _encode_varint(len(val)) + val
+        elif wt == 5:  # 32-bit fixed
+            result += tag + struct.pack("<I", val)
+    result += _field_str(9, hash_id)  # modifyHashs
+    return result
+
+
+def encode_sync_map_raw(raw_content: bytes) -> bytes:
+    """Encode a sync-map command using pre-built raw PbMap content bytes.
+
+    Use this with delete_zone_from_raw_content() to preserve every field of the
+    original map response while only removing the target zone.
+    """
+    from .const import USER_CTRL_SYNC_MAP
+
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_SYNC_MAP)
+    pb += _field_bytes(23, raw_content)
+    return pb
+
+
+def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
+    """Decode a PbMapResponse blob into go zones, no-go zones, charging station and GPS origin.
+
+    Navigation path: PbOutput.f23 → f2 → f3 (map content).
+    Field layout determined from live traffic capture (map_response.bin, 7957 B).
+    """
+    top = _decode_fields(pb_bytes)
+    outer_raw = _first(top, 23)
+    if not isinstance(outer_raw, bytes):
+        return {}
+    wrapper_raw = _first(_decode_fields(outer_raw), 2)
+    if not isinstance(wrapper_raw, bytes):
+        return {}
+    content_raw = _first(_decode_fields(wrapper_raw), 3)
+    if not isinstance(content_raw, bytes):
+        return {}
+    content = _decode_fields(content_raw)
+
+    result: dict[str, Any] = {}
+
+    # ---- Go zones (f1, repeated) -----------------------------------------
+    go_zones: list[dict[str, Any]] = []
+    for zone_raw in _all(content, _MAP_CONTENT_GO_ZONES):
+        if not isinstance(zone_raw, bytes):
+            continue
+        zf = _decode_fields(zone_raw)
+        zone: dict[str, Any] = {}
+
+        bi_raw = _first(zf, 1)
+        if isinstance(bi_raw, bytes):
+            bi = _decode_fields(bi_raw)
+            hash_raw = _first(bi, 3)
+            poly_raw = _first(bi, 5)
+            zone["hashId"] = hash_raw.decode("utf-8", errors="replace") if isinstance(hash_raw, bytes) else ""
+            zone["type"] = _first(bi, 1, 0)
+            zone["isEnabled"] = bool(_first(bi, 4, 1))
+            zone["polygon"] = _decode_map_polygon(poly_raw) if isinstance(poly_raw, bytes) else []
+
+        pp_raw = _first(zf, 3)
+        if isinstance(pp_raw, bytes):
+            pp = _decode_fields(pp_raw)
+            bmin_raw = _first(pp, 1)
+            bmax_raw = _first(pp, 2)
+            area = _first(pp, 3)
+            inner_raw = _first(pp, 5)
+            if isinstance(bmin_raw, bytes):
+                zone["boundMin"] = _decode_map_point(bmin_raw)
+            if isinstance(bmax_raw, bytes):
+                zone["boundMax"] = _decode_map_point(bmax_raw)
+            if area is not None:
+                zone["area"] = area
+            if isinstance(inner_raw, bytes):
+                zone["innerPoint"] = _decode_map_point(inner_raw)
+
+        cfg_raw = _first(zf, 2)
+        if isinstance(cfg_raw, bytes) and len(cfg_raw) > 0:
+            cf = _decode_fields(cfg_raw)
+            cut_h = _first(cf, 1)
+            path_sp = _first(cf, 4)
+            if cut_h is not None:
+                zone["cutHeight"] = cut_h
+            if path_sp is not None:
+                zone["pathSpacing"] = _decode_f32(path_sp)
+
+        go_zones.append(zone)
+    result["goZones"] = go_zones
+
+    # ---- No-go zones (f2, repeated) --------------------------------------
+    nogo_zones: list[dict[str, Any]] = []
+    for nogo_raw in _all(content, _MAP_CONTENT_NOGO_ZONES):
+        if not isinstance(nogo_raw, bytes):
+            continue
+        nf = _decode_fields(nogo_raw)
+        nogo: dict[str, Any] = {}
+
+        bi_raw = _first(nf, 1)
+        if isinstance(bi_raw, bytes):
+            bi = _decode_fields(bi_raw)
+            hash_raw = _first(bi, 3)
+            poly_raw = _first(bi, 5)
+            nogo["hashId"] = hash_raw.decode("utf-8", errors="replace") if isinstance(hash_raw, bytes) else ""
+            nogo["type"] = _first(bi, 1, 0)
+            nogo["isEnabled"] = bool(_first(bi, 4, 1))
+            nogo["polygon"] = _decode_map_polygon(poly_raw) if isinstance(poly_raw, bytes) else []
+
+        pp_raw = _first(nf, 3)
+        if isinstance(pp_raw, bytes):
+            pp = _decode_fields(pp_raw)
+            area = _first(pp, 3)
+            inner_raw = _first(pp, 5)
+            if area is not None:
+                nogo["area"] = area
+            if isinstance(inner_raw, bytes):
+                nogo["innerPoint"] = _decode_map_point(inner_raw)
+
+        parent_raw = _first(nf, 4)
+        if isinstance(parent_raw, bytes) and len(parent_raw) > 0:
+            nogo["parentZoneHashId"] = parent_raw.decode("utf-8", errors="replace")
+
+        nogo_zones.append(nogo)
+    result["nogoZones"] = nogo_zones
+
+    # ---- Charging station pose (f4) — x/y/theta as i32 floats -----------
+    cs_raw = _first(content, _MAP_CONTENT_CHARGING_STATION)
+    if isinstance(cs_raw, bytes):
+        cs = _decode_fields(cs_raw)
+        x_raw = _first(cs, 1)
+        y_raw = _first(cs, 2)
+        t_raw = _first(cs, 3)
+        result["chargingStation"] = {
+            "x": _decode_f32(x_raw) if x_raw is not None else 0.0,
+            "y": _decode_f32(y_raw) if y_raw is not None else 0.0,
+            "theta": _decode_f32(t_raw) if t_raw is not None else 0.0,
+        }
+
+    # ---- GPS origin (f7) — lat/lon as i32 floats -------------------------
+    gps_raw = _first(content, _MAP_CONTENT_GPS_ORIGIN)
+    if isinstance(gps_raw, bytes):
+        gf = _decode_fields(gps_raw)
+        lat_raw = _first(gf, 1)
+        lon_raw = _first(gf, 2)
+        result["gpsOrigin"] = {
+            "lat": _decode_f32(lat_raw) if lat_raw is not None else 0.0,
+            "lon": _decode_f32(lon_raw) if lon_raw is not None else 0.0,
+        }
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # PbOutput decoder — maps to a flat state dict
 # ---------------------------------------------------------------------------
@@ -216,6 +458,46 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             if isinstance(val, bytes):
                 state[key] = val.decode("utf-8", errors="replace")
 
+    # GPS / RTK (field 6 of outer PbOutput):
+    #   f1=satellites(int), f2=eastM(float32), f3=northM(float32), f4=rtkStatus(int)
+    rtk_raw = _first(fields, 6)
+    if isinstance(rtk_raw, bytes):
+        rtk = _decode_fields(rtk_raw)
+        sats = _first(rtk, 1)
+        if sats is not None:
+            state["rtkSatellites"] = _signed32(sats)
+        east = _first(rtk, 2)
+        if east is not None:
+            state["rtkEastM"] = _decode_f32(east)
+        north = _first(rtk, 3)
+        if north is not None:
+            state["rtkNorthM"] = _decode_f32(north)
+        rtk_status = _first(rtk, 4)
+        if rtk_status is not None:
+            state["rtkStatus"] = _signed32(rtk_status)
+
+    # Area info (field 12): f2=totalAreaM2(float32)
+    area_raw = _first(fields, 12)
+    if isinstance(area_raw, bytes):
+        area_fields = _decode_fields(area_raw)
+        total_area = _first(area_fields, 2)
+        if total_area is not None:
+            state["totalAreaM2"] = _decode_f32(total_area)
+
+    # Robot pose ENU (field 14): f1=eastM, f2=northM, f3=thetaRad (all float32)
+    pose_raw = _first(fields, 14)
+    if isinstance(pose_raw, bytes):
+        pose_fields = _decode_fields(pose_raw)
+        east_m = _first(pose_fields, 1)
+        north_m = _first(pose_fields, 2)
+        theta_rad = _first(pose_fields, 3)
+        if east_m is not None:
+            state["poseEastM"] = _decode_f32(east_m)
+        if north_m is not None:
+            state["poseNorthM"] = _decode_f32(north_m)
+        if theta_rad is not None:
+            state["poseThetaRad"] = _decode_f32(theta_rad)
+
     return state
 
 
@@ -228,6 +510,22 @@ def encode_userctrl(command: int) -> bytes:
     """Encode a simple user control command."""
     pb = _field_i32(2, PB_VERSION)
     pb += _field_i32(5, command)
+    return pb
+
+
+def encode_query_map(queryIndex: int = 0) -> bytes:
+    """Encode a query-map command (userCtrl=19)."""
+    sub = _field_i32(1, queryIndex) + _field_i32(4, 1)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, 19)  # USER_CTRL_QUERY_MAP
+    pb += _field_bytes(23, sub)
+    return pb
+
+
+def encode_query_schedules() -> bytes:
+    """Encode a query-schedules command (userCtrl=20)."""
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, 20)  # USER_CTRL_QUERY_SCHEDULES
     return pb
 
 
@@ -246,3 +544,172 @@ def encode_start_zones(zone_hash_ids: list[str]) -> bytes:
         pb += _field_bytes(12, map_pb)
 
     return pb
+
+
+# ---------------------------------------------------------------------------
+# Map content encoders — mirror of the decode path above
+# ---------------------------------------------------------------------------
+
+
+def _encode_map_point(pt: dict) -> bytes:
+    """Encode an x/y point sub-message (f1=x, f2=y, both wire-type-5 float32)."""
+    return _field_f32(1, pt.get("x", 0.0)) + _field_f32(2, pt.get("y", 0.0))
+
+
+def _encode_map_polygon(points: list) -> bytes:
+    """Encode a polygon as repeated f1 point sub-messages."""
+    out = b""
+    for pt in points:
+        out += _field_bytes(1, _encode_map_point(pt))
+    return out
+
+
+def _encode_go_zone(zone: dict) -> bytes:
+    """Encode a GoZone sub-message (f1=BasicInfo, f2=ZoneConfig, f3=PpBasicInfo)."""
+    # f1 = BasicInfo
+    bi = _field_i32(1, zone.get("type", 0))
+    bi += _field_str(3, zone.get("hashId", ""))
+    bi += _field_i32(4, int(zone.get("isEnabled", True)))
+    if zone.get("polygon"):
+        bi += _field_bytes(5, _encode_map_polygon(zone["polygon"]))
+
+    # f2 = ZoneConfig (optional)
+    cfg = b""
+    if "cutHeight" in zone:
+        cfg += _field_i32(1, zone["cutHeight"])
+    if "pathSpacing" in zone:
+        cfg += _field_f32(4, zone["pathSpacing"])
+
+    # f3 = PpBasicInfo (optional)
+    pp = b""
+    if "boundMin" in zone:
+        pp += _field_bytes(1, _encode_map_point(zone["boundMin"]))
+    if "boundMax" in zone:
+        pp += _field_bytes(2, _encode_map_point(zone["boundMax"]))
+    if "area" in zone:
+        pp += _field_i32(3, zone["area"])
+    if "innerPoint" in zone:
+        pp += _field_bytes(5, _encode_map_point(zone["innerPoint"]))
+
+    out = _field_bytes(1, bi)
+    if cfg:
+        out += _field_bytes(2, cfg)
+    if pp:
+        out += _field_bytes(3, pp)
+    return out
+
+
+def _encode_nogo_zone(nogo: dict) -> bytes:
+    """Encode a NoGoZone sub-message (f1=BasicInfo, f3=PpBasicInfo, f4=parentZoneHashId)."""
+    # f1 = BasicInfo
+    bi = _field_i32(1, nogo.get("type", 0))
+    bi += _field_str(3, nogo.get("hashId", ""))
+    bi += _field_i32(4, int(nogo.get("isEnabled", True)))
+    if nogo.get("polygon"):
+        bi += _field_bytes(5, _encode_map_polygon(nogo["polygon"]))
+
+    # f3 = PpBasicInfo (optional)
+    pp = b""
+    if "area" in nogo:
+        pp += _field_i32(3, nogo["area"])
+    if "innerPoint" in nogo:
+        pp += _field_bytes(5, _encode_map_point(nogo["innerPoint"]))
+
+    out = _field_bytes(1, bi)
+    if pp:
+        out += _field_bytes(3, pp)
+    if nogo.get("parentZoneHashId"):
+        out += _field_bytes(4, nogo["parentZoneHashId"].encode("utf-8"))
+    return out
+
+
+def _encode_map_content(map_data: dict) -> bytes:
+    """Encode a PbMap sub-message.
+
+    Field layout (confirmed from PbMap.encode Hermes bytecode analysis):
+      f1  goZones (repeated), f2  nogoZones (repeated), f3  channels (repeated)
+      f4  chargingStationLoc, f5  isIncomplete (bool), f6  diagonalCoords (repeated)
+      f7  enuBasePoint (GPS origin), f8  taskConfig, f9  modifyHashs (repeated strings)
+      f10 floorInfo, f11 globalZoneConfig, f12 globalChannelConfig, f13 runTimeConfig
+    """
+    out = b""
+    for zone in map_data.get("goZones", []):
+        out += _field_bytes(1, _encode_go_zone(zone))
+    for nogo in map_data.get("nogoZones", []):
+        out += _field_bytes(2, _encode_nogo_zone(nogo))
+    cs = map_data.get("chargingStation")
+    if cs:
+        cs_bytes = (
+            _field_f32(1, cs.get("x", 0.0)) + _field_f32(2, cs.get("y", 0.0)) + _field_f32(3, cs.get("theta", 0.0))
+        )
+        out += _field_bytes(4, cs_bytes)
+    gps = map_data.get("gpsOrigin")
+    if gps:
+        gps_bytes = _field_f32(1, gps.get("lat", 0.0)) + _field_f32(2, gps.get("lon", 0.0))
+        out += _field_bytes(7, gps_bytes)
+    for hash_id in map_data.get("modifyHashs", []):
+        out += _field_str(9, hash_id)
+    return out
+
+
+def encode_sync_map(map_data: dict) -> bytes:
+    """Encode a sync-map command (userCtrl=USER_CTRL_SYNC_MAP=25).
+
+    The map_data dict must have the same structure as returned by decode_map_response().
+    PbInput.btMap (field 23) carries PbMap bytes directly — no extra wrapper.
+    Confirmed from PbInput.encode Hermes bytecode: btMap=field23, PbMap fields=1-13.
+    """
+    from .const import USER_CTRL_SYNC_MAP
+
+    content = _encode_map_content(map_data)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_SYNC_MAP)
+    pb += _field_bytes(23, content)
+    return pb
+
+
+def encode_delete_zone(hash_id: str) -> bytes:
+    """Encode a delete-goZone command using the correct robot protocol.
+
+    Confirmed from Hermes bytecode analysis of deleteZonePartition (fn 8972):
+      - userCtrl = USER_CTRL_CLEAR_ZONE = 8  (NOT SYNC_MAP=25)
+      - map goes in PbInput field 12 (map), NOT field 23 (btMap)
+      - PbMap contains ONLY the target zone (not the full map)
+      - Structure: PbMap { goZones: [PbZone { basicInfo: PbZoneBasicInfo { hashId } }] }
+    """
+    from .const import USER_CTRL_CLEAR_ZONE
+
+    # PbZoneBasicInfo { hashId: hash_id }  — field 3 confirmed from _encode_go_zone
+    basic_info = _field_str(3, hash_id)
+    # PbZone { basicInfo: PbZoneBasicInfo }  — basicInfo = field 1 confirmed from _encode_go_zone
+    zone = _field_bytes(1, basic_info)
+    # PbMap { goZones: [zone] }  — goZones = field 1 confirmed from _encode_map_content
+    pb_map = _field_bytes(1, zone)
+    # PbInput { version, userCtrl, map }  — map = field 12
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_CLEAR_ZONE)
+    pb += _field_bytes(12, pb_map)
+    return pb
+
+
+def delete_zone(map_data: dict, hash_id: str) -> dict:
+    """Return a deep copy of map_data with the given zone (and its child no-go zones) removed.
+
+    Raises ValueError if hash_id is not found in goZones or nogoZones.
+    When a goZone is deleted, all nogoZones whose parentZoneHashId matches it are also removed.
+    """
+    import copy
+
+    all_ids = {z.get("hashId") for z in map_data.get("goZones", []) + map_data.get("nogoZones", [])}
+    if hash_id not in all_ids:
+        raise ValueError(f"Zone {hash_id!r} not found in map_data")
+
+    result = copy.deepcopy(map_data)
+    result["goZones"] = [z for z in result.get("goZones", []) if z.get("hashId") != hash_id]
+    # Also cascade-delete no-go zones that belonged to the deleted go zone
+    result["nogoZones"] = [
+        n for n in result.get("nogoZones", []) if n.get("hashId") != hash_id and n.get("parentZoneHashId") != hash_id
+    ]
+    # Signal to the robot which zones changed (required for the robot to process the deletion)
+    result["modifyHashs"] = [hash_id]
+    return result
