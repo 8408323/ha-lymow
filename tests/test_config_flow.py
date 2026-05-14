@@ -5,12 +5,8 @@ from __future__ import annotations
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-pytest.importorskip("homeassistant.config_entries")
-
-from lymow.config_flow import LymowConfigFlow  # noqa: E402
-from lymow.const import (  # noqa: E402
+from lymow.config_flow import LymowConfigFlow
+from lymow.const import (
     CONF_PASSWORD,
     CONF_REGION,
     CONF_USERNAME,

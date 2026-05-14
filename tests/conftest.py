@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import sys
+import types
 
 _BASE = os.path.join(os.path.dirname(__file__), "..", "custom_components", "lymow")
 
@@ -51,4 +52,256 @@ try:
     _load_lymow_module("switch")
     _load_lymow_module("lawn_mower")
 except ImportError:
-    pass
+    # HA not installed (uv/Python 3.13 CI env) — inject minimal stubs so all
+    # lymow platform modules can be loaded and their tests can run.
+    import enum
+    from enum import IntEnum, IntFlag
+
+    # ── homeassistant root ────────────────────────────────────────────────────
+    _ha = types.ModuleType("homeassistant")
+    sys.modules.setdefault("homeassistant", _ha)
+
+    # ── homeassistant.const ───────────────────────────────────────────────────
+    _ha_const = types.ModuleType("homeassistant.const")
+    _ha_const.PERCENTAGE = "%"  # type: ignore[attr-defined]
+
+    class _UnitOfArea:
+        SQUARE_METERS = "m²"
+
+    class _UnitOfLength:
+        METERS = "m"
+        CENTIMETERS = "cm"
+        MILLIMETERS = "mm"
+
+    _ha_const.UnitOfArea = _UnitOfArea  # type: ignore[attr-defined]
+    _ha_const.UnitOfLength = _UnitOfLength  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.const", _ha_const)
+
+    # ── homeassistant.core ────────────────────────────────────────────────────
+    _ha_core = types.ModuleType("homeassistant.core")
+
+    class _HomeAssistant:
+        pass
+
+    class _ServiceCall:
+        pass
+
+    def _callback(func):  # type: ignore[return]
+        return func
+
+    _ha_core.HomeAssistant = _HomeAssistant  # type: ignore[attr-defined]
+    _ha_core.ServiceCall = _ServiceCall  # type: ignore[attr-defined]
+    _ha_core.callback = _callback  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.core", _ha_core)
+
+    # ── homeassistant.exceptions ──────────────────────────────────────────────
+    _ha_exc = types.ModuleType("homeassistant.exceptions")
+
+    class _HomeAssistantError(Exception):
+        pass
+
+    class _ServiceValidationError(_HomeAssistantError):
+        pass
+
+    _ha_exc.HomeAssistantError = _HomeAssistantError  # type: ignore[attr-defined]
+    _ha_exc.ServiceValidationError = _ServiceValidationError  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.exceptions", _ha_exc)
+
+    # ── homeassistant.config_entries ──────────────────────────────────────────
+    _ha_ce = types.ModuleType("homeassistant.config_entries")
+
+    class _ConfigEntry:
+        pass
+
+    class _ConfigFlow:
+        def __init_subclass__(cls, domain=None, **kwargs):
+            super().__init_subclass__(**kwargs)
+
+    _ConfigFlowResult = dict
+    _ha_ce.ConfigEntry = _ConfigEntry  # type: ignore[attr-defined]
+    _ha_ce.ConfigFlow = _ConfigFlow  # type: ignore[attr-defined]
+    _ha_ce.ConfigFlowResult = _ConfigFlowResult  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.config_entries", _ha_ce)
+
+    # ── homeassistant.helpers (namespace) ────────────────────────────────────
+    _ha_helpers = types.ModuleType("homeassistant.helpers")
+    sys.modules.setdefault("homeassistant.helpers", _ha_helpers)
+
+    # ── homeassistant.helpers.update_coordinator ─────────────────────────────
+    _ha_uc = types.ModuleType("homeassistant.helpers.update_coordinator")
+
+    class _CoordinatorEntity:
+        def __init__(self, coordinator, *args, **kwargs):
+            self.coordinator = coordinator
+            self.entity_id: str | None = None
+
+        def __class_getitem__(cls, item):
+            return cls
+
+    class _DataUpdateCoordinator:
+        def __init__(self, hass=None, logger=None, *, name=None, update_interval=None, **kwargs):
+            self.hass = hass
+            self.logger = logger
+            self.name = name
+            self.update_interval = update_interval
+            self.data: dict | None = None
+            self._listeners: list = []
+
+        def __class_getitem__(cls, item):
+            return cls
+
+        async def async_shutdown(self):
+            pass
+
+        def async_set_updated_data(self, data):
+            self.data = data
+
+    class _UpdateFailed(Exception):
+        pass
+
+    _ha_uc.CoordinatorEntity = _CoordinatorEntity  # type: ignore[attr-defined]
+    _ha_uc.DataUpdateCoordinator = _DataUpdateCoordinator  # type: ignore[attr-defined]
+    _ha_uc.UpdateFailed = _UpdateFailed  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.update_coordinator", _ha_uc)
+
+    # ── homeassistant.helpers.entity_platform ─────────────────────────────────
+    _ha_ep = types.ModuleType("homeassistant.helpers.entity_platform")
+    _ha_ep.AddEntitiesCallback = None  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.entity_platform", _ha_ep)
+
+    # ── homeassistant.helpers.aiohttp_client ─────────────────────────────────
+    _ha_ac = types.ModuleType("homeassistant.helpers.aiohttp_client")
+
+    async def _async_get_clientsession(hass):  # type: ignore[return]
+        pass
+
+    _ha_ac.async_get_clientsession = _async_get_clientsession  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.aiohttp_client", _ha_ac)
+
+    # ── homeassistant.helpers.selector ────────────────────────────────────────
+    _ha_sel = types.ModuleType("homeassistant.helpers.selector")
+
+    class _SelectSelectorMode(str, enum.Enum):
+        DROPDOWN = "dropdown"
+        LIST = "list"
+
+    class _SelectSelectorConfig:
+        def __init__(self, **kwargs):
+            pass
+
+    class _SelectSelector:
+        def __init__(self, config=None):
+            pass
+
+        def __call__(self, value):
+            return value
+
+    _ha_sel.SelectSelector = _SelectSelector  # type: ignore[attr-defined]
+    _ha_sel.SelectSelectorConfig = _SelectSelectorConfig  # type: ignore[attr-defined]
+    _ha_sel.SelectSelectorMode = _SelectSelectorMode  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.selector", _ha_sel)
+
+    # ── homeassistant.helpers.config_validation ───────────────────────────────
+    _ha_cv = types.ModuleType("homeassistant.helpers.config_validation")
+    _ha_cv.string = str  # type: ignore[attr-defined]
+    _ha_cv.entity_ids = lambda v: v  # type: ignore[attr-defined]
+    _ha_cv.ensure_list = lambda v: v if isinstance(v, list) else [v]  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.config_validation", _ha_cv)
+
+    # ── homeassistant.components (namespace) ──────────────────────────────────
+    _ha_comp = types.ModuleType("homeassistant.components")
+    sys.modules.setdefault("homeassistant.components", _ha_comp)
+
+    # ── homeassistant.components.lawn_mower ───────────────────────────────────
+    _ha_lm = types.ModuleType("homeassistant.components.lawn_mower")
+
+    class LawnMowerActivity(IntEnum):
+        MOWING = 1
+        RETURNING = 2
+        DOCKED = 3
+        PAUSED = 4
+        ERROR = 5
+
+    class LawnMowerEntityFeature(IntFlag):
+        START_MOWING = 1
+        PAUSE = 2
+        DOCK = 4
+
+    class _LawnMowerEntity:
+        pass
+
+    _ha_lm.LawnMowerActivity = LawnMowerActivity  # type: ignore[attr-defined]
+    _ha_lm.LawnMowerEntityFeature = LawnMowerEntityFeature  # type: ignore[attr-defined]
+    _ha_lm.LawnMowerEntity = _LawnMowerEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.lawn_mower", _ha_lm)
+
+    # ── homeassistant.components.sensor ───────────────────────────────────────
+    _ha_sensor = types.ModuleType("homeassistant.components.sensor")
+
+    class _SensorDeviceClass(str, enum.Enum):
+        POWER = "power"
+        ENERGY = "energy"
+        BATTERY = "battery"
+        SIGNAL_STRENGTH = "signal_strength"
+
+    class _SensorStateClass(str, enum.Enum):
+        MEASUREMENT = "measurement"
+        TOTAL_INCREASING = "total_increasing"
+
+    from dataclasses import dataclass as _dataclass
+
+    @_dataclass(frozen=True)
+    class _SensorEntityDescription:
+        key: str = ""
+        name: str | None = None
+        native_unit_of_measurement: str | None = None
+        device_class: str | None = None
+        state_class: str | None = None
+        icon: str | None = None
+        entity_registry_enabled_default: bool = True
+        entity_category: str | None = None
+        suggested_display_precision: int | None = None
+
+    class _SensorEntity:
+        pass
+
+    _ha_sensor.SensorDeviceClass = _SensorDeviceClass  # type: ignore[attr-defined]
+    _ha_sensor.SensorStateClass = _SensorStateClass  # type: ignore[attr-defined]
+    _ha_sensor.SensorEntityDescription = _SensorEntityDescription  # type: ignore[attr-defined]
+    _ha_sensor.SensorEntity = _SensorEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.sensor", _ha_sensor)
+
+    # ── homeassistant.components.number ───────────────────────────────────────
+    _ha_number = types.ModuleType("homeassistant.components.number")
+
+    class _NumberDeviceClass(str, enum.Enum):
+        DISTANCE = "distance"
+
+    class _NumberMode(str, enum.Enum):
+        BOX = "box"
+        SLIDER = "slider"
+
+    class _NumberEntity:
+        pass
+
+    _ha_number.NumberDeviceClass = _NumberDeviceClass  # type: ignore[attr-defined]
+    _ha_number.NumberMode = _NumberMode  # type: ignore[attr-defined]
+    _ha_number.NumberEntity = _NumberEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.number", _ha_number)
+
+    # ── homeassistant.components.switch ───────────────────────────────────────
+    _ha_switch = types.ModuleType("homeassistant.components.switch")
+
+    class _SwitchEntity:
+        pass
+
+    _ha_switch.SwitchEntity = _SwitchEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.switch", _ha_switch)
+
+    # Now load the platform modules that depend on the above stubs.
+    _load_lymow_module("coordinator")
+    _load_lymow_module("config_flow")
+    _load_lymow_module("sensor")
+    _load_lymow_module("number")
+    _load_lymow_module("switch")
+    _load_lymow_module("lawn_mower")

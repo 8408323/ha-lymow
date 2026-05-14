@@ -4,11 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
-pytest.importorskip("homeassistant.components.switch")
-
-from lymow.switch import ZoneEnabledSwitch, async_setup_entry  # noqa: E402
+from lymow.switch import ZoneEnabledSwitch, async_setup_entry
 
 # ---------------------------------------------------------------------------
 # Helpers
