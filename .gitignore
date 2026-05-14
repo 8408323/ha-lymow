@@ -7,6 +7,13 @@ secrets.yaml
 .env
 capture-*.txt
 
+# APK analysis binaries (large, not for VCS)
+tools/apk/
+
+# Generated script outputs
+scripts/map.png
+scripts/map_response.bin
+
 # Python
 __pycache__/
 *.py[cod]

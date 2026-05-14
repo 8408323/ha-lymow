@@ -23,7 +23,7 @@ from .const import (
     WORK_STATUS_PAUSE_DOCKING,
 )
 from .mqtt import LymowMqttClient
-from .protocol import encode_userctrl
+from .protocol import encode_userctrl, encode_sync_map, encode_delete_zone, encode_start_zones
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -123,3 +123,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         ws = self._current_work_status(thing_name)
         ctrl = USER_CTRL_RESUME_DOCK if ws == WORK_STATUS_PAUSE_DOCKING else USER_CTRL_RESUME
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
+
+    async def async_sync_map(self, thing_name: str, map_data: dict) -> None:
+        """Push an edited map to the robot via SYNC_MAP command."""
+        await self._mqtt.async_publish_command(thing_name, encode_sync_map(map_data))
+
+    async def async_delete_zone(self, thing_name: str, hash_id: str) -> None:
+        """Delete a go-zone by hashId using USER_CTRL_CLEAR_ZONE=8."""
+        await self._mqtt.async_publish_command(thing_name, encode_delete_zone(hash_id))
+
+    async def async_start_zones(self, thing_name: str, zone_hash_ids: list[str]) -> None:
+        """Start mowing specific zones by hashId."""
+        await self._mqtt.async_publish_command(thing_name, encode_start_zones(zone_hash_ids))
