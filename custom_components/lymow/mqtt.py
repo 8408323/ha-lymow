@@ -255,10 +255,13 @@ class LymowMqttClient:
             _LOGGER.exception("Error handling MQTT message on %s", topic)
 
     def _handle_pboutput(self, thing_name: str, payload: bytes | str) -> None:
-        from .protocol import decode_pboutput, unwrap_envelope
+        from .protocol import decode_map_response, decode_pboutput, unwrap_envelope
 
         pb_bytes = unwrap_envelope(payload)
         state = decode_pboutput(pb_bytes)
+        map_data = decode_map_response(pb_bytes)
+        if map_data:
+            state["mapData"] = map_data
         self._on_state(thing_name, state)
 
     def _handle_notify(self, thing_name: str, payload: bytes | str) -> None:

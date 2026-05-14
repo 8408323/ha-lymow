@@ -17,7 +17,7 @@ from .mqtt import LymowMqttClient
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.LAWN_MOWER, Platform.SENSOR]
+PLATFORMS = [Platform.LAWN_MOWER, Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -67,6 +67,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         secret_key=aws["SecretKey"],
         session_token=aws.get("SessionToken"),
     )
+
+    # Proactively request map data so zone entities populate without waiting
+    # for the user to trigger a map query manually.
+    await coordinator.async_query_all_maps()
 
     _LOGGER.debug("Lymow setup complete: %d device(s) in region %s", len(devices), region)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

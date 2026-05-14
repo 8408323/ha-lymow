@@ -23,7 +23,7 @@ from .const import (
     WORK_STATUS_PAUSE_DOCKING,
 )
 from .mqtt import LymowMqttClient
-from .protocol import encode_userctrl, encode_sync_map, encode_delete_zone, encode_start_zones
+from .protocol import encode_userctrl, encode_sync_map, encode_delete_zone, encode_start_zones, encode_query_map
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -135,3 +135,47 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_start_zones(self, thing_name: str, zone_hash_ids: list[str]) -> None:
         """Start mowing specific zones by hashId."""
         await self._mqtt.async_publish_command(thing_name, encode_start_zones(zone_hash_ids))
+
+    async def async_query_map(self, thing_name: str) -> None:
+        """Send USER_CTRL_QUERY_MAP to request a fresh map from the robot."""
+        await self._mqtt.async_publish_command(thing_name, encode_query_map())
+
+    async def async_query_all_maps(self) -> None:
+        """Request map data for every registered device."""
+        for device in self.devices:
+            await self.async_query_map(device["deviceThingName"])
+
+    async def async_update_zone_cut_height(self, thing_name: str, hash_id: str, mm: int) -> None:
+        """Update cut height for a go-zone and push the map back to the robot."""
+        import copy
+
+        from homeassistant.exceptions import HomeAssistantError
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        updated = copy.deepcopy(map_data)
+        for z in updated.get("goZones", []):
+            if z.get("hashId") == hash_id:
+                z["cutHeight"] = mm
+                break
+        await self.async_sync_map(thing_name, updated)
+
+    async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
+        """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""
+        import copy
+
+        from homeassistant.exceptions import HomeAssistantError
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        updated = copy.deepcopy(map_data)
+        for z in updated.get("goZones", []):
+            if z.get("hashId") == hash_id:
+                z["isEnabled"] = is_enabled
+                break
+        for z in updated.get("nogoZones", []):
+            if z.get("parentZoneHashId") == hash_id:
+                z["isEnabled"] = is_enabled
+        await self.async_sync_map(thing_name, updated)
