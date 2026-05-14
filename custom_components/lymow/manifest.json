@@ -1,7 +1,8 @@
 {
   "domain": "lymow",
   "name": "Lymow",
-  "codeowners": [],
+  "codeowners": ["@8408323"],
+  "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/8408323/ha-lymow",
   "iot_class": "cloud_push",
