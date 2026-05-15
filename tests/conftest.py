@@ -172,7 +172,7 @@ except ImportError:
     # ── homeassistant.helpers.aiohttp_client ─────────────────────────────────
     _ha_ac = types.ModuleType("homeassistant.helpers.aiohttp_client")
 
-    async def _async_get_clientsession(hass):  # type: ignore[return]
+    def _async_get_clientsession(hass):  # type: ignore[return]
         pass
 
     _ha_ac.async_get_clientsession = _async_get_clientsession  # type: ignore[attr-defined]
