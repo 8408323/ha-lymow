@@ -18,6 +18,13 @@ uv run python scripts/query_map.py
 
 # Full debug dump: IoT REST shadow + MQTT connect + userCtrl=19
 uv run python scripts/debug_mqtt.py
+
+# 60-min focused capture — logs unknown sub-fields alongside workStatus/isCharging context
+# (requires robot to be online; writes tools/mow_focus_<timestamp>.jsonl)
+uv run python tools/capture_focus.py [seconds]
+
+# Raw capture — logs every pboutput message as decoded JSON
+uv run python tools/capture.py [seconds]
 ```
 
 **What you get:** raw protobuf hex + decoded field tree for every message the
@@ -227,11 +234,32 @@ print(f'{len(data)}B: {data.hex()}')
 |-------|------|---------|
 | 3 | packed int32s | errorCodes |
 | 4 | packed int32s | warningCodes |
-| 5 | sub-message | PbRobotInfo: f2=battery%, f3=wifiSignal, f4=lteSignal, f6=workStatus |
-| 6 | sub-message | GPS/RTK: f1=satellites, f2=eastM(float32), f3=northM(float32), f4=rtkStatus |
+| 5 | sub-message | PbRobotInfo (see below) |
+| 6 | sub-message | GPS/RTK: f1=satellites, f2=eastM(float32), f3=northM(float32), f4=rtkStatus, f5=rtkStatus(dup) |
 | 10 | sub-message | PbDeviceProfile: f1=fwVersion, f2=mcuVersion, f5=ip, f6=mac |
-| 12 | sub-message | Area info: f2=totalAreaM2(float32) |
+| 12 | sub-message | Area/mow info: f1=mowStripCount(int), f2=totalAreaM2(float32), f5=mowProgress(float32 0–1) |
 | 14 | sub-message | Robot pose ENU: f1=eastM(float32), f2=northM(float32), f3=thetaRad(float32) |
+| 22 | sub-message | Extra info: f6=wifiRssiDbm(UTF-8 string e.g. "-77") |
+
+#### PbRobotInfo sub-message (field 5)
+| Sub-field | Name | Notes |
+|-----------|------|-------|
+| f2 | battery | % |
+| f3 | wifiSignal | signal bars (int) |
+| f4 | lteSignal | signal bars (int) |
+| f6 | workStatus | 0=idle, 1=preparing, 2=mowing, 3=returning-to-dock, 5=paused (unconfirmed) |
+| f7 | isRecharging | bool |
+| f8 | isCharging | bool |
+| f9 | unknown | 1 during mow+return; value at dock unconfirmed |
+| f10 | unknown | 1 during mow+return; value at dock unconfirmed |
+
+#### rtkStatus values (field 6.f4)
+| Value | Meaning |
+|-------|---------|
+| 0 | No fix |
+| 1 | Single-point GPS |
+| 2 | RTK float (~30 cm) |
+| 3 | RTK fixed (~2 cm) |
 
 Map zone polygon data (field layout TBD — only returned during active mow or
 in response to QUERY_MAP when zones are defined and robot is mowing).
