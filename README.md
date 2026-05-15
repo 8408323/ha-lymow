@@ -34,6 +34,41 @@ Or manually:
 2. Search for *Lymow*.
 3. Enter your Lymow account credentials.
 
+## Entities
+
+Each mower device exposes the following entities:
+
+### Lawn mower
+
+| Entity | Features |
+|--------|----------|
+| Mower | Start mowing, Pause, Return to dock |
+
+### Sensors
+
+| Entity | Unit | Enabled by default |
+|--------|------|--------------------|
+| Battery | % | ✅ |
+| Error code | — | ✅ |
+| Wi-Fi signal | — | ✅ |
+| LTE signal | — | ✅ |
+| Wi-Fi RSSI | dBm | ❌ |
+| Connectivity | — | ✅ |
+| Firmware version | — | ✅ |
+| MCU version | — | ✅ |
+| IP address | — | ✅ |
+| RTK satellites | — | ✅ |
+| Total mowed area | m² | ✅ |
+| Mow progress | % | ✅ |
+| Mow strip count | — | ❌ |
+
+### Per-zone entities (one set per configured mowing zone)
+
+| Entity | Description |
+|--------|-------------|
+| Zone enabled (switch) | Enable or disable the zone for scheduled mowing |
+| Cut height (number) | Blade height for this zone (mm) |
+
 ## Contributing
 
 Pull requests are welcome. Please open an issue first to discuss what you'd like to change.
