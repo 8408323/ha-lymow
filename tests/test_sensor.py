@@ -384,6 +384,23 @@ def test_mow_strip_count_sensor_disabled_by_default() -> None:
 
 
 # ---------------------------------------------------------------------------
+# robot_state sensor
+# ---------------------------------------------------------------------------
+
+
+def test_robot_state_sensor_returns_value() -> None:
+    coord = _make_coord({"robotState": 5})
+    desc = next(s for s in SENSORS if s.key == "robot_state")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 5
+
+
+def test_robot_state_sensor_disabled_by_default() -> None:
+    desc = next(s for s in SENSORS if s.key == "robot_state")
+    assert desc.entity_registry_enabled_default is False
+
+
+# ---------------------------------------------------------------------------
 # RTK sensor — status 3 = RTK fixed
 # ---------------------------------------------------------------------------
 

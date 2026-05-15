@@ -437,6 +437,9 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         ri = _decode_fields(robot_info_raw)
         ws_raw = _first(ri, 6)
         state["workStatus"] = _signed32(ws_raw) if ws_raw is not None else -1
+        robot_state_raw = _first(ri, 1)
+        if robot_state_raw is not None:
+            state["robotState"] = _signed32(robot_state_raw)
         battery = _first(ri, 2)
         if battery is not None:
             state["battery"] = _signed32(battery)

@@ -277,6 +277,13 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:cloud-upload",
         entity_registry_enabled_default=False,
     ),
+    LymowSensorDescription(
+        key="robot_state",
+        name="Robot state (raw)",
+        value_key="robotState",
+        icon="mdi:robot",
+        entity_registry_enabled_default=False,
+    ),
 )
 
 

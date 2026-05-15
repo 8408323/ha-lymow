@@ -286,6 +286,7 @@ def _build_pboutput(
     is_recharging: int = 0,
     wifi_signal: int | None = None,
     lte_signal: int | None = None,
+    robot_state: int | None = None,
     error_codes: list[int] | None = None,
     warning_codes: list[int] | None = None,
     fw_version: str | None = None,
@@ -296,6 +297,8 @@ def _build_pboutput(
 
     # PbRobotInfo (sub-message, field 5)
     robot_info = _field_i32(6, work_status)  # workStatus
+    if robot_state is not None:
+        robot_info += _field_i32(1, robot_state)
     robot_info += _field_i32(2, battery)
     robot_info += _field_i32(8, is_charging)
     robot_info += _field_i32(7, is_recharging)
@@ -339,6 +342,16 @@ def test_decode_pboutput_basic() -> None:
     assert state["isRecharging"] is False
     assert state["errorCodes"] == []
     assert state["errorCode"] == 0
+    assert "robotState" not in state
+
+
+def test_decode_pboutput_robot_state() -> None:
+    # f5.f1=5 observed when docked/charging; f5.f1=2 when mowing
+    pb = _build_pboutput(work_status=1, battery=88, is_charging=1, robot_state=5)
+    state = decode_pboutput(pb)
+    assert state["robotState"] == 5
+    assert state["workStatus"] == 1
+    assert state["isCharging"] is True
 
 
 def test_decode_pboutput_charging() -> None:
