@@ -22,6 +22,7 @@ from lymow.protocol import (
     decode_map_response,
     decode_pboutput,
     delete_zone,
+    encode_ble_drive,
     encode_delete_zone,
     encode_start_zones,
     encode_sync_map,
@@ -1519,3 +1520,111 @@ def test_decode_map_response_skips_non_bytes_nogo_zone_field() -> None:
 
     result = decode_map_response(pb)
     assert result.get("nogoZones", []) == []
+
+
+# ---------------------------------------------------------------------------
+# encode_ble_drive — BLE manual-drive command
+# ---------------------------------------------------------------------------
+
+
+def test_encode_ble_drive_returns_bytes() -> None:
+    result = encode_ble_drive(0.0, 0.0)
+    assert isinstance(result, bytes)
+
+
+def test_encode_ble_drive_is_base64_decodable() -> None:
+    result = encode_ble_drive(0.0, 0.0)
+    decoded = base64.b64decode(result)
+    assert len(decoded) == 16
+
+
+def test_encode_ble_drive_header_bytes() -> None:
+    """Verify the fixed header bytes match the BTSnoop-captured format."""
+    result = encode_ble_drive(0.0, 0.0)
+    decoded = base64.b64decode(result)
+    # field 2 (varint 49) = 0x10 0x31
+    # field 7 (varint 2)  = 0x38 0x02
+    # field 10, len 10    = 0x52 0x0a
+    assert decoded[:6] == bytes.fromhex("10313802520a")
+
+
+def test_encode_ble_drive_full_forward() -> None:
+    """Full forward: linear=+0.5, angular=0.0 — confirmed from ADB swipe capture."""
+    import struct
+
+    result = encode_ble_drive(0.5, 0.0)
+    decoded = base64.b64decode(result)
+    # bytes 6-10: field 1 (float32) tag + 0.5
+    assert decoded[6] == 0x0D  # field 1, wire type 5
+    assert struct.unpack("<f", decoded[7:11])[0] == pytest.approx(0.5)
+    # bytes 11-15: field 2 (float32) tag + 0.0
+    assert decoded[11] == 0x15  # field 2, wire type 5
+    assert struct.unpack("<f", decoded[12:16])[0] == pytest.approx(0.0)
+
+
+def test_encode_ble_drive_full_backward() -> None:
+    """Full backward: linear=-0.5, angular=0.0 — confirmed from ADB swipe capture."""
+    import struct
+
+    result = encode_ble_drive(-0.5, 0.0)
+    decoded = base64.b64decode(result)
+    assert struct.unpack("<f", decoded[7:11])[0] == pytest.approx(-0.5)
+    assert struct.unpack("<f", decoded[12:16])[0] == pytest.approx(0.0)
+
+
+def test_encode_ble_drive_full_right() -> None:
+    """Full right turn: linear=0.0, angular=+0.6 — confirmed from ADB swipe capture."""
+    import struct
+
+    result = encode_ble_drive(0.0, 0.6)
+    decoded = base64.b64decode(result)
+    assert struct.unpack("<f", decoded[7:11])[0] == pytest.approx(0.0)
+    assert struct.unpack("<f", decoded[12:16])[0] == pytest.approx(0.6, rel=1e-5)
+
+
+def test_encode_ble_drive_full_left() -> None:
+    """Full left turn: linear=0.0, angular=-0.6 — confirmed from ADB swipe capture."""
+    import struct
+
+    result = encode_ble_drive(0.0, -0.6)
+    decoded = base64.b64decode(result)
+    assert struct.unpack("<f", decoded[7:11])[0] == pytest.approx(0.0)
+    assert struct.unpack("<f", decoded[12:16])[0] == pytest.approx(-0.6, rel=1e-5)
+
+
+def test_encode_ble_drive_stop() -> None:
+    """Stop payload: both velocities zero."""
+    import struct
+
+    result = encode_ble_drive(0.0, 0.0)
+    decoded = base64.b64decode(result)
+    assert struct.unpack("<f", decoded[7:11])[0] == pytest.approx(0.0)
+    assert struct.unpack("<f", decoded[12:16])[0] == pytest.approx(0.0)
+
+
+def test_encode_ble_drive_protobuf_structure() -> None:
+    """Verify the decoded 16 bytes parse as valid protobuf with correct field numbers."""
+    result = encode_ble_drive(0.25, -0.3)
+    decoded = base64.b64decode(result)
+    outer_fields = _decode_fields(decoded)
+    by_field = {fn: val for fn, _wt, val in outer_fields}
+
+    from lymow.protocol import PB_VERSION
+
+    # field 2 = PB_VERSION (49)
+    assert by_field[2] == PB_VERSION
+    # field 7 = 2 (constant sub-type)
+    assert by_field[7] == 2
+    # field 10 = inner bytes (10 bytes)
+    assert isinstance(by_field[10], bytes)
+    assert len(by_field[10]) == 10
+
+    # inner message has float32 fields 1 and 2
+    inner_fields = _decode_fields(by_field[10])
+    inner_by_field = {fn: val for fn, _wt, val in inner_fields}
+    import struct
+
+    linear = struct.unpack("<f", struct.pack("<I", inner_by_field[1]))[0]
+    angular = struct.unpack("<f", struct.pack("<I", inner_by_field[2]))[0]
+    assert linear == pytest.approx(0.25, rel=1e-5)
+    assert angular == pytest.approx(-0.3, rel=1e-5)

@@ -263,3 +263,74 @@ print(f'{len(data)}B: {data.hex()}')
 
 Map zone polygon data (field layout TBD — only returned during active mow or
 in response to QUERY_MAP when zones are defined and robot is mowing).
+
+---
+
+## BLE manual-drive protocol
+
+The joystick screen in the Lymow app sends drive commands over a **direct
+Bluetooth LE connection** to the robot — entirely bypassing MQTT.  These
+commands are not visible in MQTT traffic and require HCI BTSnoop analysis.
+
+### Transport
+
+| Property | Value |
+|----------|-------|
+| Characteristic UUID | `12345678-1234-5678-1234-56789abcdef1` |
+| ATT handle | `0x0014` |
+| ATT write type | Write Without Response (ATT Write Command, opcode `0x52`) |
+| Notification CCCD | ATT handle `0x0015` |
+| Send rate | ~10 Hz while joystick is held |
+
+### Payload encoding
+
+The raw GATT value written to the characteristic is the **ASCII representation
+of the base64-encoded protobuf binary** — i.e. `base64(protobuf_bytes)` as
+plain ASCII text (34 bytes on the wire).
+
+### Protobuf message structure (16 bytes decoded)
+
+```
+field 2  (varint)   = 49         ← PB_VERSION, same as MQTT protocol
+field 7  (varint)   = 2          ← constant sub-type marker
+field 10 (bytes, 10B):           ← inner motion message
+  field 1 (float32 LE)           ← linear_velocity  (forward/backward)
+  field 2 (float32 LE)           ← angular_velocity (left/right)
+```
+
+As hex bytes: `10 31 38 02 52 0a 0d <4B-linear> 15 <4B-angular>`
+
+### Velocity ranges
+
+| Axis | Field | Min | Max | Positive direction |
+|------|-------|-----|-----|--------------------|
+| Linear | 1 | −0.5 | +0.5 | Forward |
+| Angular | 2 | −0.6 | +0.6 | Right turn |
+
+### Python encoder
+
+```python
+from lymow.protocol import encode_ble_drive
+
+# Full forward
+payload = encode_ble_drive(linear=0.5, angular=0.0)
+
+# Full right turn
+payload = encode_ble_drive(linear=0.0, angular=0.6)
+
+# Stop
+payload = encode_ble_drive(linear=0.0, angular=0.0)
+```
+
+### Heartbeat
+
+When idle (no joystick input), the app sends a 42-byte heartbeat every ~3 s
+on the same characteristic.  Decoded it contains the device ID string:
+`%ONEPLUSA5010_Android_<uuid>` (format: `3802da0125` + UTF-8 device ID).
+
+### Capture method
+
+Captured using HCI BTSnoop (`hci_snoop20*.cfa` on the device) combined with
+ADB `input swipe` commands to trigger each drive direction.  Snoop log
+location on phone: `/data/misc/bluetooth/logs/hci_snoop20*.cfa` (requires
+Magisk root to access).
