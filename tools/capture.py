@@ -15,7 +15,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-import sys
 from datetime import UTC, datetime
 
 from mitmproxy import http
@@ -64,10 +63,7 @@ def _pretty_body(content: bytes, content_type: str) -> str:
         for key in ("message", "value", "data", "payload"):
             if key in obj:
                 pb = base64.b64decode(obj[key])
-                return (
-                    f"  JSON envelope key={key!r}, pb={len(pb)} bytes\n"
-                    f"  pb hex: {pb.hex()}"
-                )
+                return f"  JSON envelope key={key!r}, pb={len(pb)} bytes\n  pb hex: {pb.hex()}"
     except Exception:
         pass
     # Raw
@@ -85,7 +81,7 @@ class LymowCapture:
         body = _pretty_body(req.content or b"", ct)
         target = req.headers.get("X-Amz-Target", "")
         lines = [
-            f"\n{'='*70}",
+            f"\n{'=' * 70}",
             f"[{_ts()}] REQUEST  {req.method} {req.pretty_url}",
         ]
         if target:
