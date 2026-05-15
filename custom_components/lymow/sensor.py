@@ -105,6 +105,22 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:grass",
         entity_registry_enabled_default=False,
     ),
+    LymowSensorDescription(
+        key="mow_progress",
+        name="Mow progress",
+        value_key="mowProgress",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:progress-clock",
+    ),
+    LymowSensorDescription(
+        key="mow_strip_count",
+        name="Mow strip count",
+        value_key="mowStripCount",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:counter",
+        entity_registry_enabled_default=False,
+    ),
 )
 
 
@@ -164,6 +180,7 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         0: "Not ready",
         1: "Float fix (~40 cm)",
         2: "Fixed (~2 cm)",
+        3: "RTK fixed (~2 cm)",
     }
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
