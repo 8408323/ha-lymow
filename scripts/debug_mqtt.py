@@ -9,7 +9,6 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import hmac
 import importlib.util
@@ -17,7 +16,6 @@ import json
 import os
 import sys
 from datetime import UTC, datetime
-from typing import Any
 from urllib.parse import quote
 
 import aiohttp
@@ -70,7 +68,6 @@ from lymow.protocol import (  # noqa: E402
     wrap_envelope,
 )
 
-
 # ---------------------------------------------------------------------------
 # SigV4 for IoT Data REST API (not WebSocket — used as fallback)
 # ---------------------------------------------------------------------------
@@ -116,10 +113,7 @@ def _sigv4_headers(
     k = _hmac_sha256(k, "aws4_request")
     signature = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
 
-    auth = (
-        f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, "
-        f"SignedHeaders={signed_headers}, Signature={signature}"
-    )
+    auth = f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
     return {
         "Authorization": auth,
         "x-amz-date": amz_date,
@@ -254,8 +248,9 @@ async def try_mqtt_query_map(
     secret_key: str,
     session_token: str,
 ) -> None:
-    import aiomqtt
     import uuid
+
+    import aiomqtt
 
     print(f"\n--- MQTT: query map for {thing_name} ---")
     ws_path = build_presigned_ws_path(iot_host, region, access_key, secret_key, session_token)
@@ -287,7 +282,6 @@ async def try_mqtt_query_map(
 
             # Wait a moment for initial state push
             print("  Waiting 3s for initial pboutput state push...")
-            initial_received = False
             try:
                 async with asyncio.timeout(3):
                     async for message in client.messages:
@@ -301,7 +295,6 @@ async def try_mqtt_query_map(
                             print(f"  decoded state: {json.dumps(state, indent=4)}")
                             print("  raw fields:")
                             _pretty_fields(pb)
-                            initial_received = True
                         elif t.endswith("/notify-app"):
                             print(f"  notify payload: {payload}")
             except asyncio.TimeoutError:
@@ -333,6 +326,7 @@ async def try_mqtt_query_map(
     except Exception as exc:
         print(f"  MQTT failed: {type(exc).__name__}: {exc}")
         import traceback
+
         traceback.print_exc()
 
 
@@ -382,6 +376,7 @@ async def main() -> None:
 
         thing = things[0]
         from lymow.const import REGION_CONFIG
+
         iot_host = REGION_CONFIG[region]["iot_host"]
         assert isinstance(iot_host, str)
 
