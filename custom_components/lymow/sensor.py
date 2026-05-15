@@ -60,6 +60,15 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         value_key="lteSignalQuality",
         entity_registry_enabled_default=False,
     ),
+    LymowSensorDescription(
+        key="wifi_rssi_dbm",
+        name="Wi-Fi RSSI",
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        native_unit_of_measurement="dBm",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_key="wifiRssiDbm",
+        entity_registry_enabled_default=False,
+    ),
     # REST sensors
     LymowSensorDescription(
         key="connectivity",
