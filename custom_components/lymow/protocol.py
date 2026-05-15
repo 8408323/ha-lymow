@@ -491,6 +491,17 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if progress_raw is not None:
             state["mowProgress"] = round(_decode_f32(progress_raw) * 100, 1)
 
+    # Wi-Fi sub-message (field 22): f6=rssiDbm (UTF-8 string like "-77")
+    wifi22_raw = _first(fields, 22)
+    if isinstance(wifi22_raw, bytes):
+        wifi22_fields = _decode_fields(wifi22_raw)
+        rssi_raw = _first(wifi22_fields, 6)
+        if isinstance(rssi_raw, bytes):
+            try:
+                state["wifiRssiDbm"] = int(rssi_raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                pass
+
     # Robot pose ENU (field 14): f1=eastM, f2=northM, f3=thetaRad (all float32)
     pose_raw = _first(fields, 14)
     if isinstance(pose_raw, bytes):

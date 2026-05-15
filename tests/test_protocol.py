@@ -1040,6 +1040,47 @@ def test_decode_pboutput_mow_fields_absent_when_not_set() -> None:
 
 
 # ---------------------------------------------------------------------------
+# decode_pboutput — f22 wifiRssiDbm
+# ---------------------------------------------------------------------------
+
+
+def _build_pboutput_with_wifi_rssi(rssi_str: str) -> bytes:
+    """Build PbOutput with f22.f6 = rssi_str (UTF-8 bytes)."""
+    from lymow.protocol import PB_VERSION
+
+    f22_inner = _field_str(6, rssi_str)
+    return _field_i32(2, PB_VERSION) + _field_bytes(22, f22_inner)
+
+
+def test_decode_pboutput_wifi_rssi_dbm_valid() -> None:
+    """f22.f6 string '-77' → wifiRssiDbm = -77."""
+    pb = _build_pboutput_with_wifi_rssi("-77")
+    state = decode_pboutput(pb)
+    assert state["wifiRssiDbm"] == -77
+
+
+def test_decode_pboutput_wifi_rssi_dbm_positive() -> None:
+    """f22.f6 positive value is accepted."""
+    pb = _build_pboutput_with_wifi_rssi("-40")
+    state = decode_pboutput(pb)
+    assert state["wifiRssiDbm"] == -40
+
+
+def test_decode_pboutput_wifi_rssi_dbm_invalid_string() -> None:
+    """f22.f6 non-numeric string → wifiRssiDbm absent (ValueError swallowed)."""
+    pb = _build_pboutput_with_wifi_rssi("N/A")
+    state = decode_pboutput(pb)
+    assert "wifiRssiDbm" not in state
+
+
+def test_decode_pboutput_wifi_rssi_dbm_absent_when_no_f22() -> None:
+    """wifiRssiDbm absent when f22 is not present at all."""
+    pb = _build_pboutput()
+    state = decode_pboutput(pb)
+    assert "wifiRssiDbm" not in state
+
+
+# ---------------------------------------------------------------------------
 # _decode_fields — 64-bit and unknown wire types
 # ---------------------------------------------------------------------------
 

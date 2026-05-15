@@ -392,3 +392,20 @@ def test_rtk_sensor_native_value_rtk_fixed_status() -> None:
     coord = _make_coord({"rtkStatus": 3})
     sensor = LymowRtkSensor(coord, DEVICE)
     assert "RTK fixed" in (sensor.native_value or "")
+
+
+# ---------------------------------------------------------------------------
+# wifi_rssi_dbm sensor
+# ---------------------------------------------------------------------------
+
+
+def test_wifi_rssi_dbm_sensor_returns_value() -> None:
+    coord = _make_coord({"wifiRssiDbm": -77})
+    desc = next(s for s in SENSORS if s.key == "wifi_rssi_dbm")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == -77
+
+
+def test_wifi_rssi_dbm_sensor_disabled_by_default() -> None:
+    desc = next(s for s in SENSORS if s.key == "wifi_rssi_dbm")
+    assert desc.entity_registry_enabled_default is False
