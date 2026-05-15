@@ -21,7 +21,6 @@ import sys
 
 import aiohttp
 
-
 # ---------------------------------------------------------------------------
 # .env loader (identical to cli.py / delete_zone.py)
 # ---------------------------------------------------------------------------
@@ -79,7 +78,6 @@ from lymow.protocol import (  # noqa: E402
     unwrap_envelope,
     wrap_envelope,
 )
-
 
 # ---------------------------------------------------------------------------
 # Core logic
