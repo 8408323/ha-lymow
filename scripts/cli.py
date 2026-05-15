@@ -91,6 +91,7 @@ async def main() -> None:
 
         print("\n--- Getting AWS credentials ---")
         creds_data = await auth.get_aws_credentials(tokens["IdToken"], tokens["region"])
+        aws = creds_data["credentials"]
         print(f"Identity ID: {creds_data['identity_id']}")
 
         client = LymowApiClient(
@@ -99,6 +100,11 @@ async def main() -> None:
             region=tokens["region"],
             identity_id=creds_data["identity_id"],
         )
+        client.update_aws_credentials(
+            access_key=aws["AccessKeyId"],
+            secret_key=aws["SecretKey"],
+            session_token=aws["SessionToken"],
+        )
 
         print("\n--- Device list ---")
         devices = await client.get_devices()
@@ -106,6 +112,7 @@ async def main() -> None:
 
         for device in devices if isinstance(devices, list) else []:
             thing = device.get("deviceThingName") or device.get("thingName") or list(device.values())[0]
+
             print(f"\n--- Device info: {thing} ---")
             info = await client.get_device_info(thing)
             print(json.dumps(info, indent=2))
@@ -113,6 +120,25 @@ async def main() -> None:
             print(f"\n--- Device feature: {thing} ---")
             feature = await client.get_device_feature(thing)
             print(json.dumps(feature, indent=2))
+
+            print(f"\n--- Clean history (page 1): {thing} ---")
+            try:
+                history = await client.get_clean_history(thing)
+                print(json.dumps(history, indent=2))
+            except Exception as exc:
+                print(f"  (error: {exc})")
+
+            print(f"\n--- Backup map key: {thing} ---")
+            try:
+                s3_key = await client.get_backup_map_key(thing)
+                print(f"  S3 key: {s3_key}")
+                if s3_key:
+                    print(f"\n--- Downloading map bytes: {thing} ---")
+                    map_bytes = await client.download_map_bytes(s3_key)
+                    print(f"  Downloaded {len(map_bytes)} bytes")
+                    print(f"  First 32 bytes (hex): {map_bytes[:32].hex()}")
+            except Exception as exc:
+                print(f"  (error: {exc})")
 
 
 def main_sync() -> None:
