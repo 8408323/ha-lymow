@@ -476,13 +476,31 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if rtk_status is not None:
             state["rtkStatus"] = _signed32(rtk_status)
 
-    # Area info (field 12): f2=totalAreaM2(float32)
+    # Area / progress info (field 12):
+    #   f1=mowStripCount(int), f2=totalAreaM2(float32), f5=mowProgress(float32 0–1)
     area_raw = _first(fields, 12)
     if isinstance(area_raw, bytes):
         area_fields = _decode_fields(area_raw)
         total_area = _first(area_fields, 2)
         if total_area is not None:
             state["totalAreaM2"] = _decode_f32(total_area)
+        strip_count = _first(area_fields, 1)
+        if strip_count is not None:
+            state["mowStripCount"] = _signed32(strip_count)
+        progress_raw = _first(area_fields, 5)
+        if progress_raw is not None:
+            state["mowProgress"] = round(_decode_f32(progress_raw) * 100, 1)
+
+    # Wi-Fi sub-message (field 22): f6=rssiDbm (UTF-8 string like "-77")
+    wifi22_raw = _first(fields, 22)
+    if isinstance(wifi22_raw, bytes):
+        wifi22_fields = _decode_fields(wifi22_raw)
+        rssi_raw = _first(wifi22_fields, 6)
+        if isinstance(rssi_raw, bytes):
+            try:
+                state["wifiRssiDbm"] = int(rssi_raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                pass
 
     # Robot pose ENU (field 14): f1=eastM, f2=northM, f3=thetaRad (all float32)
     pose_raw = _first(fields, 14)

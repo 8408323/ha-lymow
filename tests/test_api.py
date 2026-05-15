@@ -91,3 +91,113 @@ class TestGetDeviceFeature:
             m.get(RE_FEATURE, status=403)
             with pytest.raises(aiohttp.ClientResponseError):
                 await client.get_device_feature("mower-001")
+
+
+RE_HISTORY = re.compile(
+    r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-clean-history-collect"
+)
+RE_BACKUP_MAP = re.compile(
+    r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-backup-map"
+)
+
+
+class TestGetCleanHistory:
+    async def test_returns_history(self, client):
+        payload = [{"date": "2026-05-14", "duration": 3600}]
+
+        with aioresponses() as m:
+            m.get(RE_HISTORY, payload=payload)
+            result = await client.get_clean_history("mower-001")
+
+        assert result == payload
+
+    async def test_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.get(RE_HISTORY, status=500)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.get_clean_history("mower-001")
+
+
+class TestGetBackupMapKey:
+    async def test_returns_key_when_present(self, client):
+        payload = {"mapList": [{"key": "maps/device_001/latest.pb"}]}
+
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload=payload)
+            result = await client.get_backup_map_key("mower-001")
+
+        assert result == "maps/device_001/latest.pb"
+
+    async def test_returns_none_when_list_empty(self, client):
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload={"mapList": []})
+            result = await client.get_backup_map_key("mower-001")
+
+        assert result is None
+
+    async def test_returns_none_when_map_list_missing(self, client):
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload={})
+            result = await client.get_backup_map_key("mower-001")
+
+        assert result is None
+
+    async def test_falls_back_to_alternative_key_fields(self, client):
+        payload = {"mapList": [{"backupMapUrl": "maps/device_001/backup.pb"}]}
+
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload=payload)
+            result = await client.get_backup_map_key("mower-001")
+
+        assert result == "maps/device_001/backup.pb"
+
+    async def test_returns_none_when_no_recognised_field(self, client):
+        payload = {"mapList": [{"unknownField": "value"}]}
+
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload=payload)
+            result = await client.get_backup_map_key("mower-001")
+
+        assert result is None
+
+
+class TestSigV4Helpers:
+    def test_s3_sigv4_headers_returns_expected_keys(self):
+        from lymow.api import _s3_sigv4_headers
+
+        headers = _s3_sigv4_headers(
+            region="eu-west-1",
+            bucket="test-bucket",
+            key="maps/test.pb",
+            access_key="AKIAIOSFODNN7EXAMPLE",
+            secret_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            session_token="test-session-token",
+        )
+
+        assert set(headers.keys()) == {"Authorization", "x-amz-date", "x-amz-content-sha256", "x-amz-security-token"}
+        assert headers["Authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/")
+        assert (
+            "x-amz-security-token" in headers["Authorization"]
+            or headers["x-amz-security-token"] == "test-session-token"
+        )
+
+    async def test_update_aws_credentials_used_in_download(self, client):
+        """update_aws_credentials stores values that feed into SigV4 signing."""
+        client.update_aws_credentials("AK123", "SK456", "TOKEN789")
+
+        # Temporarily set a known bucket so the full HTTP path executes
+        original = REGION_CONFIG[REGION]["s3_bucket"]
+        REGION_CONFIG[REGION]["s3_bucket"] = "test-bucket"
+        try:
+            re_s3 = re.compile(r"https://test-bucket\.s3\.eu-west-1\.amazonaws\.com/.*")
+            with aioresponses() as m:
+                m.get(re_s3, body=b"\x00\x01\x02")
+                result = await client.download_map_bytes("maps/test.pb")
+            assert result == b"\x00\x01\x02"
+        finally:
+            REGION_CONFIG[REGION]["s3_bucket"] = original
+
+    async def test_download_map_bytes_raises_when_bucket_not_configured(self, client):
+        """download_map_bytes raises NotImplementedError when s3_bucket is None."""
+        with pytest.raises(NotImplementedError, match="S3 bucket not yet confirmed"):
+            await client.download_map_bytes("maps/test.pb")

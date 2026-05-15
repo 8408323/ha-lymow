@@ -350,3 +350,62 @@ async def test_async_setup_entry_multiple_devices() -> None:
     unique_ids = [e._attr_unique_id for e in added]
     assert any("mower-001" in uid for uid in unique_ids)
     assert any("mower-002" in uid for uid in unique_ids)
+
+
+# ---------------------------------------------------------------------------
+# mow_progress / mow_strip_count sensors
+# ---------------------------------------------------------------------------
+
+
+def test_mow_progress_sensor_returns_value() -> None:
+    coord = _make_coord({"mowProgress": 52.6})
+    desc = next(s for s in SENSORS if s.key == "mow_progress")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 52.6
+
+
+def test_mow_progress_sensor_returns_none_when_absent() -> None:
+    coord = _make_coord({})
+    desc = next(s for s in SENSORS if s.key == "mow_progress")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value is None
+
+
+def test_mow_strip_count_sensor_returns_value() -> None:
+    coord = _make_coord({"mowStripCount": 42})
+    desc = next(s for s in SENSORS if s.key == "mow_strip_count")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 42
+
+
+def test_mow_strip_count_sensor_disabled_by_default() -> None:
+    desc = next(s for s in SENSORS if s.key == "mow_strip_count")
+    assert desc.entity_registry_enabled_default is False
+
+
+# ---------------------------------------------------------------------------
+# RTK sensor — status 3 = RTK fixed
+# ---------------------------------------------------------------------------
+
+
+def test_rtk_sensor_native_value_rtk_fixed_status() -> None:
+    coord = _make_coord({"rtkStatus": 3})
+    sensor = LymowRtkSensor(coord, DEVICE)
+    assert "RTK fixed" in (sensor.native_value or "")
+
+
+# ---------------------------------------------------------------------------
+# wifi_rssi_dbm sensor
+# ---------------------------------------------------------------------------
+
+
+def test_wifi_rssi_dbm_sensor_returns_value() -> None:
+    coord = _make_coord({"wifiRssiDbm": -77})
+    desc = next(s for s in SENSORS if s.key == "wifi_rssi_dbm")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == -77
+
+
+def test_wifi_rssi_dbm_sensor_disabled_by_default() -> None:
+    desc = next(s for s in SENSORS if s.key == "wifi_rssi_dbm")
+    assert desc.entity_registry_enabled_default is False

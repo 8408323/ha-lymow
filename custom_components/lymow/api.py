@@ -144,7 +144,8 @@ class LymowApiClient:
     async def download_map_bytes(self, s3_key: str) -> bytes:
         """Download raw protobuf map bytes from S3 using SigV4-signed credentials."""
         bucket = REGION_CONFIG[self._region]["s3_bucket"]
-        assert isinstance(bucket, str)
+        if bucket is None:
+            raise NotImplementedError(f"S3 bucket not yet confirmed for region {self._region!r}")
         headers = _s3_sigv4_headers(
             region=self._region,
             bucket=bucket,

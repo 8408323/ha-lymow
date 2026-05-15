@@ -201,9 +201,9 @@ async def run(target_hash_id: str) -> None:
                 print(f"  - goZone  {z['hashId']}  area={z.get('area')} m²")
             for n in removed_nogo:
                 print(f"  - nogoZone {n['hashId']} (child of {target_hash_id})")
-            print(
-                f"  Remaining: {len(updated.get('goZones', []))} go zones, {len(updated.get('nogoZones', []))} nogo zones"
-            )
+            n_go = len(updated.get("goZones", []))
+            n_nogo = len(updated.get("nogoZones", []))
+            print(f"  Remaining: {n_go} go zones, {n_nogo} nogo zones")
 
             # --- Send delete command (USER_CTRL_CLEAR_ZONE=8, field 12=map, single zone only) ---
             from lymow.const import USER_CTRL_CLEAR_ZONE
@@ -211,7 +211,8 @@ async def run(target_hash_id: str) -> None:
             if target_hash_id in go_ids:
                 delete_pb = encode_delete_zone(target_hash_id)
                 print(
-                    f"\nSending delete_zone (USER_CTRL_CLEAR_ZONE={USER_CTRL_CLEAR_ZONE}, field 12=map, hashId={target_hash_id!r}, {len(delete_pb)} B)…"
+                    f"\nSending delete_zone (USER_CTRL_CLEAR_ZONE={USER_CTRL_CLEAR_ZONE},"
+                    f" field 12=map, hashId={target_hash_id!r}, {len(delete_pb)} B)…"
                 )
             else:
                 print(

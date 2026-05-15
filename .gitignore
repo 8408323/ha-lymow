@@ -14,6 +14,10 @@ tools/apk/
 scripts/map.png
 scripts/map_response.bin
 
+# Capture output files (may contain device IDs / PII)
+tools/*.jsonl
+tools/*.bin
+
 # Python
 __pycache__/
 *.py[cod]
