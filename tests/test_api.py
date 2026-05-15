@@ -93,8 +93,12 @@ class TestGetDeviceFeature:
                 await client.get_device_feature("mower-001")
 
 
-RE_HISTORY = re.compile(r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-clean-history-collect")
-RE_BACKUP_MAP = re.compile(r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-backup-map")
+RE_HISTORY = re.compile(
+    r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-clean-history-collect"
+)
+RE_BACKUP_MAP = re.compile(
+    r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-backup-map"
+)
 
 
 class TestGetCleanHistory:
@@ -172,7 +176,10 @@ class TestSigV4Helpers:
 
         assert set(headers.keys()) == {"Authorization", "x-amz-date", "x-amz-content-sha256", "x-amz-security-token"}
         assert headers["Authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/")
-        assert "x-amz-security-token" in headers["Authorization"] or headers["x-amz-security-token"] == "test-session-token"
+        assert (
+            "x-amz-security-token" in headers["Authorization"]
+            or headers["x-amz-security-token"] == "test-session-token"
+        )
 
     async def test_update_aws_credentials_used_in_download(self, client):
         """update_aws_credentials stores values that feed into SigV4 signing."""

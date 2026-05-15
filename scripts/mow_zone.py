@@ -198,8 +198,10 @@ async def run(zone_ids: list[str]) -> None:
                 if not hash_id:
                     continue
                 marker = " ◀ selected" if hash_id in zone_ids else ""
-                print(f"  {hash_id:12s}  area={z.get('area', '?'):>6} m²  "
-                      f"cutHeight={z.get('cutHeight', '?'):>3} mm{marker}")
+                print(
+                    f"  {hash_id:12s}  area={z.get('area', '?'):>6} m²  "
+                    f"cutHeight={z.get('cutHeight', '?'):>3} mm{marker}"
+                )
 
             if not zone_ids:
                 print("\nNo zone IDs provided — pass hash IDs as arguments to start mowing.")
