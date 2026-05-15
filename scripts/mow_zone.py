@@ -35,16 +35,20 @@ def _load_dotenv() -> None:
     for path in candidates:
         if not os.path.isfile(path):
             continue
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, _, value = line.partition("=")
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = value
+        try:
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    key, _, value = line.partition("=")
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+        except OSError as exc:
+            print(f"Error: could not read {path}: {exc}", file=sys.stderr)
+            sys.exit(1)
         break
 
 
@@ -86,7 +90,11 @@ async def run(zone_ids: list[str]) -> None:
     username = os.environ.get("LYMOW_USER")
     password = os.environ.get("LYMOW_PASS")
     if not username or not password:
-        print("Error: set LYMOW_USER and LYMOW_PASS in scripts/.env", file=sys.stderr)
+        print(
+            "Error: LYMOW_USER and LYMOW_PASS must be set.\n"
+            "Copy scripts/.env.example to scripts/.env and fill in your credentials.",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     async with aiohttp.ClientSession() as session:
@@ -165,20 +173,21 @@ async def run(zone_ids: list[str]) -> None:
             print("Querying live map…")
             await mqtt.publish(pbin_topic, wrap_envelope(encode_query_map()), qos=1)
 
-            map_data: dict | None = None
-            deadline = asyncio.get_running_loop().time() + 15.0
+            async def _recv_map() -> dict | None:
+                async for message in mqtt.messages:
+                    try:
+                        raw = unwrap_envelope(message.payload)
+                        m = decode_map_response(raw)
+                        if m:
+                            return m
+                    except Exception:
+                        pass
+                return None
 
-            async for message in mqtt.messages:
-                try:
-                    raw = unwrap_envelope(message.payload)
-                    m = decode_map_response(raw)
-                    if m:
-                        map_data = m
-                        break
-                except Exception:
-                    pass
-                if asyncio.get_running_loop().time() > deadline:
-                    break
+            try:
+                map_data = await asyncio.wait_for(_recv_map(), timeout=15.0)
+            except asyncio.TimeoutError:
+                map_data = None
 
             if map_data is None:
                 print("ERROR: no map response received within 15 s.", file=sys.stderr)
@@ -187,17 +196,21 @@ async def run(zone_ids: list[str]) -> None:
             go_zones = map_data.get("goZones", [])
             print(f"\nAvailable go zones ({len(go_zones)}):")
             for z in go_zones:
-                marker = " ◀ selected" if z["hashId"] in zone_ids else ""
-                print(f"  {z['hashId']:12s}  area={z.get('area', '?'):>6} m²  "
+                hash_id = z.get("hashId") or ""
+                if not hash_id:
+                    continue
+                marker = " ◀ selected" if hash_id in zone_ids else ""
+                print(f"  {hash_id:12s}  area={z.get('area', '?'):>6} m²  "
                       f"cutHeight={z.get('cutHeight', '?'):>3} mm{marker}")
 
             if not zone_ids:
                 print("\nNo zone IDs provided — pass hash IDs as arguments to start mowing.")
-                print("Example:  uv run python scripts/mow_zone.py", go_zones[0]["hashId"] if go_zones else "HASH_ID")
+                first_id = next((z.get("hashId") for z in go_zones if z.get("hashId")), "HASH_ID")
+                print("Example:  uv run python scripts/mow_zone.py", first_id)
                 return
 
             # --- Validate that all requested zone IDs exist ---
-            go_ids = {z["hashId"] for z in go_zones}
+            go_ids = {z.get("hashId") for z in go_zones if z.get("hashId")}
             missing = [zid for zid in zone_ids if zid not in go_ids]
             if missing:
                 print(f"\nERROR: zone(s) not found in live map: {missing}", file=sys.stderr)
@@ -211,24 +224,31 @@ async def run(zone_ids: list[str]) -> None:
 
             # --- Wait for robot state update ---
             print("Waiting for robot response (up to 10 s)…")
-            deadline = asyncio.get_running_loop().time() + 10.0
 
-            async for message in mqtt.messages:
-                try:
-                    raw = unwrap_envelope(message.payload)
-                    state = decode_pboutput(raw)
-                    if state:
-                        print(f"\nRobot state:")
-                        print(f"  workStatus : {state.get('workStatus')}")
-                        print(f"  battery    : {state.get('battery')}%")
-                        print(f"  errorCodes : {state.get('errorCodes')}")
-                        print(f"  warningCodes: {state.get('warningCodes')}")
-                        break
-                except Exception:
-                    pass
-                if asyncio.get_running_loop().time() > deadline:
-                    print("(no state response within 10 s)")
-                    break
+            async def _recv_state() -> dict | None:
+                async for message in mqtt.messages:
+                    try:
+                        raw = unwrap_envelope(message.payload)
+                        state = decode_pboutput(raw)
+                        if state.get("workStatus") is not None:
+                            return state
+                    except Exception:
+                        pass
+                return None
+
+            try:
+                state = await asyncio.wait_for(_recv_state(), timeout=10.0)
+            except asyncio.TimeoutError:
+                state = None
+
+            if state:
+                print("\nRobot state:")
+                print(f"  workStatus : {state.get('workStatus')}")
+                print(f"  battery    : {state.get('battery')}%")
+                print(f"  errorCodes : {state.get('errorCodes')}")
+                print(f"  warningCodes: {state.get('warningCodes')}")
+            else:
+                print("(no state response within 10 s)")
 
 
 def main() -> None:
