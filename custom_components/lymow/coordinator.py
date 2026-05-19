@@ -678,6 +678,86 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """
         return await self._client.start_video_session(thing_name)
 
+    async def async_merge_zones(
+        self,
+        thing_name: str,
+        hash_ids: list[str],
+        name: str = "",
+        cut_height_mm: int | None = None,
+    ) -> str:
+        """Merge two or more go-zones into a single convex-hull zone and SYNC_MAP.
+
+        - Deletes every input zone (and their child no-go zones).
+        - Computes the convex hull of all input polygons' vertices.
+        - Adds a new zone with a fresh hashId carrying that hull as its polygon.
+        - Falls back to the highest input zone's ``cutHeight`` if ``cut_height_mm``
+          is not supplied.
+
+        Returns the new hashId. Raises ``HomeAssistantError`` if the map isn't
+        loaded, fewer than 2 zones are requested, or any requested zone is
+        missing from the cached map.
+        """
+        import copy
+        import secrets
+
+        from .geometry import merge_zone_polygons
+
+        if len(hash_ids) < 2:
+            raise HomeAssistantError(f"async_merge_zones needs at least 2 zones, got {len(hash_ids)}")
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        existing = {z.get("hashId"): z for z in map_data.get("goZones", [])}
+        missing = [h for h in hash_ids if h not in existing]
+        if missing:
+            raise HomeAssistantError(f"Zone(s) not found in map: {missing}")
+        polygons = [existing[h].get("polygon") or [] for h in hash_ids]
+        # Drop zones with no polygon — nothing useful to merge from them.
+        polygons = [p for p in polygons if p]
+        if not polygons:
+            raise HomeAssistantError("None of the requested zones have a polygon to merge")
+        try:
+            merged_hull = merge_zone_polygons(*polygons)
+        except ValueError as err:
+            raise HomeAssistantError(f"Could not merge zones: {err}") from err
+
+        if cut_height_mm is None:
+            cut_height_mm = max((existing[h].get("cutHeight") or 40) for h in hash_ids)
+
+        # Generate a non-clashing hash. Collision is vanishingly unlikely but
+        # the existing-ids set is cheap to consult.
+        all_ids = {z.get("hashId") for z in map_data.get("goZones", [])} | {
+            z.get("hashId") for z in map_data.get("nogoZones", [])
+        }
+        new_hash_id = secrets.token_hex(4)
+        while new_hash_id in all_ids:
+            new_hash_id = secrets.token_hex(4)
+
+        updated = copy.deepcopy(map_data)
+        # Remove the source zones AND their child no-go zones (cascade-delete
+        # mirrors the existing async_delete_zone behaviour).
+        hash_set = set(hash_ids)
+        updated["goZones"] = [z for z in updated.get("goZones", []) if z.get("hashId") not in hash_set]
+        updated["nogoZones"] = [
+            n
+            for n in updated.get("nogoZones", [])
+            if n.get("hashId") not in hash_set and n.get("parentZoneHashId") not in hash_set
+        ]
+        # Append the merged zone.
+        new_zone = {
+            "hashId": new_hash_id,
+            "name": name,
+            "isEnabled": True,
+            "cutHeight": int(cut_height_mm),
+            "polygon": merged_hull,
+        }
+        updated.setdefault("goZones", []).append(new_zone)
+        # Tell the robot which hashes changed.
+        existing_modified = updated.get("modifyHashs") or []
+        updated["modifyHashs"] = [*existing_modified, *hash_ids, new_hash_id]
+        await self.async_sync_map(thing_name, updated)
+        return new_hash_id
+
     async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
         """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""
         import copy

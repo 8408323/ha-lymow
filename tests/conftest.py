@@ -28,6 +28,7 @@ _load_lymow_module("auth")
 _load_lymow_module("api")
 _load_lymow_module("mqtt")
 _load_lymow_module("protocol")
+_load_lymow_module("geometry")
 
 # If homeassistant is installed (system Python), pre-load real HA modules so
 # that test_coordinator.py's setdefault stubs don't shadow the real package,

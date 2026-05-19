@@ -220,8 +220,8 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    # 5 originals + 10 query services (#39) + 2 zone-edit primitives (#38).
-    assert hass.services.async_register.call_count == 17
+    # 5 originals + 10 query services + 2 zone-edit primitives + 1 merge_zones.
+    assert hass.services.async_register.call_count == 18
 
 
 # ---------------------------------------------------------------------------
@@ -696,3 +696,81 @@ async def test_handle_add_zone_unknown_entity_returns_empty_mapping() -> None:
     result = await handlers["add_zone"](call)
     assert result == {"hash_ids": {}}
     coord.async_add_zone.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# merge_zones service (#41)
+# ---------------------------------------------------------------------------
+
+
+async def test_handle_merge_zones_returns_new_hash_ids() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_merge_zones = AsyncMock(return_value="merged01")
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"zone_hash_ids": ["alpha", "beta"], "name": "Lawn", "cut_height_mm": 30},
+    )
+    result = await handlers["merge_zones"](call)
+    assert result == {"hash_ids": {"lawn_mower.mower_1": "merged01"}}
+    coord.async_merge_zones.assert_awaited_once_with(THING, ["alpha", "beta"], name="Lawn", cut_height_mm=30)
+
+
+async def test_handle_merge_zones_uses_default_cut_height_when_unset() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_merge_zones = AsyncMock(return_value="merged02")
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"], {"zone_hash_ids": ["alpha", "beta"], "name": ""})
+    await handlers["merge_zones"](call)
+    coord.async_merge_zones.assert_awaited_once_with(THING, ["alpha", "beta"], name="", cut_height_mm=None)
+
+
+async def test_handle_merge_zones_unknown_entity_returns_empty_mapping() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_merge_zones = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"zone_hash_ids": ["a", "b"], "name": ""})
+    result = await handlers["merge_zones"](call)
+    assert result == {"hash_ids": {}}
+    coord.async_merge_zones.assert_not_awaited()
