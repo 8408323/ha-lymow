@@ -120,6 +120,7 @@ def _make_coordinator(
     api.get_clean_history = AsyncMock(return_value=[])
     api.get_device_feature = AsyncMock(return_value={})
     api.update_device_feature = AsyncMock(return_value={})
+    api.get_backup_map_list = AsyncMock(return_value=[])
 
     coord = LymowCoordinator(
         hass=MagicMock(),
@@ -181,6 +182,7 @@ async def test_async_update_data_multiple_devices() -> None:
     api.get_device_info = AsyncMock(side_effect=lambda thing: {"thing": thing, "battery": 50})
     api.get_clean_history = AsyncMock(return_value=[])
     api.get_device_feature = AsyncMock(return_value={})
+    api.get_backup_map_list = AsyncMock(return_value=[])
 
     coord = LymowCoordinator(hass=MagicMock(), client=api, mqtt_client=mqtt, devices=devices)
     result = await coord._async_update_data()
@@ -879,6 +881,120 @@ async def test_fetch_last_clean_ignores_non_list_status_times() -> None:
     result = await coord._async_update_data()
     assert "lastCleanStatusTimes" not in result[THING]
     assert "lastCleanErrorList" not in result[THING]
+
+
+# ---------------------------------------------------------------------------
+# Backup map list
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_backup_map_fields_populated_from_list() -> None:
+    from datetime import UTC, datetime
+
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = [
+        {"map_file": "a.pb", "name": "", "backup_time": 1778768592},
+        {"map_file": "b.pb", "name": "", "backup_time": 1778756506},
+    ]
+    result = await coord._async_update_data()
+    assert result[THING]["backupMapCount"] == 2
+    assert result[THING]["backupMapLatestAt"] == datetime.fromtimestamp(1778768592, tz=UTC)
+    backups = result[THING]["backupMapList"]
+    assert backups[0] == {"file": "a.pb", "name": "", "backupTime": 1778768592}
+
+
+@pytest.mark.asyncio
+async def test_backup_map_count_zero_when_empty() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = []
+    result = await coord._async_update_data()
+    assert result[THING]["backupMapCount"] == 0
+    assert result[THING]["backupMapList"] == []
+    assert "backupMapLatestAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_backup_map_swallows_errors() -> None:
+    coord, _, api = _make_coordinator(rest_data={"workStatus": 5})
+    api.get_backup_map_list.side_effect = RuntimeError("403")
+    result = await coord._async_update_data()
+    assert result[THING]["workStatus"] == 5
+    assert "backupMapCount" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_backup_map_handles_invalid_timestamp() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = [{"map_file": "a.pb", "backup_time": "not-int"}]
+    result = await coord._async_update_data()
+    assert result[THING]["backupMapCount"] == 1
+    assert "backupMapLatestAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_backup_map_fetch_throttled_across_refreshes() -> None:
+    """Two refreshes within the throttle window should issue only one HTTP call."""
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = [{"map_file": "a.pb", "backup_time": 100}]
+    await coord._async_update_data()
+    await coord._async_update_data()
+    assert api.get_backup_map_list.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_backup_map_cache_replayed_between_refreshes() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = [{"map_file": "a.pb", "backup_time": 100}]
+    first = await coord._async_update_data()
+    second = await coord._async_update_data()
+    assert second[THING]["backupMapCount"] == first[THING]["backupMapCount"] == 1
+    assert second[THING]["backupMapList"] == first[THING]["backupMapList"]
+
+
+@pytest.mark.asyncio
+async def test_backup_map_error_replays_stale_cache() -> None:
+    """A transient backend error must not drop the previously cached snapshot."""
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = [{"map_file": "a.pb", "backup_time": 100}]
+    await coord._async_update_data()
+    # Bust the throttle so the next refresh tries to hit the API again.
+    fetched_at, fields = coord._backup_map_cache[THING]
+    coord._backup_map_cache[THING] = (fetched_at.replace(year=2020), fields)
+    api.get_backup_map_list.side_effect = RuntimeError("503")
+    result = await coord._async_update_data()
+    assert result[THING]["backupMapCount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_backup_map_legacy_field_used_as_file_fallback() -> None:
+    """Older payload shapes (`key`, `backupMapUrl`) must surface as `file`."""
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = [
+        {"backupMapUrl": "legacy/a.pb", "backup_time": 100},
+        {"key": "older/b.pb", "backup_time": 90},
+    ]
+    result = await coord._async_update_data()
+    assert result[THING]["backupMapList"][0]["file"] == "legacy/a.pb"
+    assert result[THING]["backupMapList"][1]["file"] == "older/b.pb"
+
+
+@pytest.mark.asyncio
+async def test_backup_map_handles_non_list_response() -> None:
+    """If the API ever returns something other than a list, treat it like an error."""
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = "garbage"  # type: ignore[assignment]
+    result = await coord._async_update_data()
+    assert "backupMapCount" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_backup_map_skips_non_dict_entries() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = ["garbage", {"map_file": "a.pb", "backup_time": 100}]
+    result = await coord._async_update_data()
+    assert result[THING]["backupMapCount"] == 1
+    assert result[THING]["backupMapList"] == [{"file": "a.pb", "name": "", "backupTime": 100}]
 
 
 # ---------------------------------------------------------------------------

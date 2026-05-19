@@ -267,6 +267,16 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:calendar-plus",
         entity_registry_enabled_default=False,
     ),
+    # Map backups (from /get-backup-map). The full list is exposed as
+    # extra_state_attributes on the dedicated LymowBackupMapsSensor below.
+    LymowSensorDescription(
+        key="backup_map_latest_at",
+        name="Latest map backup",
+        value_key="backupMapLatestAt",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:cloud-upload",
+        entity_registry_enabled_default=False,
+    ),
 )
 
 
@@ -283,6 +293,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowMapSensor(coordinator, device))
         entities.append(LymowPoseHeadingSensor(coordinator, device))
         entities.append(LymowCleanHistoryDetailsSensor(coordinator, device))
+        entities.append(LymowBackupMapsSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -482,3 +493,30 @@ class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], Sensor
             if val is not None:
                 attrs[attr] = val
         return attrs
+
+
+class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Exposes the count of available map backups and the full list as an attribute."""
+
+    _attr_icon = "mdi:cloud-download"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_unique_id = f"{self._thing_name}_backup_maps"
+        self._attr_name = f"{device_label} Backup maps"
+
+    @property
+    def native_value(self) -> int | None:
+        data = self.coordinator.data.get(self._thing_name) or {}
+        count = data.get("backupMapCount")
+        return int(count) if count is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data.get(self._thing_name) or {}
+        entries = data.get("backupMapList") or []
+        return {"backups": entries}

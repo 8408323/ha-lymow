@@ -161,6 +161,26 @@ class LymowApiClient:
             resp.raise_for_status()
             return await resp.json(content_type=None)
 
+    async def get_backup_map_list(self, thing_name: str) -> list[dict]:
+        """Return the full backup-map list (newest-first) from /get-backup-map.
+
+        Each entry has at minimum ``map_file`` (S3 key), ``backup_time`` (Unix
+        epoch seconds), and ``name`` (often empty). Returns an empty list for
+        any shape we don't recognise so callers don't have to defend against
+        non-dict envelopes or non-list ``mapList`` values.
+        """
+        url = _api_url(self._region, "api_map", "/prod/get-backup-map")
+        params = {"deviceThingName": thing_name}
+        async with self._session.get(url, headers=self._headers, params=params) as resp:
+            resp.raise_for_status()
+            data = await resp.json(content_type=None)
+        if not isinstance(data, dict):
+            return []
+        items = data.get("mapList")
+        if not isinstance(items, list):
+            return []
+        return [entry for entry in items if isinstance(entry, dict)]
+
     async def get_backup_map_key(self, thing_name: str) -> str | None:
         """Return the S3 object key for the most recent saved map, or None if none exists.
 
