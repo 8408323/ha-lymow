@@ -85,6 +85,7 @@ except ImportError:
     _ha_const.UnitOfArea = _UnitOfArea  # type: ignore[attr-defined]
     _ha_const.UnitOfLength = _UnitOfLength  # type: ignore[attr-defined]
     _ha_const.UnitOfTime = _UnitOfTime  # type: ignore[attr-defined]
+    _ha_const.DEGREE = "°"  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.const", _ha_const)
 
     # ── homeassistant.core ────────────────────────────────────────────────────
