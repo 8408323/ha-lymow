@@ -117,6 +117,7 @@ def _make_coordinator(
 
     api = MagicMock()
     api.get_device_info = AsyncMock(return_value=rest_data or {"workStatus": 5, "battery": 100})
+    api.get_clean_history = AsyncMock(return_value=[])
 
     coord = LymowCoordinator(
         hass=MagicMock(),
@@ -176,6 +177,7 @@ async def test_async_update_data_multiple_devices() -> None:
 
     api = MagicMock()
     api.get_device_info = AsyncMock(side_effect=lambda thing: {"thing": thing, "battery": 50})
+    api.get_clean_history = AsyncMock(return_value=[])
 
     coord = LymowCoordinator(hass=MagicMock(), client=api, mqtt_client=mqtt, devices=devices)
     result = await coord._async_update_data()
@@ -628,3 +630,115 @@ async def test_async_start_zones_publishes_command() -> None:
     assert mqtt.async_publish_command.await_count == 1
     thing, _ = mqtt.async_publish_command.call_args[0]
     assert thing == THING
+
+
+# ---------------------------------------------------------------------------
+# Clean history merge
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_merges_real_shape() -> None:
+    """Validated against a real eu-west-1 capture 2026-05-19."""
+    from datetime import UTC, datetime
+
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "clean_history": [
+            {
+                "clean_area": 345,
+                "clean_time": 60,
+                "date": 1779184292,
+                "percent": 1,
+                "used_battery": 49,
+            },
+            {"clean_area": 1108, "clean_time": 229, "date": 1779020649, "percent": 0.5, "used_battery": 30},
+        ],
+        "page": 0,
+        "has_more": False,
+        "total_records": 14,
+        "clean_summary": {"total_clean_time": 829, "total_clean_area": 4243},
+    }
+    result = await coord._async_update_data()
+    assert result[THING]["lastCleanAreaM2"] == 345
+    assert result[THING]["lastCleanDurationS"] == 60
+    assert result[THING]["lastCleanAt"] == datetime.fromtimestamp(1779184292, tz=UTC)
+    assert result[THING]["lastCleanPercent"] == 100.0
+    assert result[THING]["lastCleanBatteryUsed"] == 49
+    assert result[THING]["cleanHistoryCount"] == 14  # cumulative, from total_records
+    assert result[THING]["totalCleanTimeS"] == 829
+    assert result[THING]["totalCleanHistoryAreaM2"] == 4243
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_uses_page_zero_and_pagesize_15() -> None:
+    """App was observed to call ?page=0&pageSize=15."""
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {"clean_history": []}
+    await coord._async_update_data()
+    api.get_clean_history.assert_awaited_with(THING, page=0, page_size=15)
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_empty_returns_zero_count() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {"clean_history": []}
+    result = await coord._async_update_data()
+    assert result[THING]["cleanHistoryCount"] == 0
+    assert "lastCleanAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_swallows_errors() -> None:
+    coord, _, api = _make_coordinator(rest_data={"workStatus": 5})
+    api.get_clean_history.side_effect = RuntimeError("403")
+    result = await coord._async_update_data()
+    assert result[THING]["workStatus"] == 5  # device-info still merged
+    assert "lastCleanAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_ignores_non_dict_response() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = "not-a-dict"
+    result = await coord._async_update_data()
+    assert "lastCleanAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_ignores_dict_without_clean_history_key() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {"some_other_key": [1, 2]}
+    result = await coord._async_update_data()
+    assert "lastCleanAt" not in result[THING]
+    assert "cleanHistoryCount" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_handles_bad_epoch() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {"clean_history": [{"clean_area": 10, "clean_time": 60, "date": "not-an-int"}]}
+    result = await coord._async_update_data()
+    # Other fields still extracted; bad date silently dropped
+    assert result[THING]["lastCleanAreaM2"] == 10
+    assert "lastCleanAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_handles_non_dict_entry() -> None:
+    """A malformed API response with non-dict entries must not crash the
+    whole coordinator refresh. Aggregates are kept; per-entry fields skipped."""
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "clean_history": ["unexpected string", None],
+        "total_records": 7,
+        "clean_summary": {"total_clean_time": 100, "total_clean_area": 50},
+    }
+    result = await coord._async_update_data()
+    # Aggregates still surface
+    assert result[THING]["cleanHistoryCount"] == 7
+    assert result[THING]["totalCleanTimeS"] == 100
+    assert result[THING]["totalCleanHistoryAreaM2"] == 50
+    # No per-entry fields extracted because entries[0] isn't a dict
+    assert "lastCleanAreaM2" not in result[THING]
+    assert "lastCleanAt" not in result[THING]

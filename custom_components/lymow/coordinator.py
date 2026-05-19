@@ -156,11 +156,73 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             for device in self.devices:
                 thing = device["deviceThingName"]
                 rest_data = await self._client.get_device_info(thing)
-                merged = {**rest_data, **self._mqtt_state.get(thing, {})}
+                history_fields = await self._fetch_last_clean_fields(thing)
+                merged = {**rest_data, **history_fields, **self._mqtt_state.get(thing, {})}
                 result[thing] = merged
             return result
         except Exception as err:
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
+
+    async def _fetch_last_clean_fields(self, thing_name: str) -> dict[str, Any]:
+        """Return last-clean summary fields, or {} if the response can't be interpreted.
+
+        Response envelope:
+            {"clean_history": [
+                {"clean_area": <num>, "clean_time": <int sec>, "date": <epoch>,
+                 "used_battery": <int>, "percent": <0..1>, ...},
+                ...],
+             "total_records": <int>,
+             "clean_summary": {"total_clean_time": <int>, "total_clean_area": <num>}}
+        """
+        from datetime import UTC, datetime
+
+        try:
+            history = await self._client.get_clean_history(thing_name, page=0, page_size=15)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("get_clean_history failed for %s: %s", thing_name, err)
+            return {}
+        if not isinstance(history, dict):
+            return {}
+        entries = history.get("clean_history")
+        if not isinstance(entries, list):
+            return {}
+
+        out: dict[str, Any] = {}
+        # Cumulative aggregates from the envelope (NOT per-page).
+        if isinstance(history.get("total_records"), int):
+            out["cleanHistoryCount"] = history["total_records"]
+        summary = history.get("clean_summary")
+        if isinstance(summary, dict):
+            if (t := summary.get("total_clean_time")) is not None:
+                out["totalCleanTimeS"] = t
+            if (a := summary.get("total_clean_area")) is not None:
+                out["totalCleanHistoryAreaM2"] = a
+
+        if not entries:
+            # Only fill in zero when total_records didn't already tell us
+            out.setdefault("cleanHistoryCount", 0)
+            return out
+
+        last = entries[0]
+        if not isinstance(last, dict):
+            # API returned an unexpected shape (e.g. list of strings, None).
+            # Keep the aggregates we already extracted and stop probing.
+            return out
+
+        if (area := last.get("clean_area")) is not None:
+            out["lastCleanAreaM2"] = area
+        if (t := last.get("clean_time")) is not None:
+            out["lastCleanDurationS"] = t
+        if (epoch := last.get("date")) is not None:
+            try:
+                out["lastCleanAt"] = datetime.fromtimestamp(int(epoch), tz=UTC)
+            except (TypeError, ValueError, OSError):
+                pass
+        if (pct := last.get("percent")) is not None:
+            out["lastCleanPercent"] = round(float(pct) * 100, 1)
+        if (batt := last.get("used_battery")) is not None:
+            out["lastCleanBatteryUsed"] = batt
+        return out
 
     # ------------------------------------------------------------------
     # Commands (published via MQTT)

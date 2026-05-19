@@ -75,8 +75,14 @@ except ImportError:
         CENTIMETERS = "cm"
         MILLIMETERS = "mm"
 
+    class _UnitOfTime:
+        SECONDS = "s"
+        MINUTES = "min"
+        HOURS = "h"
+
     _ha_const.UnitOfArea = _UnitOfArea  # type: ignore[attr-defined]
     _ha_const.UnitOfLength = _UnitOfLength  # type: ignore[attr-defined]
+    _ha_const.UnitOfTime = _UnitOfTime  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.const", _ha_const)
 
     # ── homeassistant.core ────────────────────────────────────────────────────
@@ -245,6 +251,8 @@ except ImportError:
         ENERGY = "energy"
         BATTERY = "battery"
         SIGNAL_STRENGTH = "signal_strength"
+        DURATION = "duration"
+        TIMESTAMP = "timestamp"
 
     class _SensorStateClass(str, enum.Enum):
         MEASUREMENT = "measurement"

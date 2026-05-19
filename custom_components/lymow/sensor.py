@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfArea
+from homeassistant.const import PERCENTAGE, UnitOfArea, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -128,6 +128,75 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         value_key="mowStripCount",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:counter",
+        entity_registry_enabled_default=False,
+    ),
+    # Clean history (REST /get-clean-history-collect, page=0, pageSize=15)
+    LymowSensorDescription(
+        key="last_clean_at",
+        name="Last mow",
+        value_key="lastCleanAt",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:calendar-clock",
+    ),
+    LymowSensorDescription(
+        key="last_clean_area",
+        name="Last mow area",
+        value_key="lastCleanAreaM2",
+        native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:grass",
+    ),
+    LymowSensorDescription(
+        key="last_clean_duration",
+        name="Last mow duration",
+        value_key="lastCleanDurationS",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:timer-outline",
+    ),
+    LymowSensorDescription(
+        key="last_clean_percent",
+        name="Last mow completion",
+        value_key="lastCleanPercent",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:progress-check",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="last_clean_battery_used",
+        name="Last mow battery used",
+        value_key="lastCleanBatteryUsed",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-arrow-down",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="clean_history_count",
+        name="Total mow sessions",
+        value_key="cleanHistoryCount",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:counter",
+    ),
+    LymowSensorDescription(
+        key="total_clean_time",
+        name="Total mow time",
+        value_key="totalCleanTimeS",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:timer-sand",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="total_clean_history_area",
+        name="Total mowed area (history)",
+        value_key="totalCleanHistoryAreaM2",
+        native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:chart-areaspline",
         entity_registry_enabled_default=False,
     ),
 )
