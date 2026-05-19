@@ -17,6 +17,16 @@ from .const import (
     USER_CTRL_CLEAN,
     USER_CTRL_PAUSE,
     USER_CTRL_PAUSE_DOCK,
+    USER_CTRL_QUERY_CHANNELS,
+    USER_CTRL_QUERY_CLEANING_INFO,
+    USER_CTRL_QUERY_CLEANING_SUMMARY,
+    USER_CTRL_QUERY_NET_DETAIL,
+    USER_CTRL_QUERY_PATH,
+    USER_CTRL_QUERY_ROBOT_CONFIG,
+    USER_CTRL_QUERY_RTK_DIAGNOSTIC_L1,
+    USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2,
+    USER_CTRL_QUERY_RUN_TIME_CONFIG,
+    USER_CTRL_QUERY_WIFI_4G,
     USER_CTRL_RECHARGE_DOCK,
     USER_CTRL_RESUME,
     USER_CTRL_RESUME_DOCK,
@@ -406,6 +416,41 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_query_schedules(self, thing_name: str) -> None:
         """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot."""
         await self._mqtt.async_publish_command(thing_name, encode_query_schedules())
+
+    async def _publish_userctrl(self, thing_name: str, code: int) -> None:
+        """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*
+        commands that the robot answers via pboutput."""
+        await self._mqtt.async_publish_command(thing_name, encode_userctrl(code))
+
+    async def async_query_cleaning_info(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_CLEANING_INFO)
+
+    async def async_query_cleaning_summary(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_CLEANING_SUMMARY)
+
+    async def async_query_robot_config(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_ROBOT_CONFIG)
+
+    async def async_query_path(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+
+    async def async_query_channels(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_CHANNELS)
+
+    async def async_query_run_time_config(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_RUN_TIME_CONFIG)
+
+    async def async_query_wifi_4g(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_WIFI_4G)
+
+    async def async_query_net_detail(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_NET_DETAIL)
+
+    async def async_query_rtk_diagnostic_l1(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_RTK_DIAGNOSTIC_L1)
+
+    async def async_query_rtk_diagnostic_l2(self, thing_name: str) -> None:
+        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2)
 
     async def async_update_zone_cut_height(self, thing_name: str, hash_id: str, mm: int) -> None:
         """Update cut height for a go-zone and push the map back to the robot."""

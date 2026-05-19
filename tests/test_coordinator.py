@@ -1130,3 +1130,38 @@ async def test_async_send_user_ctrl_publishes_command() -> None:
     assert thing == THING
     by_field = {fn: val for fn, _wt, val in _decode_fields(pb_bytes)}
     assert by_field[5] == USER_CTRL_LOCK
+
+
+# ---------------------------------------------------------------------------
+# QUERY_* service helpers — each publishes a bare userCtrl pbinput
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("method_name", "expected_code"),
+    [
+        ("async_query_cleaning_info", 24),
+        ("async_query_cleaning_summary", 34),
+        ("async_query_robot_config", 35),
+        ("async_query_path", 23),
+        ("async_query_channels", 39),
+        ("async_query_run_time_config", 51),
+        ("async_query_wifi_4g", 52),
+        ("async_query_net_detail", 53),
+        ("async_query_rtk_diagnostic_l1", 57),
+        ("async_query_rtk_diagnostic_l2", 58),
+    ],
+)
+@pytest.mark.asyncio
+async def test_query_helpers_publish_correct_userctrl(method_name: str, expected_code: int) -> None:
+    from lymow.protocol import _decode_fields
+
+    coord, mqtt, _ = _make_coordinator()
+    await getattr(coord, method_name)(THING)
+
+    assert mqtt.async_publish_command.await_count == 1
+    thing, pb_bytes = mqtt.async_publish_command.call_args[0]
+    assert thing == THING
+    by_field = {fn: val for fn, _wt, val in _decode_fields(pb_bytes)}
+    # userCtrl lives at field 5 — same convention as every other userCtrl-only command.
+    assert by_field[5] == expected_code

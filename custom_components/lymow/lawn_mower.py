@@ -35,6 +35,22 @@ _SERVICE_QUERY_MAP = "query_map"
 _SERVICE_QUERY_SCHEDULES = "query_schedules"
 _SERVICE_START_VIDEO_SESSION = "start_video_session"
 
+# Read-only diagnostic queries: each publishes a bare userCtrl=<code> pbinput.
+# The robot's pboutput reply is handled by decode_pboutput; new field decoders
+# land in a separate slice (issue #40).
+_QUERY_SERVICES: tuple[tuple[str, str], ...] = (
+    ("query_cleaning_info", "async_query_cleaning_info"),
+    ("query_cleaning_summary", "async_query_cleaning_summary"),
+    ("query_robot_config", "async_query_robot_config"),
+    ("query_path", "async_query_path"),
+    ("query_channels", "async_query_channels"),
+    ("query_run_time_config", "async_query_run_time_config"),
+    ("query_wifi_4g", "async_query_wifi_4g"),
+    ("query_net_detail", "async_query_net_detail"),
+    ("query_rtk_diagnostic_l1", "async_query_rtk_diagnostic_l1"),
+    ("query_rtk_diagnostic_l2", "async_query_rtk_diagnostic_l2"),
+)
+
 _ENTITY_ID_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids})
 _DELETE_ZONE_SCHEMA = vol.Schema(
     {
@@ -119,10 +135,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             return await coordinator.async_start_video_session(entity._thing_name)
         raise ServiceValidationError(f"No matching Lymow entity in {entity_ids!r}")
 
+    def _make_query_handler(method_name: str):
+        async def _handler(call: ServiceCall) -> None:
+            entity_ids: list[str] = call.data["entity_id"]
+            entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+            for eid in entity_ids:
+                entity = entity_map.get(eid)
+                if entity is None:
+                    continue
+                await getattr(coordinator, method_name)(entity._thing_name)
+
+        return _handler
+
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_ZONE, handle_delete_zone, schema=_DELETE_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_START_ZONE, handle_start_zone, schema=_START_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_MAP, handle_query_map, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_SCHEDULES, handle_query_schedules, schema=_ENTITY_ID_SCHEMA)
+    for service_name, method_name in _QUERY_SERVICES:
+        hass.services.async_register(
+            DOMAIN,
+            service_name,
+            _make_query_handler(method_name),
+            schema=_ENTITY_ID_SCHEMA,
+        )
     hass.services.async_register(
         DOMAIN,
         _SERVICE_START_VIDEO_SESSION,
