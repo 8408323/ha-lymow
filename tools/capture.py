@@ -74,7 +74,13 @@ def _pretty_body(content: bytes, content_type: str) -> str:
 
 
 def _decode_mqtt_publish(buf: bytes) -> tuple[str, bytes] | None:
-    """Best-effort MQTT 3.1.1 PUBLISH parser. Returns (topic, app_payload) or None."""
+    """Best-effort MQTT 3.1.1 PUBLISH parser. Returns (topic, app_payload) or None.
+
+    Bounds the returned payload by the parsed Remaining Length, so a
+    WebSocket binary frame that contains multiple coalesced MQTT control
+    packets only yields the *first* packet's payload — not bytes from
+    subsequent packets that happen to share the frame.
+    """
     if len(buf) < 2 or buf[0] >> 4 != 3:  # PUBLISH = type 3
         return None
     pos = 1
@@ -89,18 +95,25 @@ def _decode_mqtt_publish(buf: bytes) -> tuple[str, bytes] | None:
         if not (b & 0x80):
             break
         multiplier *= 128
-    if pos + 2 > len(buf):
+    # End of *this* PUBLISH packet (anything beyond is a separate packet).
+    packet_end = pos + rem_len
+    if packet_end > len(buf):
+        # Truncated frame — refuse to guess where the packet ends.
+        return None
+    if pos + 2 > packet_end:
         return None
     topic_len = (buf[pos] << 8) | buf[pos + 1]
     pos += 2
-    if pos + topic_len > len(buf):
+    if pos + topic_len > packet_end:
         return None
     topic = buf[pos : pos + topic_len].decode("utf-8", errors="replace")
     pos += topic_len
     qos = (buf[0] >> 1) & 0x03
     if qos > 0:
-        pos += 2
-    return topic, buf[pos:]
+        if pos + 2 > packet_end:
+            return None
+        pos += 2  # packet identifier
+    return topic, buf[pos:packet_end]
 
 
 def _pretty_mqtt_payload(body: bytes) -> str:
