@@ -130,11 +130,12 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:counter",
         entity_registry_enabled_default=False,
     ),
-    # Clean history (REST /get-clean-history-collect, page=1, pageSize=1)
+    # Clean history (REST /get-clean-history-collect, page=0, pageSize=15)
     LymowSensorDescription(
         key="last_clean_at",
         name="Last mow",
         value_key="lastCleanAt",
+        device_class=SensorDeviceClass.TIMESTAMP,
         icon="mdi:calendar-clock",
     ),
     LymowSensorDescription(
@@ -155,8 +156,26 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:timer-outline",
     ),
     LymowSensorDescription(
+        key="last_clean_percent",
+        name="Last mow completion",
+        value_key="lastCleanPercent",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:progress-check",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="last_clean_battery_used",
+        name="Last mow battery used",
+        value_key="lastCleanBatteryUsed",
+        native_unit_of_measurement=PERCENTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:battery-arrow-down",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
         key="clean_history_count",
-        name="Total mow sessions",
+        name="Mow sessions (last page)",
         value_key="cleanHistoryCount",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:counter",

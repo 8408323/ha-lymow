@@ -164,30 +164,43 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
 
     async def _fetch_last_clean_fields(self, thing_name: str) -> dict[str, Any]:
-        """Return last-clean summary fields, or {} if the history call fails."""
+        """Return last-clean summary fields, or {} if the history call fails.
+
+        Confirmed response shape (eu-west-1, captured 2026-05-19):
+            {"clean_history": [
+                {"clean_area": 345, "clean_time": 60, "date": 1779184292,
+                 "used_battery": 49, "percent": 1, "soc_version": "v2.1.48",
+                 "start_type": 1, "status_times": [...], "error_list": [...],
+                 "history_file": "...", "hash_id": "..."},
+                ...]}
+        """
+        from datetime import UTC, datetime
+
         try:
-            history = await self._client.get_clean_history(thing_name, page=1, page_size=1)
+            history = await self._client.get_clean_history(thing_name, page=0, page_size=15)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("get_clean_history failed for %s: %s", thing_name, err)
             return {}
-        # API is observed to return either a bare list or {"list": [...]} — be liberal.
-        entries = history.get("list", history) if isinstance(history, dict) else history
-        if not isinstance(entries, list) or not entries:
+        entries = history.get("clean_history") if isinstance(history, dict) else None
+        if not isinstance(entries, list):
+            return {}
+        if not entries:
             return {"cleanHistoryCount": 0}
         last = entries[0]
-        out: dict[str, Any] = {}
-        # Field names confirmed in APK strings: cleanArea, cleanTime, cleanDate
-        if (area := last.get("cleanArea")) is not None:
+        out: dict[str, Any] = {"cleanHistoryCount": len(entries)}
+        if (area := last.get("clean_area")) is not None:
             out["lastCleanAreaM2"] = area
-        if (clean_time := last.get("cleanTime")) is not None:
-            out["lastCleanDurationS"] = clean_time
-        for date_key in ("cleanDate", "date", "endTime", "finishTime"):
-            if date_key in last and last[date_key]:
-                out["lastCleanAt"] = last[date_key]
-                break
-        # Best-effort total: if API returns a "total" field, use it; otherwise unknown.
-        if isinstance(history, dict) and "total" in history:
-            out["cleanHistoryCount"] = history["total"]
+        if (t := last.get("clean_time")) is not None:
+            out["lastCleanDurationS"] = t
+        if (epoch := last.get("date")) is not None:
+            try:
+                out["lastCleanAt"] = datetime.fromtimestamp(int(epoch), tz=UTC)
+            except (TypeError, ValueError, OSError):
+                pass
+        if (pct := last.get("percent")) is not None:
+            out["lastCleanPercent"] = round(float(pct) * 100, 1)
+        if (batt := last.get("used_battery")) is not None:
+            out["lastCleanBatteryUsed"] = batt
         return out
 
     # ------------------------------------------------------------------

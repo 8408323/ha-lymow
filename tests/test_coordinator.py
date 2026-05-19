@@ -638,35 +638,45 @@ async def test_async_start_zones_publishes_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_fetch_last_clean_merges_into_data() -> None:
-    coord, _, api = _make_coordinator()
-    api.get_clean_history.return_value = [
-        {"cleanArea": 256.5, "cleanTime": 1740, "cleanDate": "2026-05-12T10:00:00Z"}
-    ]
-    result = await coord._async_update_data()
-    assert result[THING]["lastCleanAreaM2"] == 256.5
-    assert result[THING]["lastCleanDurationS"] == 1740
-    assert result[THING]["lastCleanAt"] == "2026-05-12T10:00:00Z"
+async def test_fetch_last_clean_merges_real_shape() -> None:
+    """Validated against a real eu-west-1 capture 2026-05-19."""
+    from datetime import UTC, datetime
 
-
-@pytest.mark.asyncio
-async def test_fetch_last_clean_handles_dict_envelope_with_total() -> None:
     coord, _, api = _make_coordinator()
     api.get_clean_history.return_value = {
-        "total": 42,
-        "list": [{"cleanArea": 100, "cleanTime": 600, "endTime": "2026-05-10T18:00:00Z"}],
+        "clean_history": [
+            {
+                "clean_area": 345,
+                "clean_time": 60,
+                "date": 1779184292,
+                "percent": 1,
+                "used_battery": 49,
+            },
+            {"clean_area": 1108, "clean_time": 229, "date": 1779020649, "percent": 0.5, "used_battery": 30},
+        ]
     }
     result = await coord._async_update_data()
-    assert result[THING]["lastCleanAreaM2"] == 100
-    assert result[THING]["lastCleanDurationS"] == 600
-    assert result[THING]["lastCleanAt"] == "2026-05-10T18:00:00Z"
-    assert result[THING]["cleanHistoryCount"] == 42
+    assert result[THING]["lastCleanAreaM2"] == 345
+    assert result[THING]["lastCleanDurationS"] == 60
+    assert result[THING]["lastCleanAt"] == datetime.fromtimestamp(1779184292, tz=UTC)
+    assert result[THING]["lastCleanPercent"] == 100.0
+    assert result[THING]["lastCleanBatteryUsed"] == 49
+    assert result[THING]["cleanHistoryCount"] == 2
 
 
 @pytest.mark.asyncio
-async def test_fetch_last_clean_empty_list_returns_zero_count() -> None:
+async def test_fetch_last_clean_uses_page_zero_and_pagesize_15() -> None:
+    """App was observed to call ?page=0&pageSize=15."""
     coord, _, api = _make_coordinator()
-    api.get_clean_history.return_value = []
+    api.get_clean_history.return_value = {"clean_history": []}
+    await coord._async_update_data()
+    api.get_clean_history.assert_awaited_with(THING, page=0, page_size=15)
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_empty_returns_zero_count() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {"clean_history": []}
     result = await coord._async_update_data()
     assert result[THING]["cleanHistoryCount"] == 0
     assert "lastCleanAt" not in result[THING]
@@ -677,14 +687,34 @@ async def test_fetch_last_clean_swallows_errors() -> None:
     coord, _, api = _make_coordinator(rest_data={"workStatus": 5})
     api.get_clean_history.side_effect = RuntimeError("403")
     result = await coord._async_update_data()
-    # Device-info data still present even when history fails
-    assert result[THING]["workStatus"] == 5
+    assert result[THING]["workStatus"] == 5  # device-info still merged
     assert "lastCleanAt" not in result[THING]
 
 
 @pytest.mark.asyncio
-async def test_fetch_last_clean_ignores_unexpected_response_shape() -> None:
+async def test_fetch_last_clean_ignores_non_dict_response() -> None:
     coord, _, api = _make_coordinator()
-    api.get_clean_history.return_value = "not-a-list"
+    api.get_clean_history.return_value = "not-a-dict"
     result = await coord._async_update_data()
+    assert "lastCleanAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_ignores_dict_without_clean_history_key() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {"some_other_key": [1, 2]}
+    result = await coord._async_update_data()
+    assert "lastCleanAt" not in result[THING]
+    assert "cleanHistoryCount" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_handles_bad_epoch() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "clean_history": [{"clean_area": 10, "clean_time": 60, "date": "not-an-int"}]
+    }
+    result = await coord._async_update_data()
+    # Other fields still extracted; bad date silently dropped
+    assert result[THING]["lastCleanAreaM2"] == 10
     assert "lastCleanAt" not in result[THING]
