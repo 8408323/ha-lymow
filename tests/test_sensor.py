@@ -429,6 +429,63 @@ def test_pose_north_sensor_disabled_by_default() -> None:
     assert desc.value_key == "poseNorthM"
 
 
+# ---------------------------------------------------------------------------
+# Static device-list-query diagnostic sensors (serial, model, BT, SIM, fw, registered)
+# ---------------------------------------------------------------------------
+
+
+def test_serial_number_sensor_disabled_by_default() -> None:
+    desc = next(s for s in SENSORS if s.key == "serial_number")
+    assert desc.entity_registry_enabled_default is False
+    assert desc.value_key == "serialNumber"
+
+
+def test_serial_number_sensor_reads_value() -> None:
+    coord = _make_coord({"serialNumber": "LR011A09A17B6521"})
+    desc = next(s for s in SENSORS if s.key == "serial_number")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "LR011A09A17B6521"
+
+
+def test_model_sensor_disabled_by_default() -> None:
+    desc = next(s for s in SENSORS if s.key == "model")
+    assert desc.entity_registry_enabled_default is False
+    assert desc.value_key == "deviceType"
+
+
+def test_bluetooth_name_sensor_reads_value() -> None:
+    coord = _make_coord({"deviceBluetooth": "Lymow_7B6521"})
+    desc = next(s for s in SENSORS if s.key == "bluetooth_name")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "Lymow_7B6521"
+
+
+def test_sim_id_sensor_reads_value() -> None:
+    coord = _make_coord({"simId": "89320420000094505458"})
+    desc = next(s for s in SENSORS if s.key == "sim_id")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "89320420000094505458"
+
+
+def test_firmware_minimum_sensor_reads_value() -> None:
+    coord = _make_coord({"fwMinVersion": "v2.1.43"})
+    desc = next(s for s in SENSORS if s.key == "firmware_minimum")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "v2.1.43"
+
+
+def test_registered_at_sensor_is_timestamp() -> None:
+    from datetime import datetime, timezone
+
+    from lymow.sensor import SensorDeviceClass
+
+    desc = next(s for s in SENSORS if s.key == "registered_at")
+    assert desc.device_class == SensorDeviceClass.TIMESTAMP
+    coord = _make_coord({"createdAt": datetime(2026, 5, 6, 16, 33, 39, tzinfo=timezone.utc)})
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == datetime(2026, 5, 6, 16, 33, 39, tzinfo=timezone.utc)
+
+
 def test_pose_heading_sensor_converts_radians_to_degrees() -> None:
     import math
     from unittest.mock import MagicMock

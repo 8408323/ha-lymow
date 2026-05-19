@@ -27,6 +27,7 @@ async def async_setup_entry(
                 ChargingBinarySensor(coordinator, device),
                 RechargingBinarySensor(coordinator, device),
                 StolenBinarySensor(coordinator, device),
+                DeviceLockedBinarySensor(coordinator, device),
             ]
         )
     if entities:
@@ -84,3 +85,22 @@ class StolenBinarySensor(_LymowBinarySensor):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Stolen alert", "stolen")
+
+
+class DeviceLockedBinarySensor(_LymowBinarySensor):
+    """Account-level lock state from /device-list-query (distinct from theftLock)."""
+
+    _field = "deviceLocked"
+    _attr_device_class = BinarySensorDeviceClass.LOCK
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Device locked", "device_locked")
+
+    @property
+    def is_on(self) -> bool | None:
+        """LOCK device class: ``on`` means *unlocked*. Invert the underlying flag."""
+        value = self._device_data.get(self._field)
+        if value is None:
+            return None
+        return not bool(value)
