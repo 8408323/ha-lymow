@@ -233,6 +233,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             out["lastCleanPercent"] = round(float(pct) * 100, 1)
         if (batt := last.get("used_battery")) is not None:
             out["lastCleanBatteryUsed"] = batt
+        # Forward additional per-entry fields so LymowCleanHistoryDetailsSensor
+        # can expose them as attributes for templating.
+        if isinstance(last.get("status_times"), list):
+            out["lastCleanStatusTimes"] = list(last["status_times"])
+        if (sv := last.get("soc_version")) is not None:
+            out["lastCleanSocVersion"] = sv
+        if (st := last.get("start_type")) is not None:
+            out["lastCleanStartType"] = st
+        if isinstance(last.get("error_list"), list):
+            out["lastCleanErrorList"] = list(last["error_list"])
+        if (mta := last.get("map_total_area")) is not None:
+            out["lastCleanMapTotalAreaM2"] = mta
         return out
 
     # ------------------------------------------------------------------

@@ -512,3 +512,106 @@ async def test_async_setup_entry_registers_pose_heading_sensor() -> None:
     pose = [e for e in added if isinstance(e, LymowPoseHeadingSensor)]
     assert len(pose) == 1
     assert pose[0]._thing_name == THING
+
+
+# ---------------------------------------------------------------------------
+# LymowCleanHistoryDetailsSensor — exposes per-session attrs from last entry
+# ---------------------------------------------------------------------------
+
+
+def test_clean_history_details_native_value_is_start_type() -> None:
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = _make_coord({"lastCleanStartType": 1})
+    e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
+    assert e.native_value == 1
+
+
+def test_clean_history_details_native_value_none_when_missing() -> None:
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = _make_coord({})
+    e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
+    assert e.native_value is None
+
+
+def test_clean_history_details_native_value_none_when_non_numeric() -> None:
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = _make_coord({"lastCleanStartType": "manual"})
+    e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
+    assert e.native_value is None
+
+
+def test_clean_history_details_attrs_includes_status_times() -> None:
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = _make_coord({"lastCleanStatusTimes": [{"status": 4, "duration": 120}]})
+    e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
+    assert e.extra_state_attributes["status_times"] == [{"status": 4, "duration": 120}]
+
+
+def test_clean_history_details_attrs_includes_soc_version_and_error_list() -> None:
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = _make_coord(
+        {
+            "lastCleanSocVersion": "v1.2.3",
+            "lastCleanErrorList": [7, 12],
+            "lastCleanMapTotalAreaM2": 850.5,
+        }
+    )
+    e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
+    attrs = e.extra_state_attributes
+    assert attrs["soc_version"] == "v1.2.3"
+    assert attrs["error_list"] == [7, 12]
+    assert attrs["map_total_area_m2"] == 850.5
+
+
+def test_clean_history_details_attrs_empty_when_no_data() -> None:
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = _make_coord({})
+    e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
+    assert e.extra_state_attributes == {}
+
+
+def test_clean_history_details_disabled_by_default() -> None:
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = _make_coord({})
+    e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
+    assert e._attr_entity_registry_enabled_default is False
+
+
+def test_clean_history_details_unique_id_and_name() -> None:
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = _make_coord({})
+    e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_last_clean_details"
+    assert "Last mow details" in e._attr_name
+    assert "Mower 1" in e._attr_name
+
+
+async def test_async_setup_entry_registers_clean_history_details_sensor() -> None:
+    from unittest.mock import MagicMock
+
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowCleanHistoryDetailsSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    details = [e for e in added if isinstance(e, LymowCleanHistoryDetailsSensor)]
+    assert len(details) == 1
+    assert details[0]._thing_name == THING
