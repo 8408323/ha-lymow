@@ -181,13 +181,29 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("get_clean_history failed for %s: %s", thing_name, err)
             return {}
-        entries = history.get("clean_history") if isinstance(history, dict) else None
+        if not isinstance(history, dict):
+            return {}
+        entries = history.get("clean_history")
         if not isinstance(entries, list):
             return {}
+
+        out: dict[str, Any] = {}
+        # Cumulative aggregates from the envelope (NOT per-page)
+        if isinstance(history.get("total_records"), int):
+            out["cleanHistoryCount"] = history["total_records"]
+        summary = history.get("clean_summary")
+        if isinstance(summary, dict):
+            if (t := summary.get("total_clean_time")) is not None:
+                out["totalCleanTimeS"] = t
+            if (a := summary.get("total_clean_area")) is not None:
+                out["totalCleanHistoryAreaM2"] = a
+
         if not entries:
-            return {"cleanHistoryCount": 0}
+            # Set count to 0 only if we don't already have a cumulative number
+            out.setdefault("cleanHistoryCount", 0)
+            return out
+
         last = entries[0]
-        out: dict[str, Any] = {"cleanHistoryCount": len(entries)}
         if (area := last.get("clean_area")) is not None:
             out["lastCleanAreaM2"] = area
         if (t := last.get("clean_time")) is not None:

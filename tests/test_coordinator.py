@@ -653,7 +653,11 @@ async def test_fetch_last_clean_merges_real_shape() -> None:
                 "used_battery": 49,
             },
             {"clean_area": 1108, "clean_time": 229, "date": 1779020649, "percent": 0.5, "used_battery": 30},
-        ]
+        ],
+        "page": 0,
+        "has_more": False,
+        "total_records": 14,
+        "clean_summary": {"total_clean_time": 829, "total_clean_area": 4243},
     }
     result = await coord._async_update_data()
     assert result[THING]["lastCleanAreaM2"] == 345
@@ -661,7 +665,9 @@ async def test_fetch_last_clean_merges_real_shape() -> None:
     assert result[THING]["lastCleanAt"] == datetime.fromtimestamp(1779184292, tz=UTC)
     assert result[THING]["lastCleanPercent"] == 100.0
     assert result[THING]["lastCleanBatteryUsed"] == 49
-    assert result[THING]["cleanHistoryCount"] == 2
+    assert result[THING]["cleanHistoryCount"] == 14  # cumulative, from total_records
+    assert result[THING]["totalCleanTimeS"] == 829
+    assert result[THING]["totalCleanHistoryAreaM2"] == 4243
 
 
 @pytest.mark.asyncio
