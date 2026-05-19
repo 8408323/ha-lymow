@@ -1719,3 +1719,143 @@ async def test_async_pin_and_go_rejects_non_positive_radius() -> None:
     with pytest.raises(HomeAssistantError, match="positive"):
         await coord.async_pin_and_go(THING, 0.0, 0.0, radius_m=0)
     coord.async_add_zone.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# async_split_zone
+# ---------------------------------------------------------------------------
+
+
+_ONE_SQUARE = {
+    "goZones": [
+        {
+            "hashId": "alpha",
+            "cutHeight": 45,
+            "isEnabled": True,
+            "polygon": [{"x": 0.0, "y": 0.0}, {"x": 4.0, "y": 0.0}, {"x": 4.0, "y": 4.0}, {"x": 0.0, "y": 4.0}],
+        }
+    ],
+    "nogoZones": [
+        {"hashId": "nogo-a", "parentZoneHashId": "alpha"},
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_async_split_zone_replaces_source_with_two_new_zones() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_ONE_SQUARE)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    left_id, right_id = await coord.async_split_zone(
+        THING, "alpha", {"x": 2.0, "y": -1.0}, {"x": 2.0, "y": 5.0}, names=("west", "east")
+    )
+    ids_after = {z["hashId"] for z in captured["map"]["goZones"]}
+    assert "alpha" not in ids_after
+    assert left_id in ids_after and right_id in ids_after
+    for zid in (left_id, right_id):
+        z = next(zone for zone in captured["map"]["goZones"] if zone["hashId"] == zid)
+        assert z["cutHeight"] == 45
+        assert z["isEnabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_async_split_zone_cascade_deletes_child_nogo_zones() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_ONE_SQUARE)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    await coord.async_split_zone(THING, "alpha", {"x": 2.0, "y": -1.0}, {"x": 2.0, "y": 5.0})
+    assert captured["map"]["nogoZones"] == []
+
+
+@pytest.mark.asyncio
+async def test_async_split_zone_marks_modified_hashes() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_ONE_SQUARE)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    left_id, right_id = await coord.async_split_zone(THING, "alpha", {"x": 2.0, "y": -1.0}, {"x": 2.0, "y": 5.0})
+    modify = captured["map"]["modifyHashs"]
+    assert "alpha" in modify and left_id in modify and right_id in modify
+
+
+@pytest.mark.asyncio
+async def test_async_split_zone_raises_when_zone_missing() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _ONE_SQUARE}}
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await coord.async_split_zone(THING, "missing", {"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0})
+
+
+@pytest.mark.asyncio
+async def test_async_split_zone_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_split_zone(THING, "alpha", {"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0})
+
+
+@pytest.mark.asyncio
+async def test_async_split_zone_raises_when_geometry_fails() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _ONE_SQUARE}}
+    with pytest.raises(HomeAssistantError, match="Could not split zone"):
+        await coord.async_split_zone(THING, "alpha", {"x": -1.0, "y": 10.0}, {"x": 5.0, "y": 10.0})
+
+
+@pytest.mark.asyncio
+async def test_async_split_zone_raises_when_source_polygon_too_small() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "alpha", "polygon": [{"x": 0.0, "y": 0.0}]}]}}}
+    with pytest.raises(HomeAssistantError, match="no polygon"):
+        await coord.async_split_zone(THING, "alpha", {"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0})
+
+
+@pytest.mark.asyncio
+async def test_async_split_zone_retries_on_hash_collision() -> None:
+    """The inner _fresh_hash loop retries when token_hex collides with an
+    existing zone id. Exercised by forcing one collision on the first call."""
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_ONE_SQUARE)}}
+
+    async def _noop(thing, map_data):
+        pass
+
+    coord.async_sync_map = _noop  # type: ignore[method-assign]
+
+    from unittest.mock import patch as _patch
+
+    # First call hits the existing "alpha", retries → fresh; second call is fresh.
+    with _patch("secrets.token_hex", side_effect=["alpha", "leftFresh", "rightFresh"]):
+        left_id, right_id = await coord.async_split_zone(THING, "alpha", {"x": 2.0, "y": -1.0}, {"x": 2.0, "y": 5.0})
+    assert left_id == "leftFresh"
+    assert right_id == "rightFresh"

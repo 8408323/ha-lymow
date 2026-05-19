@@ -787,6 +787,87 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self.async_start_zones(thing_name, [new_hash_id])
         return new_hash_id
 
+    async def async_split_zone(
+        self,
+        thing_name: str,
+        hash_id: str,
+        cut_p1: dict[str, float],
+        cut_p2: dict[str, float],
+        names: tuple[str, str] = ("", ""),
+    ) -> tuple[str, str]:
+        """Split a go-zone in two along a cut line and SYNC_MAP the result.
+
+        Returns ``(left_hash_id, right_hash_id)`` for the two new zones, where
+        "left" is the side where ``_line_side`` is positive (CCW from the cut
+        direction). Both new zones inherit the parent zone's ``cutHeight`` and
+        ``isEnabled``. Child no-go zones are dropped — their parent reference
+        would become invalid after the split, so the caller must re-create any
+        no-go zones if they should persist.
+        """
+        import copy
+        import secrets
+
+        from .geometry import split_polygon
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        source = next((z for z in map_data.get("goZones", []) if z.get("hashId") == hash_id), None)
+        if source is None:
+            raise HomeAssistantError(f"Zone {hash_id!r} not found in map")
+        polygon = source.get("polygon") or []
+        if len(polygon) < 3:
+            raise HomeAssistantError(f"Source zone has no polygon (only {len(polygon)} vertices)")
+        try:
+            left_poly, right_poly = split_polygon(polygon, cut_p1, cut_p2)
+        except ValueError as err:
+            raise HomeAssistantError(f"Could not split zone: {err}") from err
+
+        all_ids = {z.get("hashId") for z in map_data.get("goZones", [])} | {
+            z.get("hashId") for z in map_data.get("nogoZones", [])
+        }
+
+        def _fresh_hash(used: set[str]) -> str:
+            h = secrets.token_hex(4)
+            while h in used:
+                h = secrets.token_hex(4)
+            return h
+
+        left_id = _fresh_hash(all_ids)
+        right_id = _fresh_hash(all_ids | {left_id})
+        cut_height = source.get("cutHeight") or 40
+        is_enabled = bool(source.get("isEnabled", True))
+
+        updated = copy.deepcopy(map_data)
+        updated["goZones"] = [z for z in updated.get("goZones", []) if z.get("hashId") != hash_id]
+        updated["nogoZones"] = [
+            n
+            for n in updated.get("nogoZones", [])
+            if n.get("hashId") != hash_id and n.get("parentZoneHashId") != hash_id
+        ]
+        updated["goZones"].append(
+            {
+                "hashId": left_id,
+                "name": names[0],
+                "isEnabled": is_enabled,
+                "cutHeight": int(cut_height),
+                "polygon": left_poly,
+            }
+        )
+        updated["goZones"].append(
+            {
+                "hashId": right_id,
+                "name": names[1],
+                "isEnabled": is_enabled,
+                "cutHeight": int(cut_height),
+                "polygon": right_poly,
+            }
+        )
+        existing_modified = updated.get("modifyHashs") or []
+        updated["modifyHashs"] = [*existing_modified, hash_id, left_id, right_id]
+        await self.async_sync_map(thing_name, updated)
+        return left_id, right_id
+
     async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
         """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""
         import copy
