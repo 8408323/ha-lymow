@@ -852,3 +852,16 @@ async def test_async_set_geofence_radius_raises_when_no_geofence_set() -> None:
     with pytest.raises(HomeAssistantError):
         await coord.async_set_geofence_radius(THING, 200)
     api.update_device_feature.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_radius_raises_when_first_entry_not_dict() -> None:
+    """If the API ever returns malformed entries the spread `{**first, ...}`
+    would raise TypeError. Surface a controlled HomeAssistantError instead."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {"geoFence": ["malformed-string-entry"]}}
+    with pytest.raises(HomeAssistantError, match="malformed"):
+        await coord.async_set_geofence_radius(THING, 200)
+    api.update_device_feature.assert_not_awaited()

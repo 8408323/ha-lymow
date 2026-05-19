@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
@@ -290,8 +291,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Update cut height for a go-zone and push the map back to the robot."""
         import copy
 
-        from homeassistant.exceptions import HomeAssistantError
-
         map_data = (self.data or {}).get(thing_name, {}).get("mapData")
         if not map_data:
             raise HomeAssistantError("Map data not yet loaded — query map first")
@@ -311,10 +310,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """
         current = (self.data or {}).get(thing_name, {}).get("geoFence") or []
         if not isinstance(current, list) or not current:
-            from homeassistant.exceptions import HomeAssistantError
-
             raise HomeAssistantError("No geofence configured yet — set the centre in the Lymow app first.")
-        updated = [{**current[0], "radius": int(radius_m)}, *current[1:]]
+        first = current[0]
+        if not isinstance(first, dict):
+            # Defensive: the API has only ever returned a list of dicts; if a
+            # malformed entry ever appears, surface a controlled error
+            # instead of a TypeError from the `{**first, ...}` spread below.
+            raise HomeAssistantError(
+                f"Geofence record is malformed (got {type(first).__name__} instead of a dict); "
+                "re-save the geofence in the Lymow app to repair it."
+            )
+        updated = [{**first, "radius": int(radius_m)}, *current[1:]]
         await self.async_set_device_feature(thing_name, geoFence=updated)
 
     async def async_set_device_feature(self, thing_name: str, **fields: Any) -> None:
@@ -346,8 +352,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
         """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""
         import copy
-
-        from homeassistant.exceptions import HomeAssistantError
 
         map_data = (self.data or {}).get(thing_name, {}).get("mapData")
         if not map_data:
