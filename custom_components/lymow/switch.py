@@ -1,4 +1,4 @@
-"""Per-zone enable/disable switch entities for Lymow."""
+"""Switch entities for Lymow: per-zone enable + device feature toggles."""
 
 from __future__ import annotations
 
@@ -22,6 +22,19 @@ async def async_setup_entry(
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
     added: set[tuple[str, str]] = set()
 
+    # One-shot setup: device-feature switches (one set per device)
+    feature_entities: list[SwitchEntity] = []
+    for device in coordinator.devices:
+        feature_entities.extend(
+            [
+                TheftDetectionSwitch(coordinator, device),
+                TheftLockSwitch(coordinator, device),
+                FindRobotSwitch(coordinator, device),
+            ]
+        )
+    if feature_entities:
+        async_add_entities(feature_entities)
+
     @callback
     def _add_new_zones() -> None:
         new_entities: list[ZoneEnabledSwitch] = []
@@ -38,6 +51,59 @@ async def async_setup_entry(
 
     entry.async_on_unload(coordinator.async_add_listener(_add_new_zones))
     _add_new_zones()
+
+
+class _DeviceFeatureSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
+    """Base class for boolean device-feature switches backed by /update-device-feature."""
+
+    _feature_key: str = ""
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, icon: str) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_name = f"{device_label} {name}"
+        self._attr_unique_id = f"{self._thing_name}_{self._feature_key}"
+        self._attr_icon = icon
+
+    @property
+    def is_on(self) -> bool | None:
+        data = (self.coordinator.data or {}).get(self._thing_name) or {}
+        value = data.get(self._feature_key)
+        return bool(value) if value is not None else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: True})
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: False})
+
+
+class TheftDetectionSwitch(_DeviceFeatureSwitch):
+    """Anti-theft motion-detection feature (notify on unexpected movement)."""
+
+    _feature_key = "theftDetectionSwitch"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Theft detection", "mdi:shield-alert")
+
+
+class TheftLockSwitch(_DeviceFeatureSwitch):
+    """Anti-theft lock: prevents mowing/movement until unlocked from the app."""
+
+    _feature_key = "theftLock"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Theft lock", "mdi:lock")
+
+
+class FindRobotSwitch(_DeviceFeatureSwitch):
+    """Find-my-robot beep / locate signal toggle."""
+
+    _feature_key = "findRobotSwitch"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Find robot beep", "mdi:bell-ring")
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):

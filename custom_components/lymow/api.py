@@ -113,6 +113,22 @@ class LymowApiClient:
             resp.raise_for_status()
             return await resp.json(content_type=None)
 
+    async def update_device_feature(self, thing_name: str, **fields: Any) -> dict[str, Any]:
+        """PATCH /prod/update-device-feature with arbitrary feature fields.
+
+        Known fields: theftDetectionSwitch, theftLock, findRobotSwitch,
+        mobileNotificationSwitch, geoFence.
+        """
+        url = _api_url(self._region, "api_device_info", "/prod/update-device-feature")
+        body = {"deviceThingName": thing_name, **fields}
+        async with self._session.patch(url, headers=self._headers, json=body) as resp:
+            resp.raise_for_status()
+            try:
+                result = await resp.json(content_type=None)
+            except (aiohttp.ContentTypeError, ValueError):
+                return {}
+            return result if isinstance(result, dict) else {}
+
     async def get_clean_history(self, thing_name: str, page: int = 1, page_size: int = 10) -> Any:
         url = _api_url(self._region, "api_map", "/prod/get-clean-history-collect")
         params = {"deviceThingName": thing_name, "page": page, "pageSize": page_size}

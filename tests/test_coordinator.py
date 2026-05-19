@@ -118,6 +118,8 @@ def _make_coordinator(
     api = MagicMock()
     api.get_device_info = AsyncMock(return_value=rest_data or {"workStatus": 5, "battery": 100})
     api.get_clean_history = AsyncMock(return_value=[])
+    api.get_device_feature = AsyncMock(return_value={})
+    api.update_device_feature = AsyncMock(return_value={})
 
     coord = LymowCoordinator(
         hass=MagicMock(),
@@ -178,6 +180,7 @@ async def test_async_update_data_multiple_devices() -> None:
     api = MagicMock()
     api.get_device_info = AsyncMock(side_effect=lambda thing: {"thing": thing, "battery": 50})
     api.get_clean_history = AsyncMock(return_value=[])
+    api.get_device_feature = AsyncMock(return_value={})
 
     coord = LymowCoordinator(hass=MagicMock(), client=api, mqtt_client=mqtt, devices=devices)
     result = await coord._async_update_data()
@@ -742,3 +745,52 @@ async def test_fetch_last_clean_handles_non_dict_entry() -> None:
     # No per-entry fields extracted because entries[0] isn't a dict
     assert "lastCleanAreaM2" not in result[THING]
     assert "lastCleanAt" not in result[THING]
+
+
+# ---------------------------------------------------------------------------
+# Device feature endpoints
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_merges_device_feature() -> None:
+    coord, _, api = _make_coordinator(rest_data={"workStatus": 5})
+    api.get_device_feature.return_value = {"theftDetectionSwitch": True, "findRobotSwitch": False}
+    result = await coord._async_update_data()
+    assert result[THING]["theftDetectionSwitch"] is True
+    assert result[THING]["findRobotSwitch"] is False
+    assert result[THING]["workStatus"] == 5
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_swallows_device_feature_error() -> None:
+    coord, _, api = _make_coordinator(rest_data={"workStatus": 5})
+    api.get_device_feature.side_effect = RuntimeError("403 forbidden")
+    result = await coord._async_update_data()
+    assert result[THING]["workStatus"] == 5  # device-info still merged
+    assert "theftDetectionSwitch" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_async_set_device_feature_patches_and_updates_data() -> None:
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {"theftDetectionSwitch": False}}
+    coord.async_update_listeners = MagicMock()
+
+    await coord.async_set_device_feature(THING, theftDetectionSwitch=True)
+
+    api.update_device_feature.assert_awaited_once_with(THING, theftDetectionSwitch=True)
+    assert coord.data[THING]["theftDetectionSwitch"] is True
+    coord.async_update_listeners.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_set_device_feature_no_listener_when_no_data() -> None:
+    coord, _, api = _make_coordinator()
+    coord.data = None
+    coord.async_update_listeners = MagicMock()
+
+    await coord.async_set_device_feature(THING, theftLock=True)
+
+    api.update_device_feature.assert_awaited_once_with(THING, theftLock=True)
+    coord.async_update_listeners.assert_not_called()
