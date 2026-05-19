@@ -117,6 +117,7 @@ def _make_coordinator(
 
     api = MagicMock()
     api.get_device_info = AsyncMock(return_value=rest_data or {"workStatus": 5, "battery": 100})
+    api.get_clean_history = AsyncMock(return_value=[])
 
     coord = LymowCoordinator(
         hass=MagicMock(),
@@ -176,6 +177,7 @@ async def test_async_update_data_multiple_devices() -> None:
 
     api = MagicMock()
     api.get_device_info = AsyncMock(side_effect=lambda thing: {"thing": thing, "battery": 50})
+    api.get_clean_history = AsyncMock(return_value=[])
 
     coord = LymowCoordinator(hass=MagicMock(), client=api, mqtt_client=mqtt, devices=devices)
     result = await coord._async_update_data()
@@ -628,3 +630,61 @@ async def test_async_start_zones_publishes_command() -> None:
     assert mqtt.async_publish_command.await_count == 1
     thing, _ = mqtt.async_publish_command.call_args[0]
     assert thing == THING
+
+
+# ---------------------------------------------------------------------------
+# Clean history merge
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_merges_into_data() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = [
+        {"cleanArea": 256.5, "cleanTime": 1740, "cleanDate": "2026-05-12T10:00:00Z"}
+    ]
+    result = await coord._async_update_data()
+    assert result[THING]["lastCleanAreaM2"] == 256.5
+    assert result[THING]["lastCleanDurationS"] == 1740
+    assert result[THING]["lastCleanAt"] == "2026-05-12T10:00:00Z"
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_handles_dict_envelope_with_total() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "total": 42,
+        "list": [{"cleanArea": 100, "cleanTime": 600, "endTime": "2026-05-10T18:00:00Z"}],
+    }
+    result = await coord._async_update_data()
+    assert result[THING]["lastCleanAreaM2"] == 100
+    assert result[THING]["lastCleanDurationS"] == 600
+    assert result[THING]["lastCleanAt"] == "2026-05-10T18:00:00Z"
+    assert result[THING]["cleanHistoryCount"] == 42
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_empty_list_returns_zero_count() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = []
+    result = await coord._async_update_data()
+    assert result[THING]["cleanHistoryCount"] == 0
+    assert "lastCleanAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_swallows_errors() -> None:
+    coord, _, api = _make_coordinator(rest_data={"workStatus": 5})
+    api.get_clean_history.side_effect = RuntimeError("403")
+    result = await coord._async_update_data()
+    # Device-info data still present even when history fails
+    assert result[THING]["workStatus"] == 5
+    assert "lastCleanAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_ignores_unexpected_response_shape() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = "not-a-list"
+    result = await coord._async_update_data()
+    assert "lastCleanAt" not in result[THING]

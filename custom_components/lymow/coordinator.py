@@ -156,11 +156,39 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             for device in self.devices:
                 thing = device["deviceThingName"]
                 rest_data = await self._client.get_device_info(thing)
-                merged = {**rest_data, **self._mqtt_state.get(thing, {})}
+                history_fields = await self._fetch_last_clean_fields(thing)
+                merged = {**rest_data, **history_fields, **self._mqtt_state.get(thing, {})}
                 result[thing] = merged
             return result
         except Exception as err:
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
+
+    async def _fetch_last_clean_fields(self, thing_name: str) -> dict[str, Any]:
+        """Return last-clean summary fields, or {} if the history call fails."""
+        try:
+            history = await self._client.get_clean_history(thing_name, page=1, page_size=1)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("get_clean_history failed for %s: %s", thing_name, err)
+            return {}
+        # API is observed to return either a bare list or {"list": [...]} — be liberal.
+        entries = history.get("list", history) if isinstance(history, dict) else history
+        if not isinstance(entries, list) or not entries:
+            return {"cleanHistoryCount": 0}
+        last = entries[0]
+        out: dict[str, Any] = {}
+        # Field names confirmed in APK strings: cleanArea, cleanTime, cleanDate
+        if (area := last.get("cleanArea")) is not None:
+            out["lastCleanAreaM2"] = area
+        if (clean_time := last.get("cleanTime")) is not None:
+            out["lastCleanDurationS"] = clean_time
+        for date_key in ("cleanDate", "date", "endTime", "finishTime"):
+            if date_key in last and last[date_key]:
+                out["lastCleanAt"] = last[date_key]
+                break
+        # Best-effort total: if API returns a "total" field, use it; otherwise unknown.
+        if isinstance(history, dict) and "total" in history:
+            out["cleanHistoryCount"] = history["total"]
+        return out
 
     # ------------------------------------------------------------------
     # Commands (published via MQTT)

@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfArea
+from homeassistant.const import PERCENTAGE, UnitOfArea, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -126,6 +126,38 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         key="mow_strip_count",
         name="Mow strip count",
         value_key="mowStripCount",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:counter",
+        entity_registry_enabled_default=False,
+    ),
+    # Clean history (REST /get-clean-history-collect, page=1, pageSize=1)
+    LymowSensorDescription(
+        key="last_clean_at",
+        name="Last mow",
+        value_key="lastCleanAt",
+        icon="mdi:calendar-clock",
+    ),
+    LymowSensorDescription(
+        key="last_clean_area",
+        name="Last mow area",
+        value_key="lastCleanAreaM2",
+        native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:grass",
+    ),
+    LymowSensorDescription(
+        key="last_clean_duration",
+        name="Last mow duration",
+        value_key="lastCleanDurationS",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:timer-outline",
+    ),
+    LymowSensorDescription(
+        key="clean_history_count",
+        name="Total mow sessions",
+        value_key="cleanHistoryCount",
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:counter",
         entity_registry_enabled_default=False,
