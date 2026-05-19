@@ -121,6 +121,9 @@ def _make_coordinator(
     api.get_device_feature = AsyncMock(return_value={})
     api.update_device_feature = AsyncMock(return_value={})
     api.get_backup_map_list = AsyncMock(return_value=[])
+    api.check_update = AsyncMock(return_value={})
+    api.create_ota_job = AsyncMock(return_value={})
+    api.get_ota_job_summary = AsyncMock(return_value={})
 
     coord = LymowCoordinator(
         hass=MagicMock(),
@@ -183,6 +186,9 @@ async def test_async_update_data_multiple_devices() -> None:
     api.get_clean_history = AsyncMock(return_value=[])
     api.get_device_feature = AsyncMock(return_value={})
     api.get_backup_map_list = AsyncMock(return_value=[])
+    api.check_update = AsyncMock(return_value={})
+    api.create_ota_job = AsyncMock(return_value={})
+    api.get_ota_job_summary = AsyncMock(return_value={})
 
     coord = LymowCoordinator(hass=MagicMock(), client=api, mqtt_client=mqtt, devices=devices)
     result = await coord._async_update_data()
@@ -1859,3 +1865,158 @@ async def test_async_split_zone_retries_on_hash_collision() -> None:
         left_id, right_id = await coord.async_split_zone(THING, "alpha", {"x": 2.0, "y": -1.0}, {"x": 2.0, "y": 5.0})
     assert left_id == "leftFresh"
     assert right_id == "rightFresh"
+
+
+# ---------------------------------------------------------------------------
+# OTA firmware update
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_merges_ota_state() -> None:
+    """check_update fields land in coordinator.data via _ota_state."""
+    coord, _, api = _make_coordinator(rest_data={"workStatus": 1, "softwareVersion": "v2.1.40"})
+    api.check_update = AsyncMock(return_value={"latestVersion": "v2.1.48", "prefix": "", "releaseNote": "Fixes"})
+    result = await coord._async_update_data()
+    assert result[THING]["latestVersion"] == "v2.1.48"
+    assert result[THING]["otaPrefix"] == ""
+    assert result[THING]["otaReleaseNote"] == "Fixes"
+
+
+@pytest.mark.asyncio
+async def test_maybe_refresh_ota_throttles_within_interval() -> None:
+    """A second refresh within 6 h does not re-hit the endpoint."""
+    coord, _, api = _make_coordinator()
+    api.check_update = AsyncMock(return_value={"latestVersion": "v2.1.48"})
+    await coord._async_update_data()
+    await coord._async_update_data()
+    assert api.check_update.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_maybe_refresh_ota_swallows_endpoint_error() -> None:
+    """A failing check_update doesn't break the data refresh."""
+    coord, _, api = _make_coordinator()
+    api.check_update = AsyncMock(side_effect=RuntimeError("boom"))
+    result = await coord._async_update_data()
+    assert THING in result
+    assert "latestVersion" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_async_check_firmware_update_publishes_patch() -> None:
+    coord, _, api = _make_coordinator()
+    api.check_update = AsyncMock(return_value={"latestVersion": "v2.1.48", "prefix": "fw/", "releaseNote": "Note"})
+    coord.data = {THING: {"softwareVersion": "v2.1.40"}}
+    data = await coord.async_check_firmware_update(THING)
+    assert data["latestVersion"] == "v2.1.48"
+    assert coord.data[THING]["latestVersion"] == "v2.1.48"
+    assert coord.data[THING]["otaPrefix"] == "fw/"
+
+
+@pytest.mark.asyncio
+async def test_async_install_firmware_update_passes_object_key_and_caches_job_id() -> None:
+    coord, _, api = _make_coordinator()
+    api.create_ota_job = AsyncMock(return_value={"jobId": "JOB-42"})
+    coord.data = {THING: {"softwareVersion": "v2.1.40"}}
+    job_id = await coord.async_install_firmware_update(THING, "v2.1.48")
+    assert job_id == "JOB-42"
+    api.create_ota_job.assert_awaited_once_with(THING, "v2.1.48")
+    assert coord._ota_state[THING]["otaJobId"] == "JOB-42"
+    assert coord.data[THING]["otaJobId"] == "JOB-42"
+
+
+@pytest.mark.asyncio
+async def test_async_install_firmware_update_handles_missing_job_id() -> None:
+    coord, _, api = _make_coordinator()
+    api.create_ota_job = AsyncMock(return_value={})
+    job_id = await coord.async_install_firmware_update(THING, "v2.1.48")
+    assert job_id is None
+    assert coord._ota_state[THING]["otaJobId"] is None
+
+
+@pytest.mark.asyncio
+async def test_async_get_ota_progress_clears_on_terminal_status() -> None:
+    coord, _, api = _make_coordinator()
+    coord._ota_state[THING] = {"otaJobId": "JOB-42"}
+    coord.data = {THING: {"otaJobId": "JOB-42"}}
+    api.get_ota_job_summary = AsyncMock(return_value={"status": "OTA_SUCCESS"})
+    result = await coord.async_get_ota_progress(THING, "JOB-42")
+    assert result == {"status": "OTA_SUCCESS"}
+    assert "otaJobId" not in coord._ota_state[THING]
+    assert coord.data[THING]["otaJobId"] is None
+
+
+@pytest.mark.asyncio
+async def test_async_get_ota_progress_keeps_job_id_on_in_progress() -> None:
+    coord, _, api = _make_coordinator()
+    coord._ota_state[THING] = {"otaJobId": "JOB-42"}
+    api.get_ota_job_summary = AsyncMock(return_value={"status": "OTA_IN_PROGRESS"})
+    await coord.async_get_ota_progress(THING, "JOB-42")
+    assert coord._ota_state[THING]["otaJobId"] == "JOB-42"
+
+
+@pytest.mark.asyncio
+async def test_async_get_ota_progress_clears_on_robot_not_in_wait() -> None:
+    """Robot rejected the install — the dead jobId must be cleared so the
+    entity returns to "not in progress" without a separate signal."""
+    coord, _, api = _make_coordinator()
+    coord._ota_state[THING] = {"otaJobId": "JOB-42"}
+    coord.data = {THING: {"otaJobId": "JOB-42"}}
+    api.get_ota_job_summary = AsyncMock(return_value={"status": "OTA_ROBOT_NOT_IN_WAIT"})
+    await coord.async_get_ota_progress(THING, "JOB-42")
+    assert "otaJobId" not in coord._ota_state[THING]
+
+
+@pytest.mark.asyncio
+async def test_maybe_poll_ota_progress_swallows_error() -> None:
+    coord, _, api = _make_coordinator()
+    coord._ota_state[THING] = {"otaJobId": "JOB-42"}
+    api.get_ota_job_summary = AsyncMock(side_effect=RuntimeError("network"))
+    # Force the OTA refresh to be inside its throttle window so this run
+    # only exercises the job-progress poll path.
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    coord._last_ota_check[THING] = _dt.now(UTC)
+    result = await coord._async_update_data()
+    assert THING in result
+
+
+@pytest.mark.asyncio
+async def test_maybe_poll_ota_progress_skips_when_no_job_id() -> None:
+    from datetime import UTC
+    from datetime import datetime as _dt
+
+    coord, _, api = _make_coordinator()
+    coord._last_ota_check[THING] = _dt.now(UTC)
+    await coord._async_update_data()
+    api.get_ota_job_summary.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publish_ota_patch_noop_when_data_missing() -> None:
+    """The publish helper is safe to call before the first coordinator tick."""
+    coord, _, _ = _make_coordinator()
+    coord.data = None
+    coord._publish_ota_patch(THING, {"otaJobId": "JOB-42"})
+    assert coord.data is None
+
+
+@pytest.mark.asyncio
+async def test_ota_patch_from_check_handles_non_dict() -> None:
+    """A non-dict check_update response (e.g. error string) yields no patch."""
+    assert LymowCoordinator._ota_patch_from_check("oops") == {}
+
+
+@pytest.mark.asyncio
+async def test_async_check_firmware_update_no_patch_when_response_empty() -> None:
+    """An empty check_update response doesn't publish a patch but still
+    updates the last-check timestamp."""
+    coord, _, api = _make_coordinator()
+    api.check_update = AsyncMock(return_value={})
+    coord.data = {THING: {"softwareVersion": "v2.1.40"}}
+    result = await coord.async_check_firmware_update(THING)
+    assert result == {}
+    assert THING in coord._last_ota_check
+    assert "latestVersion" not in coord.data[THING]

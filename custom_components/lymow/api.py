@@ -154,6 +154,43 @@ class LymowApiClient:
             resp.raise_for_status()
             return await resp.json(content_type=None)
 
+    async def check_update(self, thing_name: str) -> dict[str, Any]:
+        """GET /prod/check-update — latest firmware metadata for one device.
+
+        Real response (confirmed eu-west-1 capture 2026-05-19):
+            {"latestVersion": "v2.1.48_20260518",
+             "prefix": "",
+             "releaseNote": "...\\n..."}
+
+        objectKey for the install endpoint is built as ``prefix + latestVersion``.
+        """
+        url = _api_url(self._region, "api_ota_check", "/prod/check-update")
+        params = {"deviceThingName": thing_name}
+        async with self._session.get(url, headers=self._headers, params=params) as resp:
+            resp.raise_for_status()
+            return await resp.json(content_type=None)
+
+    async def create_ota_job(self, thing_name: str, object_key: str) -> dict[str, Any]:
+        """GET /prod/create-ota-job — start an OTA install for the given object key.
+
+        ``object_key`` is ``prefix + latestVersion`` from check_update.
+        Returns ``{"jobId": "<id>", ...}`` on success. The robot rejects
+        with ``OTA_ROBOT_NOT_IN_WAIT`` when actively mowing.
+        """
+        url = _api_url(self._region, "api_ota_job", "/prod/create-ota-job")
+        params = {"deviceThingName": thing_name, "objectKey": object_key}
+        async with self._session.get(url, headers=self._headers, params=params) as resp:
+            resp.raise_for_status()
+            return await resp.json(content_type=None)
+
+    async def get_ota_job_summary(self, thing_name: str, job_id: str) -> dict[str, Any]:
+        """GET /prod/get-ota-job-summary — poll the status of an OTA job."""
+        url = _api_url(self._region, "api_ota_job", "/prod/get-ota-job-summary")
+        params = {"deviceThingName": thing_name, "jobId": job_id}
+        async with self._session.get(url, headers=self._headers, params=params) as resp:
+            resp.raise_for_status()
+            return await resp.json(content_type=None)
+
     async def get_clean_history(self, thing_name: str, page: int = 1, page_size: int = 10) -> Any:
         url = _api_url(self._region, "api_map", "/prod/get-clean-history-collect")
         params = {"deviceThingName": thing_name, "page": page, "pageSize": page_size}

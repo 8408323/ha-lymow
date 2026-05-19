@@ -24,6 +24,12 @@ RE_UPDATE_FEATURE = re.compile(
 GW_KVS = REGION_CONFIG[REGION]["api_kvs"]
 RE_KVS_CMD = re.compile(r"https://" + re.escape(GW_KVS) + r"\.execute-api\..+/prod/kvs/cmd")
 
+GW_OTA_CHECK = REGION_CONFIG[REGION]["api_ota_check"]
+GW_OTA_JOB = REGION_CONFIG[REGION]["api_ota_job"]
+RE_OTA_CHECK = re.compile(r"https://" + re.escape(GW_OTA_CHECK) + r"\.execute-api\..+/prod/check-update")
+RE_OTA_CREATE = re.compile(r"https://" + re.escape(GW_OTA_JOB) + r"\.execute-api\..+/prod/create-ota-job")
+RE_OTA_SUMMARY = re.compile(r"https://" + re.escape(GW_OTA_JOB) + r"\.execute-api\..+/prod/get-ota-job-summary")
+
 
 @pytest.fixture
 async def client():
@@ -343,6 +349,49 @@ class TestStartVideoSession:
             m.post(RE_KVS_CMD, status=500)
             with pytest.raises(aiohttp.ClientResponseError):
                 await client.start_video_session("mower-001")
+
+
+class TestOtaEndpoints:
+    async def test_check_update_returns_payload(self, client):
+        payload = {
+            "latestVersion": "v2.1.48_20260518",
+            "prefix": "",
+            "releaseNote": "Optimized camera...\\nFixed positioning drift...",
+        }
+        with aioresponses() as m:
+            m.get(RE_OTA_CHECK, payload=payload)
+            data = await client.check_update("mower-001")
+        assert data == payload
+
+    async def test_check_update_sends_thing_param(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_CHECK, payload={})
+            await client.check_update("mower-001")
+            request = list(m.requests.values())[0][0]
+        assert request.kwargs["params"]["deviceThingName"] == "mower-001"
+
+    async def test_check_update_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_CHECK, status=500)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.check_update("mower-001")
+
+    async def test_create_ota_job_sends_object_key_and_returns_job_id(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_CREATE, payload={"jobId": "JOB-123"})
+            data = await client.create_ota_job("mower-001", "v2.1.48_20260518")
+            request = list(m.requests.values())[0][0]
+        assert data == {"jobId": "JOB-123"}
+        assert request.kwargs["params"]["objectKey"] == "v2.1.48_20260518"
+        assert request.kwargs["params"]["deviceThingName"] == "mower-001"
+
+    async def test_get_ota_job_summary_sends_job_id(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_SUMMARY, payload={"status": "OTA_IN_PROGRESS"})
+            data = await client.get_ota_job_summary("mower-001", "JOB-123")
+            request = list(m.requests.values())[0][0]
+        assert data == {"status": "OTA_IN_PROGRESS"}
+        assert request.kwargs["params"]["jobId"] == "JOB-123"
 
 
 class TestSigV4Helpers:

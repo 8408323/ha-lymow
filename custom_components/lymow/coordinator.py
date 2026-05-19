@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -55,6 +55,25 @@ _LOGGER = logging.getLogger(__name__)
 # backups themselves are written infrequently.
 _BACKUP_MAP_REFRESH_INTERVAL = 300
 
+# How often to re-check /prod/check-update. Firmware doesn't change that often.
+_OTA_CHECK_INTERVAL = timedelta(hours=6)
+
+# OTA job-summary `status` values that mean "no longer in progress" — used to
+# clear the cached otaJobId so update.in_progress flips back to False.
+_OTA_TERMINAL_STATUSES = frozenset(
+    {
+        "OTA_SUCCESS",
+        "OTA_FAILED",
+        "OTA_DOWNLOAD_FAILED",
+        "OTA_UPGRADE_FAILED",
+        "OTA_BATTERY_LOW",
+        "OTA_EXCEEDED",
+        # The robot rejects an install when it's actively mowing — the job
+        # was never started, so the cached jobId must be cleared.
+        "OTA_ROBOT_NOT_IN_WAIT",
+    }
+)
+
 
 class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Coordinator that merges REST polling with live MQTT state.
@@ -94,6 +113,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # True if the *coordinator* (not the user) initiated the current pause,
         # so we know it's safe to auto-resume when RTK recovers.
         self._rtk_guard_active_pause: dict[str, bool] = {}
+        # OTA fields (latestVersion / otaPrefix / otaReleaseNote / otaJobId)
+        # live here so they survive coordinator refreshes — the per-refresh
+        # rebuild of self.data would otherwise drop them.
+        self._ota_state: dict[str, dict[str, Any]] = {}
+        # When we last hit /prod/check-update for each device, so we don't
+        # spam the endpoint on every 30 s coordinator tick.
+        self._last_ota_check: dict[str, datetime] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -260,12 +286,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 history_fields = await self._fetch_last_clean_fields(thing)
                 static_fields = self._static_device_fields(device)
                 backup_fields = await self._fetch_backup_map_fields(thing)
+                await self._maybe_refresh_ota(thing)
+                await self._maybe_poll_ota_progress(thing)
                 merged = {
                     **static_fields,
                     **rest_data,
                     **feature_data,
                     **history_fields,
                     **backup_fields,
+                    **self._ota_state.get(thing, {}),
                     **self._mqtt_state.get(thing, {}),
                 }
                 result[thing] = merged
@@ -667,6 +696,101 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self.data and thing_name in self.data:
             new_device = {**self.data[thing_name], **fields}
             self.async_set_updated_data({**self.data, thing_name: new_device})
+
+    async def _maybe_refresh_ota(self, thing_name: str) -> None:
+        """Refresh the OTA snapshot for one device if our cache is stale.
+
+        Hits /prod/check-update at most once per ``_OTA_CHECK_INTERVAL`` per
+        device. Failures are swallowed and still count toward the throttle —
+        if the endpoint is down we don't want every 30 s tick to retry.
+        """
+        last = self._last_ota_check.get(thing_name)
+        now = datetime.now(UTC)
+        if last is not None and (now - last) < _OTA_CHECK_INTERVAL:
+            return
+        self._last_ota_check[thing_name] = now
+        try:
+            data = await self._client.check_update(thing_name)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("check_update failed for %s: %s", thing_name, err)
+            return
+        patch = self._ota_patch_from_check(data)
+        if patch:
+            self._ota_state.setdefault(thing_name, {}).update(patch)
+
+    async def _maybe_poll_ota_progress(self, thing_name: str) -> None:
+        """If an OTA job is in flight, poll its status so in_progress can flip back."""
+        job_id = (self._ota_state.get(thing_name) or {}).get("otaJobId")
+        if not job_id:
+            return
+        try:
+            await self.async_get_ota_progress(thing_name, job_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("OTA progress poll failed for %s: %s", thing_name, err)
+
+    @staticmethod
+    def _ota_patch_from_check(data: dict[str, Any]) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if not isinstance(data, dict):
+            return out
+        for src, dst in (
+            ("latestVersion", "latestVersion"),
+            ("prefix", "otaPrefix"),
+            ("releaseNote", "otaReleaseNote"),
+        ):
+            if src in data:
+                out[dst] = data[src]
+        return out
+
+    async def async_check_firmware_update(self, thing_name: str) -> dict[str, Any]:
+        """Explicit OTA refresh (e.g. from a service call).
+
+        Always hits the endpoint, updates the persisted OTA snapshot, and
+        publishes a fresh top-level data dict so entities see the new value
+        without waiting for the next coordinator tick.
+        """
+        data = await self._client.check_update(thing_name)
+        self._last_ota_check[thing_name] = datetime.now(UTC)
+        patch = self._ota_patch_from_check(data)
+        if patch:
+            self._ota_state.setdefault(thing_name, {}).update(patch)
+            self._publish_ota_patch(thing_name, patch)
+        return data
+
+    async def async_install_firmware_update(self, thing_name: str, object_key: str) -> str | None:
+        """Trigger an OTA install. Returns the created jobId if the API gave one.
+
+        ``object_key`` is sent verbatim as the ``?objectKey=`` query param to
+        /prod/create-ota-job. The UpdateEntity passes ``otaPrefix + latestVersion``;
+        it refuses to install if those fields haven't been populated by a prior
+        check_update.
+        """
+        result = await self._client.create_ota_job(thing_name, object_key)
+        job_id = result.get("jobId") if isinstance(result, dict) else None
+        self._ota_state.setdefault(thing_name, {})["otaJobId"] = job_id
+        self._publish_ota_patch(thing_name, {"otaJobId": job_id})
+        return job_id
+
+    async def async_get_ota_progress(self, thing_name: str, job_id: str) -> dict[str, Any]:
+        """Poll the current OTA job status.
+
+        When the status is terminal (success / failed / etc.), clear the
+        cached otaJobId so update.in_progress flips back to False on the
+        next refresh.
+        """
+        result = await self._client.get_ota_job_summary(thing_name, job_id)
+        status = result.get("status") if isinstance(result, dict) else None
+        if isinstance(status, str) and status in _OTA_TERMINAL_STATUSES:
+            self._ota_state.get(thing_name, {}).pop("otaJobId", None)
+            self._publish_ota_patch(thing_name, {"otaJobId": None})
+        return result
+
+    def _publish_ota_patch(self, thing_name: str, patch: dict[str, Any]) -> None:
+        """Merge ``patch`` into self.data[thing_name] and publish a fresh snapshot."""
+        if not self.data or thing_name not in self.data:
+            return
+        new_device = {**self.data[thing_name], **patch}
+        self.async_set_updated_data({**self.data, thing_name: new_device})
 
     async def async_start_video_session(self, thing_name: str) -> dict[str, Any]:
         """Open a Kinesis Video Streams viewer session for the robot's camera.

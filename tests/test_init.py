@@ -62,6 +62,7 @@ def _make_ha_stubs() -> None:
             NUMBER = "number"
             SENSOR = "sensor"
             SWITCH = "switch"
+            UPDATE = "update"
 
         ha_const.Platform = _Platform
     sys.modules.setdefault("homeassistant.const", ha_const)
