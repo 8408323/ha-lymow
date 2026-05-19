@@ -37,6 +37,7 @@ try:
     import homeassistant.components.number  # noqa: F401
     import homeassistant.components.sensor  # noqa: F401
     import homeassistant.components.switch  # noqa: F401
+    import homeassistant.components.update  # noqa: F401
     import homeassistant.config_entries  # noqa: F401
     import homeassistant.core  # noqa: F401
     import homeassistant.exceptions  # noqa: F401
@@ -50,6 +51,7 @@ try:
     _load_lymow_module("sensor")
     _load_lymow_module("number")
     _load_lymow_module("switch")
+    _load_lymow_module("update")
     _load_lymow_module("lawn_mower")
 except ImportError:
     # HA not installed (uv/Python 3.13 CI env) — inject minimal stubs so all
@@ -298,10 +300,28 @@ except ImportError:
     _ha_switch.SwitchEntity = _SwitchEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.switch", _ha_switch)
 
+    # ── homeassistant.components.update ───────────────────────────────────────
+    _ha_update = types.ModuleType("homeassistant.components.update")
+
+    class _UpdateEntity:
+        pass
+
+    class _UpdateEntityFeature(IntFlag):
+        INSTALL = 1
+        SPECIFIC_VERSION = 2
+        PROGRESS = 4
+        BACKUP = 8
+        RELEASE_NOTES = 16
+
+    _ha_update.UpdateEntity = _UpdateEntity  # type: ignore[attr-defined]
+    _ha_update.UpdateEntityFeature = _UpdateEntityFeature  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.update", _ha_update)
+
     # Now load the platform modules that depend on the above stubs.
     _load_lymow_module("coordinator")
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
     _load_lymow_module("number")
     _load_lymow_module("switch")
+    _load_lymow_module("update")
     _load_lymow_module("lawn_mower")
