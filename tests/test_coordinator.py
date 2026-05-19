@@ -724,3 +724,23 @@ async def test_fetch_last_clean_handles_bad_epoch() -> None:
     # Other fields still extracted; bad date silently dropped
     assert result[THING]["lastCleanAreaM2"] == 10
     assert "lastCleanAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_handles_non_dict_entry() -> None:
+    """A malformed API response with non-dict entries must not crash the
+    whole coordinator refresh. Aggregates are kept; per-entry fields skipped."""
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "clean_history": ["unexpected string", None],
+        "total_records": 7,
+        "clean_summary": {"total_clean_time": 100, "total_clean_area": 50},
+    }
+    result = await coord._async_update_data()
+    # Aggregates still surface
+    assert result[THING]["cleanHistoryCount"] == 7
+    assert result[THING]["totalCleanTimeS"] == 100
+    assert result[THING]["totalCleanHistoryAreaM2"] == 50
+    # No per-entry fields extracted because entries[0] isn't a dict
+    assert "lastCleanAreaM2" not in result[THING]
+    assert "lastCleanAt" not in result[THING]

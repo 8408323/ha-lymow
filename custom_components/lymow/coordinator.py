@@ -164,15 +164,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
 
     async def _fetch_last_clean_fields(self, thing_name: str) -> dict[str, Any]:
-        """Return last-clean summary fields, or {} if the history call fails.
+        """Return last-clean summary fields, or {} if the response can't be interpreted.
 
-        Confirmed response shape (eu-west-1, captured 2026-05-19):
+        Response envelope:
             {"clean_history": [
-                {"clean_area": 345, "clean_time": 60, "date": 1779184292,
-                 "used_battery": 49, "percent": 1, "soc_version": "v2.1.48",
-                 "start_type": 1, "status_times": [...], "error_list": [...],
-                 "history_file": "...", "hash_id": "..."},
-                ...]}
+                {"clean_area": <num>, "clean_time": <int sec>, "date": <epoch>,
+                 "used_battery": <int>, "percent": <0..1>, ...},
+                ...],
+             "total_records": <int>,
+             "clean_summary": {"total_clean_time": <int>, "total_clean_area": <num>}}
         """
         from datetime import UTC, datetime
 
@@ -188,7 +188,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return {}
 
         out: dict[str, Any] = {}
-        # Cumulative aggregates from the envelope (NOT per-page)
+        # Cumulative aggregates from the envelope (NOT per-page).
         if isinstance(history.get("total_records"), int):
             out["cleanHistoryCount"] = history["total_records"]
         summary = history.get("clean_summary")
@@ -199,11 +199,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 out["totalCleanHistoryAreaM2"] = a
 
         if not entries:
-            # Set count to 0 only if we don't already have a cumulative number
+            # Only fill in zero when total_records didn't already tell us
             out.setdefault("cleanHistoryCount", 0)
             return out
 
         last = entries[0]
+        if not isinstance(last, dict):
+            # API returned an unexpected shape (e.g. list of strings, None).
+            # Keep the aggregates we already extracted and stop probing.
+            return out
+
         if (area := last.get("clean_area")) is not None:
             out["lastCleanAreaM2"] = area
         if (t := last.get("clean_time")) is not None:
