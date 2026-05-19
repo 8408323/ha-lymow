@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Use GitHub's **"Report a vulnerability"** button on the [Security tab](https://github.com/8408323/ha-lymow/security/advisories/new). That opens a private advisory visible only to maintainers — please do not file public issues for suspected security bugs.
+Use GitHub's **"Report a vulnerability"** button on the [Security tab](../../security/advisories/new). That opens a private advisory visible only to maintainers — please do not file public issues for suspected security bugs.
 
 Useful info to include:
 - Affected version (tag or commit SHA) and Home Assistant version
