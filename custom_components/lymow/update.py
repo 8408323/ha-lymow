@@ -68,21 +68,27 @@ class LymowFirmwareUpdate(CoordinatorEntity[LymowCoordinator], UpdateEntity):
             return None
         return note.replace("\\n", "\n")
 
-    async def async_update(self) -> None:
-        """Called by HA on the entity's polling cadence."""
-        try:
-            await self.coordinator.async_check_firmware_update(self._thing_name)
-        except Exception:  # noqa: BLE001
-            # Don't kill the entity on a transient OTA-check failure; HA will retry.
-            pass
-
     async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
-        # create-ota-job's objectKey query param is prefix + latestVersion. The
-        # prefix is empty in the captured response, so this reduces to the
-        # version string. Caller can also pass an explicit `version`.
-        prefix = self._device_data.get("otaPrefix") or ""
+        """Build the create-ota-job objectKey as ``prefix + latestVersion``.
+
+        HA passes ``version`` as a *target version string* (the value the
+        user sees), but the create-ota-job API expects the ``objectKey``
+        returned by check_update — not a version string. Using ``version``
+        directly would start an invalid OTA, so if we haven't cached a
+        check_update response we raise rather than guess.
+
+        ``async_update`` isn't overridden because ``CoordinatorEntity`` is
+        not polled standalone — the OTA refresh is scheduled inside the
+        coordinator's regular ``_async_update_data`` (every
+        ``_OTA_CHECK_INTERVAL`` per device).
+        """
+        from homeassistant.exceptions import HomeAssistantError
+
         latest = self._device_data.get("latestVersion")
-        target = version or (f"{prefix}{latest}" if latest else None)
-        if not target:
-            return
-        await self.coordinator.async_install_firmware_update(self._thing_name, target)
+        if not latest:
+            raise HomeAssistantError(
+                "No firmware-update info cached yet — wait for the next "
+                "coordinator OTA refresh (within 6h) before installing."
+            )
+        prefix = self._device_data.get("otaPrefix") or ""
+        await self.coordinator.async_install_firmware_update(self._thing_name, f"{prefix}{latest}")
