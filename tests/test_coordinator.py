@@ -747,6 +747,70 @@ async def test_fetch_last_clean_handles_non_dict_entry() -> None:
     assert "lastCleanAt" not in result[THING]
 
 
+@pytest.mark.asyncio
+async def test_fetch_last_clean_forwards_details_fields() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "clean_history": [
+            {
+                "clean_area": 345,
+                "clean_time": 60,
+                "date": 1779184292,
+                "status_times": [{"status": 4, "duration": 50}, {"status": 5, "duration": 10}],
+                "soc_version": "v1.2.3",
+                "start_type": 1,
+                "error_list": [7, 12],
+                "map_total_area": 850.5,
+            }
+        ],
+    }
+    result = await coord._async_update_data()
+    assert result[THING]["lastCleanStatusTimes"] == [
+        {"status": 4, "duration": 50},
+        {"status": 5, "duration": 10},
+    ]
+    assert result[THING]["lastCleanSocVersion"] == "v1.2.3"
+    assert result[THING]["lastCleanStartType"] == 1
+    assert result[THING]["lastCleanErrorList"] == [7, 12]
+    assert result[THING]["lastCleanMapTotalAreaM2"] == 850.5
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_skips_details_when_missing() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "clean_history": [{"clean_area": 10, "clean_time": 60, "date": 1779184292}],
+    }
+    result = await coord._async_update_data()
+    for absent in (
+        "lastCleanStatusTimes",
+        "lastCleanSocVersion",
+        "lastCleanStartType",
+        "lastCleanErrorList",
+        "lastCleanMapTotalAreaM2",
+    ):
+        assert absent not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_ignores_non_list_status_times() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "clean_history": [
+            {
+                "clean_area": 10,
+                "clean_time": 60,
+                "date": 1779184292,
+                "status_times": "not-a-list",
+                "error_list": "also-not-a-list",
+            }
+        ],
+    }
+    result = await coord._async_update_data()
+    assert "lastCleanStatusTimes" not in result[THING]
+    assert "lastCleanErrorList" not in result[THING]
+
+
 # ---------------------------------------------------------------------------
 # Device feature endpoints
 # ---------------------------------------------------------------------------

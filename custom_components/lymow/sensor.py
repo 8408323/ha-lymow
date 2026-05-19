@@ -237,6 +237,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowRtkSensor(coordinator, device))
         entities.append(LymowMapSensor(coordinator, device))
         entities.append(LymowPoseHeadingSensor(coordinator, device))
+        entities.append(LymowCleanHistoryDetailsSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -396,3 +397,43 @@ class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             return math.degrees(float(rad)) % 360.0
         except (TypeError, ValueError):
             return None
+
+
+class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Exposes per-session details from the most recent clean-history entry as attributes."""
+
+    _attr_icon = "mdi:history"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_unique_id = f"{self._thing_name}_last_clean_details"
+        self._attr_name = f"{device_label} Last mow details"
+
+    @property
+    def native_value(self) -> int | None:
+        data = self.coordinator.data.get(self._thing_name) or {}
+        st = data.get("lastCleanStartType")
+        if st is None:
+            return None
+        try:
+            return int(st)
+        except (TypeError, ValueError):
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        data = self.coordinator.data.get(self._thing_name) or {}
+        attrs: dict[str, Any] = {}
+        for key, attr in (
+            ("lastCleanStatusTimes", "status_times"),
+            ("lastCleanSocVersion", "soc_version"),
+            ("lastCleanErrorList", "error_list"),
+            ("lastCleanMapTotalAreaM2", "map_total_area_m2"),
+        ):
+            val = data.get(key)
+            if val is not None:
+                attrs[attr] = val
+        return attrs
