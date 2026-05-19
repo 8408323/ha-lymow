@@ -45,29 +45,29 @@ import time
 # ---------------------------------------------------------------------------
 # Bluetooth / L2CAP constants (from <bluetooth/l2cap.h>)
 # ---------------------------------------------------------------------------
-AF_BLUETOOTH = 31       # sa_family for Bluetooth sockets
-BTPROTO_L2CAP = 0       # L2CAP protocol
-SOCK_SEQPACKET = 5      # connection-oriented, message-based
+AF_BLUETOOTH = 31  # sa_family for Bluetooth sockets
+BTPROTO_L2CAP = 0  # L2CAP protocol
+SOCK_SEQPACKET = 5  # connection-oriented, message-based
 
-SOL_BLUETOOTH = 274     # socket-level option for BT
-BT_SECURITY = 4         # set connection security level
-BT_SECURITY_LOW = 1     # no authentication / encryption required
+SOL_BLUETOOTH = 274  # socket-level option for BT
+BT_SECURITY = 4  # set connection security level
+BT_SECURITY_LOW = 1  # no authentication / encryption required
 
-ATT_CID = 4             # fixed L2CAP channel for BLE ATT protocol
+ATT_CID = 4  # fixed L2CAP channel for BLE ATT protocol
 
 # bdaddr_type values for sockaddr_l2.l2_bdaddr_type  (linux/bluetooth.h)
 # NOTE: These differ from HCI address-type field values!
 BDADDR_BREDR = 0x00
-BDADDR_LE_PUBLIC = 0x01   # peer advertises with public address
-BDADDR_LE_RANDOM = 0x02   # peer advertises with random address
+BDADDR_LE_PUBLIC = 0x01  # peer advertises with public address
+BDADDR_LE_RANDOM = 0x02  # peer advertises with random address
 
 # ATT PDU opcodes
-ATT_WRITE_CMD        = 0x52   # Write Command       (no response)
-ATT_WRITE_REQ        = 0x12   # Write Request       (expects Write Response 0x13)
-ATT_WRITE_RSP        = 0x13   # Write Response      (confirms ATT_WRITE_REQ)
-ATT_READ_REQ         = 0x0a   # Read Request        (from robot reading phone GATT server)
-ATT_READ_RSP         = 0x0b   # Read Response       (our reply to robot's Read Request)
-ATT_HANDLE_VAL_NOTIF = 0x1b   # Handle Value Notification (robot status updates)
+ATT_WRITE_CMD = 0x52  # Write Command       (no response)
+ATT_WRITE_REQ = 0x12  # Write Request       (expects Write Response 0x13)
+ATT_WRITE_RSP = 0x13  # Write Response      (confirms ATT_WRITE_REQ)
+ATT_READ_REQ = 0x0A  # Read Request        (from robot reading phone GATT server)
+ATT_READ_RSP = 0x0B  # Read Response       (our reply to robot's Read Request)
+ATT_HANDLE_VAL_NOTIF = 0x1B  # Handle Value Notification (robot status updates)
 
 # ATT handles (robot GATT database)
 #
@@ -85,18 +85,20 @@ ATT_HANDLE_VAL_NOTIF = 0x1b   # Handle Value Notification (robot status updates)
 #
 # h=0x0011 is the CCCD for Battery Level (service 0x000e..0x0011, UUID 0x180F) —
 # NOT a robot status characteristic.
-DRIVE_HANDLE  = 0x0014   # drive commands written here; robot status notified here
-CCCD_HANDLE   = 0x0015   # CCCD for DRIVE_HANDLE — write 0x0001 to enable notifications
+DRIVE_HANDLE = 0x0014  # drive commands written here; robot status notified here
+CCCD_HANDLE = 0x0015  # CCCD for DRIVE_HANDLE — write 0x0001 to enable notifications
 STATUS_HANDLE = DRIVE_HANDLE  # notifications arrive on the drive char itself
 
 # ---------------------------------------------------------------------------
 # Motion parameters
 # ---------------------------------------------------------------------------
-DRIVE_VEL: float = 0.3    # linear velocity  (max ±0.5; positive = forward)
-TURN_VEL: float = 0.546   # angular velocity — measured app plateau (ADB swipe: right≈-0.546, left≈+0.545); theoretical max ±0.6
-DRIVE_SECS: float = 0.5   # seconds to drive backward / forward
-TURN_SECS: float = 10.0   # seconds for arc turns
-HZ: int = 10              # command send rate (Hz)
+DRIVE_VEL: float = 0.3  # linear velocity  (max ±0.5; positive = forward)
+TURN_VEL: float = (
+    0.546  # angular velocity — measured app plateau (ADB swipe: right≈-0.546, left≈+0.545); theoretical max ±0.6
+)
+DRIVE_SECS: float = 0.5  # seconds to drive backward / forward
+TURN_SECS: float = 10.0  # seconds for arc turns
+HZ: int = 10  # command send rate (Hz)
 
 # (DRIVE_HANDLE is defined above with CCCD_HANDLE and STATUS_HANDLE)
 
@@ -117,18 +119,20 @@ class _SockAddrL2(ctypes.Structure):
     Using a ctypes.Structure avoids the c_char_p null-termination trap that
     silently truncates the sockaddr when PSM (bytes 2-3) is 0x0000.
     """
+
     _fields_ = [
-        ("l2_family",      ctypes.c_uint16),  # AF_BLUETOOTH = 31
-        ("l2_psm",         ctypes.c_uint16),  # 0 when using fixed CID
-        ("l2_bdaddr",      ctypes.c_uint8 * 6),  # peer addr (little-endian)
-        ("l2_cid",         ctypes.c_uint16),  # ATT_CID = 4
-        ("l2_bdaddr_type", ctypes.c_uint8),   # BDADDR_LE_PUBLIC/RANDOM
+        ("l2_family", ctypes.c_uint16),  # AF_BLUETOOTH = 31
+        ("l2_psm", ctypes.c_uint16),  # 0 when using fixed CID
+        ("l2_bdaddr", ctypes.c_uint8 * 6),  # peer addr (little-endian)
+        ("l2_cid", ctypes.c_uint16),  # ATT_CID = 4
+        ("l2_bdaddr_type", ctypes.c_uint8),  # BDADDR_LE_PUBLIC/RANDOM
     ]
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_dotenv() -> None:
     """Load scripts/.env (or parent .env) into os.environ."""
@@ -152,8 +156,8 @@ def _load_protocol():
     """Load lymow.protocol from the custom_components source tree."""
     repo_root = pathlib.Path(__file__).parent.parent
     for name, path in (
-        ("lymow.const",     repo_root / "custom_components" / "lymow" / "const.py"),
-        ("lymow.protocol",  repo_root / "custom_components" / "lymow" / "protocol.py"),
+        ("lymow.const", repo_root / "custom_components" / "lymow" / "const.py"),
+        ("lymow.protocol", repo_root / "custom_components" / "lymow" / "protocol.py"),
     ):
         spec = importlib.util.spec_from_file_location(name, str(path))
         mod = importlib.util.module_from_spec(spec)
@@ -176,6 +180,7 @@ def _run(cmd: str, *, ignore_errors: bool = False) -> None:
 # ---------------------------------------------------------------------------
 # LE connection via raw L2CAP ATT socket
 # ---------------------------------------------------------------------------
+
 
 def _connect_le_att(mac: str, timeout: float = 45.0) -> socket.socket:
     """Return a connected L2CAP ATT socket over LE to *mac* (public address).
@@ -242,7 +247,7 @@ def _connect_le_att(mac: str, timeout: float = 45.0) -> socket.socket:
         ctypes.c_int(ctypes.sizeof(peer)),
     )
     err = ctypes.get_errno()
-    if ret != 0 and err != 115:   # 115 = EINPROGRESS (expected for non-blocking)
+    if ret != 0 and err != 115:  # 115 = EINPROGRESS (expected for non-blocking)
         sock.close()
         raise OSError(err, f"connect() failed: {os.strerror(err)}")
 
@@ -276,6 +281,7 @@ def _connect_le_att(mac: str, timeout: float = 45.0) -> socket.socket:
 # ---------------------------------------------------------------------------
 # ATT helpers
 # ---------------------------------------------------------------------------
+
 
 def _att_write_cmd(sock: socket.socket, handle: int, data: bytes) -> None:
     """Send ATT Write Command (opcode 0x52) — no response expected."""
@@ -371,6 +377,7 @@ def _enable_cccd(sock: socket.socket) -> None:
 # Drive helpers
 # ---------------------------------------------------------------------------
 
+
 def _drive(
     sock: socket.socket,
     encode_fn,
@@ -396,6 +403,7 @@ def _stop(sock: socket.socket, encode_fn) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     if os.geteuid() != 0:
         print(
@@ -414,8 +422,7 @@ def main() -> None:
     mac = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("LYMOW_BLE_MAC", "")
     if not mac:
         print(
-            "ERROR: robot MAC address required.\n"
-            "  Set LYMOW_BLE_MAC in scripts/.env or pass as argument.",
+            "ERROR: robot MAC address required.\n  Set LYMOW_BLE_MAC in scripts/.env or pass as argument.",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -486,10 +493,10 @@ def main() -> None:
         # TURN_VEL=0.546 is the measured app plateau (ADB swipe to screen edge;
         # right joystick max = -0.546, left joystick max = +0.545).
         steps = [
-            ("Spin right",   0.0,        -TURN_VEL,  TURN_SECS),  # pure CW spin — test angular first
-            ("Spin left",    0.0,        +TURN_VEL,  TURN_SECS),  # pure CCW spin
-            ("Backward",    -DRIVE_VEL,   0.0,        DRIVE_SECS),
-            ("Forward",     +DRIVE_VEL,   0.0,        DRIVE_SECS),
+            ("Spin right", 0.0, -TURN_VEL, TURN_SECS),  # pure CW spin — test angular first
+            ("Spin left", 0.0, +TURN_VEL, TURN_SECS),  # pure CCW spin
+            ("Backward", -DRIVE_VEL, 0.0, DRIVE_SECS),
+            ("Forward", +DRIVE_VEL, 0.0, DRIVE_SECS),
         ]
 
         for label, lin, ang, secs in steps:

@@ -6,6 +6,7 @@ identify the correct CCCD handle (UUID 0x2902) for status notifications.
 Usage:
     echo PASSWORD | sudo -S python3 scripts/gatt_discover.py [MAC]
 """
+
 from __future__ import annotations
 
 import ctypes
@@ -19,28 +20,28 @@ import sys
 import time
 
 # ---- BT/L2CAP constants ----
-AF_BLUETOOTH    = 31
-BTPROTO_L2CAP   = 0
-SOCK_SEQPACKET  = 5
-SOL_BLUETOOTH   = 274
-BT_SECURITY     = 4
+AF_BLUETOOTH = 31
+BTPROTO_L2CAP = 0
+SOCK_SEQPACKET = 5
+SOL_BLUETOOTH = 274
+BT_SECURITY = 4
 BT_SECURITY_LOW = 1
-ATT_CID         = 4
+ATT_CID = 4
 BDADDR_LE_PUBLIC = 0x01
 
 # ---- ATT opcodes ----
-ATT_ERROR_RSP             = 0x01
-ATT_FIND_INFO_REQ         = 0x04
-ATT_FIND_INFO_RSP         = 0x05
-ATT_READ_BY_TYPE_REQ      = 0x08
-ATT_READ_BY_TYPE_RSP      = 0x09
+ATT_ERROR_RSP = 0x01
+ATT_FIND_INFO_REQ = 0x04
+ATT_FIND_INFO_RSP = 0x05
+ATT_READ_BY_TYPE_REQ = 0x08
+ATT_READ_BY_TYPE_RSP = 0x09
 ATT_READ_BY_GROUP_TYPE_REQ = 0x10
 ATT_READ_BY_GROUP_TYPE_RSP = 0x11
 
 # ---- Known UUIDs ----
-UUID_PRIMARY_SERVICE   = 0x2800
-UUID_CHARACTERISTIC    = 0x2803
-UUID_CCCD              = 0x2902
+UUID_PRIMARY_SERVICE = 0x2800
+UUID_CHARACTERISTIC = 0x2803
+UUID_CCCD = 0x2902
 
 # ---- libc for raw connect ----
 libc = ctypes.CDLL("libc.so.6", use_errno=True)
@@ -48,10 +49,10 @@ libc = ctypes.CDLL("libc.so.6", use_errno=True)
 
 class _SockAddrL2(ctypes.Structure):
     _fields_ = [
-        ("l2_family",      ctypes.c_uint16),
-        ("l2_psm",         ctypes.c_uint16),
-        ("l2_bdaddr",      ctypes.c_uint8 * 6),
-        ("l2_cid",         ctypes.c_uint16),
+        ("l2_family", ctypes.c_uint16),
+        ("l2_psm", ctypes.c_uint16),
+        ("l2_bdaddr", ctypes.c_uint8 * 6),
+        ("l2_cid", ctypes.c_uint16),
         ("l2_bdaddr_type", ctypes.c_uint8),
     ]
 
@@ -90,12 +91,13 @@ def _connect_le_att(mac: str, timeout: float = 30.0) -> socket.socket:
     sock.setsockopt(SOL_BLUETOOTH, BT_SECURITY, sec)
 
     local = _SockAddrL2(
-        l2_family=AF_BLUETOOTH, l2_psm=0,
+        l2_family=AF_BLUETOOTH,
+        l2_psm=0,
         l2_bdaddr=(ctypes.c_uint8 * 6)(0, 0, 0, 0, 0, 0),
-        l2_cid=ATT_CID, l2_bdaddr_type=BDADDR_LE_PUBLIC,
+        l2_cid=ATT_CID,
+        l2_bdaddr_type=BDADDR_LE_PUBLIC,
     )
-    ret = libc.bind(ctypes.c_int(sock.fileno()), ctypes.byref(local),
-                    ctypes.c_int(ctypes.sizeof(local)))
+    ret = libc.bind(ctypes.c_int(sock.fileno()), ctypes.byref(local), ctypes.c_int(ctypes.sizeof(local)))
     if ret != 0:
         err = ctypes.get_errno()
         sock.close()
@@ -104,12 +106,13 @@ def _connect_le_att(mac: str, timeout: float = 30.0) -> socket.socket:
     sock.setblocking(False)
 
     peer = _SockAddrL2(
-        l2_family=AF_BLUETOOTH, l2_psm=0,
+        l2_family=AF_BLUETOOTH,
+        l2_psm=0,
         l2_bdaddr=(ctypes.c_uint8 * 6)(*mac_bytes),
-        l2_cid=ATT_CID, l2_bdaddr_type=BDADDR_LE_PUBLIC,
+        l2_cid=ATT_CID,
+        l2_bdaddr_type=BDADDR_LE_PUBLIC,
     )
-    ret = libc.connect(ctypes.c_int(sock.fileno()), ctypes.byref(peer),
-                       ctypes.c_int(ctypes.sizeof(peer)))
+    ret = libc.connect(ctypes.c_int(sock.fileno()), ctypes.byref(peer), ctypes.c_int(ctypes.sizeof(peer)))
     err = ctypes.get_errno()
     if ret != 0 and err != 115:
         sock.close()
@@ -160,7 +163,7 @@ def discover_primary_services(sock: socket.socket) -> list[tuple[int, int, bytes
         length = resp[1]  # attribute data length per entry
         data = resp[2:]
         for i in range(0, len(data), length):
-            chunk = data[i:i + length]
+            chunk = data[i : i + length]
             if len(chunk) < 4:
                 break
             s, e = struct.unpack_from("<HH", chunk, 0)
@@ -172,9 +175,7 @@ def discover_primary_services(sock: socket.socket) -> list[tuple[int, int, bytes
     return services
 
 
-def discover_characteristics(
-    sock: socket.socket, start: int, end: int
-) -> list[tuple[int, int, int, bytes]]:
+def discover_characteristics(sock: socket.socket, start: int, end: int) -> list[tuple[int, int, int, bytes]]:
     """Return list of (decl_handle, properties, value_handle, char_uuid_bytes)."""
     chars = []
     cur = start
@@ -188,13 +189,13 @@ def discover_characteristics(
         length = resp[1]
         data = resp[2:]
         for i in range(0, len(data), length):
-            chunk = data[i:i + length]
+            chunk = data[i : i + length]
             if len(chunk) < 5:
                 break
             decl_h = struct.unpack_from("<H", chunk, 0)[0]
-            props   = chunk[2]
-            val_h   = struct.unpack_from("<H", chunk, 3)[0]
-            uuid_b  = chunk[5:]
+            props = chunk[2]
+            val_h = struct.unpack_from("<H", chunk, 3)[0]
+            uuid_b = chunk[5:]
             chars.append((decl_h, props, val_h, uuid_b))
             cur = val_h + 1
         else:
@@ -202,9 +203,7 @@ def discover_characteristics(
     return chars
 
 
-def discover_descriptors(
-    sock: socket.socket, start: int, end: int
-) -> list[tuple[int, int]]:
+def discover_descriptors(sock: socket.socket, start: int, end: int) -> list[tuple[int, int]]:
     """Return list of (handle, uuid_16bit) for all 16-bit descriptors in range."""
     descriptors = []
     cur = start
@@ -238,8 +237,7 @@ def discover_descriptors(
 
 
 def _prop_str(props: int) -> str:
-    names = {0x01: "Bcast", 0x02: "R", 0x04: "WwR", 0x08: "W",
-             0x10: "N", 0x20: "I", 0x40: "Auth", 0x80: "Ext"}
+    names = {0x01: "Bcast", 0x02: "R", 0x04: "WwR", 0x08: "W", 0x10: "N", 0x20: "I", 0x40: "Auth", 0x80: "Ext"}
     return "|".join(v for k, v in names.items() if props & k) or "?"
 
 
@@ -247,10 +245,14 @@ def _uuid_str(uuid_bytes: bytes) -> str:
     if len(uuid_bytes) == 2:
         u = struct.unpack("<H", uuid_bytes)[0]
         known = {
-            0x1800: "Generic Access", 0x1801: "Generic Attribute",
-            0x2800: "Primary Service", 0x2803: "Characteristic",
-            0x2902: "CCCD", 0x2900: "Char Ext Props",
-            0x2901: "User Description", 0x2904: "Char Presentation Format",
+            0x1800: "Generic Access",
+            0x1801: "Generic Attribute",
+            0x2800: "Primary Service",
+            0x2803: "Characteristic",
+            0x2902: "CCCD",
+            0x2900: "Char Ext Props",
+            0x2901: "User Description",
+            0x2904: "Char Presentation Format",
         }
         return known.get(u, f"0x{u:04x}")
     elif len(uuid_bytes) == 16:
@@ -286,7 +288,7 @@ def main() -> None:
         services = discover_primary_services(sock)
         if not services:
             print("  (none found; trying raw handle scan instead)")
-        for (s, e, uuid_b) in services:
+        for s, e, uuid_b in services:
             print(f"  Service h=0x{s:04x}..0x{e:04x}  UUID={_uuid_str(uuid_b)}")
 
         # If no services discovered (robot may not support READ_BY_GROUP_TYPE),
@@ -315,7 +317,7 @@ def main() -> None:
 
         # --- Characteristics per service ---
         cccd_handles = []
-        for (svc_start, svc_end, svc_uuid) in services:
+        for svc_start, svc_end, svc_uuid in services:
             print(f"\n  Service 0x{svc_start:04x}..0x{svc_end:04x}:")
             chars = discover_characteristics(sock, svc_start, svc_end)
             for idx, (decl_h, props, val_h, uuid_b) in enumerate(chars):
@@ -325,12 +327,13 @@ def main() -> None:
                 else:
                     desc_end = svc_end
                 props_str = _prop_str(props)
-                print(f"    Char decl h=0x{decl_h:04x}  val h=0x{val_h:04x}"
-                      f"  props={props_str}  UUID={_uuid_str(uuid_b)}")
+                print(
+                    f"    Char decl h=0x{decl_h:04x}  val h=0x{val_h:04x}  props={props_str}  UUID={_uuid_str(uuid_b)}"
+                )
                 # Descriptors
                 if val_h < desc_end:
                     descs = discover_descriptors(sock, val_h + 1, desc_end)
-                    for (dh, du) in descs:
+                    for dh, du in descs:
                         label = ""
                         if du == UUID_CCCD:
                             label = " ← CCCD"

@@ -13,8 +13,8 @@ Also shows any LE Connection Complete events during a connect attempt.
 """
 
 import os
-import struct
 import socket
+import struct
 import sys
 import time
 
@@ -52,11 +52,11 @@ TARGET_MAC = _mac_env.upper()
 SOL_HCI = 0
 HCI_FILTER = 2
 HCI_EVENT_PKT = 0x04
-HCI_LE_META_EVENT = 0x3e
+HCI_LE_META_EVENT = 0x3E
 HCI_LE_ADVERTISING_REPORT = 0x02
-HCI_LE_EXTENDED_ADVERTISING_REPORT = 0x0d
+HCI_LE_EXTENDED_ADVERTISING_REPORT = 0x0D
 HCI_LE_CONNECTION_COMPLETE = 0x01
-HCI_LE_ENHANCED_CONNECTION_COMPLETE = 0x0a
+HCI_LE_ENHANCED_CONNECTION_COMPLETE = 0x0A
 
 # ADV PDU types
 ADV_PDU = {
@@ -82,23 +82,25 @@ def parse_advertising_report(data: bytes) -> list[dict]:
     for _ in range(num_reports):
         if pos + 9 > len(data):
             break
-        evt_type = data[pos]     # ADV PDU type
-        addr_type = data[pos+1]  # 0=public, 1=random
-        addr = mac_bytes_to_str(data[pos+2:pos+8])
-        data_len = data[pos+8]
-        adv_data = data[pos+9:pos+9+data_len]
+        evt_type = data[pos]  # ADV PDU type
+        addr_type = data[pos + 1]  # 0=public, 1=random
+        addr = mac_bytes_to_str(data[pos + 2 : pos + 8])
+        data_len = data[pos + 8]
+        adv_data = data[pos + 9 : pos + 9 + data_len]
         pos += 9 + data_len
         rssi = struct.unpack_from("b", data, pos)[0]
         pos += 1
-        reports.append({
-            "type": evt_type,
-            "type_str": ADV_PDU.get(evt_type, f"UNKNOWN(0x{evt_type:02x})"),
-            "addr_type": addr_type,
-            "addr": addr,
-            "rssi": rssi,
-            "data_len": data_len,
-            "data": adv_data,
-        })
+        reports.append(
+            {
+                "type": evt_type,
+                "type_str": ADV_PDU.get(evt_type, f"UNKNOWN(0x{evt_type:02x})"),
+                "addr_type": addr_type,
+                "addr": addr,
+                "rssi": rssi,
+                "data_len": data_len,
+                "data": adv_data,
+            }
+        )
     return reports
 
 
@@ -120,32 +122,34 @@ def parse_ext_advertising_report(data: bytes) -> list[dict]:
         directed = bool(evt_type & 0x0004)
         legacy = bool(evt_type & 0x0010)
 
-        addr_type = data[pos+2]
-        addr = mac_bytes_to_str(data[pos+3:pos+9])
-        primary_phy = data[pos+9]
-        secondary_phy = data[pos+10]
-        sid = data[pos+11]
-        tx_power = struct.unpack_from("b", data, pos+12)[0]
-        rssi = struct.unpack_from("b", data, pos+13)[0]
-        periodic_interval = struct.unpack_from("<H", data, pos+14)[0]
-        direct_addr_type = data[pos+16]
-        direct_addr = mac_bytes_to_str(data[pos+17:pos+23])
-        data_len = data[pos+23]
-        adv_data = data[pos+24:pos+24+data_len]
+        addr_type = data[pos + 2]
+        addr = mac_bytes_to_str(data[pos + 3 : pos + 9])
+        data[pos + 9]
+        data[pos + 10]
+        data[pos + 11]
+        struct.unpack_from("b", data, pos + 12)[0]
+        rssi = struct.unpack_from("b", data, pos + 13)[0]
+        struct.unpack_from("<H", data, pos + 14)[0]
+        data[pos + 16]
+        direct_addr = mac_bytes_to_str(data[pos + 17 : pos + 23])
+        data_len = data[pos + 23]
+        adv_data = data[pos + 24 : pos + 24 + data_len]
         pos += 24 + data_len
 
         pdu_str = f"ext evt_type=0x{evt_type:04x} conn={connectable} scan={scannable} dir={directed} legacy={legacy}"
-        reports.append({
-            "type": evt_type,
-            "type_str": pdu_str,
-            "addr_type": addr_type,
-            "addr": addr,
-            "rssi": rssi,
-            "connectable": connectable,
-            "directed": directed,
-            "direct_addr": direct_addr if directed else None,
-            "data": adv_data,
-        })
+        reports.append(
+            {
+                "type": evt_type,
+                "type_str": pdu_str,
+                "addr_type": addr_type,
+                "addr": addr,
+                "rssi": rssi,
+                "connectable": connectable,
+                "directed": directed,
+                "direct_addr": direct_addr if directed else None,
+                "data": adv_data,
+            }
+        )
     return reports
 
 
@@ -157,9 +161,9 @@ def open_hci_socket(dev_id: int = 0) -> socket.socket:
     # Set HCI filter: struct hci_filter { type_mask u32; event_mask [2]u32; opcode u16 }
     # type_mask: bit 4 = HCI_EVENT_PKT
     # event_mask: LE_META_EVENT is event 0x3e (62), so it sits in event_mask2 bit 30 (62-32)
-    type_mask = 1 << HCI_EVENT_PKT          # bit 4
-    event_mask1 = 0xFFFFFFFF                # allow all events in low 32
-    event_mask2 = 0xFFFFFFFF                # allow all events in high 32
+    type_mask = 1 << HCI_EVENT_PKT  # bit 4
+    event_mask1 = 0xFFFFFFFF  # allow all events in low 32
+    event_mask2 = 0xFFFFFFFF  # allow all events in high 32
     opcode = 0
     hci_filter = struct.pack("<IIIh2x", type_mask, event_mask1, event_mask2, opcode)
     sock.setsockopt(SOL_HCI, HCI_FILTER, hci_filter)
@@ -229,7 +233,9 @@ def main():
                     key = (r["type"], r["addr"])
                     if key not in target_seen:
                         target_seen.add(key)
-                        print(f"[{ts}] TARGET FOUND: {r['addr']} PDU={r['type_str']} rssi={r['rssi']} addr_type={r['addr_type']}")
+                        print(
+                            f"[{ts}] TARGET FOUND: {r['addr']} PDU={r['type_str']} rssi={r['rssi']} addr_type={r['addr_type']}"
+                        )
                         print(f"         adv_data={r['data'].hex()}")
 
         elif sub_evt == HCI_LE_EXTENDED_ADVERTISING_REPORT:
@@ -250,10 +256,12 @@ def main():
                 status = sub_data[0]
                 handle = struct.unpack_from("<H", sub_data, 1)[0]
                 role = sub_data[3]
-                addr_type = sub_data[4]
+                sub_data[4]
                 addr = mac_bytes_to_str(sub_data[5:11])
                 status_str = "SUCCESS" if status == 0 else f"ERROR(0x{status:02x})"
-                print(f"[{ts}] LE CONNECTION COMPLETE: status={status_str} handle=0x{handle:04x} addr={addr} role={role}")
+                print(
+                    f"[{ts}] LE CONNECTION COMPLETE: status={status_str} handle=0x{handle:04x} addr={addr} role={role}"
+                )
 
         elif sub_evt == HCI_LE_ENHANCED_CONNECTION_COMPLETE:
             if len(sub_data) >= 30:

@@ -34,11 +34,11 @@ import time
 # ---------------------------------------------------------------------------
 # Motion parameters — tune these before running
 # ---------------------------------------------------------------------------
-DRIVE_VEL: float = 0.3    # linear velocity  (max ±0.5; positive = forward)
-TURN_VEL: float = 0.4     # angular velocity (max ±0.6; positive = right)
-DRIVE_SECS: float = 1.5   # seconds to drive backward / forward
-TURN_SECS: float = 2.0    # seconds to spin right / left
-HZ: int = 10              # command send rate — matches the app's observed rate
+DRIVE_VEL: float = 0.3  # linear velocity  (max ±0.5; positive = forward)
+TURN_VEL: float = 0.4  # angular velocity (max ±0.6; positive = right)
+DRIVE_SECS: float = 1.5  # seconds to drive backward / forward
+TURN_SECS: float = 2.0  # seconds to spin right / left
+HZ: int = 10  # command send rate — matches the app's observed rate
 
 # BLE characteristic UUID confirmed from HCI BTSnoop capture (2025-05)
 DRIVE_UUID = "12345678-1234-5678-1234-56789abcdef1"
@@ -49,6 +49,7 @@ CCCD_HANDLE = 0x0015
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_dotenv() -> None:
     """Load key=value pairs from scripts/.env into os.environ (no overrides)."""
@@ -88,6 +89,7 @@ def _load_protocol() -> object:
 # Motion helpers
 # ---------------------------------------------------------------------------
 
+
 async def _drive(client: object, encode_fn, linear: float, angular: float, secs: float) -> None:
     """Send repeated drive commands at HZ for the given duration."""
     payload = encode_fn(linear, angular)
@@ -106,6 +108,7 @@ async def _stop(client: object, encode_fn) -> None:
 # ---------------------------------------------------------------------------
 # Main sequence
 # ---------------------------------------------------------------------------
+
 
 async def run(mac: str) -> None:
     try:
@@ -135,10 +138,10 @@ async def run(mac: str) -> None:
                 pass  # notifications not strictly required for drive commands
 
             steps = [
-                ("Backward",    -DRIVE_VEL,  0.0,       DRIVE_SECS),
-                ("Forward",     +DRIVE_VEL,  0.0,       DRIVE_SECS),
-                ("Spin right",   0.0,       +TURN_VEL,  TURN_SECS),
-                ("Spin left",    0.0,       -TURN_VEL,  TURN_SECS),
+                ("Backward", -DRIVE_VEL, 0.0, DRIVE_SECS),
+                ("Forward", +DRIVE_VEL, 0.0, DRIVE_SECS),
+                ("Spin right", 0.0, +TURN_VEL, TURN_SECS),
+                ("Spin left", 0.0, -TURN_VEL, TURN_SECS),
             ]
 
             for label, lin, ang, secs in steps:

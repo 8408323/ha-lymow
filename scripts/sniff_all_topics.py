@@ -25,10 +25,10 @@ import time
 
 import aiohttp
 
-
 # ---------------------------------------------------------------------------
 # .env loader
 # ---------------------------------------------------------------------------
+
 
 def _load_dotenv() -> None:
     candidates = [
@@ -86,7 +86,7 @@ def hex_lines(data: bytes, width: int = 32) -> list[str]:
         chunk = data[i : i + width]
         hex_part = " ".join(f"{b:02x}" for b in chunk)
         ascii_part = "".join(chr(b) if 32 <= b < 127 else "." for b in chunk)
-        lines.append(f"  {i:04x}: {hex_part:<{width*3}}  {ascii_part}")
+        lines.append(f"  {i:04x}: {hex_part:<{width * 3}}  {ascii_part}")
     return lines
 
 
@@ -125,11 +125,15 @@ async def run() -> None:
         iot_host = cfg["iot_host"]
 
         import uuid
+
         import aiomqtt
 
         ws_path = build_presigned_ws_path(
-            iot_host, region,
-            aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"),
+            iot_host,
+            region,
+            aws["AccessKeyId"],
+            aws["SecretKey"],
+            aws.get("SessionToken"),
         )
         tls = aiomqtt.TLSParameters()
         client_id = f"lymow-sniffall-{uuid.uuid4().hex[:8]}"
@@ -159,10 +163,14 @@ async def run() -> None:
 
             async for message in mqtt.messages:
                 topic = str(message.topic)
-                payload = bytes(message.payload) if isinstance(message.payload, (bytes, bytearray)) else message.payload.encode()
+                payload = (
+                    bytes(message.payload)
+                    if isinstance(message.payload, (bytes, bytearray))
+                    else message.payload.encode()
+                )
                 ts = time.strftime("%H:%M:%S")
 
-                suffix = topic.split("/")[-1]
+                topic.split("/")[-1]
 
                 # Try to decode as text (JSON) first
                 try:
