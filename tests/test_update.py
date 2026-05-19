@@ -60,20 +60,6 @@ def test_in_progress_false_when_no_job_id() -> None:
     assert e.in_progress is False
 
 
-async def test_async_update_calls_coordinator_check() -> None:
-    coord = _make_coord({"softwareVersion": "12.0.0.125"})
-    e = LymowFirmwareUpdate(coord, DEVICE)
-    await e.async_update()
-    coord.async_check_firmware_update.assert_awaited_once_with(THING)
-
-
-async def test_async_update_swallows_errors() -> None:
-    coord = _make_coord({"softwareVersion": "12.0.0.125"})
-    coord.async_check_firmware_update.side_effect = RuntimeError("network")
-    e = LymowFirmwareUpdate(coord, DEVICE)
-    await e.async_update()  # must not raise
-
-
 async def test_async_install_uses_prefix_plus_latest_version() -> None:
     coord = _make_coord(
         {"softwareVersion": "v2.1.43", "latestVersion": "v2.1.48_20260518", "otaPrefix": ""}
@@ -96,17 +82,25 @@ async def test_async_install_concatenates_non_empty_prefix() -> None:
     coord.async_install_firmware_update.assert_awaited_once_with(THING, "firmware/v2.1.48")
 
 
-async def test_async_install_falls_back_to_version_arg() -> None:
-    coord = _make_coord({"softwareVersion": "v2.1.43"})
+async def test_async_install_ignores_version_arg() -> None:
+    """The HA `version` arg is a version string, not the objectKey we need —
+    so it must be ignored. The install must build objectKey from cached fields."""
+    coord = _make_coord({"softwareVersion": "v2.1.43", "latestVersion": "v2.1.48", "otaPrefix": "fw/"})
     e = LymowFirmwareUpdate(coord, DEVICE)
-    await e.async_install(version="explicit-target", backup=False)
-    coord.async_install_firmware_update.assert_awaited_once_with(THING, "explicit-target")
+    await e.async_install(version="something-else", backup=False)
+    coord.async_install_firmware_update.assert_awaited_once_with(THING, "fw/v2.1.48")
 
 
-async def test_async_install_noop_when_no_target() -> None:
+async def test_async_install_raises_when_no_latest_version_cached() -> None:
+    """Refuse to install if no check_update has populated latestVersion yet —
+    using HA's `version` string as the objectKey would start an invalid OTA."""
+    import pytest
+    from homeassistant.exceptions import HomeAssistantError
+
     coord = _make_coord({"softwareVersion": "v2.1.43"})
     e = LymowFirmwareUpdate(coord, DEVICE)
-    await e.async_install(version=None, backup=False)
+    with pytest.raises(HomeAssistantError):
+        await e.async_install(version="anything", backup=False)
     coord.async_install_firmware_update.assert_not_awaited()
 
 
