@@ -5,17 +5,27 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 from lymow.button import (
+    AbortOtaButton,
     ChargingStationResetButton,
+    ClearAllZonesAndChannelsButton,
+    CompleteZonePartitionButton,
+    ExitRemoteControlButton,
     ForceReinitButton,
     LockRobotButton,
+    RestoreFactoryDefaultsButton,
     SelfCheckButton,
     async_setup_entry,
 )
 from lymow.const import (
     DOMAIN,
+    USER_CTRL_ABORT_OTA,
     USER_CTRL_CHARGING_STATION_RESET,
+    USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
+    USER_CTRL_COMPLETE_ZONE_PARTITION,
+    USER_CTRL_EXIT_REMOTE,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
+    USER_CTRL_RESTORE_FACTORY,
     USER_CTRL_SELF_CHECKING,
 )
 
@@ -93,7 +103,7 @@ async def test_button_name_fallback_to_sn() -> None:
     assert "SN42" in e._attr_name
 
 
-async def test_async_setup_entry_creates_four_buttons_per_device() -> None:
+async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
     coord = _make_coord()
 
     hass = MagicMock()
@@ -110,7 +120,73 @@ async def test_async_setup_entry_creates_four_buttons_per_device() -> None:
         "SelfCheckButton",
         "ForceReinitButton",
         "ChargingStationResetButton",
+        "AbortOtaButton",
+        "CompleteZonePartitionButton",
+        "ExitRemoteControlButton",
+        "RestoreFactoryDefaultsButton",
+        "ClearAllZonesAndChannelsButton",
     }
+
+
+# ---------------------------------------------------------------------------
+# Misc destructive / lifecycle buttons (#53)
+# ---------------------------------------------------------------------------
+
+
+def _check_disabled_default(cls) -> None:
+    coord = _make_coord()
+    e = cls(coord, DEVICE)
+    assert e._attr_entity_registry_enabled_default is False
+
+
+def test_abort_ota_button_disabled_by_default() -> None:
+    _check_disabled_default(AbortOtaButton)
+
+
+def test_complete_zone_partition_button_disabled_by_default() -> None:
+    _check_disabled_default(CompleteZonePartitionButton)
+
+
+def test_exit_remote_button_disabled_by_default() -> None:
+    _check_disabled_default(ExitRemoteControlButton)
+
+
+def test_restore_factory_button_disabled_by_default() -> None:
+    _check_disabled_default(RestoreFactoryDefaultsButton)
+
+
+def test_clear_all_zones_button_disabled_by_default() -> None:
+    _check_disabled_default(ClearAllZonesAndChannelsButton)
+
+
+async def test_abort_ota_press_sends_correct_userctrl() -> None:
+    coord = _make_coord()
+    await AbortOtaButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_ABORT_OTA)
+
+
+async def test_complete_zone_partition_press_sends_correct_userctrl() -> None:
+    coord = _make_coord()
+    await CompleteZonePartitionButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_COMPLETE_ZONE_PARTITION)
+
+
+async def test_exit_remote_press_sends_correct_userctrl() -> None:
+    coord = _make_coord()
+    await ExitRemoteControlButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_EXIT_REMOTE)
+
+
+async def test_restore_factory_press_sends_correct_userctrl() -> None:
+    coord = _make_coord()
+    await RestoreFactoryDefaultsButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_RESTORE_FACTORY)
+
+
+async def test_clear_all_zones_press_sends_correct_userctrl() -> None:
+    coord = _make_coord()
+    await ClearAllZonesAndChannelsButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_CLEAR_ALL_ZONES_CHANNELS)
 
 
 async def test_async_setup_entry_no_devices() -> None:
