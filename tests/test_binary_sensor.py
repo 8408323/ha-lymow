@@ -105,8 +105,32 @@ async def test_async_setup_entry_creates_three_per_device() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    types = {type(e).__name__ for e in added}
-    assert types == {"ChargingBinarySensor", "RechargingBinarySensor", "StolenBinarySensor"}
+    # Exact count, not just type set — catches accidental duplicates.
+    assert len(added) == 3
+    types = [type(e).__name__ for e in added]
+    assert sorted(types) == [
+        "ChargingBinarySensor",
+        "RechargingBinarySensor",
+        "StolenBinarySensor",
+    ]
+
+
+async def test_async_setup_entry_creates_three_per_device_with_two_devices() -> None:
+    """Two devices → exactly six entities (no duplicates, no skips)."""
+    coord = _make_coord({"isCharging": True})
+    coord.devices = [DEVICE, {"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert len(added) == 6
+    thing_names = sorted({e._thing_name for e in added})
+    assert thing_names == ["mower-001", "mower-002"]
 
 
 async def test_async_setup_entry_no_devices() -> None:

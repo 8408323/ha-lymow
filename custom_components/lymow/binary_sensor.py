@@ -1,4 +1,4 @@
-"""Binary sensors for Lymow: charging status and theft alert."""
+"""Binary sensors for Lymow: charging, returning-for-charge, and theft alert."""
 
 from __future__ import annotations
 
