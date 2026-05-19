@@ -119,14 +119,32 @@ class TestGetCleanHistory:
 
 
 class TestGetBackupMapKey:
-    async def test_returns_key_when_present(self, client):
-        payload = {"mapList": [{"key": "maps/device_001/latest.pb"}]}
+    async def test_returns_map_file_from_real_response(self, client):
+        """Real response shape (captured 2026-05-19, eu-west-1):
+        {"mapList": [{"map_file": "...", "name": "", "backup_time": <epoch>}, ...]}.
+        Entries are newest-first.
+        """
+        payload = {
+            "mapList": [
+                {
+                    "map_file": "device_7890838300cd/map/map_20260514T142312Z.pb",
+                    "name": "",
+                    "backup_time": 1778768592,
+                },
+                {
+                    "map_file": "device_7890838300cd/map/map_20260514T110146Z.pb",
+                    "name": "",
+                    "backup_time": 1778756506,
+                },
+            ]
+        }
 
         with aioresponses() as m:
             m.get(RE_BACKUP_MAP, payload=payload)
             result = await client.get_backup_map_key("mower-001")
 
-        assert result == "maps/device_001/latest.pb"
+        # Newest entry (entry[0]) is returned
+        assert result == "device_7890838300cd/map/map_20260514T142312Z.pb"
 
     async def test_returns_none_when_list_empty(self, client):
         with aioresponses() as m:
@@ -143,6 +161,8 @@ class TestGetBackupMapKey:
         assert result is None
 
     async def test_falls_back_to_alternative_key_fields(self, client):
+        """If a future app version drops back to one of the older guesses, we
+        still recover the key."""
         payload = {"mapList": [{"backupMapUrl": "maps/device_001/backup.pb"}]}
 
         with aioresponses() as m:
@@ -159,6 +179,23 @@ class TestGetBackupMapKey:
             result = await client.get_backup_map_key("mower-001")
 
         assert result is None
+
+    async def test_map_file_wins_over_legacy_field(self, client):
+        """When both map_file and a legacy field are present, map_file is preferred."""
+        payload = {
+            "mapList": [
+                {
+                    "map_file": "device_7890838300cd/map/new.pb",
+                    "key": "legacy.pb",
+                }
+            ]
+        }
+
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload=payload)
+            result = await client.get_backup_map_key("mower-001")
+
+        assert result == "device_7890838300cd/map/new.pb"
 
 
 class TestSigV4Helpers:
