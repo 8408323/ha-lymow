@@ -478,13 +478,12 @@ async def test_handle_query_schedules_calls_coordinator() -> None:
 async def test_handle_start_video_session_returns_session_data() -> None:
     coord = _make_coord()
     coord.devices = [DEVICE]
-    coord.async_start_video_session = AsyncMock(
-        return_value={"channelARN": "arn:test", "region": "eu-west-1"}
-    )
+    coord.async_start_video_session = AsyncMock(return_value={"channelARN": "arn:test", "region": "eu-west-1"})
     hass = MagicMock()
     entry = MagicMock()
     entry.entry_id = "entry-1"
     from lymow.const import DOMAIN
+
     hass.data = {DOMAIN: {"entry-1": coord}}
     handlers2: dict = {}
 
@@ -514,6 +513,7 @@ async def test_handle_start_video_session_raises_when_no_match() -> None:
     entry = MagicMock()
     entry.entry_id = "entry-1"
     from lymow.const import DOMAIN
+
     hass.data = {DOMAIN: {"entry-1": coord}}
     handlers2: dict = {}
 

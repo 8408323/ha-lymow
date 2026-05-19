@@ -127,9 +127,7 @@ class LymowApiClient:
         WebRTC handshake within that window.
         """
         if not REGION_CONFIG[self._region].get("api_kvs"):
-            raise NotImplementedError(
-                f"Kinesis Video gateway not configured for region {self._region!r}"
-            )
+            raise NotImplementedError(f"Kinesis Video gateway not configured for region {self._region!r}")
         url = _api_url(self._region, "api_kvs", "/prod/kvs/cmd")
         body = {"deviceThingName": thing_name, "action": "start"}
         async with self._session.post(url, headers=self._headers, json=body) as resp:
