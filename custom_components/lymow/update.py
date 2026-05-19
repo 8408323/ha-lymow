@@ -30,7 +30,7 @@ async def async_setup_entry(
 class LymowFirmwareUpdate(CoordinatorEntity[LymowCoordinator], UpdateEntity):
     """Firmware update entity backed by check-update / create-ota-job."""
 
-    _attr_supported_features = UpdateEntityFeature.INSTALL
+    _attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.RELEASE_NOTES
     _attr_icon = "mdi:cog-refresh"
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
@@ -59,6 +59,15 @@ class LymowFirmwareUpdate(CoordinatorEntity[LymowCoordinator], UpdateEntity):
     def in_progress(self) -> bool:
         return bool(self._device_data.get("otaJobId"))
 
+    @property
+    def release_summary(self) -> str | None:
+        # The app delivers releaseNote with literal "\n" escape sequences;
+        # convert them to real newlines so the HA UI renders multi-line text.
+        note = self._device_data.get("otaReleaseNote")
+        if not isinstance(note, str):
+            return None
+        return note.replace("\\n", "\n")
+
     async def async_update(self) -> None:
         """Called by HA on the entity's polling cadence."""
         try:
@@ -68,7 +77,12 @@ class LymowFirmwareUpdate(CoordinatorEntity[LymowCoordinator], UpdateEntity):
             pass
 
     async def async_install(self, version: str | None, backup: bool, **kwargs: Any) -> None:
-        object_key = self._device_data.get("otaObjectKey") or version
-        if not object_key:
+        # create-ota-job's objectKey query param is prefix + latestVersion. The
+        # prefix is empty in the captured response, so this reduces to the
+        # version string. Caller can also pass an explicit `version`.
+        prefix = self._device_data.get("otaPrefix") or ""
+        latest = self._device_data.get("latestVersion")
+        target = version or (f"{prefix}{latest}" if latest else None)
+        if not target:
             return
-        await self.coordinator.async_install_firmware_update(self._thing_name, object_key)
+        await self.coordinator.async_install_firmware_update(self._thing_name, target)

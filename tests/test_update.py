@@ -74,25 +74,58 @@ async def test_async_update_swallows_errors() -> None:
     await e.async_update()  # must not raise
 
 
-async def test_async_install_uses_object_key_from_data() -> None:
-    coord = _make_coord({"softwareVersion": "12.0.0.125", "otaObjectKey": "firmware/x.bin"})
+async def test_async_install_uses_prefix_plus_latest_version() -> None:
+    coord = _make_coord(
+        {"softwareVersion": "v2.1.43", "latestVersion": "v2.1.48_20260518", "otaPrefix": ""}
+    )
     e = LymowFirmwareUpdate(coord, DEVICE)
     await e.async_install(version=None, backup=False)
-    coord.async_install_firmware_update.assert_awaited_once_with(THING, "firmware/x.bin")
+    coord.async_install_firmware_update.assert_awaited_once_with(THING, "v2.1.48_20260518")
+
+
+async def test_async_install_concatenates_non_empty_prefix() -> None:
+    coord = _make_coord(
+        {
+            "softwareVersion": "v2.1.43",
+            "latestVersion": "v2.1.48",
+            "otaPrefix": "firmware/",
+        }
+    )
+    e = LymowFirmwareUpdate(coord, DEVICE)
+    await e.async_install(version=None, backup=False)
+    coord.async_install_firmware_update.assert_awaited_once_with(THING, "firmware/v2.1.48")
 
 
 async def test_async_install_falls_back_to_version_arg() -> None:
-    coord = _make_coord({"softwareVersion": "12.0.0.125"})
+    coord = _make_coord({"softwareVersion": "v2.1.43"})
     e = LymowFirmwareUpdate(coord, DEVICE)
-    await e.async_install(version="firmware/12.0.0.130.bin", backup=False)
-    coord.async_install_firmware_update.assert_awaited_once_with(THING, "firmware/12.0.0.130.bin")
+    await e.async_install(version="explicit-target", backup=False)
+    coord.async_install_firmware_update.assert_awaited_once_with(THING, "explicit-target")
 
 
-async def test_async_install_noop_when_no_object_key() -> None:
-    coord = _make_coord({"softwareVersion": "12.0.0.125"})
+async def test_async_install_noop_when_no_target() -> None:
+    coord = _make_coord({"softwareVersion": "v2.1.43"})
     e = LymowFirmwareUpdate(coord, DEVICE)
     await e.async_install(version=None, backup=False)
     coord.async_install_firmware_update.assert_not_awaited()
+
+
+def test_release_summary_converts_escaped_newlines() -> None:
+    coord = _make_coord({"otaReleaseNote": "first line\\nsecond line\\nthird"})
+    e = LymowFirmwareUpdate(coord, DEVICE)
+    assert e.release_summary == "first line\nsecond line\nthird"
+
+
+def test_release_summary_none_when_missing() -> None:
+    coord = _make_coord({})
+    e = LymowFirmwareUpdate(coord, DEVICE)
+    assert e.release_summary is None
+
+
+def test_release_summary_none_when_not_a_string() -> None:
+    coord = _make_coord({"otaReleaseNote": 123})
+    e = LymowFirmwareUpdate(coord, DEVICE)
+    assert e.release_summary is None
 
 
 async def test_async_setup_entry_creates_one_entity_per_device() -> None:
