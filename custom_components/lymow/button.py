@@ -10,9 +10,14 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     DOMAIN,
+    USER_CTRL_ABORT_OTA,
     USER_CTRL_CHARGING_STATION_RESET,
+    USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
+    USER_CTRL_COMPLETE_ZONE_PARTITION,
+    USER_CTRL_EXIT_REMOTE,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
+    USER_CTRL_RESTORE_FACTORY,
     USER_CTRL_SELF_CHECKING,
 )
 from .coordinator import LymowCoordinator
@@ -32,6 +37,11 @@ async def async_setup_entry(
                 SelfCheckButton(coordinator, device),
                 ForceReinitButton(coordinator, device),
                 ChargingStationResetButton(coordinator, device),
+                AbortOtaButton(coordinator, device),
+                CompleteZonePartitionButton(coordinator, device),
+                ExitRemoteControlButton(coordinator, device),
+                RestoreFactoryDefaultsButton(coordinator, device),
+                ClearAllZonesAndChannelsButton(coordinator, device),
             ]
         )
     if entities:
@@ -93,3 +103,61 @@ class ChargingStationResetButton(_UserCtrlButton):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Reset charging station", "mdi:home-lightning-bolt")
+
+
+class AbortOtaButton(_UserCtrlButton):
+    """Cancel an in-flight firmware install. Only meaningful while an OTA is running."""
+
+    _user_ctrl = USER_CTRL_ABORT_OTA
+    _key = "abort_ota"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Abort OTA", "mdi:close-octagon")
+
+
+class CompleteZonePartitionButton(_UserCtrlButton):
+    """Exit zone-recording mode after recording is done."""
+
+    _user_ctrl = USER_CTRL_COMPLETE_ZONE_PARTITION
+    _key = "complete_zone_partition"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Finish zone recording", "mdi:check-circle-outline")
+
+
+class ExitRemoteControlButton(_UserCtrlButton):
+    """Exit remote-control mode (BLE drive)."""
+
+    _user_ctrl = USER_CTRL_EXIT_REMOTE
+    _key = "exit_remote"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Exit remote control", "mdi:gamepad-variant-off")
+
+
+class RestoreFactoryDefaultsButton(_UserCtrlButton):
+    """Reset robot to factory defaults. **Destructive** — disabled by default.
+
+    Press wipes user-side settings and map. Re-pairing is required after.
+    """
+
+    _user_ctrl = USER_CTRL_RESTORE_FACTORY
+    _key = "restore_factory"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Factory reset", "mdi:restart-alert")
+
+
+class ClearAllZonesAndChannelsButton(_UserCtrlButton):
+    """Wipe every zone and channel from the robot's map. **Very destructive** — disabled by default."""
+
+    _user_ctrl = USER_CTRL_CLEAR_ALL_ZONES_CHANNELS
+    _key = "clear_all_zones_channels"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Clear all zones & channels", "mdi:delete-sweep")
