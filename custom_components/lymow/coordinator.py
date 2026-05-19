@@ -758,6 +758,35 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self.async_sync_map(thing_name, updated)
         return new_hash_id
 
+    async def async_pin_and_go(
+        self,
+        thing_name: str,
+        x: float,
+        y: float,
+        radius_m: float = 1.0,
+        cut_height_mm: int = 40,
+        name: str = "",
+    ) -> str:
+        """Drop a square go-zone of side ``2*radius_m`` around ``(x, y)`` and
+        immediately start mowing it. Returns the new zone's hashId.
+
+        Coordinates are in the robot's local ENU frame (same as
+        ``poseEastM`` / ``poseNorthM``). The new zone persists in the map
+        after the mow completes; the caller can delete it via
+        ``async_delete_zone`` if it's a one-shot.
+        """
+        if radius_m <= 0:
+            raise HomeAssistantError(f"Pin-and-go radius must be positive, got {radius_m}")
+        square = [
+            {"x": float(x) - radius_m, "y": float(y) - radius_m},
+            {"x": float(x) + radius_m, "y": float(y) - radius_m},
+            {"x": float(x) + radius_m, "y": float(y) + radius_m},
+            {"x": float(x) - radius_m, "y": float(y) + radius_m},
+        ]
+        new_hash_id = await self.async_add_zone(thing_name, square, name=name, cut_height_mm=cut_height_mm)
+        await self.async_start_zones(thing_name, [new_hash_id])
+        return new_hash_id
+
     async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
         """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""
         import copy

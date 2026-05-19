@@ -1673,3 +1673,49 @@ async def test_async_merge_zones_retries_on_hash_collision() -> None:
     with _patch("secrets.token_hex", side_effect=["alpha", "fresh001"]):
         new_id = await coord.async_merge_zones(THING, ["alpha", "beta"])
     assert new_id == "fresh001"
+
+
+# ---------------------------------------------------------------------------
+# async_pin_and_go (#43)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_pin_and_go_builds_square_and_starts_zone() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.async_add_zone = AsyncMock(return_value="newhash99")
+    coord.async_start_zones = AsyncMock()
+    new_id = await coord.async_pin_and_go(THING, 5.0, 3.0, radius_m=2.0, cut_height_mm=35, name="pin")
+    assert new_id == "newhash99"
+    expected_polygon = [
+        {"x": 3.0, "y": 1.0},
+        {"x": 7.0, "y": 1.0},
+        {"x": 7.0, "y": 5.0},
+        {"x": 3.0, "y": 5.0},
+    ]
+    coord.async_add_zone.assert_awaited_once_with(THING, expected_polygon, name="pin", cut_height_mm=35)
+    coord.async_start_zones.assert_awaited_once_with(THING, ["newhash99"])
+
+
+@pytest.mark.asyncio
+async def test_async_pin_and_go_default_radius_is_one_meter() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.async_add_zone = AsyncMock(return_value="hh")
+    coord.async_start_zones = AsyncMock()
+    await coord.async_pin_and_go(THING, 0.0, 0.0)
+    polygon = coord.async_add_zone.await_args.args[1]
+    xs = sorted({p["x"] for p in polygon})
+    ys = sorted({p["y"] for p in polygon})
+    assert xs == [-1.0, 1.0]
+    assert ys == [-1.0, 1.0]
+
+
+@pytest.mark.asyncio
+async def test_async_pin_and_go_rejects_non_positive_radius() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.async_add_zone = AsyncMock()
+    with pytest.raises(HomeAssistantError, match="positive"):
+        await coord.async_pin_and_go(THING, 0.0, 0.0, radius_m=0)
+    coord.async_add_zone.assert_not_awaited()
