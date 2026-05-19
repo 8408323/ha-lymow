@@ -466,6 +466,92 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 break
         await self.async_sync_map(thing_name, updated)
 
+    async def async_update_zone_polygon(self, thing_name: str, hash_id: str, polygon: list[dict]) -> None:
+        """Replace a go-zone's polygon with the caller-supplied vertices and SYNC_MAP.
+
+        ``polygon`` is a list of ``{"x": float, "y": float}`` points in the robot's
+        local ENU frame — the same shape the existing decoder produces. We don't
+        validate the polygon's geometry (self-intersection, winding order, etc.)
+        because the robot's behaviour with invalid input isn't documented; the
+        caller is responsible for sending well-formed shapes.
+
+        Marks ``modifyHashs`` so the robot knows which zone changed.
+        """
+        import copy
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            raise HomeAssistantError(
+                f"Polygon needs at least 3 vertices, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
+            )
+        for pt in polygon:
+            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
+                raise HomeAssistantError("Polygon vertices must be dicts with 'x' and 'y' keys")
+        updated = copy.deepcopy(map_data)
+        target = None
+        for z in updated.get("goZones", []):
+            if z.get("hashId") == hash_id:
+                target = z
+                break
+        if target is None:
+            raise HomeAssistantError(f"Zone {hash_id!r} not found in map")
+        target["polygon"] = [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon]
+        # Tell the robot which zone changed — same pattern used by delete_zone.
+        existing_modified = updated.get("modifyHashs") or []
+        if hash_id not in existing_modified:
+            updated["modifyHashs"] = [*existing_modified, hash_id]
+        await self.async_sync_map(thing_name, updated)
+
+    async def async_add_zone(
+        self,
+        thing_name: str,
+        polygon: list[dict],
+        name: str = "",
+        cut_height_mm: int = 40,
+    ) -> str:
+        """Create a brand-new go-zone with the given polygon and push the map.
+
+        Generates a fresh 8-char hex hashId (same format the robot uses) and
+        appends the new zone to the map's ``goZones``. Returns the new hashId
+        so a follow-up automation can target it (e.g. ``start_zone``).
+        """
+        import copy
+        import secrets
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            raise HomeAssistantError(
+                f"Polygon needs at least 3 vertices, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
+            )
+        for pt in polygon:
+            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
+                raise HomeAssistantError("Polygon vertices must be dicts with 'x' and 'y' keys")
+        new_hash_id = secrets.token_hex(4)
+        # Ensure we don't clash with an existing zone's hash (vanishingly unlikely
+        # but the cost of the check is one set lookup, so paranoia is cheap).
+        existing_ids = {z.get("hashId") for z in map_data.get("goZones", [])} | {
+            z.get("hashId") for z in map_data.get("nogoZones", [])
+        }
+        while new_hash_id in existing_ids:
+            new_hash_id = secrets.token_hex(4)
+        updated = copy.deepcopy(map_data)
+        new_zone = {
+            "hashId": new_hash_id,
+            "name": name,
+            "isEnabled": True,
+            "cutHeight": int(cut_height_mm),
+            "polygon": [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon],
+        }
+        updated.setdefault("goZones", []).append(new_zone)
+        existing_modified = updated.get("modifyHashs") or []
+        updated["modifyHashs"] = [*existing_modified, new_hash_id]
+        await self.async_sync_map(thing_name, updated)
+        return new_hash_id
+
     async def async_set_geofence_radius(self, thing_name: str, radius_m: int) -> None:
         """Update the radius of the first (and only observed) geofence circle.
 

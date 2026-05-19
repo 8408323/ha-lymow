@@ -34,6 +34,11 @@ _ATTR_ZONE_HASH_IDS = "zone_hash_ids"
 _SERVICE_QUERY_MAP = "query_map"
 _SERVICE_QUERY_SCHEDULES = "query_schedules"
 _SERVICE_START_VIDEO_SESSION = "start_video_session"
+_SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
+_SERVICE_ADD_ZONE = "add_zone"
+_ATTR_POLYGON = "polygon"
+_ATTR_NAME = "name"
+_ATTR_CUT_HEIGHT_MM = "cut_height_mm"
 
 # Read-only diagnostic queries: each publishes a bare userCtrl=<code> pbinput.
 # The robot's pboutput reply is handled by decode_pboutput; new field decoders
@@ -62,6 +67,30 @@ _START_ZONE_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_IDS): vol.All(cv.ensure_list, [cv.string]),
+    }
+)
+
+# A polygon vertex is {"x": float, "y": float} in the robot's local ENU frame.
+_POINT_SCHEMA = vol.Schema(
+    {
+        vol.Required("x"): vol.Coerce(float),
+        vol.Required("y"): vol.Coerce(float),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+_UPDATE_ZONE_POLYGON_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
+    }
+)
+_ADD_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
+        vol.Optional(_ATTR_NAME, default=""): cv.string,
+        vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
     }
 )
 
@@ -118,6 +147,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_query_schedules(entity._thing_name)
 
+    async def handle_update_zone_polygon(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
+        polygon: list[dict] = call.data[_ATTR_POLYGON]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_update_zone_polygon(entity._thing_name, hash_id, polygon)
+
+    async def handle_add_zone(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        polygon: list[dict] = call.data[_ATTR_POLYGON]
+        name: str = call.data[_ATTR_NAME]
+        cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        new_ids: dict[str, str] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            new_id = await coordinator.async_add_zone(entity._thing_name, polygon, name=name, cut_height_mm=cut_height)
+            new_ids[eid] = new_id
+        return {"hash_ids": new_ids}
+
     async def handle_start_video_session(call: ServiceCall) -> dict[str, Any]:
         """Open a Kinesis Video Streams viewer session for the first matched device.
 
@@ -158,6 +213,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             _make_query_handler(method_name),
             schema=_ENTITY_ID_SCHEMA,
         )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_UPDATE_ZONE_POLYGON, handle_update_zone_polygon, schema=_UPDATE_ZONE_POLYGON_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_ADD_ZONE,
+        handle_add_zone,
+        schema=_ADD_ZONE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     hass.services.async_register(
         DOMAIN,
         _SERVICE_START_VIDEO_SESSION,
