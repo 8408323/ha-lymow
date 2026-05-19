@@ -20,9 +20,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list[UpdateEntity] = [
-        LymowFirmwareUpdate(coordinator, device) for device in coordinator.devices
-    ]
+    entities: list[UpdateEntity] = [LymowFirmwareUpdate(coordinator, device) for device in coordinator.devices]
     if entities:
         async_add_entities(entities)
 

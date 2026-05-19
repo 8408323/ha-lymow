@@ -61,9 +61,7 @@ def test_in_progress_false_when_no_job_id() -> None:
 
 
 async def test_async_install_uses_prefix_plus_latest_version() -> None:
-    coord = _make_coord(
-        {"softwareVersion": "v2.1.43", "latestVersion": "v2.1.48_20260518", "otaPrefix": ""}
-    )
+    coord = _make_coord({"softwareVersion": "v2.1.43", "latestVersion": "v2.1.48_20260518", "otaPrefix": ""})
     e = LymowFirmwareUpdate(coord, DEVICE)
     await e.async_install(version=None, backup=False)
     coord.async_install_firmware_update.assert_awaited_once_with(THING, "v2.1.48_20260518")
