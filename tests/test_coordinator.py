@@ -988,6 +988,15 @@ async def test_backup_map_handles_non_list_response() -> None:
     assert "backupMapCount" not in result[THING]
 
 
+@pytest.mark.asyncio
+async def test_backup_map_skips_non_dict_entries() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = ["garbage", {"map_file": "a.pb", "backup_time": 100}]
+    result = await coord._async_update_data()
+    assert result[THING]["backupMapCount"] == 1
+    assert result[THING]["backupMapList"] == [{"file": "a.pb", "name": "", "backupTime": 100}]
+
+
 # ---------------------------------------------------------------------------
 # Device feature endpoints
 # ---------------------------------------------------------------------------
