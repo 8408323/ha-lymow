@@ -390,6 +390,9 @@ class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         if rad is None:
             return None
         try:
-            return round(math.degrees(float(rad)) % 360.0, 2)
+            # Don't round here — _attr_suggested_display_precision tells HA
+            # how many decimals to render; rounding at the source would
+            # double-truncate and disagree with long-term statistics.
+            return math.degrees(float(rad)) % 360.0
         except (TypeError, ValueError):
             return None

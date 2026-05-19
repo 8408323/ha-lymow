@@ -488,3 +488,27 @@ def test_pose_heading_sensor_unique_id_and_name() -> None:
     assert e._attr_unique_id == "mower-001_pose_heading"
     assert "Pose heading" in e._attr_name
     assert "Mower 1" in e._attr_name
+
+
+async def test_async_setup_entry_registers_pose_heading_sensor() -> None:
+    """One LymowPoseHeadingSensor should be registered per device."""
+    from unittest.mock import MagicMock
+
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowPoseHeadingSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    pose = [e for e in added if isinstance(e, LymowPoseHeadingSensor)]
+    assert len(pose) == 1
+    assert pose[0]._thing_name == THING
