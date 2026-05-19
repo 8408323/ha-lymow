@@ -220,7 +220,9 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    assert hass.services.async_register.call_count == 5
+    # 5 originals (delete_zone, start_zone, query_map, query_schedules,
+    # start_video_session) + 10 new read-only query services from #39.
+    assert hass.services.async_register.call_count == 15
 
 
 # ---------------------------------------------------------------------------
@@ -531,3 +533,73 @@ async def test_handle_start_video_session_raises_when_no_match() -> None:
     with pytest.raises(ServiceValidationError):
         await handlers2["start_video_session"](call)
     coord.async_start_video_session.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# query_* services (#39) — handler routing
+# ---------------------------------------------------------------------------
+
+
+_QUERY_SERVICE_METHODS = [
+    ("query_cleaning_info", "async_query_cleaning_info"),
+    ("query_cleaning_summary", "async_query_cleaning_summary"),
+    ("query_robot_config", "async_query_robot_config"),
+    ("query_path", "async_query_path"),
+    ("query_channels", "async_query_channels"),
+    ("query_run_time_config", "async_query_run_time_config"),
+    ("query_wifi_4g", "async_query_wifi_4g"),
+    ("query_net_detail", "async_query_net_detail"),
+    ("query_rtk_diagnostic_l1", "async_query_rtk_diagnostic_l1"),
+    ("query_rtk_diagnostic_l2", "async_query_rtk_diagnostic_l2"),
+]
+
+
+@pytest.mark.parametrize(("service_name", "method_name"), _QUERY_SERVICE_METHODS)
+async def test_query_service_calls_matching_coordinator_method(service_name: str, method_name: str) -> None:
+    from lymow.const import DOMAIN
+
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    setattr(coord, method_name, AsyncMock())
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    await handlers[service_name](_make_call(["lawn_mower.mower_1"]))
+    getattr(coord, method_name).assert_awaited_once_with(THING)
+
+
+async def test_query_service_unknown_entity_skips() -> None:
+    """Calling a query service with an unmatched entity_id is a silent no-op."""
+    from lymow.const import DOMAIN
+
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_query_robot_config = AsyncMock()
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+    await async_setup_entry(hass, entry, lambda entities: None)
+    await handlers["query_robot_config"](_make_call(["lawn_mower.unknown"]))
+    coord.async_query_robot_config.assert_not_awaited()
