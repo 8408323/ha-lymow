@@ -16,6 +16,11 @@ Robot MAC address: set LYMOW_BLE_MAC in scripts/.env (or pass as CLI arg):
 
 Example:
     LYMOW_BLE_MAC=AA:BB:11:CC:22:DD uv run python scripts/ble_drive_test.py
+
+IMPORTANT — close the Lymow app before running:
+    The robot accepts only one BLE connection at a time. If the phone app is open
+    and connected, the laptop's connect() call will time out. Force-close the app
+    (or disable Bluetooth on the phone) before running this script.
 """
 
 from __future__ import annotations
@@ -154,7 +159,7 @@ async def run(mac: str) -> None:
                 file=sys.stderr,
             )
         else:
-            print(f"ERROR: {exc}", file=sys.stderr)
+            print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)
         sys.exit(1)
 
 

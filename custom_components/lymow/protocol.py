@@ -756,10 +756,11 @@ def encode_ble_drive(linear: float, angular: float) -> bytes:
         linear:  Forward/backward velocity in [-0.5, +0.5].
                  +0.5 = full forward, -0.5 = full backward.
         angular: Left/right angular velocity in [-0.6, +0.6].
-                 +0.6 = full right turn, -0.6 = full left turn.
+                 +0.6 = full left turn (CCW), -0.6 = full right turn (CW).
+                 (Confirmed from ADB capture: right-joystick LEFT = +0.6.)
 
     Returns:
-        ASCII-encoded base64 bytes (34 bytes).  Send as the raw GATT value.
+        ASCII-encoded base64 bytes (24 bytes).  Send as the raw GATT value.
 
     Protocol (confirmed from HCI BTSnoop capture, 2025-05):
         Decoded 16-byte protobuf:
