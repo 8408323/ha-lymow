@@ -672,3 +672,87 @@ async def test_async_setup_entry_registers_clean_history_details_sensor() -> Non
     details = [e for e in added if isinstance(e, LymowCleanHistoryDetailsSensor)]
     assert len(details) == 1
     assert details[0]._thing_name == THING
+
+
+# ---------------------------------------------------------------------------
+# LymowBackupMapsSensor — count + full backup list as attribute
+# ---------------------------------------------------------------------------
+
+
+def test_backup_maps_sensor_native_value_is_count() -> None:
+    from lymow.sensor import LymowBackupMapsSensor
+
+    coord = _make_coord({"backupMapCount": 3})
+    e = LymowBackupMapsSensor(coord, DEVICE)
+    assert e.native_value == 3
+
+
+def test_backup_maps_sensor_native_value_none_when_missing() -> None:
+    from lymow.sensor import LymowBackupMapsSensor
+
+    coord = _make_coord({})
+    e = LymowBackupMapsSensor(coord, DEVICE)
+    assert e.native_value is None
+
+
+def test_backup_maps_sensor_attrs_include_list() -> None:
+    from lymow.sensor import LymowBackupMapsSensor
+
+    backups = [{"file": "a.pb", "backupTime": 200, "name": ""}]
+    coord = _make_coord({"backupMapList": backups})
+    e = LymowBackupMapsSensor(coord, DEVICE)
+    assert e.extra_state_attributes == {"backups": backups}
+
+
+def test_backup_maps_sensor_attrs_empty_when_no_list() -> None:
+    from lymow.sensor import LymowBackupMapsSensor
+
+    coord = _make_coord({})
+    e = LymowBackupMapsSensor(coord, DEVICE)
+    assert e.extra_state_attributes == {"backups": []}
+
+
+def test_backup_maps_sensor_unique_id_and_disabled_default() -> None:
+    from lymow.sensor import LymowBackupMapsSensor
+
+    coord = _make_coord({})
+    e = LymowBackupMapsSensor(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_backup_maps"
+    assert "Backup maps" in e._attr_name
+    assert e._attr_entity_registry_enabled_default is False
+
+
+def test_backup_map_latest_at_sensor_is_timestamp() -> None:
+    from datetime import datetime, timezone
+
+    from lymow.sensor import SensorDeviceClass
+
+    desc = next(s for s in SENSORS if s.key == "backup_map_latest_at")
+    assert desc.device_class == SensorDeviceClass.TIMESTAMP
+    assert desc.entity_registry_enabled_default is False
+    coord = _make_coord({"backupMapLatestAt": datetime(2026, 5, 14, 14, 23, tzinfo=timezone.utc)})
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == datetime(2026, 5, 14, 14, 23, tzinfo=timezone.utc)
+
+
+async def test_async_setup_entry_registers_backup_maps_sensor() -> None:
+    from unittest.mock import MagicMock
+
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowBackupMapsSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    backup = [e for e in added if isinstance(e, LymowBackupMapsSensor)]
+    assert len(backup) == 1
+    assert backup[0]._thing_name == THING

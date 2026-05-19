@@ -260,6 +260,49 @@ class TestGetBackupMapKey:
         assert result == "device_7890838300cd/map/new.pb"
 
 
+class TestGetBackupMapList:
+    async def test_returns_full_list_newest_first(self, client):
+        payload = {
+            "mapList": [
+                {"map_file": "a.pb", "name": "", "backup_time": 200},
+                {"map_file": "b.pb", "name": "", "backup_time": 100},
+            ]
+        }
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload=payload)
+            result = await client.get_backup_map_list("mower-001")
+        assert len(result) == 2
+        assert result[0]["map_file"] == "a.pb"
+        assert result[1]["backup_time"] == 100
+
+    async def test_returns_empty_list_when_missing(self, client):
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload={})
+            result = await client.get_backup_map_list("mower-001")
+        assert result == []
+
+    async def test_drops_non_dict_entries(self, client):
+        payload = {"mapList": [{"map_file": "a.pb"}, "garbage", None]}
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload=payload)
+            result = await client.get_backup_map_list("mower-001")
+        assert result == [{"map_file": "a.pb"}]
+
+    async def test_returns_empty_list_when_payload_not_dict(self, client):
+        """If the backend ever returns a bare list/string, we shouldn't crash."""
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload=[1, 2, 3])
+            result = await client.get_backup_map_list("mower-001")
+        assert result == []
+
+    async def test_returns_empty_list_when_map_list_not_list(self, client):
+        """`mapList` arriving as a string/dict shouldn't propagate as an AttributeError."""
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload={"mapList": "oops"})
+            result = await client.get_backup_map_list("mower-001")
+        assert result == []
+
+
 class TestStartVideoSession:
     async def test_sends_start_action(self, client):
         payload = {

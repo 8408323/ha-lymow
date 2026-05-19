@@ -39,6 +39,11 @@ from .protocol import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# /get-backup-map is fetched on a longer interval than the main coordinator poll
+# (default 30 s) because both backup-map sensors are disabled-by-default and
+# backups themselves are written infrequently.
+_BACKUP_MAP_REFRESH_INTERVAL = 300
+
 
 class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Coordinator that merges REST polling with live MQTT state.
@@ -67,6 +72,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._mqtt_state: dict[str, dict[str, Any]] = {}
         # Track work status per device to detect important transitions.
         self._prev_work_status: dict[str, int] = {}
+        # Cached backup-map snapshot per device: (fetched_at, fields).
+        self._backup_map_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -164,11 +171,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     feature_data = {}
                 history_fields = await self._fetch_last_clean_fields(thing)
                 static_fields = self._static_device_fields(device)
+                backup_fields = await self._fetch_backup_map_fields(thing)
                 merged = {
                     **static_fields,
                     **rest_data,
                     **feature_data,
                     **history_fields,
+                    **backup_fields,
                     **self._mqtt_state.get(thing, {}),
                 }
                 result[thing] = merged
@@ -283,6 +292,63 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             out["lastCleanErrorList"] = list(last["error_list"])
         if (mta := last.get("map_total_area")) is not None:
             out["lastCleanMapTotalAreaM2"] = mta
+        return out
+
+    async def _fetch_backup_map_fields(self, thing_name: str) -> dict[str, Any]:
+        """Summarise /get-backup-map for sensors.
+
+        Throttled to one call per ``_BACKUP_MAP_REFRESH_INTERVAL`` (5 min) — backups
+        are written infrequently and both consumer sensors are disabled by default,
+        so polling on every 30 s coordinator refresh would generate avoidable
+        backend load. The cached snapshot is replayed between refreshes.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        cached = self._backup_map_cache.get(thing_name)
+        now = datetime.now(tz=UTC)
+        if cached is not None:
+            fetched_at, fields = cached
+            if now - fetched_at < timedelta(seconds=_BACKUP_MAP_REFRESH_INTERVAL):
+                return fields
+
+        try:
+            entries = await self._client.get_backup_map_list(thing_name)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("get_backup_map_list failed for %s: %s", thing_name, err)
+            # Replay whatever we had — keeps sensors stable across transient errors.
+            return cached[1] if cached else {}
+        if not isinstance(entries, list):
+            return cached[1] if cached else {}
+        normalised: list[dict[str, Any]] = []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            # Prefer `map_file`, but fall back to legacy field names that
+            # api.get_backup_map_key already accepts — keeps the new sensor and
+            # the existing MQTT map-sync agreeing about what file each entry points at.
+            file_key = None
+            for candidate in ("map_file", "key", "backupMapUrl", "mapKey", "url"):
+                if candidate in entry and entry[candidate]:
+                    file_key = entry[candidate]
+                    break
+            normalised.append(
+                {
+                    "file": file_key,
+                    "name": entry.get("name") or "",
+                    "backupTime": entry.get("backup_time"),
+                }
+            )
+        out: dict[str, Any] = {
+            "backupMapCount": len(normalised),
+            "backupMapList": normalised,
+        }
+        # mapList is newest-first; use entry[0] for the latest timestamp.
+        if normalised and (ts := normalised[0].get("backupTime")) is not None:
+            try:
+                out["backupMapLatestAt"] = datetime.fromtimestamp(int(ts), tz=UTC)
+            except (TypeError, ValueError, OSError):
+                pass
+        self._backup_map_cache[thing_name] = (now, out)
         return out
 
     # ------------------------------------------------------------------
