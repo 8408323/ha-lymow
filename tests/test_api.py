@@ -17,6 +17,9 @@ GW_DEVICE_INFO = REGION_CONFIG[REGION]["api_device_info"]
 RE_LIST = re.compile(r"https://" + re.escape(GW_DEVICE_LIST) + r"\.execute-api\..+/prod/device-list-query")
 RE_INFO = re.compile(r"https://" + re.escape(GW_DEVICE_INFO) + r"\.execute-api\..+/prod/get-device-info")
 RE_FEATURE = re.compile(r"https://" + re.escape(GW_DEVICE_INFO) + r"\.execute-api\..+/prod/get-device-feature")
+RE_UPDATE_FEATURE = re.compile(
+    r"https://" + re.escape(GW_DEVICE_INFO) + r"\.execute-api\..+/prod/update-device-feature"
+)
 
 GW_KVS = REGION_CONFIG[REGION]["api_kvs"]
 RE_KVS_CMD = re.compile(r"https://" + re.escape(GW_KVS) + r"\.execute-api\..+/prod/kvs/cmd")
@@ -96,6 +99,62 @@ class TestGetDeviceFeature:
                 await client.get_device_feature("mower-001")
 
 
+class TestUpdateDeviceFeature:
+    async def test_sends_patch_with_fields(self, client):
+        with aioresponses() as m:
+            m.patch(RE_UPDATE_FEATURE, payload={"ok": True})
+            result = await client.update_device_feature(
+                "mower-001",
+                theftDetectionSwitch=True,
+                findRobotSwitch=False,
+            )
+
+            request = list(m.requests.values())[0][0]
+            sent_body = request.kwargs["json"]
+
+        assert result == {"ok": True}
+        assert sent_body == {
+            "deviceThingName": "mower-001",
+            "theftDetectionSwitch": True,
+            "findRobotSwitch": False,
+        }
+        assert request.kwargs["headers"]["Authorization"] == "test-access-token"
+
+    async def test_returns_empty_dict_on_non_json_response(self, client):
+        with aioresponses() as m:
+            m.patch(RE_UPDATE_FEATURE, body="", status=204, content_type="text/plain")
+            result = await client.update_device_feature("mower-001", theftLock=True)
+
+        assert result == {}
+
+    async def test_returns_empty_dict_on_malformed_json(self, client):
+        with aioresponses() as m:
+            m.patch(RE_UPDATE_FEATURE, body="not-json", status=200, content_type="text/plain")
+            result = await client.update_device_feature("mower-001", theftLock=True)
+
+        assert result == {}
+
+    async def test_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.patch(RE_UPDATE_FEATURE, status=400)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.update_device_feature("mower-001", theftLock=True)
+
+    async def test_explicit_thing_name_overrides_fields_key(self, client):
+        """A caller cannot poison the request by passing deviceThingName in **fields."""
+        with aioresponses() as m:
+            m.patch(RE_UPDATE_FEATURE, payload={})
+            await client.update_device_feature(
+                "mower-001",
+                deviceThingName="mower-evil",  # type: ignore[arg-type]
+                theftLock=True,
+            )
+            request = list(m.requests.values())[0][0]
+            sent_body = request.kwargs["json"]
+        assert sent_body["deviceThingName"] == "mower-001"
+        assert sent_body["theftLock"] is True
+
+
 RE_HISTORY = re.compile(
     r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-clean-history-collect"
 )
@@ -122,14 +181,32 @@ class TestGetCleanHistory:
 
 
 class TestGetBackupMapKey:
-    async def test_returns_key_when_present(self, client):
-        payload = {"mapList": [{"key": "maps/device_001/latest.pb"}]}
+    async def test_returns_map_file_from_real_response(self, client):
+        """Real response shape (captured 2026-05-19, eu-west-1):
+        {"mapList": [{"map_file": "...", "name": "", "backup_time": <epoch>}, ...]}.
+        Entries are newest-first.
+        """
+        payload = {
+            "mapList": [
+                {
+                    "map_file": "device_7890838300cd/map/map_20260514T142312Z.pb",
+                    "name": "",
+                    "backup_time": 1778768592,
+                },
+                {
+                    "map_file": "device_7890838300cd/map/map_20260514T110146Z.pb",
+                    "name": "",
+                    "backup_time": 1778756506,
+                },
+            ]
+        }
 
         with aioresponses() as m:
             m.get(RE_BACKUP_MAP, payload=payload)
             result = await client.get_backup_map_key("mower-001")
 
-        assert result == "maps/device_001/latest.pb"
+        # Newest entry (entry[0]) is returned
+        assert result == "device_7890838300cd/map/map_20260514T142312Z.pb"
 
     async def test_returns_none_when_list_empty(self, client):
         with aioresponses() as m:
@@ -146,6 +223,8 @@ class TestGetBackupMapKey:
         assert result is None
 
     async def test_falls_back_to_alternative_key_fields(self, client):
+        """If a future app version drops back to one of the older guesses, we
+        still recover the key."""
         payload = {"mapList": [{"backupMapUrl": "maps/device_001/backup.pb"}]}
 
         with aioresponses() as m:
@@ -162,6 +241,23 @@ class TestGetBackupMapKey:
             result = await client.get_backup_map_key("mower-001")
 
         assert result is None
+
+    async def test_map_file_wins_over_legacy_field(self, client):
+        """When both map_file and a legacy field are present, map_file is preferred."""
+        payload = {
+            "mapList": [
+                {
+                    "map_file": "device_7890838300cd/map/new.pb",
+                    "key": "legacy.pb",
+                }
+            ]
+        }
+
+        with aioresponses() as m:
+            m.get(RE_BACKUP_MAP, payload=payload)
+            result = await client.get_backup_map_key("mower-001")
+
+        assert result == "device_7890838300cd/map/new.pb"
 
 
 class TestStartVideoSession:

@@ -113,6 +113,26 @@ class LymowApiClient:
             resp.raise_for_status()
             return await resp.json(content_type=None)
 
+    async def update_device_feature(self, thing_name: str, **fields: Any) -> dict[str, Any]:
+        """PATCH /prod/update-device-feature with arbitrary feature fields.
+
+        Known fields: theftDetectionSwitch, theftLock, findRobotSwitch,
+        mobileNotificationSwitch, geoFence.
+
+        The explicit ``thing_name`` argument always wins — any
+        ``deviceThingName`` key passed via ``fields`` is silently dropped
+        so a caller can't accidentally PATCH a different device.
+        """
+        url = _api_url(self._region, "api_device_info", "/prod/update-device-feature")
+        body = {**{k: v for k, v in fields.items() if k != "deviceThingName"}, "deviceThingName": thing_name}
+        async with self._session.patch(url, headers=self._headers, json=body) as resp:
+            resp.raise_for_status()
+            try:
+                result = await resp.json(content_type=None)
+            except (aiohttp.ContentTypeError, ValueError):
+                return {}
+            return result if isinstance(result, dict) else {}
+
     async def start_video_session(self, thing_name: str) -> dict[str, Any]:
         """POST /prod/kvs/cmd with action="start".
 
@@ -144,8 +164,14 @@ class LymowApiClient:
     async def get_backup_map_key(self, thing_name: str) -> str | None:
         """Return the S3 object key for the most recent saved map, or None if none exists.
 
-        Response format: {"mapList": [{"key": "<s3-key>", ...}, ...]}
-        The list is empty when no map has been saved yet.
+        Real response (confirmed eu-west-1 capture 2026-05-19):
+            {"mapList": [
+                {"map_file": "device_<mac>/map/map_<ts>.pb",
+                 "name": "",
+                 "backup_time": 1778768592},
+                ...
+            ]}
+        Entries are returned newest-first; backup_time is a Unix epoch.
         """
         url = _api_url(self._region, "api_map", "/prod/get-backup-map")
         params = {"deviceThingName": thing_name}
@@ -155,9 +181,11 @@ class LymowApiClient:
         map_list = data.get("mapList") or []
         if not map_list:
             return None
-        # Most recent map is the last entry; try common key field names
-        entry = map_list[-1]
-        for field in ("key", "backupMapUrl", "mapKey", "url"):
+        # mapList is newest-first per the captured response — take entry[0].
+        # Older guesses (key/backupMapUrl/mapKey/url) are kept as fallbacks in
+        # case different regions or app versions use a different field name.
+        entry = map_list[0]
+        for field in ("map_file", "key", "backupMapUrl", "mapKey", "url"):
             if field in entry:
                 return entry[field]
         return None

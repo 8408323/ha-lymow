@@ -84,8 +84,10 @@ The path structure is identical across all regions — only the gateway ID diffe
 | Map | `3q1zxz98l2` | `bpath65iid` | `l2gobpcoqc` | `kdueg6qcwl` |
 | Push notifications | `mu0adv3yse` | `suk4e76xe5` | `inflizu44a` | `i1pbnu30si` |
 | WebSocket / misc | `eigc6a2ds9` | `6at3p6r6ce` | `19d2hfwavg` | `v2tsms5kll` |
-| (unknown) | `frgai1jfwg` | `xuw7gtx113` | — | `t0da44vtxf` |
+| Live video (KVS) | `frgai1jfwg` | `xuw7gtx113` | — | `t0da44vtxf` |
 | (unknown) | `l3hazobjk0` | — | — | — |
+
+Confirmed `frgai1jfwg` (eu-west-1) is the **Kinesis Video Streams command** gateway via live capture (2026-05-19, app v3.0.6). Mappings for other regions are inferred and unverified.
 
 ### API Paths (same across all regions)
 
@@ -164,10 +166,72 @@ The path structure is identical across all regions — only the gateway ID diffe
 | GET | `<ota-job>/prod/create-ota-job?deviceThingName=<thing>&objectKey=<version>` | Trigger OTA update |
 | GET | `<ota-job>/prod/get-ota-job-summary?deviceThingName=<thing>&jobId=<id>` | Poll OTA job status |
 
+**check-update response** (confirmed eu-west-1 capture 2026-05-19):
+```json
+{
+  "latestVersion": "v2.1.48_20260518",
+  "prefix": "",
+  "releaseNote": "Optimized camera exposure...\\nFixed positioning drift..."
+}
+```
+`prefix` was empty in the captured call; `objectKey` for `create-ota-job` is assumed to be `prefix + latestVersion` (still untested live since an upgrade install would interrupt mowing).
+
+**Update device feature** (`device-info` gateway):
+| Method | Path | Description |
+|--------|------|-------------|
+| PATCH | `/prod/update-device-feature` | Set theft / find-robot / mobile-notification / theft-lock |
+
+Request body (confirmed): `{"deviceThingName": "device_<mac>", "<fieldName>": <value>}` — a single feature field per call. Response returns the full feature state (geoFence, theftDetectionSwitch, mobileNotificationSwitch, theftLock, findRobotSwitch, utcTime).
+
+`mobileNotificationSwitch` is an integer, **not a boolean** — observed values are `0` (off) and `2` (on); the wire format leaves room for a third state but only those two were seen.
+
+The Anti-theft sub-menu in the app is a **geofence editor** (centre coords + radius slider + Enable toggle); the Enable toggle is `theftDetectionSwitch`, and editing the radius is a separate PATCH that updates `geoFence[0].radius`.
+
+The Network Settings screen also issues a PATCH carrying `{"simInfo": {"code": 10000, "data": {...sim card status from oapi.eiotclub.com...}, "message": "Success"}}` — the data is **uploaded** to the Lymow API for caching; subsequent `get-device-feature` GETs do **not** return `simInfo`, so it's effectively write-only on the Lymow side. The `data` block includes (snake_case): `available_days`, `expire_date`, `expire_timestamp`, `iccid`, `imei`, `remain` (bytes), `remain_str` (human), `total`, `total_str`, `used`, `used_str`, `status_str`, `throttling` (bool), `usage_alert`, `card_status_str`.
+
+**Mowing history** (`map` gateway):
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/prod/get-clean-history-collect?deviceThingName=<thing>&page=0&pageSize=15` | Paginated mow history + cumulative aggregates |
+
+Response (confirmed):
+```json
+{
+  "clean_history": [
+    {"clean_area": 345, "clean_time": 60, "date": 1779184292,
+     "percent": 1, "used_battery": 49, "soc_version": "v2.1.48",
+     "start_type": 1, "status_times": [60,0,4,0,0,0],
+     "error_list": [{"code": 74, "percent": 0.67}],
+     "history_file": "device_<mac>/clean_history/<date>/<ts>.history",
+     "hash_id": "<8 hex>"},
+    ...
+  ],
+  "page": 0,
+  "has_more": false,
+  "total_records": 14,
+  "clean_summary": {"total_clean_time": 829, "total_clean_area": 4243}
+}
+```
+`date` is a Unix epoch (seconds). `percent` is 0..1 (float). Pages are zero-indexed.
+
 **Map**:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/prod/get-backup-map?deviceThingName=<thing>` | Retrieve saved mowing map |
+
+**Live video (Kinesis Video Streams + WebRTC)** (`kvs` gateway):
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/prod/kvs/cmd` body `{"deviceThingName": "...", "action": "start"}` | Start a viewer session — returns temporary AWS credentials + KVS channelARN |
+
+Flow (confirmed live capture):
+1. POST `frgai1jfwg.execute-api.<region>.amazonaws.com/prod/kvs/cmd` → returns `{credentials: {accessKeyId, secretAccessKey, sessionToken, expiration}, channelARN, region, deviceThingName}` (creds expire after ~15 min)
+2. POST `kinesisvideo.<region>.amazonaws.com/getSignalingChannelEndpoint` with `{ChannelARN, SingleMasterChannelEndpointConfiguration: {Protocols: ["WSS", "HTTPS"], Role: "VIEWER"}}` → returns HTTPS + WSS endpoint URLs
+3. POST `<https-endpoint>/v1/get-ice-server-config` → returns TURN servers for NAT traversal
+4. WebSocket connect to `<wss-endpoint>?<SigV4 query>` with `X-Amz-ChannelARN`, `X-Amz-ClientId=<deviceModel>_<os>_<deviceUuid>_userId_<cognitoSub>`, `X-Amz-Expires=299` → signaling channel for SDP / ICE exchange
+5. Actual video bytes flow P2P over WebRTC (UDP/TURN) — opaque to mitmproxy
+
+`channelARN` format: `arn:aws:kinesisvideo:<region>:<accountId>:channel/<deviceThingName>_stream_channel/<timestamp>`. The same AWS account (`863518414241`) was observed in eu-west-1.
 
 **Push Notifications**:
 | Method | Path | Description |
@@ -196,7 +260,25 @@ The path structure is identical across all regions — only the gateway ID diffe
 
 **Device thing name format:** `device_<mac_without_colons>` (e.g. `device_7890838300cd`)
 
-MQTT topics and message payloads not yet decoded — need capture of start/stop/park commands.
+**Topics observed** (confirmed live capture 2026-05-19):
+- Incoming: `/device/<thing>/pboutput` — robot state (heartbeat every ~60s, larger payloads on map/zone responses up to ~35 KB)
+- Outgoing: `/device/<thing>/pbinput` — commands + queries
+- Notifications: `/device/<thing>/notify-app` — online/offline JSON
+
+**RTK diagnostic fields** (read-only, from `pboutput` field 6; rendered live in the app's RTK Diagnostic screen):
+- `rtkStatus` — 0 Not ready / 1 Float fix / 2 Fixed / 3 RTK fixed
+- `rtkSatellites` — total GNSS satellite count (observed: 27)
+- L1 / L2 / L5 per-band counts and SNR — sub-fields not yet decoded but present in pboutput
+- Location precision in metres (observed: 0.010m, i.e. sub-cm)
+- Base station status (Online/Offline)
+- Data error rate (%)
+
+**Payload envelope** (both directions): `{"message": "<base64 protobuf>"}`. See `custom_components/lymow/protocol.py` for the field-level schema.
+
+**Captured-but-not-fully-identified pbinput at app startup**:
+- Field `9` (length-delimited, observed value `58 01`) — sent at app startup alongside the device-registration string (e.g. `ONEPLUSA5010_Android_<uuid>`). Purpose still unknown.
+
+The `userCtrl=52` (`USER_CTRL_QUERY_WIFI_4G`) seen at startup is already in `const.py`; the v3.0.6 app uses it to populate the Wi-Fi / 4G signal sub-screen.
 
 ---
 
@@ -233,7 +315,17 @@ Entities (after MQTT)
 
 ## Open Questions
 - User Pool ID for `us-east-2` (not yet extracted from APK)
-- MQTT topic names and message payloads for mower commands (start/stop/park) and battery/activity state
 - Token refresh flow (RefreshToken grant — AccessToken expires after 24h)
-- Purpose of unknown API gateways (`frgai1jfwg`, `l3hazobjk0`, `xuw7gtx113`, `t0da44vtxf`)
+- Purpose of unknown API gateways (`l3hazobjk0` (eu-west-1), `xuw7gtx113` (us-east-2 KVS?), `t0da44vtxf` (ap-east-1 KVS?))
 - `cleanSchedules` field format (always empty string in captured traffic — likely populated when schedules are configured)
+- The `create-ota-job` request body — `objectKey` value is assumed `prefix + latestVersion` but untested live
+- Field `9` purpose in pbinput at startup (observed value `58 01`, alongside device-registration string)
+- Device Settings toggles (Vehicle, Rainy, Charging mode, Return-to-base mode) — UI toggle does not appear to fire a backend request synchronously; they may be batched on screen exit or stored via a different transport
+
+## Resolved (live-captured 2026-05-19, app v3.0.6, eu-west-1)
+- `update-device-feature` PATCH body shape ✓
+- `check-update` response shape ✓ (`latestVersion` + `prefix` + `releaseNote`)
+- `get-clean-history-collect` response shape ✓ (snake_case fields, Unix epoch date, `clean_summary` aggregates, pagination)
+- `get-device-info` matches the documented shape ✓
+- MQTT topics confirmed: `/device/<thing>/pboutput`, `/device/<thing>/pbinput`, `/device/<thing>/notify-app`
+- `frgai1jfwg` gateway is Kinesis Video command endpoint ✓
