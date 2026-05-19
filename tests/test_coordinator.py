@@ -701,6 +701,18 @@ async def test_async_add_zone_rejects_too_few_vertices() -> None:
         await coord.async_add_zone(THING, [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
 
 
+@pytest.mark.asyncio
+async def test_async_add_zone_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_DATA}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_add_zone(
+            THING, [{"x": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}]
+        )
+
+
 # ---------------------------------------------------------------------------
 # Zone update commands — async_update_zone_enabled
 # ---------------------------------------------------------------------------
