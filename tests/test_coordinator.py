@@ -717,9 +717,7 @@ async def test_fetch_last_clean_ignores_dict_without_clean_history_key() -> None
 @pytest.mark.asyncio
 async def test_fetch_last_clean_handles_bad_epoch() -> None:
     coord, _, api = _make_coordinator()
-    api.get_clean_history.return_value = {
-        "clean_history": [{"clean_area": 10, "clean_time": 60, "date": "not-an-int"}]
-    }
+    api.get_clean_history.return_value = {"clean_history": [{"clean_area": 10, "clean_time": 60, "date": "not-an-int"}]}
     result = await coord._async_update_data()
     # Other fields still extracted; bad date silently dropped
     assert result[THING]["lastCleanAreaM2"] == 10
