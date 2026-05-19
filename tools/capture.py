@@ -184,7 +184,9 @@ class LymowCapture:
                 _write(f"\n[{_ts()}] MQTT {arrow} {topic} ({len(body)}B)\n{_pretty_mqtt_payload(body)}")
                 return
             ctrl = msg.content[0] >> 4 if msg.content else 0
-            ctrl_name = {1: "CONNECT", 2: "CONNACK", 8: "SUB", 9: "SUBACK", 12: "PINGREQ", 13: "PINGRESP"}.get(ctrl, f"type{ctrl}")
+            ctrl_name = {1: "CONNECT", 2: "CONNACK", 8: "SUB", 9: "SUBACK", 12: "PINGREQ", 13: "PINGRESP"}.get(
+                ctrl, f"type{ctrl}"
+            )
             if ctrl_name not in ("PINGREQ", "PINGRESP"):
                 arrow = "→" if msg.from_client else "←"
                 _write(f"[{_ts()}] MQTT {arrow} {ctrl_name} ({len(msg.content)}B)")

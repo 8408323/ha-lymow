@@ -1167,8 +1167,6 @@ async def test_query_helpers_publish_correct_userctrl(method_name: str, expected
     assert by_field[5] == expected_code
 
 
-
-
 # ---------------------------------------------------------------------------
 # RTK auto-pause guard
 # ---------------------------------------------------------------------------
