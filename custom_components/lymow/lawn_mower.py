@@ -37,9 +37,13 @@ _SERVICE_START_VIDEO_SESSION = "start_video_session"
 _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
 _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_MERGE_ZONES = "merge_zones"
+_SERVICE_SPLIT_ZONE = "split_zone"
 _ATTR_POLYGON = "polygon"
 _ATTR_NAME = "name"
+_ATTR_NAMES = "names"
 _ATTR_CUT_HEIGHT_MM = "cut_height_mm"
+_ATTR_CUT_P1 = "cut_p1"
+_ATTR_CUT_P2 = "cut_p2"
 
 # Read-only diagnostic queries: each publishes a bare userCtrl=<code> pbinput.
 # The robot's pboutput reply is handled by decode_pboutput; new field decoders
@@ -76,6 +80,22 @@ _MERGE_ZONES_SCHEMA = vol.Schema(
         vol.Required(_ATTR_ZONE_HASH_IDS): vol.All(cv.ensure_list, [cv.string], vol.Length(min=2)),
         vol.Optional(_ATTR_NAME, default=""): cv.string,
         vol.Optional(_ATTR_CUT_HEIGHT_MM): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+_POINT_SCHEMA = vol.Schema(
+    {
+        vol.Required("x"): vol.Coerce(float),
+        vol.Required("y"): vol.Coerce(float),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+_SPLIT_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Required(_ATTR_CUT_P1): _POINT_SCHEMA,
+        vol.Required(_ATTR_CUT_P2): _POINT_SCHEMA,
+        vol.Optional(_ATTR_NAMES, default=["", ""]): vol.All(cv.ensure_list, [cv.string], vol.Length(min=2, max=2)),
     }
 )
 
@@ -199,6 +219,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             new_ids[eid] = new_id
         return {"hash_ids": new_ids}
 
+    async def handle_split_zone(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
+        cut_p1: dict[str, float] = call.data[_ATTR_CUT_P1]
+        cut_p2: dict[str, float] = call.data[_ATTR_CUT_P2]
+        names: list[str] = call.data[_ATTR_NAMES]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        new_ids: dict[str, tuple[str, str]] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            left_id, right_id = await coordinator.async_split_zone(
+                entity._thing_name, hash_id, cut_p1, cut_p2, names=(names[0], names[1])
+            )
+            new_ids[eid] = (left_id, right_id)
+        return {"hash_ids": new_ids}
+
     async def handle_start_video_session(call: ServiceCall) -> dict[str, Any]:
         """Open a Kinesis Video Streams viewer session for the first matched device.
 
@@ -254,6 +292,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _SERVICE_MERGE_ZONES,
         handle_merge_zones,
         schema=_MERGE_ZONES_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_SPLIT_ZONE,
+        handle_split_zone,
+        schema=_SPLIT_ZONE_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
