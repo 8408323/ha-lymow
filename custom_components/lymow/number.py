@@ -23,6 +23,11 @@ async def async_setup_entry(
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
     added: set[tuple[str, str]] = set()
 
+    # One geofence-radius number per device (geoFence is a feature-level field).
+    radius_entities: list[NumberEntity] = [GeofenceRadiusNumber(coordinator, device) for device in coordinator.devices]
+    if radius_entities:
+        async_add_entities(radius_entities)
+
     @callback
     def _add_new_zones() -> None:
         new_entities: list[ZoneCutHeightNumber] = []
@@ -39,6 +44,52 @@ async def async_setup_entry(
 
     entry.async_on_unload(coordinator.async_add_listener(_add_new_zones))
     _add_new_zones()
+
+
+class GeofenceRadiusNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
+    """Radius (m) of the theft-detection geofence circle.
+
+    Backed by /update-device-feature → \"geoFence\": [{..., radius}]. Requires
+    the geofence centre to already be set from the Lymow app — we only know
+    how to mutate the radius, not set the initial coords.
+    """
+
+    _attr_device_class = NumberDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = UnitOfLength.METERS
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = 10
+    _attr_native_max_value = 500
+    _attr_native_step = 5
+    _attr_icon = "mdi:radius-outline"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_unique_id = f"{self._thing_name}_geofence_radius"
+        self._attr_name = f"{device_label} Geofence radius"
+
+    @property
+    def _geofence(self) -> dict[str, Any] | None:
+        gf = (self.coordinator.data or {}).get(self._thing_name, {}).get("geoFence")
+        if isinstance(gf, list) and gf and isinstance(gf[0], dict):
+            return gf[0]
+        return None
+
+    @property
+    def available(self) -> bool:
+        return self._geofence is not None
+
+    @property
+    def native_value(self) -> float | None:
+        gf = self._geofence
+        if not gf:
+            return None
+        val = gf.get("radius")
+        return float(val) if val is not None else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_geofence_radius(self._thing_name, int(value))
 
 
 class ZoneCutHeightNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):

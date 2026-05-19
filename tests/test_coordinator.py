@@ -814,3 +814,54 @@ async def test_async_start_video_session_delegates_to_client() -> None:
     result = await coord.async_start_video_session(THING)
     assert result == {"channelARN": "arn:test", "region": "eu-west-1"}
     api.start_video_session.assert_awaited_once_with(THING)
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_radius_resends_full_array() -> None:
+    """Mutating the radius must preserve the centre coords + name in the array."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Home", "latitude": 59.0, "longitude": 16.0, "radius": 150},
+            ]
+        }
+    }
+    publishes: list = []
+    coord.async_set_updated_data = publishes.append  # type: ignore[method-assign]
+
+    await coord.async_set_geofence_radius(THING, 200)
+
+    api.update_device_feature.assert_awaited_once()
+    args, kwargs = api.update_device_feature.call_args
+    assert args[0] == THING
+    sent = kwargs["geoFence"]
+    assert len(sent) == 1
+    assert sent[0]["radius"] == 200
+    assert sent[0]["latitude"] == 59.0
+    assert sent[0]["longitude"] == 16.0
+    assert sent[0]["name"] == "Home"
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_radius_raises_when_no_geofence_set() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError):
+        await coord.async_set_geofence_radius(THING, 200)
+    api.update_device_feature.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_radius_raises_when_first_entry_not_dict() -> None:
+    """If the API ever returns malformed entries the spread `{**first, ...}`
+    would raise TypeError. Surface a controlled HomeAssistantError instead."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {"geoFence": ["malformed-string-entry"]}}
+    with pytest.raises(HomeAssistantError, match="malformed"):
+        await coord.async_set_geofence_radius(THING, 200)
+    api.update_device_feature.assert_not_awaited()

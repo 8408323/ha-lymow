@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from lymow.number import ZoneCutHeightNumber, async_setup_entry
+from lymow.number import GeofenceRadiusNumber, ZoneCutHeightNumber, async_setup_entry
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -135,7 +135,7 @@ async def test_set_native_value_calls_coordinator() -> None:
 
 
 async def test_async_setup_entry_no_zones_initially() -> None:
-    """With no mapData, no entities added."""
+    """With no mapData, no ZONE entities — geofence-radius still adds once per device."""
     from lymow.const import DOMAIN
 
     coord = _make_coord({})
@@ -148,7 +148,8 @@ async def test_async_setup_entry_no_zones_initially() -> None:
 
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    assert added == []
+    zone_entities = [e for e in added if isinstance(e, ZoneCutHeightNumber)]
+    assert zone_entities == []
 
 
 async def test_async_setup_entry_creates_entities_for_zones() -> None:
@@ -165,8 +166,8 @@ async def test_async_setup_entry_creates_entities_for_zones() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 2
-    assert all(isinstance(e, ZoneCutHeightNumber) for e in added)
+    zone_entities = [e for e in added if isinstance(e, ZoneCutHeightNumber)]
+    assert len(zone_entities) == 2
 
 
 async def test_async_setup_entry_registers_listener() -> None:
@@ -213,11 +214,89 @@ async def test_async_setup_entry_listener_callback_adds_new_zones() -> None:
         added.extend(entities)
 
     await async_setup_entry(hass, entry, _add)
-    assert added == []  # no zones yet
+    zone_entities = [e for e in added if isinstance(e, ZoneCutHeightNumber)]
+    assert zone_entities == []  # no zones yet (geofence-radius doesn't count)
 
     # Simulate coordinator data update with zones
     coord.data = {THING: {"mapData": {"goZones": [_ZONE]}}}
     captured_callback()
 
-    assert len(added) == 1
-    assert isinstance(added[0], ZoneCutHeightNumber)
+    zone_entities = [e for e in added if isinstance(e, ZoneCutHeightNumber)]
+    assert len(zone_entities) == 1
+
+
+# ---------------------------------------------------------------------------
+# GeofenceRadiusNumber
+# ---------------------------------------------------------------------------
+
+
+def _make_radius_coord(geofence: list | None = None) -> MagicMock:
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {"geoFence": geofence} if geofence is not None else {}}
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    coord.async_set_geofence_radius = AsyncMock()
+    return coord
+
+
+def test_geofence_radius_unique_id_and_name() -> None:
+    coord = _make_radius_coord([{"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 150}])
+    e = GeofenceRadiusNumber(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_geofence_radius"
+    assert "Geofence radius" in e._attr_name
+
+
+def test_geofence_radius_native_value() -> None:
+    coord = _make_radius_coord([{"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 175}])
+    e = GeofenceRadiusNumber(coord, DEVICE)
+    assert e.native_value == 175.0
+
+
+def test_geofence_radius_native_value_none_when_no_geofence() -> None:
+    coord = _make_radius_coord(None)
+    e = GeofenceRadiusNumber(coord, DEVICE)
+    assert e.native_value is None
+    assert e.available is False
+
+
+def test_geofence_radius_native_value_none_when_empty_list() -> None:
+    coord = _make_radius_coord([])
+    e = GeofenceRadiusNumber(coord, DEVICE)
+    assert e.native_value is None
+    assert e.available is False
+
+
+def test_geofence_radius_native_value_none_when_radius_missing() -> None:
+    coord = _make_radius_coord([{"name": "", "latitude": 0.0, "longitude": 0.0}])
+    e = GeofenceRadiusNumber(coord, DEVICE)
+    assert e.native_value is None
+
+
+def test_geofence_radius_native_value_none_when_first_entry_not_dict() -> None:
+    coord = _make_radius_coord(["not-a-dict"])
+    e = GeofenceRadiusNumber(coord, DEVICE)
+    assert e.native_value is None
+
+
+async def test_geofence_radius_set_native_value() -> None:
+    coord = _make_radius_coord([{"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 150}])
+    e = GeofenceRadiusNumber(coord, DEVICE)
+    await e.async_set_native_value(200)
+    coord.async_set_geofence_radius.assert_awaited_once_with(THING, 200)
+
+
+async def test_async_setup_entry_registers_geofence_radius_per_device() -> None:
+    from lymow.const import DOMAIN
+
+    coord = _make_radius_coord([{"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 150}])
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    radius_entities = [e for e in added if isinstance(e, GeofenceRadiusNumber)]
+    assert len(radius_entities) == 1
+    assert radius_entities[0]._thing_name == THING
