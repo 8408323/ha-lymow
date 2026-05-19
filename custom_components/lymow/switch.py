@@ -30,6 +30,7 @@ async def async_setup_entry(
                 TheftDetectionSwitch(coordinator, device),
                 TheftLockSwitch(coordinator, device),
                 FindRobotSwitch(coordinator, device),
+                MobileNotificationSwitch(coordinator, device),
             ]
         )
     if feature_entities:
@@ -104,6 +105,32 @@ class FindRobotSwitch(_DeviceFeatureSwitch):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Find robot beep", "mdi:bell-ring")
+
+
+class MobileNotificationSwitch(_DeviceFeatureSwitch):
+    """Push notification toggle. Wire value is integer ``0`` (off) / ``2`` (on)
+    — not a Python bool — so the on/off methods PATCH the matching int."""
+
+    _feature_key = "mobileNotificationSwitch"
+    _OFF_VALUE = 0
+    _ON_VALUE = 2
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Mobile notifications", "mdi:bell-outline")
+
+    @property
+    def is_on(self) -> bool | None:
+        data = (self.coordinator.data or {}).get(self._thing_name) or {}
+        value = data.get(self._feature_key)
+        if value is None:
+            return None
+        return value == self._ON_VALUE
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: self._ON_VALUE})
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: self._OFF_VALUE})
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
