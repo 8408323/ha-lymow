@@ -127,14 +127,10 @@ class MobileNotificationSwitch(_DeviceFeatureSwitch):
         return value == self._ON_VALUE
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_device_feature(
-            self._thing_name, **{self._feature_key: self._ON_VALUE}
-        )
+        await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: self._ON_VALUE})
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        await self.coordinator.async_set_device_feature(
-            self._thing_name, **{self._feature_key: self._OFF_VALUE}
-        )
+        await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: self._OFF_VALUE})
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
