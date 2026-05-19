@@ -437,6 +437,9 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         ri = _decode_fields(robot_info_raw)
         ws_raw = _first(ri, 6)
         state["workStatus"] = _signed32(ws_raw) if ws_raw is not None else -1
+        robot_state_raw = _first(ri, 1)
+        if robot_state_raw is not None:
+            state["robotState"] = _signed32(robot_state_raw)
         battery = _first(ri, 2)
         if battery is not None:
             state["battery"] = _signed32(battery)
@@ -731,3 +734,43 @@ def delete_zone(map_data: dict, hash_id: str) -> dict:
     # Signal to the robot which zones changed (required for the robot to process the deletion)
     result["modifyHashs"] = [hash_id]
     return result
+
+
+# ---------------------------------------------------------------------------
+# BLE encoders — manual-drive commands sent directly over Bluetooth LE
+# (not via MQTT; written to the drive characteristic on the robot)
+# ---------------------------------------------------------------------------
+
+
+def encode_ble_drive(linear: float, angular: float) -> bytes:
+    """Encode a BLE manual-drive command payload.
+
+    Returns ASCII bytes (base64-encoded protobuf) suitable for direct write to
+    the BLE drive characteristic (UUID 12345678-1234-5678-1234-56789abcdef1,
+    ATT handle 0x0014) using Write Without Response (ATT Write Command, 0x52).
+
+    The robot samples this characteristic at ~10 Hz while the joystick is held.
+    Sending a zero payload (linear=0, angular=0) stops the robot.
+
+    Args:
+        linear:  Forward/backward velocity in [-0.5, +0.5].
+                 +0.5 = full forward, -0.5 = full backward.
+        angular: Left/right angular velocity in [-0.6, +0.6].
+                 +0.6 = full left turn (CCW), -0.6 = full right turn (CW).
+                 (Confirmed from ADB capture: right-joystick LEFT = +0.6.)
+
+    Returns:
+        ASCII-encoded base64 bytes (24 bytes).  Send as the raw GATT value.
+
+    Protocol (confirmed from HCI BTSnoop capture, 2025-05):
+        Decoded 16-byte protobuf:
+          field 2  (varint): PB_VERSION (49)
+          field 7  (varint): 2  (message sub-type, constant)
+          field 10 (bytes):  10-byte inner message:
+            field 1 (float32 LE): linear velocity
+            field 2 (float32 LE): angular velocity
+        Outer payload = base64(protobuf), written as ASCII to the characteristic.
+    """
+    inner = _field_f32(1, linear) + _field_f32(2, angular)
+    pb = _field_i32(2, PB_VERSION) + _field_i32(7, 2) + _field_bytes(10, inner)
+    return base64.b64encode(pb)

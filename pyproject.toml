@@ -23,6 +23,7 @@ dev = [
     "ruff>=0.15.13",
     "pytest-cov>=7.1.0",
     "voluptuous>=0.16.0",
+    "bleak>=3.0.2",
 ]
 
 [tool.ruff]

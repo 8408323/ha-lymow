@@ -181,3 +181,14 @@ ERROR_DESCRIPTIONS: dict[int, str] = {
 RTK_STATUS_NOT_READY = 0
 RTK_STATUS_FLOAT_FIX = 1  # ~40 cm precision
 RTK_STATUS_FIXED = 2  # ~2 cm precision
+
+# ---------------------------------------------------------------------------
+# BLE manual-drive characteristic (local, not via MQTT)
+# ---------------------------------------------------------------------------
+# UUID confirmed from GATT discovery (ReadByTypeRsp) in BTSnoop capture
+BLE_DRIVE_CHARACTERISTIC_UUID = "12345678-1234-5678-1234-56789abcdef1"
+# ATT handle of the drive characteristic value (handle from BLE connection)
+BLE_DRIVE_CHARACTERISTIC_HANDLE = 0x0014
+# Velocity ranges confirmed from ADB joystick swipe captures
+BLE_DRIVE_LINEAR_MAX = 0.5  # m/s (forward: +, backward: -)
+BLE_DRIVE_ANGULAR_MAX = 0.6  # rad/s (right: +, left: -)
