@@ -337,7 +337,7 @@ async def test_find_robot_switch_turn_on() -> None:
 
 
 async def test_async_setup_entry_creates_feature_switches() -> None:
-    """async_setup_entry should add 3 feature switches per device on first call."""
+    """async_setup_entry should add 4 feature switches per device on first call."""
     from lymow.const import DOMAIN
 
     coord = _make_feature_coord({"theftDetectionSwitch": True})
@@ -355,3 +355,71 @@ async def test_async_setup_entry_creates_feature_switches() -> None:
     assert "TheftDetectionSwitch" in feature_types
     assert "TheftLockSwitch" in feature_types
     assert "FindRobotSwitch" in feature_types
+    assert "MobileNotificationSwitch" in feature_types
+
+
+# ---------------------------------------------------------------------------
+# MobileNotificationSwitch (integer 0/2 instead of bool)
+# ---------------------------------------------------------------------------
+
+
+def test_mobile_notification_switch_unique_id() -> None:
+    from lymow.switch import MobileNotificationSwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 2})
+    e = MobileNotificationSwitch(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_mobileNotificationSwitch"
+    assert "Mobile notifications" in e._attr_name
+
+
+def test_mobile_notification_switch_is_on_when_value_is_two() -> None:
+    from lymow.switch import MobileNotificationSwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 2})
+    e = MobileNotificationSwitch(coord, DEVICE)
+    assert e.is_on is True
+
+
+def test_mobile_notification_switch_is_off_when_value_is_zero() -> None:
+    from lymow.switch import MobileNotificationSwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 0})
+    e = MobileNotificationSwitch(coord, DEVICE)
+    assert e.is_on is False
+
+
+def test_mobile_notification_switch_is_off_when_value_is_unknown_int() -> None:
+    """Anything that isn't the observed ON value (2) is treated as off, since
+    we haven't seen any other state on the wire."""
+    from lymow.switch import MobileNotificationSwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 1})
+    e = MobileNotificationSwitch(coord, DEVICE)
+    assert e.is_on is False
+
+
+def test_mobile_notification_switch_is_none_when_missing() -> None:
+    from lymow.switch import MobileNotificationSwitch
+
+    coord = _make_feature_coord({})
+    e = MobileNotificationSwitch(coord, DEVICE)
+    assert e.is_on is None
+
+
+async def test_mobile_notification_switch_turn_on_sends_int_two() -> None:
+    """The wire format expects the integer 2, NOT Python True."""
+    from lymow.switch import MobileNotificationSwitch
+
+    coord = _make_feature_coord({})
+    e = MobileNotificationSwitch(coord, DEVICE)
+    await e.async_turn_on()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=2)
+
+
+async def test_mobile_notification_switch_turn_off_sends_int_zero() -> None:
+    from lymow.switch import MobileNotificationSwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 2})
+    e = MobileNotificationSwitch(coord, DEVICE)
+    await e.async_turn_off()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=0)
