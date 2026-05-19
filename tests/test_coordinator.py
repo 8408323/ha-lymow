@@ -628,3 +628,75 @@ async def test_async_start_zones_publishes_command() -> None:
     assert mqtt.async_publish_command.await_count == 1
     thing, _ = mqtt.async_publish_command.call_args[0]
     assert thing == THING
+
+
+# ---------------------------------------------------------------------------
+# OTA firmware update
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_check_firmware_update_stashes_fields() -> None:
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {"softwareVersion": "12.0.0.125"}}
+    coord.async_update_listeners = MagicMock()
+    api.check_update = AsyncMock(
+        return_value={"latestVersion": "12.0.0.130", "objectKey": "firmware/12.0.0.130.bin"}
+    )
+
+    data = await coord.async_check_firmware_update(THING)
+
+    assert data["latestVersion"] == "12.0.0.130"
+    assert coord.data[THING]["latestVersion"] == "12.0.0.130"
+    assert coord.data[THING]["otaObjectKey"] == "firmware/12.0.0.130.bin"
+    coord.async_update_listeners.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_check_firmware_update_no_listener_when_no_data() -> None:
+    coord, _, api = _make_coordinator()
+    coord.data = None
+    coord.async_update_listeners = MagicMock()
+    api.check_update = AsyncMock(return_value={"latestVersion": "12.0.0.130"})
+
+    await coord.async_check_firmware_update(THING)
+
+    coord.async_update_listeners.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_install_firmware_update_returns_job_id() -> None:
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {}}
+    coord.async_update_listeners = MagicMock()
+    api.create_ota_job = AsyncMock(return_value={"jobId": "JOB-42"})
+
+    job_id = await coord.async_install_firmware_update(THING, "firmware/test.bin")
+
+    assert job_id == "JOB-42"
+    assert coord.data[THING]["otaJobId"] == "JOB-42"
+    api.create_ota_job.assert_awaited_once_with(THING, "firmware/test.bin")
+
+
+@pytest.mark.asyncio
+async def test_async_install_firmware_update_no_job_id_when_missing() -> None:
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {}}
+    coord.async_update_listeners = MagicMock()
+    api.create_ota_job = AsyncMock(return_value={})
+
+    job_id = await coord.async_install_firmware_update(THING, "firmware/test.bin")
+
+    assert job_id is None
+    assert coord.data[THING]["otaJobId"] is None
+
+
+@pytest.mark.asyncio
+async def test_async_get_ota_progress_returns_payload() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_ota_job_summary = AsyncMock(return_value={"status": "IN_PROGRESS"})
+
+    result = await coord.async_get_ota_progress(THING, "JOB-7")
+
+    assert result == {"status": "IN_PROGRESS"}
+    api.get_ota_job_summary.assert_awaited_once_with(THING, "JOB-7")

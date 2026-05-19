@@ -230,6 +230,32 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 break
         await self.async_sync_map(thing_name, updated)
 
+    async def async_check_firmware_update(self, thing_name: str) -> dict[str, Any]:
+        """Fetch firmware update metadata and stash latestVersion / objectKey into coordinator data."""
+        data = await self._client.check_update(thing_name)
+        if self.data and thing_name in self.data:
+            patch: dict[str, Any] = {}
+            for src, dst in (("latestVersion", "latestVersion"), ("objectKey", "otaObjectKey")):
+                if src in data:
+                    patch[dst] = data[src]
+            if patch:
+                self.data[thing_name].update(patch)
+                self.async_update_listeners()
+        return data
+
+    async def async_install_firmware_update(self, thing_name: str, object_key: str) -> str | None:
+        """Trigger an OTA install. Returns the created jobId (if returned)."""
+        result = await self._client.create_ota_job(thing_name, object_key)
+        job_id = result.get("jobId") if isinstance(result, dict) else None
+        if self.data and thing_name in self.data:
+            self.data[thing_name]["otaJobId"] = job_id
+            self.async_update_listeners()
+        return job_id
+
+    async def async_get_ota_progress(self, thing_name: str, job_id: str) -> dict[str, Any]:
+        """Poll the current OTA job status."""
+        return await self._client.get_ota_job_summary(thing_name, job_id)
+
     async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
         """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""
         import copy

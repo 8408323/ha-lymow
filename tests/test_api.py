@@ -18,6 +18,12 @@ RE_LIST = re.compile(r"https://" + re.escape(GW_DEVICE_LIST) + r"\.execute-api\.
 RE_INFO = re.compile(r"https://" + re.escape(GW_DEVICE_INFO) + r"\.execute-api\..+/prod/get-device-info")
 RE_FEATURE = re.compile(r"https://" + re.escape(GW_DEVICE_INFO) + r"\.execute-api\..+/prod/get-device-feature")
 
+GW_OTA_CHECK = REGION_CONFIG[REGION]["api_ota_check"]
+GW_OTA_JOB = REGION_CONFIG[REGION]["api_ota_job"]
+RE_OTA_CHECK = re.compile(r"https://" + re.escape(GW_OTA_CHECK) + r"\.execute-api\..+/prod/check-update")
+RE_OTA_CREATE = re.compile(r"https://" + re.escape(GW_OTA_JOB) + r"\.execute-api\..+/prod/create-ota-job")
+RE_OTA_SUMMARY = re.compile(r"https://" + re.escape(GW_OTA_JOB) + r"\.execute-api\..+/prod/get-ota-job-summary")
+
 
 @pytest.fixture
 async def client():
@@ -201,3 +207,42 @@ class TestSigV4Helpers:
         """download_map_bytes raises NotImplementedError when s3_bucket is None."""
         with pytest.raises(NotImplementedError, match="S3 bucket not yet confirmed"):
             await client.download_map_bytes("maps/test.pb")
+
+
+class TestOtaEndpoints:
+    async def test_check_update_returns_payload(self, client):
+        payload = {"latestVersion": "12.0.0.130", "objectKey": "firmware/12.0.0.130.bin"}
+        with aioresponses() as m:
+            m.get(RE_OTA_CHECK, payload=payload)
+            data = await client.check_update("mower-001")
+        assert data == payload
+
+    async def test_check_update_sends_thing_param(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_CHECK, payload={})
+            await client.check_update("mower-001")
+            request = list(m.requests.values())[0][0]
+        assert request.kwargs["params"]["deviceThingName"] == "mower-001"
+
+    async def test_create_ota_job_sends_object_key_and_returns_job_id(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_CREATE, payload={"jobId": "JOB-123"})
+            data = await client.create_ota_job("mower-001", "firmware/12.0.0.130.bin")
+            request = list(m.requests.values())[0][0]
+        assert data == {"jobId": "JOB-123"}
+        assert request.kwargs["params"]["objectKey"] == "firmware/12.0.0.130.bin"
+        assert request.kwargs["params"]["deviceThingName"] == "mower-001"
+
+    async def test_get_ota_job_summary_sends_job_id(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_SUMMARY, payload={"status": "IN_PROGRESS"})
+            data = await client.get_ota_job_summary("mower-001", "JOB-123")
+            request = list(m.requests.values())[0][0]
+        assert data == {"status": "IN_PROGRESS"}
+        assert request.kwargs["params"]["jobId"] == "JOB-123"
+
+    async def test_ota_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_CHECK, status=500)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.check_update("mower-001")
