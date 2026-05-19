@@ -305,11 +305,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_set_device_feature(self, thing_name: str, **fields: Any) -> None:
         """PATCH device feature settings (theft, find-robot, mobile-notification, etc.)
         and optimistically merge the change into coordinator data so entities
-        reflect the new state immediately."""
+        reflect the new state immediately.
+
+        Publishes a fresh top-level data snapshot via
+        ``async_set_updated_data`` rather than mutating ``self.data[...]``
+        in place, so listeners always see a consistent dict (and any
+        downstream code that holds a reference to the previous snapshot
+        won't observe shifted state mid-cycle).
+        """
         await self._client.update_device_feature(thing_name, **fields)
         if self.data and thing_name in self.data:
-            self.data[thing_name].update(fields)
-            self.async_update_listeners()
+            new_device = {**self.data[thing_name], **fields}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
 
     async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
         """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""

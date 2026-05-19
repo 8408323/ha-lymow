@@ -772,25 +772,36 @@ async def test_async_update_data_swallows_device_feature_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_set_device_feature_patches_and_updates_data() -> None:
+async def test_async_set_device_feature_patches_and_publishes_snapshot() -> None:
     coord, _, api = _make_coordinator()
-    coord.data = {THING: {"theftDetectionSwitch": False}}
-    coord.async_update_listeners = MagicMock()
+    original_data = {THING: {"theftDetectionSwitch": False, "battery": 80}}
+    coord.data = original_data
+    publishes: list[dict] = []
+    coord.async_set_updated_data = publishes.append  # type: ignore[method-assign]
 
     await coord.async_set_device_feature(THING, theftDetectionSwitch=True)
 
     api.update_device_feature.assert_awaited_once_with(THING, theftDetectionSwitch=True)
-    assert coord.data[THING]["theftDetectionSwitch"] is True
-    coord.async_update_listeners.assert_called_once()
+    assert len(publishes) == 1
+    snapshot = publishes[0]
+    # New value is in the published snapshot
+    assert snapshot[THING]["theftDetectionSwitch"] is True
+    # Unrelated keys preserved
+    assert snapshot[THING]["battery"] == 80
+    # Per-device dict is a NEW object (not the same reference) — proves no in-place mutation
+    assert snapshot[THING] is not original_data[THING]
+    # Original snapshot is untouched (immutability invariant)
+    assert original_data[THING]["theftDetectionSwitch"] is False
 
 
 @pytest.mark.asyncio
-async def test_async_set_device_feature_no_listener_when_no_data() -> None:
+async def test_async_set_device_feature_no_publish_when_no_data() -> None:
     coord, _, api = _make_coordinator()
     coord.data = None
-    coord.async_update_listeners = MagicMock()
+    publishes: list[dict] = []
+    coord.async_set_updated_data = publishes.append  # type: ignore[method-assign]
 
     await coord.async_set_device_feature(THING, theftLock=True)
 
     api.update_device_feature.assert_awaited_once_with(THING, theftLock=True)
-    coord.async_update_listeners.assert_not_called()
+    assert publishes == []

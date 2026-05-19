@@ -124,11 +124,32 @@ class TestUpdateDeviceFeature:
 
         assert result == {}
 
+    async def test_returns_empty_dict_on_malformed_json(self, client):
+        with aioresponses() as m:
+            m.patch(RE_UPDATE_FEATURE, body="not-json", status=200, content_type="text/plain")
+            result = await client.update_device_feature("mower-001", theftLock=True)
+
+        assert result == {}
+
     async def test_raises_on_http_error(self, client):
         with aioresponses() as m:
             m.patch(RE_UPDATE_FEATURE, status=400)
             with pytest.raises(aiohttp.ClientResponseError):
                 await client.update_device_feature("mower-001", theftLock=True)
+
+    async def test_explicit_thing_name_overrides_fields_key(self, client):
+        """A caller cannot poison the request by passing deviceThingName in **fields."""
+        with aioresponses() as m:
+            m.patch(RE_UPDATE_FEATURE, payload={})
+            await client.update_device_feature(
+                "mower-001",
+                deviceThingName="mower-evil",  # type: ignore[arg-type]
+                theftLock=True,
+            )
+            request = list(m.requests.values())[0][0]
+            sent_body = request.kwargs["json"]
+        assert sent_body["deviceThingName"] == "mower-001"
+        assert sent_body["theftLock"] is True
 
 
 RE_HISTORY = re.compile(

@@ -118,9 +118,13 @@ class LymowApiClient:
 
         Known fields: theftDetectionSwitch, theftLock, findRobotSwitch,
         mobileNotificationSwitch, geoFence.
+
+        The explicit ``thing_name`` argument always wins — any
+        ``deviceThingName`` key passed via ``fields`` is silently dropped
+        so a caller can't accidentally PATCH a different device.
         """
         url = _api_url(self._region, "api_device_info", "/prod/update-device-feature")
-        body = {"deviceThingName": thing_name, **fields}
+        body = {**{k: v for k, v in fields.items() if k != "deviceThingName"}, "deviceThingName": thing_name}
         async with self._session.patch(url, headers=self._headers, json=body) as resp:
             resp.raise_for_status()
             try:
