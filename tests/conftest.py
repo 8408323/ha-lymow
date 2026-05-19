@@ -33,6 +33,7 @@ _load_lymow_module("protocol")
 # that test_coordinator.py's setdefault stubs don't shadow the real package,
 # and load the HA platform modules so their tests can import them.
 try:
+    import homeassistant.components.binary_sensor  # noqa: F401
     import homeassistant.components.device_tracker  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
@@ -51,6 +52,7 @@ try:
     _load_lymow_module("sensor")
     _load_lymow_module("number")
     _load_lymow_module("switch")
+    _load_lymow_module("binary_sensor")
     _load_lymow_module("device_tracker")
     _load_lymow_module("lawn_mower")
 except ImportError:
@@ -323,6 +325,22 @@ except ImportError:
     _ha_dt.TrackerEntity = _TrackerEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.device_tracker", _ha_dt)
 
+    # ── homeassistant.components.binary_sensor ────────────────────────────────
+    _ha_bs = types.ModuleType("homeassistant.components.binary_sensor")
+
+    class _BinarySensorDeviceClass(str, enum.Enum):
+        BATTERY_CHARGING = "battery_charging"
+        TAMPER = "tamper"
+        CONNECTIVITY = "connectivity"
+        PROBLEM = "problem"
+
+    class _BinarySensorEntity:
+        pass
+
+    _ha_bs.BinarySensorDeviceClass = _BinarySensorDeviceClass  # type: ignore[attr-defined]
+    _ha_bs.BinarySensorEntity = _BinarySensorEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.binary_sensor", _ha_bs)
+
     # Now load the platform modules that depend on the above stubs.
     _load_lymow_module("coordinator")
     _load_lymow_module("config_flow")
@@ -330,4 +348,5 @@ except ImportError:
     _load_lymow_module("number")
     _load_lymow_module("switch")
     _load_lymow_module("device_tracker")
+    _load_lymow_module("binary_sensor")
     _load_lymow_module("lawn_mower")
