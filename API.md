@@ -275,11 +275,10 @@ Flow (confirmed live capture):
 
 **Payload envelope** (both directions): `{"message": "<base64 protobuf>"}`. See `custom_components/lymow/protocol.py` for the field-level schema.
 
-**Confirmed userCtrl codes from live app traffic** (in addition to the const.py list):
-- `userCtrl=52` — sent at app startup, purpose unknown (not in our const.py — likely a query introduced in v3.0.6)
-- Field `9` (length-delimited, observed value `58 01`) — also sent at startup; appears alongside the device-registration string (e.g. `ONEPLUSA5010_Android_<uuid>`)
+**Captured-but-not-fully-identified pbinput at app startup**:
+- Field `9` (length-delimited, observed value `58 01`) — sent at app startup alongside the device-registration string (e.g. `ONEPLUSA5010_Android_<uuid>`). Purpose still unknown.
 
-These are documented here as captured-but-unidentified for future investigation.
+The `userCtrl=52` (`USER_CTRL_QUERY_WIFI_4G`) seen at startup is already in `const.py`; the v3.0.6 app uses it to populate the Wi-Fi / 4G signal sub-screen.
 
 ---
 
@@ -320,7 +319,7 @@ Entities (after MQTT)
 - Purpose of unknown API gateways (`l3hazobjk0` (eu-west-1), `xuw7gtx113` (us-east-2 KVS?), `t0da44vtxf` (ap-east-1 KVS?))
 - `cleanSchedules` field format (always empty string in captured traffic — likely populated when schedules are configured)
 - The `create-ota-job` request body — `objectKey` value is assumed `prefix + latestVersion` but untested live
-- `userCtrl=52` purpose (sent at app startup)
+- Field `9` purpose in pbinput at startup (observed value `58 01`, alongside device-registration string)
 - Device Settings toggles (Vehicle, Rainy, Charging mode, Return-to-base mode) — UI toggle does not appear to fire a backend request synchronously; they may be batched on screen exit or stored via a different transport
 
 ## Resolved (live-captured 2026-05-19, app v3.0.6, eu-west-1)
