@@ -34,6 +34,7 @@ _load_lymow_module("protocol")
 # and load the HA platform modules so their tests can import them.
 try:
     import homeassistant.components.binary_sensor  # noqa: F401
+    import homeassistant.components.button  # noqa: F401
     import homeassistant.components.device_tracker  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
@@ -53,6 +54,7 @@ try:
     _load_lymow_module("number")
     _load_lymow_module("switch")
     _load_lymow_module("binary_sensor")
+    _load_lymow_module("button")
     _load_lymow_module("device_tracker")
     _load_lymow_module("lawn_mower")
 except ImportError:
@@ -349,6 +351,15 @@ except ImportError:
     _ha_bs.BinarySensorEntity = _BinarySensorEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.binary_sensor", _ha_bs)
 
+    # ── homeassistant.components.button ───────────────────────────────────────
+    _ha_button = types.ModuleType("homeassistant.components.button")
+
+    class _ButtonEntity:
+        pass
+
+    _ha_button.ButtonEntity = _ButtonEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.button", _ha_button)
+
     # Now load the platform modules that depend on the above stubs.
     _load_lymow_module("coordinator")
     _load_lymow_module("config_flow")
@@ -357,4 +368,5 @@ except ImportError:
     _load_lymow_module("switch")
     _load_lymow_module("device_tracker")
     _load_lymow_module("binary_sensor")
+    _load_lymow_module("button")
     _load_lymow_module("lawn_mower")

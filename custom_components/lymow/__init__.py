@@ -22,6 +22,7 @@ _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
 
 PLATFORMS = [
     Platform.BINARY_SENSOR,
+    Platform.BUTTON,
     Platform.DEVICE_TRACKER,
     Platform.LAWN_MOWER,
     Platform.NUMBER,
