@@ -3,7 +3,7 @@
 Usage:
     mitmdump -s tools/capture.py --listen-port 8080 --ssl-insecure
 
-The phone must be configured to use this machine (192.168.1.147:8080) as its
+The phone must be configured to use this machine (e.g. 192.168.1.100:8080) as its
 HTTP proxy, and the mitmproxy CA certificate must be installed on the phone.
 
 All requests/responses matching known Lymow hosts are written to

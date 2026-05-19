@@ -69,7 +69,7 @@ If the phone shows "unauthorized" — tap "Allow" on the phone's USB debugging p
 ### Environment details
 - usbipd-win: installed at `C:\Program Files\usbipd-win\`
 - Phone (OnePlus): USB bus ID **1-3** (confirm with `usbipd list` each session — bus IDs can change)
-- Phone WiFi IP: **192.168.1.45** (may vary — check router if stale)
+- Phone WiFi IP: **192.168.1.101** (example — check the router or phone settings for the real value)
 
 ### Run the capture script
 
@@ -125,9 +125,9 @@ Intercepts all HTTPS traffic from the app including REST API calls and the
 MQTT WebSocket upgrade. Requires installing the mitmproxy CA cert on the phone.
 
 ### Environment details
-- Proxy host (this machine, WSL2): **192.168.1.147:8888**
-- Phone WiFi IP: **192.168.1.45**
-- Phone proxy setting: Manual, host `192.168.1.147`, port `8888`
+- Proxy host (this machine, WSL2): **192.168.1.100:8888** (example — your dev machine's LAN IP)
+- Phone WiFi IP: **192.168.1.101** (example — your phone's LAN IP)
+- Phone proxy setting: Manual, host `192.168.1.100`, port `8888`
 - CA cert: install via Settings → Security → Install certificate → CA certificate
   (download from `http://mitm.it` while proxy is active)
 
@@ -144,7 +144,7 @@ Output is written to `tools/capture-lymow.txt` (gitignored) and printed live.
 
 1. Connect phone to same WiFi as this machine
 2. WiFi settings → long-press network → Modify → Advanced → Proxy → Manual
-   - Hostname: `192.168.1.147`
+   - Hostname: `192.168.1.100` (your dev machine's LAN IP)
    - Port: `8888`
 3. Open `http://mitm.it` in the phone browser → download Android cert
 4. Settings → Security → Install certificate → CA certificate → select downloaded file
