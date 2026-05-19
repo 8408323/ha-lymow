@@ -37,9 +37,13 @@ _SERVICE_START_VIDEO_SESSION = "start_video_session"
 _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
 _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_MERGE_ZONES = "merge_zones"
+_SERVICE_PIN_AND_GO = "pin_and_go"
 _ATTR_POLYGON = "polygon"
 _ATTR_NAME = "name"
 _ATTR_CUT_HEIGHT_MM = "cut_height_mm"
+_ATTR_X = "x"
+_ATTR_Y = "y"
+_ATTR_RADIUS_M = "radius_m"
 
 # Read-only diagnostic queries: each publishes a bare userCtrl=<code> pbinput.
 # The robot's pboutput reply is handled by decode_pboutput; new field decoders
@@ -100,6 +104,16 @@ _ADD_ZONE_SCHEMA = vol.Schema(
         vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
         vol.Optional(_ATTR_NAME, default=""): cv.string,
         vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+_PIN_AND_GO_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_X): vol.Coerce(float),
+        vol.Required(_ATTR_Y): vol.Coerce(float),
+        vol.Optional(_ATTR_RADIUS_M, default=1.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=20.0)),
+        vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+        vol.Optional(_ATTR_NAME, default=""): cv.string,
     }
 )
 
@@ -199,6 +213,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             new_ids[eid] = new_id
         return {"hash_ids": new_ids}
 
+    async def handle_pin_and_go(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        x: float = call.data[_ATTR_X]
+        y: float = call.data[_ATTR_Y]
+        radius_m: float = call.data[_ATTR_RADIUS_M]
+        cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
+        name: str = call.data[_ATTR_NAME]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        new_ids: dict[str, str] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            new_id = await coordinator.async_pin_and_go(
+                entity._thing_name, x, y, radius_m=radius_m, cut_height_mm=cut_height, name=name
+            )
+            new_ids[eid] = new_id
+        return {"hash_ids": new_ids}
+
     async def handle_start_video_session(call: ServiceCall) -> dict[str, Any]:
         """Open a Kinesis Video Streams viewer session for the first matched device.
 
@@ -254,6 +287,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _SERVICE_MERGE_ZONES,
         handle_merge_zones,
         schema=_MERGE_ZONES_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_PIN_AND_GO,
+        handle_pin_and_go,
+        schema=_PIN_AND_GO_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
