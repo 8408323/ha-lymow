@@ -1,10 +1,16 @@
-"""Tests for switch.py — ZoneEnabledSwitch and async_setup_entry."""
+"""Tests for switch.py — ZoneEnabledSwitch, device-feature switches, and async_setup_entry."""
 
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from lymow.switch import ZoneEnabledSwitch, async_setup_entry
+from lymow.switch import (
+    FindRobotSwitch,
+    TheftDetectionSwitch,
+    TheftLockSwitch,
+    ZoneEnabledSwitch,
+    async_setup_entry,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -158,7 +164,9 @@ async def test_async_setup_entry_no_zones_initially() -> None:
 
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    assert added == []
+    # No zones, but device-feature switches still register once per device.
+    zone_entities = [e for e in added if isinstance(e, ZoneEnabledSwitch)]
+    assert zone_entities == []
 
 
 async def test_async_setup_entry_creates_entities_for_zones() -> None:
@@ -175,8 +183,8 @@ async def test_async_setup_entry_creates_entities_for_zones() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 2
-    assert all(isinstance(e, ZoneEnabledSwitch) for e in added)
+    zone_entities = [e for e in added if isinstance(e, ZoneEnabledSwitch)]
+    assert len(zone_entities) == 2
 
 
 async def test_async_setup_entry_registers_listener() -> None:
@@ -217,13 +225,14 @@ async def test_async_setup_entry_listener_callback_adds_new_zones() -> None:
 
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    assert added == []
+    zone_entities = [e for e in added if isinstance(e, ZoneEnabledSwitch)]
+    assert zone_entities == []
 
     coord.data = {THING: {"mapData": {"goZones": [_ZONE_ON]}}}
     captured_callback()
 
-    assert len(added) == 1
-    assert isinstance(added[0], ZoneEnabledSwitch)
+    zone_entities = [e for e in added if isinstance(e, ZoneEnabledSwitch)]
+    assert len(zone_entities) == 1
 
 
 async def test_async_setup_entry_does_not_duplicate_zones() -> None:
@@ -249,8 +258,100 @@ async def test_async_setup_entry_does_not_duplicate_zones() -> None:
 
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
-    assert len(added) == 1
+    zone_entities = [e for e in added if isinstance(e, ZoneEnabledSwitch)]
+    assert len(zone_entities) == 1
 
     # Fire callback again with same zone — should not add again
     captured_callback()
-    assert len(added) == 1
+    zone_entities = [e for e in added if isinstance(e, ZoneEnabledSwitch)]
+    assert len(zone_entities) == 1
+
+
+# ---------------------------------------------------------------------------
+# Device-feature switches
+# ---------------------------------------------------------------------------
+
+
+def _make_feature_coord(feature_state: dict[str, object] | None = None) -> MagicMock:
+    coord = MagicMock()
+    coord.data = {THING: dict(feature_state or {})}
+    coord.devices = [DEVICE]
+    coord.async_set_device_feature = AsyncMock()
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    return coord
+
+
+def test_theft_detection_switch_unique_id_and_name() -> None:
+    coord = _make_feature_coord({"theftDetectionSwitch": True})
+    e = TheftDetectionSwitch(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_theftDetectionSwitch"
+    assert "Theft detection" in e._attr_name
+
+
+def test_theft_detection_switch_is_on_true() -> None:
+    coord = _make_feature_coord({"theftDetectionSwitch": True})
+    e = TheftDetectionSwitch(coord, DEVICE)
+    assert e.is_on is True
+
+
+def test_theft_detection_switch_is_on_false() -> None:
+    coord = _make_feature_coord({"theftDetectionSwitch": False})
+    e = TheftDetectionSwitch(coord, DEVICE)
+    assert e.is_on is False
+
+
+def test_theft_detection_switch_is_on_none_when_missing() -> None:
+    coord = _make_feature_coord({})
+    e = TheftDetectionSwitch(coord, DEVICE)
+    assert e.is_on is None
+
+
+async def test_theft_detection_switch_turn_on_calls_coordinator() -> None:
+    coord = _make_feature_coord({})
+    e = TheftDetectionSwitch(coord, DEVICE)
+    await e.async_turn_on()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, theftDetectionSwitch=True)
+
+
+async def test_theft_detection_switch_turn_off_calls_coordinator() -> None:
+    coord = _make_feature_coord({"theftDetectionSwitch": True})
+    e = TheftDetectionSwitch(coord, DEVICE)
+    await e.async_turn_off()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, theftDetectionSwitch=False)
+
+
+async def test_theft_lock_switch_turn_on() -> None:
+    coord = _make_feature_coord({})
+    e = TheftLockSwitch(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_theftLock"
+    await e.async_turn_on()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, theftLock=True)
+
+
+async def test_find_robot_switch_turn_on() -> None:
+    coord = _make_feature_coord({})
+    e = FindRobotSwitch(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_findRobotSwitch"
+    await e.async_turn_on()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, findRobotSwitch=True)
+
+
+async def test_async_setup_entry_creates_feature_switches() -> None:
+    """async_setup_entry should add 3 feature switches per device on first call."""
+    from lymow.const import DOMAIN
+
+    coord = _make_feature_coord({"theftDetectionSwitch": True})
+    coord.async_update_zone_enabled = AsyncMock()
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    feature_types = {type(e).__name__ for e in added}
+    assert "TheftDetectionSwitch" in feature_types
+    assert "TheftLockSwitch" in feature_types
+    assert "FindRobotSwitch" in feature_types

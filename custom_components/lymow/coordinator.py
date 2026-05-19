@@ -156,8 +156,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             for device in self.devices:
                 thing = device["deviceThingName"]
                 rest_data = await self._client.get_device_info(thing)
+                try:
+                    feature_data = await self._client.get_device_feature(thing)
+                except Exception as feat_err:  # noqa: BLE001
+                    _LOGGER.debug("get_device_feature failed for %s: %s", thing, feat_err)
+                    feature_data = {}
                 history_fields = await self._fetch_last_clean_fields(thing)
-                merged = {**rest_data, **history_fields, **self._mqtt_state.get(thing, {})}
+                merged = {
+                    **rest_data,
+                    **feature_data,
+                    **history_fields,
+                    **self._mqtt_state.get(thing, {}),
+                }
                 result[thing] = merged
             return result
         except Exception as err:
@@ -291,6 +301,22 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 z["cutHeight"] = mm
                 break
         await self.async_sync_map(thing_name, updated)
+
+    async def async_set_device_feature(self, thing_name: str, **fields: Any) -> None:
+        """PATCH device feature settings (theft, find-robot, mobile-notification, etc.)
+        and optimistically merge the change into coordinator data so entities
+        reflect the new state immediately.
+
+        Publishes a fresh top-level data snapshot via
+        ``async_set_updated_data`` rather than mutating ``self.data[...]``
+        in place, so listeners always see a consistent dict (and any
+        downstream code that holds a reference to the previous snapshot
+        won't observe shifted state mid-cycle).
+        """
+        await self._client.update_device_feature(thing_name, **fields)
+        if self.data and thing_name in self.data:
+            new_device = {**self.data[thing_name], **fields}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
 
     async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
         """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""
