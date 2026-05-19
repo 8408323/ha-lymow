@@ -999,3 +999,18 @@ async def test_async_set_geofence_radius_raises_when_first_entry_not_dict() -> N
     with pytest.raises(HomeAssistantError, match="malformed"):
         await coord.async_set_geofence_radius(THING, 200)
     api.update_device_feature.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_send_user_ctrl_publishes_command() -> None:
+    from lymow.const import USER_CTRL_LOCK
+    from lymow.protocol import _decode_fields
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_send_user_ctrl(THING, USER_CTRL_LOCK)
+
+    assert mqtt.async_publish_command.await_count == 1
+    thing, pb_bytes = mqtt.async_publish_command.call_args[0]
+    assert thing == THING
+    by_field = {fn: val for fn, _wt, val in _decode_fields(pb_bytes)}
+    assert by_field[5] == USER_CTRL_LOCK

@@ -294,6 +294,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return self.data.get(thing_name, {}).get("workStatus", -1)
         return -1
 
+    async def async_send_user_ctrl(self, thing_name: str, user_ctrl: int) -> None:
+        """Publish an arbitrary userCtrl command. Used by button entities."""
+        await self._mqtt.async_publish_command(thing_name, encode_userctrl(user_ctrl))
+
     async def async_start_mowing(self, thing_name: str) -> None:
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(USER_CTRL_CLEAN))
 
