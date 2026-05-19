@@ -231,11 +231,19 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self.async_sync_map(thing_name, updated)
 
     async def async_check_firmware_update(self, thing_name: str) -> dict[str, Any]:
-        """Fetch firmware update metadata and stash latestVersion / objectKey into coordinator data."""
+        """Fetch firmware update metadata and stash relevant fields into coordinator data.
+
+        Real eu-west-1 response (captured 2026-05-19):
+            {"latestVersion": "v2.1.48_20260518", "prefix": "", "releaseNote": "..."}
+        """
         data = await self._client.check_update(thing_name)
         if self.data and thing_name in self.data:
             patch: dict[str, Any] = {}
-            for src, dst in (("latestVersion", "latestVersion"), ("objectKey", "otaObjectKey")):
+            for src, dst in (
+                ("latestVersion", "latestVersion"),
+                ("prefix", "otaPrefix"),
+                ("releaseNote", "otaReleaseNote"),
+            ):
                 if src in data:
                     patch[dst] = data[src]
             if patch:
@@ -243,9 +251,14 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 self.async_update_listeners()
         return data
 
-    async def async_install_firmware_update(self, thing_name: str, object_key: str) -> str | None:
-        """Trigger an OTA install. Returns the created jobId (if returned)."""
-        result = await self._client.create_ota_job(thing_name, object_key)
+    async def async_install_firmware_update(self, thing_name: str, version_or_key: str) -> str | None:
+        """Trigger an OTA install. Returns the created jobId (if returned).
+
+        The argument is passed as the ?objectKey= query param to create-ota-job.
+        Most likely value: prefix + latestVersion (from check_update). When the
+        prefix is empty, that reduces to the version string itself.
+        """
+        result = await self._client.create_ota_job(thing_name, version_or_key)
         job_id = result.get("jobId") if isinstance(result, dict) else None
         if self.data and thing_name in self.data:
             self.data[thing_name]["otaJobId"] = job_id

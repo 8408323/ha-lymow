@@ -641,14 +641,19 @@ async def test_async_check_firmware_update_stashes_fields() -> None:
     coord.data = {THING: {"softwareVersion": "12.0.0.125"}}
     coord.async_update_listeners = MagicMock()
     api.check_update = AsyncMock(
-        return_value={"latestVersion": "12.0.0.130", "objectKey": "firmware/12.0.0.130.bin"}
+        return_value={
+            "latestVersion": "v2.1.48_20260518",
+            "prefix": "",
+            "releaseNote": "fixed something\\nfixed another",
+        }
     )
 
     data = await coord.async_check_firmware_update(THING)
 
-    assert data["latestVersion"] == "12.0.0.130"
-    assert coord.data[THING]["latestVersion"] == "12.0.0.130"
-    assert coord.data[THING]["otaObjectKey"] == "firmware/12.0.0.130.bin"
+    assert data["latestVersion"] == "v2.1.48_20260518"
+    assert coord.data[THING]["latestVersion"] == "v2.1.48_20260518"
+    assert coord.data[THING]["otaPrefix"] == ""
+    assert coord.data[THING]["otaReleaseNote"] == "fixed something\\nfixed another"
     coord.async_update_listeners.assert_called_once()
 
 
