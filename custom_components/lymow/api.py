@@ -126,8 +126,7 @@ class LymowApiClient:
         Credentials expire in ~15 minutes; callers must complete the
         WebRTC handshake within that window.
         """
-        gw = REGION_CONFIG[self._region].get("api_kvs")
-        if not gw:
+        if not REGION_CONFIG[self._region].get("api_kvs"):
             raise NotImplementedError(
                 f"Kinesis Video gateway not configured for region {self._region!r}"
             )

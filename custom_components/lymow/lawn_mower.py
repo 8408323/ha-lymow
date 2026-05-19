@@ -8,7 +8,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.components.lawn_mower import LawnMowerActivity, LawnMowerEntity, LawnMowerEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -128,7 +128,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _SERVICE_START_VIDEO_SESSION,
         handle_start_video_session,
         schema=_ENTITY_ID_SCHEMA,
-        supports_response=True,
+        supports_response=SupportsResponse.OPTIONAL,
     )
 
 
