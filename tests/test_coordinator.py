@@ -1477,3 +1477,199 @@ async def test_rtk_guard_resume_helper_publishes_resume_and_clears_flag() -> Non
     await coord._async_rtk_guard_resume(THING, rtk_val=3)
     assert coord._rtk_guard_active_pause[THING] is False
     assert mqtt.async_publish_command.await_count == 1
+
+
+# ---------------------------------------------------------------------------
+# async_merge_zones
+# ---------------------------------------------------------------------------
+
+
+_TWO_SQUARES = {
+    "goZones": [
+        {
+            "hashId": "alpha",
+            "cutHeight": 40,
+            "isEnabled": True,
+            "polygon": [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}, {"x": 2.0, "y": 2.0}, {"x": 0.0, "y": 2.0}],
+        },
+        {
+            "hashId": "beta",
+            "cutHeight": 50,
+            "isEnabled": True,
+            "polygon": [{"x": 5.0, "y": 0.0}, {"x": 7.0, "y": 0.0}, {"x": 7.0, "y": 2.0}, {"x": 5.0, "y": 2.0}],
+        },
+    ],
+    "nogoZones": [
+        {"hashId": "nogo-a", "parentZoneHashId": "alpha"},
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_replaces_inputs_with_combined_hull() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    new_id = await coord.async_merge_zones(THING, ["alpha", "beta"], name="combined")
+    # Original zones gone, new merged zone present.
+    ids_after = {z["hashId"] for z in captured["map"]["goZones"]}
+    assert "alpha" not in ids_after and "beta" not in ids_after
+    assert new_id in ids_after
+    merged = next(z for z in captured["map"]["goZones"] if z["hashId"] == new_id)
+    assert merged["name"] == "combined"
+    # Highest cutHeight wins (50 from beta).
+    assert merged["cutHeight"] == 50
+    # Convex hull of the two squares should be the bounding rectangle.
+    hull_set = {(p["x"], p["y"]) for p in merged["polygon"]}
+    assert hull_set == {(0.0, 0.0), (7.0, 0.0), (7.0, 2.0), (0.0, 2.0)}
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_cascade_deletes_child_nogo_zones() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    await coord.async_merge_zones(THING, ["alpha", "beta"])
+    # nogo-a belongs to alpha → deleted with it.
+    assert captured["map"]["nogoZones"] == []
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_marks_modified_hashes() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    new_id = await coord.async_merge_zones(THING, ["alpha", "beta"])
+    modify = captured["map"]["modifyHashs"]
+    assert "alpha" in modify and "beta" in modify and new_id in modify
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_respects_explicit_cut_height() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    new_id = await coord.async_merge_zones(THING, ["alpha", "beta"], cut_height_mm=30)
+    merged = next(z for z in captured["map"]["goZones"] if z["hashId"] == new_id)
+    assert merged["cutHeight"] == 30
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_raises_with_fewer_than_two_inputs() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _TWO_SQUARES}}
+    with pytest.raises(HomeAssistantError, match="at least 2"):
+        await coord.async_merge_zones(THING, ["alpha"])
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_raises_when_zone_missing() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _TWO_SQUARES}}
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await coord.async_merge_zones(THING, ["alpha", "missing"])
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_merge_zones(THING, ["alpha", "beta"])
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_raises_when_no_polygons() -> None:
+    """If every input zone has an empty polygon there's nothing to merge."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [
+                    {"hashId": "a", "polygon": []},
+                    {"hashId": "b", "polygon": []},
+                ],
+                "nogoZones": [],
+            }
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="None of the requested zones have a polygon"):
+        await coord.async_merge_zones(THING, ["a", "b"])
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_raises_when_geometry_fails() -> None:
+    """If the combined polygon vertices can't form a hull, surface the error
+    as HomeAssistantError instead of letting ValueError propagate."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [
+                    {"hashId": "a", "polygon": [{"x": 0.0, "y": 0.0}]},
+                    {"hashId": "b", "polygon": [{"x": 0.0, "y": 0.0}]},
+                ],
+                "nogoZones": [],
+            }
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="Could not merge zones"):
+        await coord.async_merge_zones(THING, ["a", "b"])
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_retries_on_hash_collision() -> None:
+    """Defensive collision-retry path on token_hex — exercised by forcing one collision."""
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
+
+    async def _noop(thing, map_data):
+        pass
+
+    coord.async_sync_map = _noop  # type: ignore[method-assign]
+
+    from unittest.mock import patch as _patch
+
+    with _patch("secrets.token_hex", side_effect=["alpha", "fresh001"]):
+        new_id = await coord.async_merge_zones(THING, ["alpha", "beta"])
+    assert new_id == "fresh001"
