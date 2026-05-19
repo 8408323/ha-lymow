@@ -113,6 +113,30 @@ class LymowApiClient:
             resp.raise_for_status()
             return await resp.json(content_type=None)
 
+    async def start_video_session(self, thing_name: str) -> dict[str, Any]:
+        """POST /prod/kvs/cmd with action="start".
+
+        Response:
+            {"credentials": {"accessKeyId", "secretAccessKey",
+                             "sessionToken", "expiration"},
+             "channelARN": "arn:aws:kinesisvideo:<region>:<acct>:channel/<thing>_stream_channel/<ts>",
+             "region": "<region>",
+             "deviceThingName": "<thing>"}
+
+        Credentials expire in ~15 minutes; callers must complete the
+        WebRTC handshake within that window.
+        """
+        gw = REGION_CONFIG[self._region].get("api_kvs")
+        if not gw:
+            raise NotImplementedError(
+                f"Kinesis Video gateway not configured for region {self._region!r}"
+            )
+        url = _api_url(self._region, "api_kvs", "/prod/kvs/cmd")
+        body = {"deviceThingName": thing_name, "action": "start"}
+        async with self._session.post(url, headers=self._headers, json=body) as resp:
+            resp.raise_for_status()
+            return await resp.json(content_type=None)
+
     async def get_clean_history(self, thing_name: str, page: int = 1, page_size: int = 10) -> Any:
         url = _api_url(self._region, "api_map", "/prod/get-clean-history-collect")
         params = {"deviceThingName": thing_name, "page": page, "pageSize": page_size}

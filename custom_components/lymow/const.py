@@ -24,6 +24,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "api_ota_check": "eigc6a2ds9",
         "api_map": "3q1zxz98l2",
         "api_user_account": "l3hazobjk0",
+        "api_kvs": "frgai1jfwg",  # confirmed from live capture 2026-05-19
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "us-east-2": {
@@ -36,6 +37,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "api_ota_check": "6at3p6r6ce",
         "api_map": "suk4e76xe5",
         "api_user_account": "6r8m5rxeth",
+        "api_kvs": "xuw7gtx113",  # per API.md table; unverified live
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "ap-southeast-2": {
@@ -48,6 +50,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "api_ota_check": "v7tlj1gnw7",
         "api_map": "2xipi98nw3",
         "api_user_account": "l2gobpcoqc",
+        "api_kvs": None,  # not present in API.md; unknown
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "ap-east-1": {
@@ -60,6 +63,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "api_ota_check": "kdueg6qcwl",
         "api_map": "m35t3px95i",
         "api_user_account": "1h2q9awtqd",
+        "api_kvs": "t0da44vtxf",  # per API.md table; unverified live
         "s3_bucket": None,  # not yet confirmed from capture
     },
 }

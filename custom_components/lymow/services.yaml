@@ -39,3 +39,12 @@ query_schedules:
   description: >
     Request schedule data from the robot (USER_CTRL_QUERY_SCHEDULES=20).
     Currently returns an empty result if no schedules are configured in the app.
+
+start_video_session:
+  name: Start video session
+  description: >
+    Request a Kinesis Video Streams WebRTC session for the robot's camera.
+    Returns the channelARN, temporary AWS credentials, and region. Credentials
+    expire in ~15 minutes. The integration itself does not stream video bytes —
+    you need an external WebRTC viewer (go2rtc, aiortc, etc.) to consume the
+    response and complete the handshake.
