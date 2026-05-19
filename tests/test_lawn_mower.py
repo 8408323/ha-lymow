@@ -220,8 +220,8 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    # 5 originals + 10 query services + 2 zone-edit primitives + 1 merge_zones.
-    assert hass.services.async_register.call_count == 19
+    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split.
+    assert hass.services.async_register.call_count == 20
 
 
 # ---------------------------------------------------------------------------
@@ -828,3 +828,69 @@ async def test_handle_pin_and_go_unknown_entity_returns_empty_mapping() -> None:
     result = await handlers["pin_and_go"](call)
     assert result == {"hash_ids": {}}
     coord.async_pin_and_go.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# split_zone service (#42)
+# ---------------------------------------------------------------------------
+
+
+async def test_handle_split_zone_returns_two_new_hash_ids() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_split_zone = AsyncMock(return_value=("leftId01", "rightId01"))
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {
+            "zone_hash_id": "alpha",
+            "cut_p1": {"x": 0.0, "y": 0.0},
+            "cut_p2": {"x": 1.0, "y": 1.0},
+            "names": ["west", "east"],
+        },
+    )
+    result = await handlers["split_zone"](call)
+    assert result == {"hash_ids": {"lawn_mower.mower_1": ("leftId01", "rightId01")}}
+    coord.async_split_zone.assert_awaited_once_with(
+        THING, "alpha", {"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}, names=("west", "east")
+    )
+
+
+async def test_handle_split_zone_unknown_entity_returns_empty_mapping() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_split_zone = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(
+        ["lawn_mower.unknown"],
+        {
+            "zone_hash_id": "alpha",
+            "cut_p1": {"x": 0.0, "y": 0.0},
+            "cut_p2": {"x": 1.0, "y": 1.0},
+            "names": ["", ""],
+        },
+    )
+    result = await handlers["split_zone"](call)
+    assert result == {"hash_ids": {}}
+    coord.async_split_zone.assert_not_awaited()
