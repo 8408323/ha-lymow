@@ -726,6 +726,66 @@ async def test_maybe_refresh_ota_swallows_errors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_maybe_refresh_ota_throttle_applies_even_on_failure() -> None:
+    """When the endpoint is down, _last_ota_check still advances so we
+    don't retry on every 30s tick. The interval gate then suppresses
+    subsequent calls until the cooldown elapses.
+    """
+    coord, _, api = _make_coordinator()
+    api.check_update = AsyncMock(side_effect=RuntimeError("503"))
+
+    await coord._maybe_refresh_ota(THING)
+    assert api.check_update.await_count == 1
+    # Second call inside the window is throttled away
+    await coord._maybe_refresh_ota(THING)
+    assert api.check_update.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_maybe_poll_ota_progress_skips_when_no_job() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_ota_job_summary = AsyncMock()
+    await coord._maybe_poll_ota_progress(THING)
+    api.get_ota_job_summary.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_maybe_poll_ota_progress_polls_when_job_present() -> None:
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {"otaJobId": "JOB-9"}}
+    coord._ota_state[THING] = {"otaJobId": "JOB-9"}
+    api.get_ota_job_summary = AsyncMock(return_value={"status": "IN_PROGRESS"})
+    await coord._maybe_poll_ota_progress(THING)
+    api.get_ota_job_summary.assert_awaited_once_with(THING, "JOB-9")
+    # Still in progress → job ID retained
+    assert coord._ota_state[THING]["otaJobId"] == "JOB-9"
+
+
+@pytest.mark.asyncio
+async def test_maybe_poll_ota_progress_clears_on_robot_not_in_wait() -> None:
+    """OTA_ROBOT_NOT_IN_WAIT is terminal (install never started) — must clear."""
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {"otaJobId": "JOB-9"}}
+    coord._ota_state[THING] = {"otaJobId": "JOB-9"}
+    publishes: list = []
+    coord.async_set_updated_data = publishes.append  # type: ignore[method-assign]
+    api.get_ota_job_summary = AsyncMock(return_value={"status": "OTA_ROBOT_NOT_IN_WAIT"})
+
+    await coord._maybe_poll_ota_progress(THING)
+
+    assert "otaJobId" not in coord._ota_state[THING]
+    assert publishes[0][THING]["otaJobId"] is None
+
+
+@pytest.mark.asyncio
+async def test_maybe_poll_ota_progress_swallows_errors() -> None:
+    coord, _, api = _make_coordinator()
+    coord._ota_state[THING] = {"otaJobId": "JOB-9"}
+    api.get_ota_job_summary = AsyncMock(side_effect=RuntimeError("network"))
+    await coord._maybe_poll_ota_progress(THING)  # must not raise
+
+
+@pytest.mark.asyncio
 async def test_async_install_firmware_update_stores_job_id() -> None:
     coord, _, api = _make_coordinator()
     coord.data = {THING: {}}

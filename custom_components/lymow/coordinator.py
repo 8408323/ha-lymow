@@ -45,7 +45,17 @@ _OTA_CHECK_INTERVAL = timedelta(hours=6)
 # OTA job-summary `status` values that mean "no longer in progress" — used to
 # clear the cached otaJobId so update.in_progress flips back to False.
 _OTA_TERMINAL_STATUSES = frozenset(
-    {"OTA_SUCCESS", "OTA_FAILED", "OTA_DOWNLOAD_FAILED", "OTA_UPGRADE_FAILED", "OTA_BATTERY_LOW", "OTA_EXCEEDED"}
+    {
+        "OTA_SUCCESS",
+        "OTA_FAILED",
+        "OTA_DOWNLOAD_FAILED",
+        "OTA_UPGRADE_FAILED",
+        "OTA_BATTERY_LOW",
+        "OTA_EXCEEDED",
+        # OTA_ROBOT_NOT_IN_WAIT means the install never started because the
+        # robot wasn't in the waiting state — the job is dead, clear it.
+        "OTA_ROBOT_NOT_IN_WAIT",
+    }
 )
 
 
@@ -174,6 +184,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 thing = device["deviceThingName"]
                 rest_data = await self._client.get_device_info(thing)
                 await self._maybe_refresh_ota(thing)
+                await self._maybe_poll_ota_progress(thing)
                 merged = {
                     **rest_data,
                     **self._ota_state.get(thing, {}),
@@ -188,22 +199,41 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Refresh the OTA snapshot for one device if our cache is stale.
 
         Hits /prod/check-update at most once per `_OTA_CHECK_INTERVAL` per
-        device. Failures are swallowed so a transient OTA-endpoint hiccup
-        doesn't break the main coordinator refresh.
+        device. Failures are swallowed and *still* count for the throttle:
+        if the endpoint is down we don't want every 30s tick to retry.
         """
         last = self._last_ota_check.get(thing_name)
         now = datetime.now(UTC)
         if last is not None and (now - last) < _OTA_CHECK_INTERVAL:
             return
+        # Record the attempt timestamp first, so an exception below still
+        # counts for the throttle and we don't hammer a failing endpoint.
+        self._last_ota_check[thing_name] = now
         try:
             data = await self._client.check_update(thing_name)
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("check_update failed for %s: %s", thing_name, err)
             return
-        self._last_ota_check[thing_name] = now
         patch = self._ota_patch_from_check(data)
         if patch:
             self._ota_state.setdefault(thing_name, {}).update(patch)
+
+    async def _maybe_poll_ota_progress(self, thing_name: str) -> None:
+        """If an OTA job is in flight for this device, poll its status.
+
+        ``async_get_ota_progress`` clears ``otaJobId`` automatically on a
+        terminal status, which lets ``update.in_progress`` flip back to
+        False without any external caller. Without this poll the entity
+        would stay stuck as in-progress for the entire HA process lifetime
+        once an install starts.
+        """
+        job_id = (self._ota_state.get(thing_name) or {}).get("otaJobId")
+        if not job_id:
+            return
+        try:
+            await self.async_get_ota_progress(thing_name, job_id)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("OTA progress poll failed for %s: %s", thing_name, err)
 
     @staticmethod
     def _ota_patch_from_check(data: dict[str, Any]) -> dict[str, Any]:
