@@ -21,6 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
 
 PLATFORMS = [
+    Platform.BINARY_SENSOR,
     Platform.DEVICE_TRACKER,
     Platform.LAWN_MOWER,
     Platform.NUMBER,
