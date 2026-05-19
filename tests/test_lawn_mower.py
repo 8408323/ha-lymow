@@ -220,9 +220,8 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    # 5 originals (delete_zone, start_zone, query_map, query_schedules,
-    # start_video_session) + 10 new read-only query services from #39.
-    assert hass.services.async_register.call_count == 15
+    # 5 originals + 10 query services (#39) + 2 zone-edit primitives (#38).
+    assert hass.services.async_register.call_count == 17
 
 
 # ---------------------------------------------------------------------------
@@ -535,7 +534,6 @@ async def test_handle_start_video_session_raises_when_no_match() -> None:
     coord.async_start_video_session.assert_not_awaited()
 
 
-# ---------------------------------------------------------------------------
 # query_* services (#39) — handler routing
 # ---------------------------------------------------------------------------
 
@@ -603,3 +601,98 @@ async def test_query_service_unknown_entity_skips() -> None:
     await async_setup_entry(hass, entry, lambda entities: None)
     await handlers["query_robot_config"](_make_call(["lawn_mower.unknown"]))
     coord.async_query_robot_config.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# update_zone_polygon / add_zone services (#38)
+# ---------------------------------------------------------------------------
+
+
+_TRIANGLE = [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 0.5, "y": 1.0}]
+
+
+async def test_handle_update_zone_polygon_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_update_zone_polygon = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"], {"zone_hash_id": "z1", "polygon": _TRIANGLE})
+    await handlers["update_zone_polygon"](call)
+    coord.async_update_zone_polygon.assert_awaited_once_with(THING, "z1", _TRIANGLE)
+
+
+async def test_handle_update_zone_polygon_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_update_zone_polygon = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"zone_hash_id": "z1", "polygon": _TRIANGLE})
+    await handlers["update_zone_polygon"](call)
+    coord.async_update_zone_polygon.assert_not_awaited()
+
+
+async def test_handle_add_zone_returns_new_hash_ids() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_add_zone = AsyncMock(return_value="newhash01")
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"polygon": _TRIANGLE, "name": "Patio", "cut_height_mm": 30},
+    )
+    result = await handlers["add_zone"](call)
+    assert result == {"hash_ids": {"lawn_mower.mower_1": "newhash01"}}
+    coord.async_add_zone.assert_awaited_once_with(THING, _TRIANGLE, name="Patio", cut_height_mm=30)
+
+
+async def test_handle_add_zone_unknown_entity_returns_empty_mapping() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_add_zone = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"polygon": _TRIANGLE, "name": "", "cut_height_mm": 40})
+    result = await handlers["add_zone"](call)
+    assert result == {"hash_ids": {}}
+    coord.async_add_zone.assert_not_awaited()

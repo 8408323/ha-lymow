@@ -553,6 +553,167 @@ async def test_update_zone_cut_height_only_modifies_target_zone() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Zone polygon edit / new-zone services
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_update_zone_polygon_replaces_vertices_and_marks_modified() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_DATA)}}
+    captured = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    new_polygon = [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]
+    await coord.async_update_zone_polygon(THING, "zone0001", new_polygon)
+    target = next(z for z in captured["map"]["goZones"] if z["hashId"] == "zone0001")
+    assert target["polygon"] == [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]
+    assert "zone0001" in captured["map"]["modifyHashs"]
+
+
+@pytest.mark.asyncio
+async def test_async_update_zone_polygon_does_not_mutate_other_zones() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    orig = copy.deepcopy(_SAMPLE_MAP_DATA)
+    coord.data = {THING: {"mapData": orig}}
+
+    async def _noop(thing, map_data):
+        pass
+
+    coord.async_sync_map = _noop  # type: ignore[method-assign]
+    new_polygon = [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]
+    await coord.async_update_zone_polygon(THING, "zone0001", new_polygon)
+    # Cached original is unchanged — we deep-copied before mutating.
+    assert orig["goZones"][0]["polygon"] == []
+
+
+@pytest.mark.asyncio
+async def test_async_update_zone_polygon_raises_when_zone_missing() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_DATA}}
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await coord.async_update_zone_polygon(THING, "no-such-zone", [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_update_zone_polygon_rejects_too_few_vertices() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_DATA}}
+    with pytest.raises(HomeAssistantError, match="3 vertices"):
+        await coord.async_update_zone_polygon(THING, "zone0001", [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_update_zone_polygon_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_DATA}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_update_zone_polygon(
+            THING, "zone0001", [{"x": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_update_zone_polygon_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_update_zone_polygon(THING, "zone0001", [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_add_zone_appends_new_zone_with_fresh_hash() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_DATA)}}
+    captured = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    poly = [{"x": 10.0, "y": 10.0}, {"x": 20.0, "y": 10.0}, {"x": 15.0, "y": 20.0}]
+    new_id = await coord.async_add_zone(THING, poly, name="patio", cut_height_mm=35)
+    # New hashId is unique and present in goZones.
+    assert new_id not in {"zone0001", "zone0002"}
+    assert any(z["hashId"] == new_id for z in captured["map"]["goZones"])
+    added = next(z for z in captured["map"]["goZones"] if z["hashId"] == new_id)
+    assert added["name"] == "patio"
+    assert added["cutHeight"] == 35
+    assert added["isEnabled"] is True
+    assert added["polygon"] == poly
+    assert new_id in captured["map"]["modifyHashs"]
+
+
+@pytest.mark.asyncio
+async def test_async_add_zone_avoids_hash_collision() -> None:
+    """Defensive: if secrets.token_hex were to collide with an existing id, the
+    method must keep retrying. We force a collision once, then succeed."""
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    # Pre-existing hash that the first secrets call will pretend to produce.
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_DATA)}}
+
+    async def _noop(thing, map_data):
+        pass
+
+    coord.async_sync_map = _noop  # type: ignore[method-assign]
+
+    from unittest.mock import patch as _patch
+
+    with _patch("secrets.token_hex", side_effect=["zone0001", "fresh1234"]):
+        new_id = await coord.async_add_zone(THING, [{"x": 0.0, "y": 0.0}] * 3)
+    assert new_id == "fresh1234"
+
+
+@pytest.mark.asyncio
+async def test_async_add_zone_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_add_zone(THING, [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_add_zone_rejects_too_few_vertices() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_DATA}}
+    with pytest.raises(HomeAssistantError, match="3 vertices"):
+        await coord.async_add_zone(THING, [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_zone_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_DATA}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_add_zone(THING, [{"x": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}])
+
+
+# ---------------------------------------------------------------------------
 # Zone update commands — async_update_zone_enabled
 # ---------------------------------------------------------------------------
 
