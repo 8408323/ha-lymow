@@ -20,7 +20,13 @@ from .mqtt import LymowMqttClient
 _LOGGER = logging.getLogger(__name__)
 _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
 
-PLATFORMS = [Platform.LAWN_MOWER, Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS = [
+    Platform.DEVICE_TRACKER,
+    Platform.LAWN_MOWER,
+    Platform.NUMBER,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
