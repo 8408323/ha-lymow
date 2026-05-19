@@ -33,6 +33,7 @@ _load_lymow_module("protocol")
 # that test_coordinator.py's setdefault stubs don't shadow the real package,
 # and load the HA platform modules so their tests can import them.
 try:
+    import homeassistant.components.device_tracker  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
     import homeassistant.components.sensor  # noqa: F401
@@ -50,6 +51,7 @@ try:
     _load_lymow_module("sensor")
     _load_lymow_module("number")
     _load_lymow_module("switch")
+    _load_lymow_module("device_tracker")
     _load_lymow_module("lawn_mower")
 except ImportError:
     # HA not installed (uv/Python 3.13 CI env) — inject minimal stubs so all
@@ -298,10 +300,26 @@ except ImportError:
     _ha_switch.SwitchEntity = _SwitchEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.switch", _ha_switch)
 
+    # ── homeassistant.components.device_tracker ───────────────────────────────
+    _ha_dt = types.ModuleType("homeassistant.components.device_tracker")
+
+    class _SourceType(str, enum.Enum):
+        GPS = "gps"
+        ROUTER = "router"
+        BLUETOOTH = "bluetooth"
+
+    class _TrackerEntity:
+        pass
+
+    _ha_dt.SourceType = _SourceType  # type: ignore[attr-defined]
+    _ha_dt.TrackerEntity = _TrackerEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.device_tracker", _ha_dt)
+
     # Now load the platform modules that depend on the above stubs.
     _load_lymow_module("coordinator")
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
     _load_lymow_module("number")
     _load_lymow_module("switch")
+    _load_lymow_module("device_tracker")
     _load_lymow_module("lawn_mower")

@@ -55,6 +55,7 @@ def _make_ha_stubs() -> None:
     if not hasattr(ha_const, "Platform"):
 
         class _Platform:
+            DEVICE_TRACKER = "device_tracker"
             LAWN_MOWER = "lawn_mower"
             NUMBER = "number"
             SENSOR = "sensor"
