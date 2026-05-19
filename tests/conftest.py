@@ -340,6 +340,7 @@ except ImportError:
         TAMPER = "tamper"
         CONNECTIVITY = "connectivity"
         PROBLEM = "problem"
+        LOCK = "lock"
 
     class _BinarySensorEntity:
         pass

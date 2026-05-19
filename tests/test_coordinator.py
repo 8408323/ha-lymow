@@ -727,6 +727,76 @@ async def test_fetch_last_clean_handles_bad_epoch() -> None:
     assert "lastCleanAt" not in result[THING]
 
 
+# ---------------------------------------------------------------------------
+# Static device-list-query fields
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_static_device_fields_merged_into_update() -> None:
+    devices = [
+        {
+            "deviceThingName": THING,
+            "sn": "LR011A09A17B6521",
+            "deviceType": "Lymow one",
+            "deviceBluetooth": "Lymow_7B6521",
+            "simId": " 89320420000094505458",
+            "fwMinVersion": "v2.1.43",
+            "createdAt": "2026-05-06T16:33:39.243Z",
+            "deviceLocked": False,
+        }
+    ]
+    coord, _, _ = _make_coordinator(devices=devices)
+    result = await coord._async_update_data()
+    assert result[THING]["serialNumber"] == "LR011A09A17B6521"
+    assert result[THING]["deviceType"] == "Lymow one"
+    assert result[THING]["deviceBluetooth"] == "Lymow_7B6521"
+    assert result[THING]["simId"] == "89320420000094505458"
+    assert result[THING]["fwMinVersion"] == "v2.1.43"
+    assert result[THING]["deviceLocked"] is False
+    from datetime import datetime, timezone
+
+    expected = datetime(2026, 5, 6, 16, 33, 39, 243000, tzinfo=timezone.utc)
+    assert result[THING]["createdAt"] == expected
+
+
+@pytest.mark.asyncio
+async def test_static_device_fields_skipped_when_missing() -> None:
+    devices = [{"deviceThingName": THING}]
+    coord, _, _ = _make_coordinator(devices=devices)
+    result = await coord._async_update_data()
+    for absent in ("serialNumber", "deviceType", "deviceBluetooth", "simId", "fwMinVersion", "createdAt"):
+        assert absent not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_static_device_fields_skips_empty_string() -> None:
+    devices = [{"deviceThingName": THING, "deviceBluetooth": "   ", "simId": ""}]
+    coord, _, _ = _make_coordinator(devices=devices)
+    result = await coord._async_update_data()
+    assert "deviceBluetooth" not in result[THING]
+    assert "simId" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_static_device_fields_invalid_created_at_ignored() -> None:
+    devices = [{"deviceThingName": THING, "createdAt": "not-an-iso-date"}]
+    coord, _, _ = _make_coordinator(devices=devices)
+    result = await coord._async_update_data()
+    assert "createdAt" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_static_fields_do_not_override_live_state() -> None:
+    """REST get_device_info and MQTT win over the static merge."""
+    devices = [{"deviceThingName": THING, "deviceType": "static-type"}]
+    coord, _, _ = _make_coordinator(devices=devices, rest_data={"deviceType": "fresh", "battery": 50})
+    coord._mqtt_state[THING] = {"battery": 90}
+    result = await coord._async_update_data()
+    assert result[THING]["deviceType"] == "fresh"
+    assert result[THING]["battery"] == 90
+
+
 @pytest.mark.asyncio
 async def test_fetch_last_clean_handles_non_dict_entry() -> None:
     """A malformed API response with non-dict entries must not crash the

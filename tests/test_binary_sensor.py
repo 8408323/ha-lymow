@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 from lymow.binary_sensor import (
     ChargingBinarySensor,
+    DeviceLockedBinarySensor,
     RechargingBinarySensor,
     StolenBinarySensor,
     async_setup_entry,
@@ -94,8 +95,33 @@ def test_name_fallback_to_sn() -> None:
     assert "SN9" in e._attr_name
 
 
-async def test_async_setup_entry_creates_three_per_device() -> None:
-    coord = _make_coord({"isCharging": True, "isRecharging": False, "stolenStatus": False})
+async def test_device_locked_metadata_disabled_by_default() -> None:
+    coord = _make_coord({})
+    e = DeviceLockedBinarySensor(coord, DEVICE)
+    assert e._attr_entity_registry_enabled_default is False
+    assert e._attr_unique_id == f"{THING}_device_locked"
+    assert "Device locked" in e._attr_name
+
+
+def test_device_locked_inverts_for_lock_device_class() -> None:
+    """LOCK device class: is_on=True means *unlocked* (HA convention)."""
+    coord = _make_coord({"deviceLocked": True})
+    e = DeviceLockedBinarySensor(coord, DEVICE)
+    assert e.is_on is False  # locked → reported as off
+
+    coord = _make_coord({"deviceLocked": False})
+    e = DeviceLockedBinarySensor(coord, DEVICE)
+    assert e.is_on is True  # unlocked → reported as on
+
+
+def test_device_locked_none_when_missing() -> None:
+    coord = _make_coord({})
+    e = DeviceLockedBinarySensor(coord, DEVICE)
+    assert e.is_on is None
+
+
+async def test_async_setup_entry_creates_four_per_device() -> None:
+    coord = _make_coord({"isCharging": True, "isRecharging": False, "stolenStatus": False, "deviceLocked": False})
 
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": coord}}
@@ -106,17 +132,18 @@ async def test_async_setup_entry_creates_three_per_device() -> None:
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     # Exact count, not just type set — catches accidental duplicates.
-    assert len(added) == 3
+    assert len(added) == 4
     types = [type(e).__name__ for e in added]
     assert sorted(types) == [
         "ChargingBinarySensor",
+        "DeviceLockedBinarySensor",
         "RechargingBinarySensor",
         "StolenBinarySensor",
     ]
 
 
-async def test_async_setup_entry_creates_three_per_device_with_two_devices() -> None:
-    """Two devices → exactly six entities (no duplicates, no skips)."""
+async def test_async_setup_entry_creates_four_per_device_with_two_devices() -> None:
+    """Two devices → exactly eight entities (no duplicates, no skips)."""
     coord = _make_coord({"isCharging": True})
     coord.devices = [DEVICE, {"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
 
@@ -128,7 +155,7 @@ async def test_async_setup_entry_creates_three_per_device_with_two_devices() -> 
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 6
+    assert len(added) == 8
     thing_names = sorted({e._thing_name for e in added})
     assert thing_names == ["mower-001", "mower-002"]
 

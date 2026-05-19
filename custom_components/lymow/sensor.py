@@ -222,6 +222,51 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:chart-areaspline",
         entity_registry_enabled_default=False,
     ),
+    # Static device-list-query fields (set once at registration, exposed as
+    # diagnostic sensors — disabled by default so they don't clutter the UI).
+    LymowSensorDescription(
+        key="serial_number",
+        name="Serial number",
+        value_key="serialNumber",
+        icon="mdi:barcode",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="model",
+        name="Model",
+        value_key="deviceType",
+        icon="mdi:robot-mower",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="bluetooth_name",
+        name="Bluetooth name",
+        value_key="deviceBluetooth",
+        icon="mdi:bluetooth",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="sim_id",
+        name="SIM ID",
+        value_key="simId",
+        icon="mdi:sim",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="firmware_minimum",
+        name="Minimum firmware",
+        value_key="fwMinVersion",
+        icon="mdi:tag-arrow-down",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="registered_at",
+        name="Registered",
+        value_key="createdAt",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        icon="mdi:calendar-plus",
+        entity_registry_enabled_default=False,
+    ),
 )
 
 

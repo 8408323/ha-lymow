@@ -163,7 +163,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     _LOGGER.debug("get_device_feature failed for %s: %s", thing, feat_err)
                     feature_data = {}
                 history_fields = await self._fetch_last_clean_fields(thing)
+                static_fields = self._static_device_fields(device)
                 merged = {
+                    **static_fields,
                     **rest_data,
                     **feature_data,
                     **history_fields,
@@ -173,6 +175,42 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             return result
         except Exception as err:
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
+
+    @staticmethod
+    def _static_device_fields(device: dict[str, Any]) -> dict[str, Any]:
+        """Diagnostic fields from /device-list-query?p=devices that don't change
+        within a session: SIM, Bluetooth pairing name, model, registration date,
+        minimum supported firmware, lock state."""
+        from datetime import datetime
+
+        out: dict[str, Any] = {}
+        for src, dst in (
+            ("sn", "serialNumber"),
+            ("deviceType", "deviceType"),
+            ("deviceBluetooth", "deviceBluetooth"),
+            ("simId", "simId"),
+            ("fwMinVersion", "fwMinVersion"),
+            ("deviceLocked", "deviceLocked"),
+        ):
+            val = device.get(src)
+            if val is None:
+                continue
+            if isinstance(val, str):
+                stripped = val.strip()
+                if not stripped:
+                    continue
+                out[dst] = stripped
+            else:
+                out[dst] = val
+        # createdAt arrives as ISO 8601 with a trailing "Z" — convert so the
+        # TIMESTAMP-classed sensor doesn't get a raw string.
+        created_at = device.get("createdAt")
+        if isinstance(created_at, str) and created_at:
+            try:
+                out["createdAt"] = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            except ValueError:
+                pass
+        return out
 
     async def _fetch_last_clean_fields(self, thing_name: str) -> dict[str, Any]:
         """Return last-clean summary fields, or {} if the response can't be interpreted.
