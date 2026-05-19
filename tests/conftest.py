@@ -99,9 +99,15 @@ except ImportError:
     def _callback(func):  # type: ignore[return]
         return func
 
+    class _SupportsResponse(str, enum.Enum):
+        NONE = "none"
+        OPTIONAL = "optional"
+        ONLY = "only"
+
     _ha_core.HomeAssistant = _HomeAssistant  # type: ignore[attr-defined]
     _ha_core.ServiceCall = _ServiceCall  # type: ignore[attr-defined]
     _ha_core.callback = _callback  # type: ignore[attr-defined]
+    _ha_core.SupportsResponse = _SupportsResponse  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.core", _ha_core)
 
     # ── homeassistant.exceptions ──────────────────────────────────────────────

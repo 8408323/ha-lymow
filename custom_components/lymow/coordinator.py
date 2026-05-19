@@ -318,6 +318,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             new_device = {**self.data[thing_name], **fields}
             self.async_set_updated_data({**self.data, thing_name: new_device})
 
+    async def async_start_video_session(self, thing_name: str) -> dict[str, Any]:
+        """Open a Kinesis Video Streams viewer session for the robot's camera.
+
+        Returns the channelARN + temporary AWS credentials needed for a
+        WebRTC viewer. The HA integration itself does not pipe video bytes
+        (that needs aiortc / go2rtc / similar); this is exposed via a service
+        so users can plumb the WebRTC handshake into their own stack.
+        """
+        return await self._client.start_video_session(thing_name)
+
     async def async_update_zone_enabled(self, thing_name: str, hash_id: str, is_enabled: bool) -> None:
         """Enable or disable a go-zone (and its child no-go zones) and push map to robot."""
         import copy

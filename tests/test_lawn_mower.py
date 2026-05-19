@@ -220,7 +220,7 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    assert hass.services.async_register.call_count == 4
+    assert hass.services.async_register.call_count == 5
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +234,7 @@ async def _setup_and_get_handlers(hass: MagicMock, entry: MagicMock, coord: Magi
 
     handlers: dict = {}
 
-    def _register(domain, service, handler, schema=None):
+    def _register(domain, service, handler, schema=None, supports_response=False):
         handlers[service] = handler
 
     hass.services.async_register.side_effect = _register
@@ -284,7 +284,7 @@ async def test_handle_delete_zone_valid_zone_calls_coordinator() -> None:
     # Re-setup so entity_map is populated
     handlers2 = {}
 
-    def _register2(domain, service, handler, schema=None):
+    def _register2(domain, service, handler, schema=None, supports_response=False):
         handlers2[service] = handler
 
     hass.services.async_register.side_effect = _register2
@@ -312,7 +312,7 @@ async def test_handle_delete_zone_unknown_zone_raises_validation_error() -> None
 
     handlers2 = {}
 
-    def _register2(domain, service, handler, schema=None):
+    def _register2(domain, service, handler, schema=None, supports_response=False):
         handlers2[service] = handler
 
     hass.services.async_register.side_effect = _register2
@@ -340,7 +340,7 @@ async def test_handle_delete_zone_empty_go_ids_skips_validation() -> None:
     hass.data = {DOMAIN: {"entry-1": coord}}
     handlers2 = {}
 
-    def _register2(domain, service, handler, schema=None):
+    def _register2(domain, service, handler, schema=None, supports_response=False):
         handlers2[service] = handler
 
     hass.services.async_register.side_effect = _register2
@@ -406,7 +406,7 @@ async def test_handle_start_zone_calls_coordinator() -> None:
     hass.data = {DOMAIN: {"entry-1": coord}}
     handlers2 = {}
 
-    def _register2(domain, service, handler, schema=None):
+    def _register2(domain, service, handler, schema=None, supports_response=False):
         handlers2[service] = handler
 
     hass.services.async_register.side_effect = _register2
@@ -433,7 +433,7 @@ async def test_handle_query_map_calls_coordinator() -> None:
     hass.data = {DOMAIN: {"entry-1": coord}}
     handlers2 = {}
 
-    def _register2(domain, service, handler, schema=None):
+    def _register2(domain, service, handler, schema=None, supports_response=False):
         handlers2[service] = handler
 
     hass.services.async_register.side_effect = _register2
@@ -460,7 +460,7 @@ async def test_handle_query_schedules_calls_coordinator() -> None:
     hass.data = {DOMAIN: {"entry-1": coord}}
     handlers2 = {}
 
-    def _register2(domain, service, handler, schema=None):
+    def _register2(domain, service, handler, schema=None, supports_response=False):
         handlers2[service] = handler
 
     hass.services.async_register.side_effect = _register2
@@ -473,3 +473,61 @@ async def test_handle_query_schedules_calls_coordinator() -> None:
     call = _make_call(["lawn_mower.mower_1"])
     await handlers2["query_schedules"](call)
     coord.async_query_schedules.assert_called_once_with(THING)
+
+
+async def test_handle_start_video_session_returns_session_data() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_start_video_session = AsyncMock(return_value={"channelARN": "arn:test", "region": "eu-west-1"})
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers2: dict = {}
+
+    def _register2(domain, service, handler, schema=None, supports_response=False):
+        handlers2[service] = handler
+
+    hass.services.async_register.side_effect = _register2
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"])
+    result = await handlers2["start_video_session"](call)
+    assert result == {"channelARN": "arn:test", "region": "eu-west-1"}
+    coord.async_start_video_session.assert_awaited_once_with(THING)
+
+
+async def test_handle_start_video_session_raises_when_no_match() -> None:
+    from homeassistant.exceptions import ServiceValidationError
+
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_start_video_session = AsyncMock(return_value={})
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers2: dict = {}
+
+    def _register2(domain, service, handler, schema=None, supports_response=False):
+        handlers2[service] = handler
+
+    hass.services.async_register.side_effect = _register2
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.unknown"])
+    with pytest.raises(ServiceValidationError):
+        await handlers2["start_video_session"](call)
+    coord.async_start_video_session.assert_not_awaited()

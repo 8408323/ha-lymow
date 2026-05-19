@@ -21,6 +21,9 @@ RE_UPDATE_FEATURE = re.compile(
     r"https://" + re.escape(GW_DEVICE_INFO) + r"\.execute-api\..+/prod/update-device-feature"
 )
 
+GW_KVS = REGION_CONFIG[REGION]["api_kvs"]
+RE_KVS_CMD = re.compile(r"https://" + re.escape(GW_KVS) + r"\.execute-api\..+/prod/kvs/cmd")
+
 
 @pytest.fixture
 async def client():
@@ -255,6 +258,48 @@ class TestGetBackupMapKey:
             result = await client.get_backup_map_key("mower-001")
 
         assert result == "device_7890838300cd/map/new.pb"
+
+
+class TestStartVideoSession:
+    async def test_sends_start_action(self, client):
+        payload = {
+            "credentials": {
+                "accessKeyId": "ASIA...",
+                "secretAccessKey": "secret",
+                "sessionToken": "tok",
+                "expiration": "2026-05-19T15:26:31.000Z",
+            },
+            "channelARN": "arn:aws:kinesisvideo:eu-west-1:863518414241:channel/device_xxxx_stream_channel/1778088062627",
+            "region": "eu-west-1",
+            "deviceThingName": "mower-001",
+        }
+        with aioresponses() as m:
+            m.post(RE_KVS_CMD, payload=payload)
+            result = await client.start_video_session("mower-001")
+            request = list(m.requests.values())[0][0]
+
+        assert result == payload
+        assert request.kwargs["json"] == {"deviceThingName": "mower-001", "action": "start"}
+        assert request.kwargs["headers"]["Authorization"] == "test-access-token"
+
+    async def test_raises_when_gateway_not_configured(self, client):
+        """ap-southeast-2 has api_kvs=None in const.py — should raise NotImplementedError."""
+        # Re-create the client pointed at a region without a KVS gateway
+        async with aiohttp.ClientSession() as session:
+            apse2 = LymowApiClient(
+                session=session,
+                access_token="t",
+                region="ap-southeast-2",
+                identity_id="i",
+            )
+            with pytest.raises(NotImplementedError, match="Kinesis Video"):
+                await apse2.start_video_session("mower-001")
+
+    async def test_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_CMD, status=500)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.start_video_session("mower-001")
 
 
 class TestSigV4Helpers:

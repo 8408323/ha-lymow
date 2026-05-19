@@ -8,7 +8,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.components.lawn_mower import LawnMowerActivity, LawnMowerEntity, LawnMowerEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -33,6 +33,7 @@ _SERVICE_START_ZONE = "start_zone"
 _ATTR_ZONE_HASH_IDS = "zone_hash_ids"
 _SERVICE_QUERY_MAP = "query_map"
 _SERVICE_QUERY_SCHEDULES = "query_schedules"
+_SERVICE_START_VIDEO_SESSION = "start_video_session"
 
 _ENTITY_ID_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids})
 _DELETE_ZONE_SCHEMA = vol.Schema(
@@ -101,10 +102,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_query_schedules(entity._thing_name)
 
+    async def handle_start_video_session(call: ServiceCall) -> dict[str, Any]:
+        """Open a Kinesis Video Streams viewer session for the first matched device.
+
+        Returns the channelARN + temporary AWS credentials needed for a
+        WebRTC viewer (e.g. go2rtc / aiortc). Caller is responsible for
+        consuming the response and completing the WebRTC handshake within
+        the credentials' ~15-minute lifetime.
+        """
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            return await coordinator.async_start_video_session(entity._thing_name)
+        raise ServiceValidationError(f"No matching Lymow entity in {entity_ids!r}")
+
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_ZONE, handle_delete_zone, schema=_DELETE_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_START_ZONE, handle_start_zone, schema=_START_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_MAP, handle_query_map, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_SCHEDULES, handle_query_schedules, schema=_ENTITY_ID_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_START_VIDEO_SESSION,
+        handle_start_video_session,
+        schema=_ENTITY_ID_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):

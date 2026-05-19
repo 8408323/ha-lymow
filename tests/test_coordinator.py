@@ -805,3 +805,12 @@ async def test_async_set_device_feature_no_publish_when_no_data() -> None:
 
     api.update_device_feature.assert_awaited_once_with(THING, theftLock=True)
     assert publishes == []
+
+
+@pytest.mark.asyncio
+async def test_async_start_video_session_delegates_to_client() -> None:
+    coord, _, api = _make_coordinator()
+    api.start_video_session = AsyncMock(return_value={"channelARN": "arn:test", "region": "eu-west-1"})
+    result = await coord.async_start_video_session(THING)
+    assert result == {"channelARN": "arn:test", "region": "eu-west-1"}
+    api.start_video_session.assert_awaited_once_with(THING)
