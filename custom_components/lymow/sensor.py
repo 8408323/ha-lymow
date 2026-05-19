@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, UnitOfArea, UnitOfTime
+from homeassistant.const import DEGREE, PERCENTAGE, UnitOfArea, UnitOfLength, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -130,6 +130,29 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:counter",
         entity_registry_enabled_default=False,
     ),
+    # Robot pose in local ENU frame (pboutput field 14), disabled by default —
+    # mostly useful for debugging and advanced visualisations.
+    LymowSensorDescription(
+        key="pose_east_m",
+        name="Pose East",
+        value_key="poseEastM",
+        native_unit_of_measurement=UnitOfLength.METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:axis-arrow",
+        entity_registry_enabled_default=False,
+        suggested_display_precision=2,
+    ),
+    LymowSensorDescription(
+        key="pose_north_m",
+        name="Pose North",
+        value_key="poseNorthM",
+        native_unit_of_measurement=UnitOfLength.METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:axis-arrow",
+        entity_registry_enabled_default=False,
+        suggested_display_precision=2,
+    ),
+    # poseThetaRad is exposed by PoseHeadingSensor (separate class — needs radians→degrees).
     # Clean history (REST /get-clean-history-collect, page=0, pageSize=15)
     LymowSensorDescription(
         key="last_clean_at",
@@ -204,7 +227,7 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities: list[LymowSensor | LymowErrorSensor | LymowRtkSensor | LymowMapSensor] = []
+    entities: list[SensorEntity] = []
     for device in coordinator.devices:
         for description in SENSORS:
             if description.key == "error_code":
@@ -213,6 +236,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 entities.append(LymowSensor(coordinator, device, description))
         entities.append(LymowRtkSensor(coordinator, device))
         entities.append(LymowMapSensor(coordinator, device))
+        entities.append(LymowPoseHeadingSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -335,3 +359,40 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             if val is not None:
                 attrs[key] = val
         return attrs
+
+
+class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Robot heading converted to degrees from the radians on the wire.
+
+    Wraps the result into 0..360 so a compass-style display reads correctly.
+    Disabled by default — pose data is diagnostic, not user-facing.
+    """
+
+    _attr_native_unit_of_measurement = DEGREE
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:compass"
+    _attr_entity_registry_enabled_default = False
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_unique_id = f"{self._thing_name}_pose_heading"
+        self._attr_name = f"{device_label} Pose heading"
+
+    @property
+    def native_value(self) -> float | None:
+        import math
+
+        data = self.coordinator.data.get(self._thing_name) or {}
+        rad = data.get("poseThetaRad")
+        if rad is None:
+            return None
+        try:
+            # Don't round here — _attr_suggested_display_precision tells HA
+            # how many decimals to render; rounding at the source would
+            # double-truncate and disagree with long-term statistics.
+            return math.degrees(float(rad)) % 360.0
+        except (TypeError, ValueError):
+            return None

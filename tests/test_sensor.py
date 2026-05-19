@@ -409,3 +409,106 @@ def test_wifi_rssi_dbm_sensor_returns_value() -> None:
 def test_wifi_rssi_dbm_sensor_disabled_by_default() -> None:
     desc = next(s for s in SENSORS if s.key == "wifi_rssi_dbm")
     assert desc.entity_registry_enabled_default is False
+
+
+# ---------------------------------------------------------------------------
+# Pose sensors (poseEastM / poseNorthM via SENSORS descriptions; poseThetaRad
+# via the dedicated LymowPoseHeadingSensor that converts radians→degrees)
+# ---------------------------------------------------------------------------
+
+
+def test_pose_east_sensor_disabled_by_default() -> None:
+    desc = next(s for s in SENSORS if s.key == "pose_east_m")
+    assert desc.entity_registry_enabled_default is False
+    assert desc.value_key == "poseEastM"
+
+
+def test_pose_north_sensor_disabled_by_default() -> None:
+    desc = next(s for s in SENSORS if s.key == "pose_north_m")
+    assert desc.entity_registry_enabled_default is False
+    assert desc.value_key == "poseNorthM"
+
+
+def test_pose_heading_sensor_converts_radians_to_degrees() -> None:
+    import math
+    from unittest.mock import MagicMock
+
+    from lymow.sensor import LymowPoseHeadingSensor
+
+    coord = MagicMock()
+    coord.data = {"mower-001": {"poseThetaRad": math.pi / 2}}
+    e = LymowPoseHeadingSensor(coord, {"deviceThingName": "mower-001"})
+    # pi/2 rad → 90°
+    assert e.native_value == 90.0
+
+
+def test_pose_heading_sensor_wraps_to_zero_to_360() -> None:
+    import math
+    from unittest.mock import MagicMock
+
+    from lymow.sensor import LymowPoseHeadingSensor
+
+    coord = MagicMock()
+    # -pi/2 rad → -90° → wrapped to 270°
+    coord.data = {"mower-001": {"poseThetaRad": -math.pi / 2}}
+    e = LymowPoseHeadingSensor(coord, {"deviceThingName": "mower-001"})
+    assert e.native_value == 270.0
+
+
+def test_pose_heading_sensor_none_when_missing() -> None:
+    from unittest.mock import MagicMock
+
+    from lymow.sensor import LymowPoseHeadingSensor
+
+    coord = MagicMock()
+    coord.data = {"mower-001": {}}
+    e = LymowPoseHeadingSensor(coord, {"deviceThingName": "mower-001"})
+    assert e.native_value is None
+
+
+def test_pose_heading_sensor_none_when_non_numeric() -> None:
+    from unittest.mock import MagicMock
+
+    from lymow.sensor import LymowPoseHeadingSensor
+
+    coord = MagicMock()
+    coord.data = {"mower-001": {"poseThetaRad": "not-a-number"}}
+    e = LymowPoseHeadingSensor(coord, {"deviceThingName": "mower-001"})
+    assert e.native_value is None
+
+
+def test_pose_heading_sensor_unique_id_and_name() -> None:
+    from unittest.mock import MagicMock
+
+    from lymow.sensor import LymowPoseHeadingSensor
+
+    coord = MagicMock()
+    coord.data = {"mower-001": {}}
+    e = LymowPoseHeadingSensor(coord, {"deviceThingName": "mower-001", "deviceName": "Mower 1"})
+    assert e._attr_unique_id == "mower-001_pose_heading"
+    assert "Pose heading" in e._attr_name
+    assert "Mower 1" in e._attr_name
+
+
+async def test_async_setup_entry_registers_pose_heading_sensor() -> None:
+    """One LymowPoseHeadingSensor should be registered per device."""
+    from unittest.mock import MagicMock
+
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowPoseHeadingSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    pose = [e for e in added if isinstance(e, LymowPoseHeadingSensor)]
+    assert len(pose) == 1
+    assert pose[0]._thing_name == THING
