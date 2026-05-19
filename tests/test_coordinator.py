@@ -690,6 +690,7 @@ async def test_ota_fields_survive_coordinator_refresh() -> None:
     }
     # Prime _last_ota_check so _maybe_refresh_ota is a no-op
     from datetime import UTC, datetime
+
     coord._last_ota_check[THING] = datetime.now(UTC)
 
     result = await coord._async_update_data()
@@ -711,6 +712,7 @@ async def test_maybe_refresh_ota_hits_endpoint_when_cold_cache() -> None:
 async def test_maybe_refresh_ota_skips_within_interval() -> None:
     coord, _, api = _make_coordinator()
     from datetime import UTC, datetime
+
     coord._last_ota_check[THING] = datetime.now(UTC)
     api.check_update = AsyncMock(return_value={"latestVersion": "x"})
     await coord._maybe_refresh_ota(THING)
