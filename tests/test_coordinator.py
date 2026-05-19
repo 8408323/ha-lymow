@@ -1326,3 +1326,154 @@ async def test_query_helpers_publish_correct_userctrl(method_name: str, expected
     by_field = {fn: val for fn, _wt, val in _decode_fields(pb_bytes)}
     # userCtrl lives at field 5 — same convention as every other userCtrl-only command.
     assert by_field[5] == expected_code
+
+
+# ---------------------------------------------------------------------------
+# RTK auto-pause guard
+# ---------------------------------------------------------------------------
+
+
+def test_rtk_guard_defaults_disabled() -> None:
+    coord, _, _ = _make_coordinator()
+    assert coord.is_rtk_guard_enabled(THING) is False
+    assert coord.get_rtk_guard_threshold(THING) == 1
+
+
+def test_set_rtk_guard_enabled_toggles_state() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    assert coord.is_rtk_guard_enabled(THING) is True
+    coord.set_rtk_guard_enabled(THING, False)
+    assert coord.is_rtk_guard_enabled(THING) is False
+
+
+def test_disable_clears_guard_paused_flag() -> None:
+    """Disabling the feature mid-flight must not leave a stale guard-paused state
+    around, otherwise a later natural pause→resume cycle would be mis-attributed."""
+    coord, _, _ = _make_coordinator()
+    coord._rtk_guard_active_pause[THING] = True
+    coord.set_rtk_guard_enabled(THING, False)
+    assert coord._rtk_guard_active_pause[THING] is False
+
+
+def test_set_rtk_guard_threshold_persists() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_threshold(THING, 2)
+    assert coord.get_rtk_guard_threshold(THING) == 2
+
+
+def _capture_create_task(coord) -> MagicMock:
+    """Replace coord.hass.async_create_task with a mock that closes the coroutine
+    so we don't see "coroutine was never awaited" RuntimeWarnings."""
+    mock = MagicMock(side_effect=lambda coro: coro.close())
+    coord.hass.async_create_task = mock
+    return mock
+
+
+def test_rtk_guard_disabled_does_not_schedule_task() -> None:
+    """When the switch is off the MQTT-side check is a complete no-op."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 2}}  # mowing
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"rtkStatus": 0})
+    create_task.assert_not_called()
+
+
+def test_rtk_guard_no_action_without_rtk_in_patch() -> None:
+    """A patch that doesn't carry rtkStatus must not trigger anything."""
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    coord.data = {THING: {"workStatus": 2}}
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"battery": 50})
+    create_task.assert_not_called()
+
+
+def test_rtk_guard_pauses_when_below_threshold_while_mowing() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    coord.set_rtk_guard_threshold(THING, 1)
+    coord.data = {THING: {"workStatus": 2}}  # mowing
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"rtkStatus": 0})
+    assert create_task.call_count == 1
+
+
+def test_rtk_guard_does_not_pause_when_above_threshold() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    coord.set_rtk_guard_threshold(THING, 1)
+    coord.data = {THING: {"workStatus": 2}}
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"rtkStatus": 2})  # comfortably above
+    create_task.assert_not_called()
+
+
+def test_rtk_guard_does_not_pause_when_not_mowing() -> None:
+    """Only mowing → pause makes sense; docked/error states are ignored."""
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    coord.data = {THING: {"workStatus": 5}}  # docked
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"rtkStatus": 0})
+    create_task.assert_not_called()
+
+
+def test_rtk_guard_resumes_only_when_we_paused() -> None:
+    """If the user paused manually, RTK recovery must not auto-resume."""
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    coord.data = {THING: {"workStatus": 3}}  # paused
+    coord._rtk_guard_active_pause[THING] = False  # we did NOT pause
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"rtkStatus": 3})  # great fix
+    create_task.assert_not_called()
+
+
+def test_rtk_guard_resumes_when_we_paused_and_rtk_recovers() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    coord.data = {THING: {"workStatus": 3}}  # paused
+    coord._rtk_guard_active_pause[THING] = True  # we paused earlier
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"rtkStatus": 3})
+    assert create_task.call_count == 1
+
+
+def test_rtk_guard_ignores_non_numeric_rtk() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    coord.data = {THING: {"workStatus": 2}}
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"rtkStatus": "bad"})
+    create_task.assert_not_called()
+
+
+def test_rtk_guard_no_action_when_work_status_unknown() -> None:
+    """If the cached merge doesn't yet contain workStatus, the guard has no
+    context to decide on — it must early-return without scheduling."""
+    coord, _, _ = _make_coordinator()
+    coord.set_rtk_guard_enabled(THING, True)
+    coord.data = {THING: {}}  # no workStatus
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_state(THING, {"rtkStatus": 0})
+    create_task.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_rtk_guard_pause_helper_publishes_pause_and_sets_flag() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 2}}  # mowing
+    await coord._async_rtk_guard_pause(THING, rtk_val=0, threshold=1)
+    assert coord._rtk_guard_active_pause[THING] is True
+    assert mqtt.async_publish_command.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_rtk_guard_resume_helper_publishes_resume_and_clears_flag() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 3}}  # paused
+    coord._rtk_guard_active_pause[THING] = True
+    await coord._async_rtk_guard_resume(THING, rtk_val=3)
+    assert coord._rtk_guard_active_pause[THING] is False
+    assert mqtt.async_publish_command.await_count == 1

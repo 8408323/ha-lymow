@@ -423,3 +423,51 @@ async def test_mobile_notification_switch_turn_off_sends_int_zero() -> None:
     e = MobileNotificationSwitch(coord, DEVICE)
     await e.async_turn_off()
     coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=0)
+
+
+# ---------------------------------------------------------------------------
+# RtkAutoPauseSwitch — reads + writes a coordinator-side flag (no API call)
+# ---------------------------------------------------------------------------
+
+
+def test_rtk_auto_pause_switch_reflects_coordinator_state() -> None:
+    from lymow.switch import RtkAutoPauseSwitch
+
+    coord = MagicMock()
+    coord.is_rtk_guard_enabled = MagicMock(return_value=False)
+    e = RtkAutoPauseSwitch(coord, DEVICE)
+    assert e.is_on is False
+    coord.is_rtk_guard_enabled = MagicMock(return_value=True)
+    assert e.is_on is True
+
+
+def test_rtk_auto_pause_switch_unique_id_and_disabled_default() -> None:
+    from lymow.switch import RtkAutoPauseSwitch
+
+    coord = MagicMock()
+    coord.is_rtk_guard_enabled = MagicMock(return_value=False)
+    e = RtkAutoPauseSwitch(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_rtk_auto_pause"
+    assert e._attr_entity_registry_enabled_default is False
+
+
+async def test_rtk_auto_pause_switch_turn_on_toggles_coordinator() -> None:
+    from lymow.switch import RtkAutoPauseSwitch
+
+    coord = MagicMock()
+    coord.is_rtk_guard_enabled = MagicMock(return_value=False)
+    e = RtkAutoPauseSwitch(coord, DEVICE)
+    e.async_write_ha_state = MagicMock()
+    await e.async_turn_on()
+    coord.set_rtk_guard_enabled.assert_called_once_with(THING, True)
+
+
+async def test_rtk_auto_pause_switch_turn_off_toggles_coordinator() -> None:
+    from lymow.switch import RtkAutoPauseSwitch
+
+    coord = MagicMock()
+    coord.is_rtk_guard_enabled = MagicMock(return_value=True)
+    e = RtkAutoPauseSwitch(coord, DEVICE)
+    e.async_write_ha_state = MagicMock()
+    await e.async_turn_off()
+    coord.set_rtk_guard_enabled.assert_called_once_with(THING, False)

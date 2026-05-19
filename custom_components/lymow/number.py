@@ -25,6 +25,7 @@ async def async_setup_entry(
 
     # One geofence-radius number per device (geoFence is a feature-level field).
     radius_entities: list[NumberEntity] = [GeofenceRadiusNumber(coordinator, device) for device in coordinator.devices]
+    radius_entities.extend(RtkPauseThresholdNumber(coordinator, device) for device in coordinator.devices)
     if radius_entities:
         async_add_entities(radius_entities)
 
@@ -130,3 +131,35 @@ class ZoneCutHeightNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_update_zone_cut_height(self._thing_name, self._hash_id, int(value))
+
+
+class RtkPauseThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
+    """Minimum acceptable RTK status while mowing.
+
+    When the dedicated ``RTK auto-pause`` switch is on and the live ``rtkStatus``
+    drops to or below this value during an active mow, the coordinator publishes
+    PAUSE; once it climbs back above, RESUME. Valid range maps to the same
+    rtkStatus codes ``LymowRtkSensor`` decodes (0=Not ready … 3=RTK fixed).
+    """
+
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = 0
+    _attr_native_max_value = 3
+    _attr_native_step = 1
+    _attr_icon = "mdi:satellite-uplink"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_unique_id = f"{self._thing_name}_rtk_pause_threshold"
+        self._attr_name = f"{device_label} RTK pause threshold"
+
+    @property
+    def native_value(self) -> float:
+        return float(self.coordinator.get_rtk_guard_threshold(self._thing_name))
+
+    async def async_set_native_value(self, value: float) -> None:
+        self.coordinator.set_rtk_guard_threshold(self._thing_name, int(value))
+        self.async_write_ha_state()

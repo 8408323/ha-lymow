@@ -35,6 +35,7 @@ from .const import (
     WORK_STATUS_ERROR_GROUP,
     WORK_STATUS_MOWING_GROUP,
     WORK_STATUS_PAUSE_DOCKING,
+    WORK_STATUS_PAUSED_GROUP,
     WORK_STATUS_RETURNING_GROUP,
 )
 from .mqtt import LymowMqttClient
@@ -84,6 +85,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._prev_work_status: dict[str, int] = {}
         # Cached backup-map snapshot per device: (fetched_at, fields).
         self._backup_map_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
+        # RTK auto-pause guard: per-device knobs and tracking.
+        # Enabled defaults off — opt-in safety feature.
+        self._rtk_guard_enabled: dict[str, bool] = {}
+        # Minimum acceptable rtkStatus while mowing. Drop ≤ this triggers PAUSE.
+        # Default 1 (≥ float fix). 0 means "no fix" — anything tighter is safer.
+        self._rtk_guard_threshold: dict[str, int] = {}
+        # True if the *coordinator* (not the user) initiated the current pause,
+        # so we know it's safe to auto-resume when RTK recovers.
+        self._rtk_guard_active_pause: dict[str, bool] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -107,6 +117,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             merged = {**self.data[thing_name], **patch}
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
+        self._check_rtk_guard(thing_name, patch)
 
     def _check_work_status_transition(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Fire HA event bus events and persistent notifications on notable work status changes."""
@@ -144,6 +155,73 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 title=f"Lymow — {device_label} done",
                 notification_id=f"{DOMAIN}_{thing_name}_done",
             )
+
+    def _check_rtk_guard(self, thing_name: str, patch: dict[str, Any]) -> None:
+        """Auto-pause when RTK falls below user-configured threshold; auto-resume when it recovers.
+
+        Reads ``rtkStatus`` from the latest MQTT patch. To avoid resuming
+        user-initiated pauses, we only auto-resume mowers that *we* paused via
+        this guard (tracked in ``_rtk_guard_active_pause``).
+        """
+        if not self._rtk_guard_enabled.get(thing_name, False):
+            return
+        # Only react when this patch actually carries an rtkStatus update.
+        new_rtk = patch.get("rtkStatus")
+        if new_rtk is None:
+            return
+        threshold = self._rtk_guard_threshold.get(thing_name, 1)
+        merged = (self.data or {}).get(thing_name) or {}
+        work_status = merged.get("workStatus")
+        if work_status is None:
+            return
+        try:
+            rtk_val = int(new_rtk)
+        except (TypeError, ValueError):
+            return
+
+        if rtk_val <= threshold and work_status in WORK_STATUS_MOWING_GROUP:
+            self.hass.async_create_task(self._async_rtk_guard_pause(thing_name, rtk_val, threshold))
+        elif (
+            rtk_val > threshold
+            and self._rtk_guard_active_pause.get(thing_name, False)
+            and work_status in WORK_STATUS_PAUSED_GROUP
+        ):
+            self.hass.async_create_task(self._async_rtk_guard_resume(thing_name, rtk_val))
+
+    async def _async_rtk_guard_pause(self, thing_name: str, rtk_val: int, threshold: int) -> None:
+        """Publish PAUSE and mark this device as guard-paused."""
+        await self.async_pause(thing_name)
+        self._rtk_guard_active_pause[thing_name] = True
+        _LOGGER.warning(
+            "Lymow %s: paused mow because RTK status %d ≤ threshold %d",
+            thing_name,
+            rtk_val,
+            threshold,
+        )
+
+    async def _async_rtk_guard_resume(self, thing_name: str, rtk_val: int) -> None:
+        """Publish RESUME and clear the guard-paused flag."""
+        await self.async_resume(thing_name)
+        self._rtk_guard_active_pause[thing_name] = False
+        _LOGGER.info("Lymow %s: resumed mow because RTK status recovered to %d", thing_name, rtk_val)
+
+    def set_rtk_guard_enabled(self, thing_name: str, enabled: bool) -> None:
+        """Switch entity calls this to flip auto-pause on/off."""
+        self._rtk_guard_enabled[thing_name] = enabled
+        if not enabled:
+            # Clear the guard-paused flag — once the user disables the feature
+            # we don't want a later natural pause/resume to be mis-attributed.
+            self._rtk_guard_active_pause[thing_name] = False
+
+    def is_rtk_guard_enabled(self, thing_name: str) -> bool:
+        return self._rtk_guard_enabled.get(thing_name, False)
+
+    def set_rtk_guard_threshold(self, thing_name: str, threshold: int) -> None:
+        """Number entity calls this to update the threshold."""
+        self._rtk_guard_threshold[thing_name] = int(threshold)
+
+    def get_rtk_guard_threshold(self, thing_name: str) -> int:
+        return self._rtk_guard_threshold.get(thing_name, 1)
 
     def on_mqtt_online(self, thing_name: str, is_online: bool) -> None:
         """Receive an online/offline notification from MQTT."""
