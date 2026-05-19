@@ -22,6 +22,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "api_device_list": "asjqh5wbtj",
         "api_device_info": "6ghz1zkccg",
         "api_ota_check": "eigc6a2ds9",
+        "api_ota_job": "io4nsakkt8",  # from APK strings; create-ota-job + get-ota-job-summary
         "api_map": "3q1zxz98l2",
         "api_user_account": "l3hazobjk0",
         "api_kvs": "frgai1jfwg",  # confirmed from live capture 2026-05-19
@@ -35,6 +36,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "api_device_list": "453ahng0z4",
         "api_device_info": "xuw7gtx113",
         "api_ota_check": "6at3p6r6ce",
+        "api_ota_job": "tvdfyh81d1",  # from APK strings; us-east-2 OTA job gateway
         "api_map": "suk4e76xe5",
         "api_user_account": "6r8m5rxeth",
         "api_kvs": "xuw7gtx113",  # per API.md table; unverified live
@@ -48,6 +50,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "api_device_list": "1sfa49lnl8",
         "api_device_info": "7k2iuc99h7",
         "api_ota_check": "v7tlj1gnw7",
+        "api_ota_job": None,  # not present in APK strings or capture
         "api_map": "2xipi98nw3",
         "api_user_account": "l2gobpcoqc",
         "api_kvs": None,  # not present in API.md; unknown
@@ -61,6 +64,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "api_device_list": "08ydw34dfj",
         "api_device_info": "i1pbnu30si",
         "api_ota_check": "kdueg6qcwl",
+        "api_ota_job": None,  # not present in APK strings or capture
         "api_map": "m35t3px95i",
         "api_user_account": "1h2q9awtqd",
         "api_kvs": "t0da44vtxf",  # per API.md table; unverified live

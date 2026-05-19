@@ -41,6 +41,7 @@ try:
     import homeassistant.components.number  # noqa: F401
     import homeassistant.components.sensor  # noqa: F401
     import homeassistant.components.switch  # noqa: F401
+    import homeassistant.components.update  # noqa: F401
     import homeassistant.config_entries  # noqa: F401
     import homeassistant.core  # noqa: F401
     import homeassistant.exceptions  # noqa: F401
@@ -58,6 +59,7 @@ try:
     _load_lymow_module("button")
     _load_lymow_module("device_tracker")
     _load_lymow_module("lawn_mower")
+    _load_lymow_module("update")
 except ImportError:
     # HA not installed (uv/Python 3.13 CI env) — inject minimal stubs so all
     # lymow platform modules can be loaded and their tests can run.
@@ -361,6 +363,20 @@ except ImportError:
     _ha_button.ButtonEntity = _ButtonEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.button", _ha_button)
 
+    # ── homeassistant.components.update ───────────────────────────────────────
+    _ha_update = types.ModuleType("homeassistant.components.update")
+
+    class _UpdateEntityFeature(IntFlag):
+        INSTALL = 1
+        RELEASE_NOTES = 2
+
+    class _UpdateEntity:
+        pass
+
+    _ha_update.UpdateEntity = _UpdateEntity  # type: ignore[attr-defined]
+    _ha_update.UpdateEntityFeature = _UpdateEntityFeature  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.update", _ha_update)
+
     # Now load the platform modules that depend on the above stubs.
     _load_lymow_module("coordinator")
     _load_lymow_module("config_flow")
@@ -371,3 +387,4 @@ except ImportError:
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
     _load_lymow_module("lawn_mower")
+    _load_lymow_module("update")
