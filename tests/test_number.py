@@ -300,3 +300,58 @@ async def test_async_setup_entry_registers_geofence_radius_per_device() -> None:
     radius_entities = [e for e in added if isinstance(e, GeofenceRadiusNumber)]
     assert len(radius_entities) == 1
     assert radius_entities[0]._thing_name == THING
+
+
+# ---------------------------------------------------------------------------
+# RtkPauseThresholdNumber — pure coordinator-state knob, no REST call
+# ---------------------------------------------------------------------------
+
+
+def test_rtk_pause_threshold_native_value_reads_coordinator() -> None:
+    from lymow.number import RtkPauseThresholdNumber
+
+    coord = MagicMock()
+    coord.get_rtk_guard_threshold = MagicMock(return_value=2)
+    e = RtkPauseThresholdNumber(coord, DEVICE)
+    assert e.native_value == 2.0
+
+
+def test_rtk_pause_threshold_bounds_disabled_default() -> None:
+    from lymow.number import RtkPauseThresholdNumber
+
+    coord = MagicMock()
+    coord.get_rtk_guard_threshold = MagicMock(return_value=1)
+    e = RtkPauseThresholdNumber(coord, DEVICE)
+    assert e._attr_native_min_value == 0
+    assert e._attr_native_max_value == 3
+    assert e._attr_entity_registry_enabled_default is False
+    assert e._attr_unique_id == f"{THING}_rtk_pause_threshold"
+
+
+async def test_rtk_pause_threshold_set_writes_coordinator() -> None:
+    from lymow.number import RtkPauseThresholdNumber
+
+    coord = MagicMock()
+    coord.get_rtk_guard_threshold = MagicMock(return_value=1)
+    e = RtkPauseThresholdNumber(coord, DEVICE)
+    e.async_write_ha_state = MagicMock()
+    await e.async_set_native_value(2)
+    coord.set_rtk_guard_threshold.assert_called_once_with(THING, 2)
+
+
+async def test_async_setup_entry_registers_rtk_threshold_per_device() -> None:
+    from lymow.const import DOMAIN
+    from lymow.number import RtkPauseThresholdNumber
+
+    coord = _make_radius_coord([{"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 150}])
+    coord.get_rtk_guard_threshold = MagicMock(return_value=1)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    threshold_entities = [e for e in added if isinstance(e, RtkPauseThresholdNumber)]
+    assert len(threshold_entities) == 1

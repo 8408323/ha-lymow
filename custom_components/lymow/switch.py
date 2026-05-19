@@ -31,6 +31,7 @@ async def async_setup_entry(
                 TheftLockSwitch(coordinator, device),
                 FindRobotSwitch(coordinator, device),
                 MobileNotificationSwitch(coordinator, device),
+                RtkAutoPauseSwitch(coordinator, device),
             ]
         )
     if feature_entities:
@@ -168,3 +169,31 @@ class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_update_zone_enabled(self._thing_name, self._hash_id, False)
+
+
+class RtkAutoPauseSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
+    """Opt-in safety switch: when on, the coordinator auto-pauses the mower
+    if RTK status drops to or below the configured threshold, and auto-resumes
+    once it recovers — protects against the mower wandering on a degraded fix."""
+
+    _attr_icon = "mdi:satellite-variant"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_unique_id = f"{self._thing_name}_rtk_auto_pause"
+        self._attr_name = f"{device_label} RTK auto-pause"
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.is_rtk_guard_enabled(self._thing_name)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator.set_rtk_guard_enabled(self._thing_name, True)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator.set_rtk_guard_enabled(self._thing_name, False)
+        self.async_write_ha_state()
