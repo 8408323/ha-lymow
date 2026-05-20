@@ -2,7 +2,7 @@
 # Capture the BLE ATT bytes the Lymow app sends during a joystick turn.
 #
 # Usage:
-#   bash scripts/adb_capture_turn.sh [phone_ip]   (default: 192.168.1.45)
+#   bash scripts/adb_capture_turn.sh [phone_ip]   (default: 192.168.1.101 — set to your phone's LAN IP)
 #
 # Steps:
 #   1. Connects ADB over WiFi
@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-PHONE_IP="${1:-192.168.1.45}"
+PHONE_IP="${1:-192.168.1.101}"
 PHONE_PORT=5555
 SNOOP_PATH="/data/misc/bluetooth/logs/btsnoop_hci.log"
 OUT_DIR="$(cd "$(dirname "$0")/../tools" && pwd)"
