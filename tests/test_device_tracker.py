@@ -27,10 +27,10 @@ def test_metadata() -> None:
 
 
 def test_coords_returns_lat_lon_from_robot_location() -> None:
-    coord = _make_coord({"robotLocation": [59.3293, 18.0686]})
+    coord = _make_coord({"robotLocation": [12.3456, 65.4321]})
     e = LymowDeviceTracker(coord, DEVICE)
-    assert e.latitude == 59.3293
-    assert e.longitude == 18.0686
+    assert e.latitude == 12.3456
+    assert e.longitude == 65.4321
 
 
 def test_coords_none_when_location_missing() -> None:

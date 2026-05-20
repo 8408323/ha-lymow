@@ -1240,7 +1240,7 @@ async def test_async_set_geofence_radius_resends_full_array() -> None:
     coord.data = {
         THING: {
             "geoFence": [
-                {"name": "Home", "latitude": 59.0, "longitude": 16.0, "radius": 150},
+                {"name": "Home", "latitude": 12.0, "longitude": 65.0, "radius": 150},
             ]
         }
     }
@@ -1255,8 +1255,8 @@ async def test_async_set_geofence_radius_resends_full_array() -> None:
     sent = kwargs["geoFence"]
     assert len(sent) == 1
     assert sent[0]["radius"] == 200
-    assert sent[0]["latitude"] == 59.0
-    assert sent[0]["longitude"] == 16.0
+    assert sent[0]["latitude"] == 12.0
+    assert sent[0]["longitude"] == 65.0
     assert sent[0]["name"] == "Home"
 
 
