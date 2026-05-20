@@ -661,7 +661,7 @@ def test_decode_map_response_full() -> None:
             {"hashId": "nogo0002", "type": 2, "parentZoneHashId": "gozone02"},
         ],
         charging_station={"x": -0.08, "y": -0.11, "theta": -1.57},
-        gps_origin={"lat": 59.68, "lon": 16.76},
+        gps_origin={"lat": 12.34, "lon": 65.43},
     )
     result = decode_map_response(pb)
     assert len(result["goZones"]) == 2
@@ -689,7 +689,7 @@ def _sample_map() -> dict:
             {"hashId": "nogo0002", "type": 2, "parentZoneHashId": "gozone02"},
         ],
         charging_station={"x": -0.08, "y": -0.11, "theta": -1.57},
-        gps_origin={"lat": 59.68, "lon": 16.76},
+        gps_origin={"lat": 12.34, "lon": 65.43},
     )
     return decode_map_response(pb)
 

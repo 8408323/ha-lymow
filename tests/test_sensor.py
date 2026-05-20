@@ -269,7 +269,7 @@ def test_map_sensor_extra_attrs_has_nogo_zones() -> None:
 
 
 def test_map_sensor_extra_attrs_has_gps_origin() -> None:
-    origin = {"lat": 59.0, "lon": 18.0}
+    origin = {"lat": 12.0, "lon": 65.0}
     coord = _make_coord({"mapData": {"gpsOrigin": origin}})
     sensor = LymowMapSensor(coord, DEVICE)
     assert sensor.extra_state_attributes["gps_origin"] == origin

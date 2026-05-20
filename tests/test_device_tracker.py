@@ -55,7 +55,7 @@ def test_coords_none_when_not_a_list() -> None:
 
 
 def test_coords_none_when_list_too_short() -> None:
-    coord = _make_coord({"robotLocation": [59.3]})
+    coord = _make_coord({"robotLocation": [12.3]})
     e = LymowDeviceTracker(coord, DEVICE)
     assert e.latitude is None
 
@@ -69,7 +69,7 @@ def test_coords_none_when_values_not_numeric() -> None:
 def test_extra_state_attributes_collects_metadata() -> None:
     coord = _make_coord(
         {
-            "robotLocation": [59.3, 18.0],
+            "robotLocation": [12.3, 65.0],
             "sn": "SN42",
             "deviceState": "online",
             "stolenStatus": False,
@@ -103,7 +103,7 @@ def test_device_data_empty_when_coordinator_data_none() -> None:
 
 
 async def test_async_setup_entry_creates_one_per_device() -> None:
-    coord = _make_coord({"robotLocation": [59.3, 18.0]})
+    coord = _make_coord({"robotLocation": [12.3, 65.0]})
 
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": coord}}
