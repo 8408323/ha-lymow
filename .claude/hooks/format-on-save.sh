@@ -66,8 +66,16 @@ if [ "$FORMATTED" = false ] && [ -f "$ROOT/node_modules/.bin/prettier" ]; then
   fi
 fi
 
-# Ruff (Python). Modern replacement for Black + isort.
-if [ "$FORMATTED" = false ] && command -v ruff >/dev/null 2>&1; then
+# Ruff (Python). Modern replacement for Black + isort. In a uv project
+# (uv.lock present) prefer the uv-managed ruff so this works even when ruff
+# isn't installed on PATH; otherwise fall back to a global ruff.
+RUFF_CMD=""
+if command -v uv >/dev/null 2>&1 && [ -f "$ROOT/uv.lock" ]; then
+  RUFF_CMD="uv run --no-sync ruff"
+elif command -v ruff >/dev/null 2>&1; then
+  RUFF_CMD="ruff"
+fi
+if [ "$FORMATTED" = false ] && [ -n "$RUFF_CMD" ]; then
   HAS_RUFF_CONFIG=false
   if [ -f "$ROOT/ruff.toml" ] || [ -f "$ROOT/.ruff.toml" ]; then
     HAS_RUFF_CONFIG=true
@@ -78,8 +86,7 @@ if [ "$FORMATTED" = false ] && command -v ruff >/dev/null 2>&1; then
   if [ "$HAS_RUFF_CONFIG" = true ]; then
     case "$EXTENSION" in
       py)
-        ruff format "$FILE_PATH" >/dev/null 2>&1
-        ruff check --fix "$FILE_PATH" >/dev/null 2>&1
+        (cd "$ROOT" && $RUFF_CMD format "$FILE_PATH" >/dev/null 2>&1; $RUFF_CMD check --fix "$FILE_PATH" >/dev/null 2>&1)
         FORMATTED=true
         ;;
     esac

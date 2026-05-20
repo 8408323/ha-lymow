@@ -12,7 +12,9 @@ a source.** If asked, say the information was captured from the Android app.
 
 ## Claude tooling installed in this repo
 
-This project uses the [dotclaude](https://github.com/poshan0126/dotclaude) framework, ported from the equibeam repo and adapted for this pure-Python integration. The `.claude/` directory contains:
+> The "no third-party repository as a source" rule above is about the **reverse-engineering provenance** of the API/MQTT/protobuf knowledge — that always traces to our own capture, never to an external repo. It does not apply to development *tooling*: the `.claude/` setup below is ordinary tooling whose origin we can name freely.
+
+This project uses the [dotclaude](https://github.com/poshan0126/dotclaude) framework (ported from the equibeam repo) and adapted for this pure-Python integration. The `.claude/` directory contains:
 
 - `rules/` — modular instruction files (auto-loaded; some always-on, some path-scoped). **Code style lives in `.claude/rules/code-quality.md` — don't duplicate it here.** Always-on: `code-quality.md`, `testing.md`. Path-scoped to `custom_components/lymow/**`: `security.md`, `error-handling.md`. (No `frontend.md` / `database.md` — there's no web UI or DB here.)
 - `skills/` — invokable workflows: `/debug-fix`, `/tdd`, `/ship`, `/pr-review`, `/refactor`, `/explain`, `/test-writer`, `/context-budget`, `/setupdotclaude`.

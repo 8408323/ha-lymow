@@ -126,7 +126,12 @@ case "$EXTENSION" in
     fi
     ;;
   py)
-    if command -v pytest >/dev/null 2>&1; then
+    # In a uv project (uv.lock present) run tests through uv so the project's
+    # environment and dependencies are used; otherwise fall back to a global
+    # pytest, then stdlib unittest.
+    if command -v uv >/dev/null 2>&1 && [ -f "$ROOT/uv.lock" ]; then
+      OUTPUT=$(cd "$ROOT" && uv run --no-sync pytest "$REL_TEST" 2>&1); EXIT=$?
+    elif command -v pytest >/dev/null 2>&1; then
       OUTPUT=$(cd "$ROOT" && pytest "$REL_TEST" 2>&1); EXIT=$?
     elif command -v python3 >/dev/null 2>&1; then
       OUTPUT=$(cd "$ROOT" && python3 -m unittest "$REL_TEST" 2>&1); EXIT=$?

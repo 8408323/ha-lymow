@@ -66,18 +66,18 @@ CRITICAL PROJECT RULES (restored automatically. Do not ignore):
    - Don't add features beyond what was asked.
    - No dead code or commented-out blocks.
    - Functions do one thing. No magic values.
-   - Named exports over default exports.
+   - `from __future__ import annotations`; type hints throughout; house style is no comments unless the WHY is non-obvious.
 
 3. WORKFLOW
-   - Run typecheck after making code changes.
+   - Run `uv run pytest tests/test_<module>.py` after changes (full suite enforces 100% coverage).
    - Prefer fixing root causes over workarounds.
-   - Don't modify generated files (*.gen.ts, *.generated.*).
+   - Keep wire-protocol field names verbatim (e.g. deviceThingName); don't snake-case them.
    - Don't modify lock files, .env files, or hook scripts.
 
 4. SECURITY
-   - Never commit secrets, tokens, or credentials.
-   - Validate all user input at system boundaries.
-   - Parameterized queries only. No string interpolation in SQL.
+   - Never commit secrets, tokens, credentials, the device PIN, or GPS coordinates.
+   - Never log tokens, PIN, GPS, or PII.
+   - Validate untrusted input (decoded protobuf / MQTT / REST) at the boundary. No shell=True with interpolation.
 
 5. GIT
    - Don't push directly to main/master.
