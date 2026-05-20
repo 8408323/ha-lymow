@@ -1,0 +1,5 @@
+{
+  "name": "block rm --recursive --force / (GNU long flag forms)",
+  "stdin": { "tool_input": { "command": "rm --recursive --force /" } },
+  "expect_exit": 2
+}

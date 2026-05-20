@@ -1,0 +1,5 @@
+{
+  "name": "allow git push -u origin feat/some-work (flag + remote + non-protected branch)",
+  "stdin": { "tool_input": { "command": "git push -u origin feat/some-work" } },
+  "expect_exit": 0
+}

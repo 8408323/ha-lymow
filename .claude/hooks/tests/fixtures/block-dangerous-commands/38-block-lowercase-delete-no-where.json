@@ -1,0 +1,5 @@
+{
+  "name": "block lowercase 'delete from' (case-insensitive via tolower, not GNU IGNORECASE)",
+  "stdin": { "tool_input": { "command": "psql -c \"delete from users\"" } },
+  "expect_exit": 2
+}

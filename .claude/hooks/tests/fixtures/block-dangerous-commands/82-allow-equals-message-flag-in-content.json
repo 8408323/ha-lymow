@@ -1,0 +1,5 @@
+{
+  "name": "allow git commit --message=\"contains --no-verify in message\" (no actual bypass flag)",
+  "stdin": { "tool_input": { "command": "git commit --message=\"contains --no-verify in message\"" } },
+  "expect_exit": 0
+}

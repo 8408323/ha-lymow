@@ -1,0 +1,5 @@
+{
+  "name": "block echo a; rm -rf / (rm after `;` separator — exercises portable tr-based splitter)",
+  "stdin": { "tool_input": { "command": "echo a; rm -rf /" } },
+  "expect_exit": 2
+}

@@ -1,0 +1,5 @@
+{
+  "name": "block git commit -c commit.gpgSign=false (case-insensitive git-config key)",
+  "stdin": { "tool_input": { "command": "git commit -c commit.gpgSign=false -m \"x\"" } },
+  "expect_exit": 2
+}

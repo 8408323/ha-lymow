@@ -1,0 +1,5 @@
+{
+  "name": "allow echo 'DROP TABLE users' (quoted SQL inside echo is plain text)",
+  "stdin": { "tool_input": { "command": "echo 'DROP TABLE users'" } },
+  "expect_exit": 0
+}

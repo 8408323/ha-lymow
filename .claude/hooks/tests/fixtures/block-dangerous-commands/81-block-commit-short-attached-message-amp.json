@@ -1,0 +1,6 @@
+{
+  "name": "block git commit -m\"fix & note\" --no-verify (short-attached form, no space)",
+  "stdin": { "tool_input": { "command": "git commit -m\"fix & note\" --no-verify" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["--no-verify"]
+}

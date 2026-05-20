@@ -1,0 +1,5 @@
+{
+  "name": "block rm -rf -- /etc (option terminator + system dir)",
+  "stdin": { "tool_input": { "command": "rm -rf -- /etc" } },
+  "expect_exit": 2
+}

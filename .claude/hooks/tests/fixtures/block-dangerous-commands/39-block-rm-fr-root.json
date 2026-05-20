@@ -1,0 +1,5 @@
+{
+  "name": "block rm -fr / (flag order f-then-r, swapped from rf)",
+  "stdin": { "tool_input": { "command": "rm -fr /" } },
+  "expect_exit": 2
+}

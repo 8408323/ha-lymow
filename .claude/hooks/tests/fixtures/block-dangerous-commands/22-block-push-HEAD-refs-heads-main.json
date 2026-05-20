@@ -1,0 +1,6 @@
+{
+  "name": "block push HEAD:refs/heads/main (src:full-dst refspec)",
+  "stdin": { "tool_input": { "command": "git push origin HEAD:refs/heads/main" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["deny", "main"]
+}

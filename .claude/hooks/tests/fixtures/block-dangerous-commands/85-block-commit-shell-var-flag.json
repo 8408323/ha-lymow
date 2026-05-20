@@ -1,0 +1,6 @@
+{
+  "name": "block NV=-n; git commit $NV -m x (shell-var expansion as flag at exec time)",
+  "stdin": { "tool_input": { "command": "NV=-n; git commit $NV -m \"x\"" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["shell-expanded"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "block git --config-env=commit.gpgsign=NO_SIGN commit (env-indirection signing bypass)",
+  "stdin": { "tool_input": { "command": "NO_SIGN=false git --config-env=commit.gpgsign=NO_SIGN commit -m x" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["config-env"]
+}

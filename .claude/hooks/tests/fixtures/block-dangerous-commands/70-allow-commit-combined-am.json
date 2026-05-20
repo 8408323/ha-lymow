@@ -1,0 +1,5 @@
+{
+  "name": "allow git commit -am (combined short flags without -n)",
+  "stdin": { "tool_input": { "command": "git commit -am \"x\"" } },
+  "expect_exit": 0
+}
