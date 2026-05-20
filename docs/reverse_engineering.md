@@ -337,6 +337,9 @@ payload = encode_ble_drive(linear=0.5, angular=0.0)
 # Full left turn (CCW)
 payload = encode_ble_drive(linear=0.0, angular=0.6)
 
+# Full right turn (CW)
+payload = encode_ble_drive(linear=0.0, angular=-0.6)
+
 # Stop
 payload = encode_ble_drive(linear=0.0, angular=0.0)
 ```
