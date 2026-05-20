@@ -281,12 +281,25 @@ commands are not visible in MQTT traffic and require HCI BTSnoop analysis.
 | ATT write type | Write Without Response (ATT Write Command, opcode `0x52`) |
 | Notification CCCD | ATT handle `0x0015` |
 | Send rate | ~10 Hz while joystick is held |
+| **ATT MTU** | **Must negotiate ≥ 27 (app uses 512).** See critical note below. |
+
+> **CRITICAL — negotiate the ATT MTU before driving.** The drive value is **24 bytes**.
+> On the default ATT MTU (23), a Write Command's value is capped at MTU−3 = **20 bytes**,
+> so the robot truncates the value, preserving the **linear** float (bytes 7–10) but
+> corrupting the **angular** float (bytes 12–15). Symptom: linear drive works, but
+> rotation only twitches and never sustains. Send an **ATT Exchange MTU Request**
+> (opcode `0x02`, client_rx_mtu = 512 — exactly what the app does) right after
+> connecting; then the full value is delivered and **rotation works**. Confirmed live
+> 2026-05-21: with MTU 512, right spin = ~204°, left spin = ~175° (measured from the
+> robot's pose heading `f14.f3` in its notifications, which also only stream in full
+> once the MTU is raised). `scripts/raw_ble_drive.py` now does this via `_exchange_mtu()`.
 
 ### Payload encoding
 
 The raw GATT value written to the characteristic is the **ASCII representation
 of the base64-encoded protobuf binary** — i.e. `base64(protobuf_bytes)` as
-plain ASCII text (34 bytes on the wire).
+plain ASCII text. The 16-byte drive protobuf encodes to **24 ASCII bytes** on
+the wire; the idle heartbeat (42-byte protobuf) is **56 ASCII bytes**.
 
 ### Protobuf message structure (16 bytes decoded)
 
@@ -304,8 +317,20 @@ As hex bytes: `10 31 38 02 52 0a 0d <4B-linear> 15 <4B-angular>`
 
 | Axis | Field | Min | Max | Positive direction |
 |------|-------|-----|-----|--------------------|
-| Linear | 1 | −0.5 | +0.5 | Forward |
-| Angular | 2 | −0.6 | +0.6 | Right turn |
+| Linear | 1 | −0.5 | +0.5 | Forward (− = reverse) |
+| Angular | 2 | −0.6 | +0.6 | **Left / CCW** (− = right / CW) |
+
+Confirmed from a live joystick capture (2026-05-20): right-90° → angular ramped to
+−0.600; forward → linear ramped to +0.500; left-360° → angular held +0.575;
+reverse → linear held −0.500. Stick deflection distance maps proportionally to
+speed and clamps at the max. (Matches `encode_ble_drive`; the earlier
+"positive = right turn" note here was wrong.)
+
+> **Open issue — laptop-driven spin:** driving from a laptop (raw-L2CAP), linear
+> commands move the robot but pure-angular commands only jerk it — even at the
+> app's exact ±0.600. The app spins the robot with byte-identical drive frames,
+> so the gating factor is something else in the app's BLE session (mode/enable
+> command or robot state), not the drive payload. Under investigation.
 
 ### Python encoder
 
