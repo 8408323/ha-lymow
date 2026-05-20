@@ -340,6 +340,33 @@ def _robot_receiver(
         # ignore any late-arriving ones here.
 
 
+def _exchange_mtu(sock: socket.socket, mtu: int = 512) -> None:
+    """Negotiate a larger ATT MTU (ATT Exchange MTU Request, opcode 0x02).
+
+    CRITICAL: the default ATT MTU is 23, which caps a Write Command's value at
+    MTU-3 = 20 bytes.  The drive command value is 24 bytes (base64 of the 16-byte
+    protobuf), so on the default MTU the robot truncates it to 20 bytes — which
+    preserves the linear float (offset 7-10) but corrupts the *angular* float
+    (offset 12-15).  Result: linear drive works, but rotation only jerks.
+    The app negotiates MTU 512; doing the same here makes angular/rotation work.
+    """
+    old_timeout = sock.gettimeout()
+    sock.settimeout(3.0)
+    try:
+        with _send_lock:
+            sock.send(struct.pack("<BH", 0x02, mtu))  # ATT_EXCHANGE_MTU_REQ
+        resp = sock.recv(64)
+        if resp and len(resp) >= 3 and resp[0] == 0x03:  # ATT_EXCHANGE_MTU_RSP
+            server_mtu = struct.unpack_from("<H", resp, 1)[0]
+            print(f"  ATT MTU negotiated: client={mtu} server={server_mtu} -> {min(mtu, server_mtu)}")
+        else:
+            print(f"  MTU exchange unexpected response: {resp.hex() if resp else 'empty'} — continuing.")
+    except socket.timeout:
+        print("  MTU exchange timed out — continuing (angular/rotation may not work).")
+    finally:
+        sock.settimeout(old_timeout)
+
+
 def _enable_cccd(sock: socket.socket) -> None:
     """Subscribe to notifications from the drive/status characteristic (CCCD at 0x0015).
 
@@ -454,6 +481,11 @@ def main() -> None:
 
     try:
         sock = _connect_le_att(mac, timeout=45.0)
+
+        # Negotiate a large ATT MTU FIRST — without this the 24-byte drive value is
+        # truncated to 20 bytes on the default MTU=23, corrupting the angular float
+        # (rotation fails while linear still works).
+        _exchange_mtu(sock, 512)
 
         # Subscribe to status notifications.  This MUST happen before starting
         # the receiver thread (the receiver's settimeout(0.1) would compete with

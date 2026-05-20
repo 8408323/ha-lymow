@@ -107,11 +107,13 @@ def decode_cfa(path: str) -> None:
 
         raw_bytes = bytes.fromhex(hexval.replace(":", ""))
 
-        # Try base64 → protobuf decode (34 ASCII bytes → 16 byte protobuf)
+        # Value is ASCII base64 of the protobuf. Drive = 24 ASCII bytes
+        # (16-byte pb: 1031 3802 52 0a0d <lin f32> 15 <ang f32>);
+        # heartbeat = 56 ASCII bytes (42-byte pb 3802da0125 <device-id>).
         linear_s = "?"
         angular_s = "?"
         note = ""
-        if len(raw_bytes) == 34:
+        if len(raw_bytes) == 24:
             try:
                 pb = base64.b64decode(raw_bytes)
                 if len(pb) >= 16:
@@ -121,7 +123,7 @@ def decode_cfa(path: str) -> None:
                     angular_s = f"{angular:+.4f}"
             except Exception as e:
                 note = f"  decode_err={e}"
-        elif len(raw_bytes) == 42:
+        elif len(raw_bytes) == 56:
             # Heartbeat / device-ID payload — skip
             note = "  [heartbeat/device-id, skipped]"
         else:
