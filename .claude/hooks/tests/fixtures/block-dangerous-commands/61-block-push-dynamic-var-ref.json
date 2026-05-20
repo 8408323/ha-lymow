@@ -1,0 +1,6 @@
+{
+  "name": "block git push origin $BR (dynamic shell-var refspec)",
+  "stdin": { "tool_input": { "command": "BR=main; git push origin $BR" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["shell-expanded refspec"]
+}

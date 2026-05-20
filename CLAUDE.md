@@ -10,6 +10,19 @@ configuration, and Cognito pool IDs comes from our own Android traffic
 capture and APK analysis. **Never reference any third-party repository as
 a source.** If asked, say the information was captured from the Android app.
 
+## Claude tooling installed in this repo
+
+> The "no third-party repository as a source" rule above is about the **reverse-engineering provenance** of the API/MQTT/protobuf knowledge — that always traces to our own capture, never to an external repo. It does not apply to development *tooling*: the `.claude/` setup below is ordinary tooling whose origin we can name freely.
+
+This project uses the [dotclaude](https://github.com/poshan0126/dotclaude) framework (ported from the equibeam repo) and adapted for this pure-Python integration. The `.claude/` directory contains:
+
+- `rules/` — modular instruction files (auto-loaded; some always-on, some path-scoped). **Code style lives in `.claude/rules/code-quality.md` — don't duplicate it here.** Always-on: `code-quality.md`, `testing.md`. Path-scoped to `custom_components/lymow/**`: `security.md`, `error-handling.md`. (No `frontend.md` / `database.md` — there's no web UI or DB here.)
+- `skills/` — invokable workflows: `/debug-fix`, `/tdd`, `/ship`, `/pr-review`, `/refactor`, `/explain`, `/test-writer`, `/context-budget`, `/setupdotclaude`.
+- `agents/` — specialized reviewers (subagents): `code-reviewer`, `security-reviewer`, `performance-reviewer`, `doc-reviewer`.
+- `hooks/` — automated guardrails wired through `.claude/settings.json`: secrets scan, format-on-save (ruff), dangerous-command block, file-protection, build-artifact warn, session-start context, post-compaction context-recovery, notify. The format/test hooks auto-detect this repo's `ruff` + `pytest` setup.
+
+`CLAUDE.local.md` (gitignored) is the place for personal overrides that should not be shared.
+
 ## Repository structure
 
 ```

@@ -1,0 +1,6 @@
+{
+  "name": "block git push origin $(echo main) (command substitution refspec)",
+  "stdin": { "tool_input": { "command": "git push origin $(echo main)" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["shell-expanded refspec"]
+}

@@ -1,0 +1,6 @@
+{
+  "name": "block git commit --no-veri (abbreviated long-option for --no-verify)",
+  "stdin": { "tool_input": { "command": "git commit --no-veri -m \"x\"" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["--no-v"]
+}

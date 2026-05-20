@@ -1,0 +1,6 @@
+{
+  "name": "block bash -lc \"echo \\\"x\\\"; git push origin main\" (escaped quotes inside double-quoted -c payload)",
+  "stdin": { "tool_input": { "command": "bash -lc \"echo \\\"x\\\"; git push origin main\"" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["main"]
+}

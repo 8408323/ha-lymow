@@ -1,0 +1,6 @@
+{
+  "name": "block FOO=\"a b\" git push origin main (quoted env-var assignment with space)",
+  "stdin": { "tool_input": { "command": "FOO=\"a b\" git push origin main" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["main"]
+}

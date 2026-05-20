@@ -1,0 +1,5 @@
+{
+  "name": "block rm -Rf / (capital R is GNU rm's equivalent of -r)",
+  "stdin": { "tool_input": { "command": "rm -Rf /" } },
+  "expect_exit": 2
+}

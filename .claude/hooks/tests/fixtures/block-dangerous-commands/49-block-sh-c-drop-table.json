@@ -1,0 +1,5 @@
+{
+  "name": "block sh -c 'DROP TABLE users' (shell-wrapper bypass on SQL guard)",
+  "stdin": { "tool_input": { "command": "sh -c 'DROP TABLE users'" } },
+  "expect_exit": 2
+}

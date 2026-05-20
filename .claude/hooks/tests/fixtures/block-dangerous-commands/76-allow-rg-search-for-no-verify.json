@@ -1,0 +1,5 @@
+{
+  "name": "allow rg \"--no-verify\" . (ripgrep search, not a commit)",
+  "stdin": { "tool_input": { "command": "rg \"--no-verify\" ." } },
+  "expect_exit": 0
+}

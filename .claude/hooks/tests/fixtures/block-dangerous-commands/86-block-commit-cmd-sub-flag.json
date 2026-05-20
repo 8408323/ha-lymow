@@ -1,0 +1,5 @@
+{
+  "name": "block git commit $(printf %s --no-verify) -m x (command substitution as flag)",
+  "stdin": { "tool_input": { "command": "git commit $(printf %s --no-verify) -m \"x\"" } },
+  "expect_exit": 2
+}

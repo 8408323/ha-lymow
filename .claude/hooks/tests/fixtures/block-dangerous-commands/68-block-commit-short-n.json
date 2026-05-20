@@ -1,0 +1,6 @@
+{
+  "name": "block git commit -n (short form of --no-verify)",
+  "stdin": { "tool_input": { "command": "git commit -n -m \"x\"" } },
+  "expect_exit": 2,
+  "expect_stdout_contains": ["-n"]
+}
