@@ -326,12 +326,6 @@ reverse → linear held −0.500. Stick deflection distance maps proportionally 
 speed and clamps at the max. (Matches `encode_ble_drive`; the earlier
 "positive = right turn" note here was wrong.)
 
-> **Open issue — laptop-driven spin:** driving from a laptop (raw-L2CAP), linear
-> commands move the robot but pure-angular commands only jerk it — even at the
-> app's exact ±0.600. The app spins the robot with byte-identical drive frames,
-> so the gating factor is something else in the app's BLE session (mode/enable
-> command or robot state), not the drive payload. Under investigation.
-
 ### Python encoder
 
 ```python
@@ -340,7 +334,7 @@ from lymow.protocol import encode_ble_drive
 # Full forward
 payload = encode_ble_drive(linear=0.5, angular=0.0)
 
-# Full right turn
+# Full left turn (CCW)
 payload = encode_ble_drive(linear=0.0, angular=0.6)
 
 # Stop

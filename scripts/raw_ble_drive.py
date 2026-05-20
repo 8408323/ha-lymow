@@ -350,12 +350,13 @@ def _exchange_mtu(sock: socket.socket, mtu: int = 512) -> None:
     (offset 12-15).  Result: linear drive works, but rotation only jerks.
     The app negotiates MTU 512; doing the same here makes angular/rotation work.
     """
+    old_timeout = sock.gettimeout()
     sock.settimeout(3.0)
     try:
         with _send_lock:
             sock.send(struct.pack("<BH", 0x02, mtu))  # ATT_EXCHANGE_MTU_REQ
         resp = sock.recv(64)
-        if resp and resp[0] == 0x03:  # ATT_EXCHANGE_MTU_RSP
+        if resp and len(resp) >= 3 and resp[0] == 0x03:  # ATT_EXCHANGE_MTU_RSP
             server_mtu = struct.unpack_from("<H", resp, 1)[0]
             print(f"  ATT MTU negotiated: client={mtu} server={server_mtu} -> {min(mtu, server_mtu)}")
         else:
@@ -363,7 +364,7 @@ def _exchange_mtu(sock: socket.socket, mtu: int = 512) -> None:
     except socket.timeout:
         print("  MTU exchange timed out — continuing (angular/rotation may not work).")
     finally:
-        sock.settimeout(None)
+        sock.settimeout(old_timeout)
 
 
 def _enable_cccd(sock: socket.socket) -> None:
