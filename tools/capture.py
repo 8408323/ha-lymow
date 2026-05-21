@@ -170,8 +170,18 @@ class LymowCapture:
         _write("\n".join(lines))
 
     def websocket_message(self, flow: http.HTTPFlow) -> None:
-        """Log every MQTT-over-WebSocket frame on the iot.<region>.amazonaws.com host."""
-        if "iot." not in flow.request.pretty_host:
+        """Log MQTT-over-WS frames (iot.*) and KVS WebRTC signaling (kinesisvideo)."""
+        host = flow.request.pretty_host
+        if "kinesisvideo" in host:
+            # KVS signaling: text JSON frames carrying SDP offer/answer + ICE.
+            if not flow.websocket or not flow.websocket.messages:
+                return
+            msg = flow.websocket.messages[-1]
+            arrow = "→" if msg.from_client else "←"
+            body = msg.text if msg.is_text else (msg.content.decode("utf-8", "replace") if msg.content else "")
+            _write(f"\n[{_ts()}] KVS-WSS {arrow} ({len(body)}B)\n  {body[:1400]}")
+            return
+        if "iot." not in host:
             return
         if not flow.websocket or not flow.websocket.messages:
             return
