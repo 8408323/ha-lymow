@@ -173,6 +173,37 @@ RE_DELETE_MAP = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/dele
 RE_RENAME_MAP = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/update-backup-map-metadata")
 
 
+RE_DEVICE_UPDATE = re.compile(
+    r"https://" + re.escape(REGION_CONFIG[REGION]["api_device_list"]) + r"\.execute-api\..+/prod/device-update"
+)
+
+
+class TestRenameDevice:
+    async def test_patches_name(self, client):
+        with aioresponses() as m:
+            m.patch(RE_DEVICE_UPDATE, payload={"ok": True})
+            result = await client.rename_device("mower-001", "Garden Bot")
+            req = list(m.requests.values())[0][0]
+        assert result == {"ok": True}
+        assert req.kwargs["json"] == {"deviceThingName": "mower-001", "deviceName": "Garden Bot"}
+
+    async def test_non_json_returns_empty(self, client):
+        with aioresponses() as m:
+            m.patch(RE_DEVICE_UPDATE, body="OK", content_type="text/plain")
+            assert await client.rename_device("mower-001", "x") == {}
+
+    async def test_non_dict_returns_empty(self, client):
+        with aioresponses() as m:
+            m.patch(RE_DEVICE_UPDATE, payload=[1])
+            assert await client.rename_device("mower-001", "x") == {}
+
+    async def test_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.patch(RE_DEVICE_UPDATE, status=500)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.rename_device("mower-001", "x")
+
+
 class TestBackupMapManagement:
     async def test_restore_posts_from_and_to(self, client):
         with aioresponses() as m:

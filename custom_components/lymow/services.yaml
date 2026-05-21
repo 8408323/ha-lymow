@@ -155,3 +155,19 @@ rename_backup_map:
       example: "Spring layout"
       selector:
         text:
+
+set_device_name:
+  name: Set device name
+  description: Set the robot's cloud display name (device-update).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    name:
+      name: Name
+      description: New display name for the robot.
+      required: true
+      example: "Garden Bot"
+      selector:
+        text:

@@ -724,6 +724,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             new_device = {**self.data[thing_name], **fields}
             self.async_set_updated_data({**self.data, thing_name: new_device})
 
+    async def async_rename_device(self, thing_name: str, device_name: str) -> None:
+        """Set the robot's cloud display name and merge it into coordinator data."""
+        await self._client.rename_device(thing_name, device_name)
+        if self.data and thing_name in self.data:
+            new_device = {**self.data[thing_name], "deviceName": device_name}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
+
     # ------------------------------------------------------------------
     # Backup-map management
     # ------------------------------------------------------------------
