@@ -233,7 +233,8 @@ class LymowApiClient:
             resp.raise_for_status()
             data = await resp.json(content_type=None)
         endpoints = {}
-        for ep in (data or {}).get("ResourceEndpointList", []):
+        items = data.get("ResourceEndpointList", []) if isinstance(data, dict) else []
+        for ep in items if isinstance(items, list) else []:
             if isinstance(ep, dict) and ep.get("Protocol") and ep.get("ResourceEndpoint"):
                 endpoints[ep["Protocol"]] = ep["ResourceEndpoint"]
         return endpoints
@@ -264,7 +265,7 @@ class LymowApiClient:
         ) as resp:
             resp.raise_for_status()
             data = await resp.json(content_type=None)
-        servers = (data or {}).get("IceServerList", [])
+        servers = data.get("IceServerList", []) if isinstance(data, dict) else []
         return servers if isinstance(servers, list) else []
 
     async def check_update(self, thing_name: str) -> dict[str, Any]:

@@ -2159,3 +2159,10 @@ async def test_async_start_video_session_endpoint_failure_is_nonfatal() -> None:
     result = await coord.async_start_video_session(THING)
     assert result["channelARN"] == "arn:test"  # base session still returned
     assert "signalingEndpoints" not in result
+
+
+async def test_async_start_video_session_non_dict_returned_as_is() -> None:
+    coord, _, api = _make_coordinator()
+    api.start_video_session = AsyncMock(return_value="unexpected")
+    result = await coord.async_start_video_session(THING)
+    assert result == "unexpected"
