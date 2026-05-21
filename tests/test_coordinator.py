@@ -2066,3 +2066,14 @@ async def test_async_shutdown_disconnects_ble(monkeypatch) -> None:
     await coord.async_ble_drive("AA:BB", 0.1, 0.0, 0.2)
     await coord.async_shutdown()
     created[0].async_disconnect.assert_awaited_once()
+
+
+async def test_async_shutdown_disconnects_ble_even_if_mqtt_raises(monkeypatch) -> None:
+    coord, mqtt, _ = _make_coordinator()
+    created: list = []
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "LymowBleController", _fake_ble_ctor(created))
+    await coord.async_ble_drive("AA:BB", 0.1, 0.0, 0.2)
+    mqtt.disconnect.side_effect = RuntimeError("boom")
+    with pytest.raises(RuntimeError):
+        await coord.async_shutdown()
+    created[0].async_disconnect.assert_awaited_once()

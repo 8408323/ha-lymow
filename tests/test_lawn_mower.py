@@ -962,3 +962,20 @@ async def test_handle_ble_drive_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.unknown"], {"linear": 0.1, "angular": 0.0, "duration": 1.0})
     await handlers["ble_drive"](call)
     coord.async_ble_drive.assert_not_called()
+
+
+async def test_handle_ble_drive_drives_once_for_duplicate_entities() -> None:
+    from lymow.const import CONF_BLE_ADDRESS
+
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {CONF_BLE_ADDRESS: "AA:BB"}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1", "lawn_mower.mower_1"],
+        {"linear": 0.2, "angular": 0.0, "duration": 1.0},
+    )
+    await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_awaited_once()

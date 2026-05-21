@@ -129,11 +129,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     # ------------------------------------------------------------------
 
     async def async_shutdown(self) -> None:
-        """Disconnect MQTT and stop polling."""
+        """Disconnect MQTT and BLE and stop polling.
+
+        The BLE disconnect runs even if the MQTT disconnect raises, so a
+        failure on one transport can't leak the other's connection.
+        """
         await super().async_shutdown()
-        await self._mqtt.disconnect()
-        if self._ble_controller is not None:
-            await self._ble_controller.async_disconnect()
+        try:
+            await self._mqtt.disconnect()
+        finally:
+            if self._ble_controller is not None:
+                await self._ble_controller.async_disconnect()
 
     # ------------------------------------------------------------------
     # BLE manual drive (local transport, not via MQTT)

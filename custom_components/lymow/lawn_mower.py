@@ -333,11 +333,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "Set the robot's BLE address in the Lymow integration options before using ble_drive."
             )
 
+        # One BLE transport per config entry (one robot at one address): drive
+        # exactly once even when several entity_ids are targeted, so overlapping
+        # motions never stack on the same link.
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
-        for eid in entity_ids:
-            if entity_map.get(eid) is None:
-                continue
-            await coordinator.async_ble_drive(address, linear, angular, duration)
+        if not any(eid in entity_map for eid in entity_ids):
+            return
+        await coordinator.async_ble_drive(address, linear, angular, duration)
 
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_ZONE, handle_delete_zone, schema=_DELETE_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_START_ZONE, handle_start_zone, schema=_START_ZONE_SCHEMA)
