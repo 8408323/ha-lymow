@@ -204,6 +204,66 @@ class TestRenameDevice:
                 await client.rename_device("mower-001", "x")
 
 
+_CREDS = {"accessKeyId": "AKIATESTKVS", "secretAccessKey": "secretkvs", "sessionToken": "tokkvs"}
+RE_KVS_ENDPOINT = re.compile(
+    r"https://kinesisvideo\." + re.escape(REGION) + r"\.amazonaws\.com/getSignalingChannelEndpoint"
+)
+RE_KVS_ICE = re.compile(
+    r"https://r-[a-z0-9]+\.kinesisvideo\." + re.escape(REGION) + r"\.amazonaws\.com/v1/get-ice-server-config"
+)
+
+
+class TestKvsWebRTC:
+    async def test_signaling_endpoint_returns_protocol_map(self, client):
+        client.update_aws_credentials("AK", "SK", "ST")
+        payload = {
+            "ResourceEndpointList": [
+                {"Protocol": "WSS", "ResourceEndpoint": "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION},
+                {"Protocol": "HTTPS", "ResourceEndpoint": "https://r-1.kinesisvideo.%s.amazonaws.com" % REGION},
+            ]
+        }
+        with aioresponses() as m:
+            m.post(RE_KVS_ENDPOINT, payload=payload)
+            eps = await client.get_signaling_channel_endpoint("arn:test", _CREDS)
+            req = list(m.requests.values())[0][0]
+        assert eps["WSS"].startswith("wss://") and eps["HTTPS"].startswith("https://")
+        assert req.kwargs["headers"]["Authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIATESTKVS/")
+        assert "x-amz-security-token" in req.kwargs["headers"]
+
+    async def test_signaling_endpoint_skips_malformed_entries(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ENDPOINT, payload={"ResourceEndpointList": [{"Protocol": "WSS"}, "junk", {}]})
+            eps = await client.get_signaling_channel_endpoint("arn:test", _CREDS)
+        assert eps == {}
+
+    async def test_ice_server_config_returns_list(self, client):
+        ice = [{"Uris": ["turn:1.2.3.4:443"], "Username": "u", "Password": "p"}]
+        with aioresponses() as m:
+            m.post(RE_KVS_ICE, payload={"IceServerList": ice})
+            out = await client.get_ice_server_config(
+                "arn:test", "https://r-d1.kinesisvideo.%s.amazonaws.com" % REGION, _CREDS
+            )
+            req = list(m.requests.values())[0][0]
+        assert out == ice
+        assert req.kwargs["headers"]["Authorization"].startswith("AWS4-HMAC-SHA256")
+
+    async def test_ice_server_config_non_list_returns_empty(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ICE, payload={"IceServerList": "nope"})
+            assert (
+                await client.get_ice_server_config(
+                    "arn:test", "https://r-d1.kinesisvideo.%s.amazonaws.com" % REGION, _CREDS
+                )
+                == []
+            )
+
+    async def test_signaling_endpoint_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ENDPOINT, status=403)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.get_signaling_channel_endpoint("arn:test", _CREDS)
+
+
 class TestBackupMapManagement:
     async def test_restore_posts_from_and_to(self, client):
         with aioresponses() as m:

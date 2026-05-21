@@ -846,14 +846,34 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.async_set_updated_data({**self.data, thing_name: new_device})
 
     async def async_start_video_session(self, thing_name: str) -> dict[str, Any]:
-        """Open a Kinesis Video Streams viewer session for the robot's camera.
+        """Open a Kinesis Video Streams viewer session and resolve the full
+        WebRTC connect config for the robot's camera.
 
-        Returns the channelARN + temporary AWS credentials needed for a
-        WebRTC viewer. The HA integration itself does not pipe video bytes
-        (that needs aiortc / go2rtc / similar); this is exposed via a service
-        so users can plumb the WebRTC handshake into their own stack.
+        Chains the captured flow: ``kvs/cmd`` → ``getSignalingChannelEndpoint``
+        → ``get-ice-server-config`` and returns everything a WebRTC viewer
+        needs — channelARN, temporary AWS credentials, the signaling WSS +
+        HTTPS endpoints, and the ICE/TURN server list. The HA integration
+        itself does not pipe video bytes (that needs aiortc / go2rtc / a
+        camera entity); this service hands a viewer the complete handshake
+        inputs. Endpoint/ICE resolution failures are non-fatal — the base
+        session is still returned so a caller can resolve them itself.
         """
-        return await self._client.start_video_session(thing_name)
+        session = await self._client.start_video_session(thing_name)
+        channel_arn = session.get("channelARN")
+        creds = session.get("credentials")
+        region = session.get("region")
+        if not (channel_arn and isinstance(creds, dict)):
+            return session
+        try:
+            endpoints = await self._client.get_signaling_channel_endpoint(channel_arn, creds, region=region)
+            session["signalingEndpoints"] = endpoints
+            if endpoints.get("HTTPS"):
+                session["iceServers"] = await self._client.get_ice_server_config(
+                    channel_arn, endpoints["HTTPS"], creds, region=region
+                )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("KVS endpoint/ICE resolution failed for %s: %s", thing_name, err)
+        return session
 
     async def async_merge_zones(
         self,
