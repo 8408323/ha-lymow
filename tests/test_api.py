@@ -236,6 +236,11 @@ class TestKvsWebRTC:
             eps = await client.get_signaling_channel_endpoint("arn:test", _CREDS)
         assert eps == {}
 
+    async def test_signaling_endpoint_non_dict_returns_empty(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ENDPOINT, payload=[1, 2, 3])
+            assert await client.get_signaling_channel_endpoint("arn:test", _CREDS) == {}
+
     async def test_ice_server_config_returns_list(self, client):
         ice = [{"Uris": ["turn:1.2.3.4:443"], "Username": "u", "Password": "p"}]
         with aioresponses() as m:
@@ -246,6 +251,16 @@ class TestKvsWebRTC:
             req = list(m.requests.values())[0][0]
         assert out == ice
         assert req.kwargs["headers"]["Authorization"].startswith("AWS4-HMAC-SHA256")
+
+    async def test_ice_server_config_non_dict_returns_empty(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ICE, payload=[1, 2, 3])
+            assert (
+                await client.get_ice_server_config(
+                    "arn:test", "https://r-d1.kinesisvideo.%s.amazonaws.com" % REGION, _CREDS
+                )
+                == []
+            )
 
     async def test_ice_server_config_non_list_returns_empty(self, client):
         with aioresponses() as m:

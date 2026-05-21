@@ -859,6 +859,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         session is still returned so a caller can resolve them itself.
         """
         session = await self._client.start_video_session(thing_name)
+        if not isinstance(session, dict):
+            return session
         channel_arn = session.get("channelARN")
         creds = session.get("credentials")
         region = session.get("region")
