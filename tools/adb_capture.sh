@@ -3,7 +3,7 @@
 #
 # Requires: phone connected via USB with USB debugging enabled.
 #
-# Usage: bash scripts/adb_capture.sh [iot_host]
+# Usage: bash tools/adb_capture.sh [iot_host]
 #   iot_host  AWS IoT endpoint to filter tcpdump on. Defaults to
 #             $LYMOW_IOT_HOST, then the eu-west-1 endpoint. Override for
 #             other regions (e.g. ...iot.us-east-2.amazonaws.com) without
@@ -20,7 +20,7 @@ if [ -z "$ADB" ]; then
     exit 1
 fi
 IOT_HOST="${1:-${LYMOW_IOT_HOST:-a3j5zqqo5iuph9-ats.iot.eu-west-1.amazonaws.com}}"
-OUT_DIR="$(dirname "$0")/../tools"
+OUT_DIR="$(dirname "$0")"
 mkdir -p "$OUT_DIR"
 
 echo "=== Waiting for device ==="

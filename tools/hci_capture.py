@@ -6,7 +6,7 @@ the Lymow robot.
 
 Reads LYMOW_BLE_MAC from scripts/.env (e.g. LYMOW_BLE_MAC=AA:BB:CC:DD:EE:FF).
 
-Must run as root: sudo python3 scripts/hci_capture.py
+Must run as root: sudo python3 tools/hci_capture.py
 
 Captures for 30 seconds while printing advertising events for the target MAC.
 Also shows any LE Connection Complete events during a connect attempt.
@@ -185,7 +185,7 @@ def main():
     try:
         sock = open_hci_socket(0)
     except PermissionError:
-        print("ERROR: Need root. Run as: sudo python3 scripts/hci_capture.py")
+        print("ERROR: Need root. Run as: sudo python3 tools/hci_capture.py")
         sys.exit(1)
     except Exception as e:
         print(f"ERROR opening HCI socket: {e}")

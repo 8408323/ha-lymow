@@ -75,7 +75,7 @@ If the phone shows "unauthorized" — tap "Allow" on the phone's USB debugging p
 
 ```bash
 # From the repo root:
-bash scripts/adb_capture.sh
+bash tools/adb_capture.sh
 ```
 
 Then open the Lymow app on the phone and navigate to the map screen. Press Ctrl-C when done.
@@ -292,7 +292,7 @@ commands are not visible in MQTT traffic and require HCI BTSnoop analysis.
 > connecting; then the full value is delivered and **rotation works**. Confirmed live
 > 2026-05-21: with MTU 512, right spin = ~204°, left spin = ~175° (measured from the
 > robot's pose heading `f14.f3` in its notifications, which also only stream in full
-> once the MTU is raised). `scripts/raw_ble_drive.py` now does this via `_exchange_mtu()`.
+> once the MTU is raised). `tools/raw_ble_drive.py` now does this via `_exchange_mtu()`.
 
 ### Payload encoding
 

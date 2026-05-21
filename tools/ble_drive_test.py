@@ -12,10 +12,10 @@ Requires the bleak BLE library (not in default deps):
     pip install bleak
 
 Robot MAC address: set LYMOW_BLE_MAC in scripts/.env (or pass as CLI arg):
-    uv run python scripts/ble_drive_test.py [MAC]
+    uv run python tools/ble_drive_test.py [MAC]
 
 Example:
-    LYMOW_BLE_MAC=AA:BB:11:CC:22:DD uv run python scripts/ble_drive_test.py
+    LYMOW_BLE_MAC=AA:BB:11:CC:22:DD uv run python tools/ble_drive_test.py
 
 IMPORTANT — close the Lymow app before running:
     The robot accepts only one BLE connection at a time. If the phone app is open
@@ -173,7 +173,7 @@ def main() -> None:
         print(
             "ERROR: robot MAC address required.\n"
             "  Set LYMOW_BLE_MAC in scripts/.env or pass as argument:\n"
-            "  uv run python scripts/ble_drive_test.py AA:BB:11:CC:22:DD",
+            "  uv run python tools/ble_drive_test.py AA:BB:11:CC:22:DD",
             file=sys.stderr,
         )
         sys.exit(1)
