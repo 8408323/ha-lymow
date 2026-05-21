@@ -2123,3 +2123,39 @@ async def test_async_rename_device_no_data_noop_merge() -> None:
     coord.data = None
     await coord.async_rename_device(THING, "New Name")
     api.rename_device.assert_awaited_once_with(THING, "New Name")
+
+
+async def test_async_start_video_session_chains_endpoints() -> None:
+    coord, _, api = _make_coordinator()
+    creds = {"accessKeyId": "AK", "secretAccessKey": "SK", "sessionToken": "ST"}
+    api.start_video_session = AsyncMock(
+        return_value={"channelARN": "arn:test", "region": "eu-west-1", "credentials": creds}
+    )
+    api.get_signaling_channel_endpoint = AsyncMock(return_value={"WSS": "wss://v", "HTTPS": "https://r"})
+    api.get_ice_server_config = AsyncMock(return_value=[{"Uris": ["turn:x"]}])
+    result = await coord.async_start_video_session(THING)
+    api.get_signaling_channel_endpoint.assert_awaited_once_with("arn:test", creds, region="eu-west-1")
+    api.get_ice_server_config.assert_awaited_once_with("arn:test", "https://r", creds, region="eu-west-1")
+    assert result["signalingEndpoints"] == {"WSS": "wss://v", "HTTPS": "https://r"}
+    assert result["iceServers"] == [{"Uris": ["turn:x"]}]
+
+
+async def test_async_start_video_session_no_creds_returns_base() -> None:
+    coord, _, api = _make_coordinator()
+    api.start_video_session = AsyncMock(return_value={"channelARN": "arn:test"})
+    api.get_signaling_channel_endpoint = AsyncMock()
+    result = await coord.async_start_video_session(THING)
+    api.get_signaling_channel_endpoint.assert_not_awaited()
+    assert result == {"channelARN": "arn:test"}
+
+
+async def test_async_start_video_session_endpoint_failure_is_nonfatal() -> None:
+    coord, _, api = _make_coordinator()
+    creds = {"accessKeyId": "AK", "secretAccessKey": "SK", "sessionToken": "ST"}
+    api.start_video_session = AsyncMock(
+        return_value={"channelARN": "arn:test", "region": "eu-west-1", "credentials": creds}
+    )
+    api.get_signaling_channel_endpoint = AsyncMock(side_effect=RuntimeError("boom"))
+    result = await coord.async_start_video_session(THING)
+    assert result["channelARN"] == "arn:test"  # base session still returned
+    assert "signalingEndpoints" not in result
