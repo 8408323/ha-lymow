@@ -2020,3 +2020,60 @@ async def test_async_check_firmware_update_no_patch_when_response_empty() -> Non
     assert result == {}
     assert THING in coord._last_ota_check
     assert "latestVersion" not in coord.data[THING]
+
+
+# ---------------------------------------------------------------------------
+# BLE manual drive
+# ---------------------------------------------------------------------------
+
+
+def _fake_ble_ctor(created: list):
+    def ctor(address):
+        c = MagicMock()
+        c.address = address
+        c.async_drive_for = AsyncMock()
+        c.async_disconnect = AsyncMock()
+        created.append(c)
+        return c
+
+    return ctor
+
+
+async def test_async_ble_drive_creates_reuses_and_replaces(monkeypatch) -> None:
+    coord, _, _ = _make_coordinator()
+    created: list = []
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "LymowBleController", _fake_ble_ctor(created))
+
+    await coord.async_ble_drive("AA:BB", 0.3, -0.2, 1.0)
+    assert len(created) == 1
+    created[0].async_drive_for.assert_awaited_once_with(0.3, -0.2, 1.0)
+
+    # same address reuses the controller
+    await coord.async_ble_drive("AA:BB", 0.1, 0.0, 0.5)
+    assert len(created) == 1
+    assert created[0].async_drive_for.await_count == 2
+
+    # different address drops the old connection and builds a new controller
+    await coord.async_ble_drive("CC:DD", 0.0, 0.0, 0.5)
+    assert len(created) == 2
+    created[0].async_disconnect.assert_awaited_once()
+
+
+async def test_async_shutdown_disconnects_ble(monkeypatch) -> None:
+    coord, _, _ = _make_coordinator()
+    created: list = []
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "LymowBleController", _fake_ble_ctor(created))
+    await coord.async_ble_drive("AA:BB", 0.1, 0.0, 0.2)
+    await coord.async_shutdown()
+    created[0].async_disconnect.assert_awaited_once()
+
+
+async def test_async_shutdown_disconnects_ble_even_if_mqtt_raises(monkeypatch) -> None:
+    coord, mqtt, _ = _make_coordinator()
+    created: list = []
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "LymowBleController", _fake_ble_ctor(created))
+    await coord.async_ble_drive("AA:BB", 0.1, 0.0, 0.2)
+    mqtt.disconnect.side_effect = RuntimeError("boom")
+    with pytest.raises(RuntimeError):
+        await coord.async_shutdown()
+    created[0].async_disconnect.assert_awaited_once()

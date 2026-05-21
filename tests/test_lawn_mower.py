@@ -36,6 +36,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_start_zones = AsyncMock()
     coord.async_query_map = AsyncMock()
     coord.async_query_schedules = AsyncMock()
+    coord.async_ble_drive = AsyncMock()
     return coord
 
 
@@ -220,8 +221,8 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split.
-    assert hass.services.async_register.call_count == 20
+    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 ble_drive.
+    assert hass.services.async_register.call_count == 21
 
 
 # ---------------------------------------------------------------------------
@@ -894,3 +895,87 @@ async def test_handle_split_zone_unknown_entity_returns_empty_mapping() -> None:
     result = await handlers["split_zone"](call)
     assert result == {"hash_ids": {}}
     coord.async_split_zone.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# ble_drive service
+# ---------------------------------------------------------------------------
+
+
+async def _setup_with_entity(coord: MagicMock, entry: MagicMock) -> dict:
+    """async_setup_entry, assign the mower a known entity_id, capture handlers."""
+    from lymow.const import DOMAIN
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {entry.entry_id: coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    return handlers
+
+
+async def test_handle_ble_drive_calls_coordinator() -> None:
+    from lymow.const import CONF_BLE_ADDRESS
+
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {CONF_BLE_ADDRESS: "AA:BB:CC:DD:EE:FF"}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"linear": 0.3, "angular": -0.2, "duration": 1.5})
+    await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_awaited_once_with("AA:BB:CC:DD:EE:FF", 0.3, -0.2, 1.5)
+
+
+async def test_handle_ble_drive_without_address_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"linear": 0.3, "angular": 0.0, "duration": 1.0})
+    with pytest.raises(ServiceValidationError):
+        await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_not_called()
+
+
+async def test_handle_ble_drive_unknown_entity_skips() -> None:
+    from lymow.const import CONF_BLE_ADDRESS
+
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {CONF_BLE_ADDRESS: "AA:BB:CC:DD:EE:FF"}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.unknown"], {"linear": 0.1, "angular": 0.0, "duration": 1.0})
+    await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_not_called()
+
+
+async def test_handle_ble_drive_drives_once_for_duplicate_entities() -> None:
+    from lymow.const import CONF_BLE_ADDRESS
+
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {CONF_BLE_ADDRESS: "AA:BB"}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1", "lawn_mower.mower_1"],
+        {"linear": 0.2, "angular": 0.0, "duration": 1.0},
+    )
+    await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_awaited_once()

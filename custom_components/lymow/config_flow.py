@@ -5,12 +5,21 @@ from __future__ import annotations
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectSelectorMode
 
 from .auth import LymowAuth
-from .const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME, DOMAIN, REGION_AUTO, REGION_CHOICES
+from .const import (
+    CONF_BLE_ADDRESS,
+    CONF_PASSWORD,
+    CONF_REGION,
+    CONF_USERNAME,
+    DOMAIN,
+    REGION_AUTO,
+    REGION_CHOICES,
+)
 
 STEP_USER_SCHEMA = vol.Schema(
     {
@@ -66,3 +75,20 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=STEP_USER_SCHEMA,
             errors=errors,
         )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> LymowOptionsFlow:
+        return LymowOptionsFlow()
+
+
+class LymowOptionsFlow(OptionsFlow):
+    """Options: the robot's BLE MAC for local manual drive."""
+
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        if user_input is not None:
+            return self.async_create_entry(data={CONF_BLE_ADDRESS: user_input.get(CONF_BLE_ADDRESS, "").strip()})
+
+        current = self.config_entry.options.get(CONF_BLE_ADDRESS, "")
+        schema = vol.Schema({vol.Optional(CONF_BLE_ADDRESS, default=current): str})
+        return self.async_show_form(step_id="init", data_schema=schema)

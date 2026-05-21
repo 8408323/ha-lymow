@@ -4,7 +4,7 @@
   "after_dependencies": ["http"],
   "codeowners": ["@8408323"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["bluetooth"],
   "documentation": "https://github.com/8408323/ha-lymow",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/8408323/ha-lymow/issues",

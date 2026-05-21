@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
+from .bluetooth import LymowBleController
 from .const import (
     DOMAIN,
     POLLING_INTERVAL,
@@ -120,15 +121,41 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # When we last hit /prod/check-update for each device, so we don't
         # spam the endpoint on every 30 s coordinator tick.
         self._last_ota_check: dict[str, datetime] = {}
+        # Lazily-created BLE manual-drive transport, reused across drive calls.
+        self._ble_controller: LymowBleController | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def async_shutdown(self) -> None:
-        """Disconnect MQTT and stop polling."""
+        """Disconnect MQTT and BLE and stop polling.
+
+        The BLE disconnect runs even if the MQTT disconnect raises, so a
+        failure on one transport can't leak the other's connection.
+        """
         await super().async_shutdown()
-        await self._mqtt.disconnect()
+        try:
+            await self._mqtt.disconnect()
+        finally:
+            if self._ble_controller is not None:
+                await self._ble_controller.async_disconnect()
+
+    # ------------------------------------------------------------------
+    # BLE manual drive (local transport, not via MQTT)
+    # ------------------------------------------------------------------
+
+    async def async_ble_drive(self, address: str, linear: float, angular: float, duration: float) -> None:
+        """Stream a manual-drive command to the robot over BLE for ``duration`` s.
+
+        A controller is created lazily and reused; if the configured address
+        changes, the old connection is dropped first.
+        """
+        if self._ble_controller is None or self._ble_controller.address != address:
+            if self._ble_controller is not None:
+                await self._ble_controller.async_disconnect()
+            self._ble_controller = LymowBleController(address)
+        await self._ble_controller.async_drive_for(linear, angular, duration)
 
     # ------------------------------------------------------------------
     # MQTT callbacks (called from mqtt.py via loop.call_soon_threadsafe)

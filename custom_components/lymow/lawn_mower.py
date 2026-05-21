@@ -15,7 +15,15 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    ATTR_ANGULAR,
+    ATTR_DURATION,
+    ATTR_LINEAR,
+    BLE_DRIVE_ANGULAR_MAX,
+    BLE_DRIVE_LINEAR_MAX,
+    BLE_DRIVE_MAX_DURATION_S,
+    CONF_BLE_ADDRESS,
     DOMAIN,
+    SERVICE_BLE_DRIVE,
     WORK_STATUS_DOCKED_GROUP,
     WORK_STATUS_ERROR_GROUP,
     WORK_STATUS_MOWING_GROUP,
@@ -134,6 +142,20 @@ _PIN_AND_GO_SCHEMA = vol.Schema(
         vol.Optional(_ATTR_RADIUS_M, default=1.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=20.0)),
         vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
         vol.Optional(_ATTR_NAME, default=""): cv.string,
+    }
+)
+_BLE_DRIVE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(ATTR_LINEAR): vol.All(
+            vol.Coerce(float), vol.Range(min=-BLE_DRIVE_LINEAR_MAX, max=BLE_DRIVE_LINEAR_MAX)
+        ),
+        vol.Required(ATTR_ANGULAR): vol.All(
+            vol.Coerce(float), vol.Range(min=-BLE_DRIVE_ANGULAR_MAX, max=BLE_DRIVE_ANGULAR_MAX)
+        ),
+        vol.Optional(ATTR_DURATION, default=1.0): vol.All(
+            vol.Coerce(float), vol.Range(min=0.0, max=BLE_DRIVE_MAX_DURATION_S)
+        ),
     }
 )
 
@@ -299,6 +321,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
         return _handler
 
+    async def handle_ble_drive(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        linear: float = call.data[ATTR_LINEAR]
+        angular: float = call.data[ATTR_ANGULAR]
+        duration: float = call.data[ATTR_DURATION]
+
+        address = (entry.options.get(CONF_BLE_ADDRESS) or "").strip()
+        if not address:
+            raise ServiceValidationError(
+                "Set the robot's BLE address in the Lymow integration options before using ble_drive."
+            )
+
+        # One BLE transport per config entry (one robot at one address): drive
+        # exactly once even when several entity_ids are targeted, so overlapping
+        # motions never stack on the same link.
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        if not any(eid in entity_map for eid in entity_ids):
+            return
+        await coordinator.async_ble_drive(address, linear, angular, duration)
+
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_ZONE, handle_delete_zone, schema=_DELETE_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_START_ZONE, handle_start_zone, schema=_START_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_MAP, handle_query_map, schema=_ENTITY_ID_SCHEMA)
@@ -348,6 +390,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         schema=_ENTITY_ID_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
+    hass.services.async_register(DOMAIN, SERVICE_BLE_DRIVE, handle_ble_drive, schema=_BLE_DRIVE_SCHEMA)
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
