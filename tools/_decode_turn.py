@@ -5,7 +5,7 @@ Prints the linear / angular float32 values from every frame written to
 the Lymow drive characteristic (handle 0x0014).
 
 Usage:
-    python3 scripts/_decode_turn.py tools/capture_turn_*.cfa
+    python3 tools/_decode_turn.py tools/capture_turn_*.cfa
 """
 
 from __future__ import annotations

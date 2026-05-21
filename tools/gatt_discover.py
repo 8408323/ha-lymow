@@ -4,7 +4,7 @@ Prints the full handle-UUID map for the robot's GATT database so we can
 identify the correct CCCD handle (UUID 0x2902) for status notifications.
 
 Usage:
-    echo PASSWORD | sudo -S python3 scripts/gatt_discover.py [MAC]
+    echo PASSWORD | sudo -S python3 tools/gatt_discover.py [MAC]
 """
 
 from __future__ import annotations

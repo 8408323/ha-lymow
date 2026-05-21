@@ -23,9 +23,9 @@ Requirements
 
 Usage
 -----
-    echo PASSWORD | sudo -S uv run python scripts/raw_ble_drive.py
+    echo PASSWORD | sudo -S uv run python tools/raw_ble_drive.py
     # or
-    sudo python3 scripts/raw_ble_drive.py [MAC]
+    sudo python3 tools/raw_ble_drive.py [MAC]
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ ATT_HANDLE_VAL_NOTIF = 0x1B  # Handle Value Notification (robot status updates)
 
 # ATT handles (robot GATT database)
 #
-# Confirmed via GATT discovery (scripts/gatt_discover.py):
+# Confirmed via GATT discovery (tools/gatt_discover.py):
 #   Service 0x0012..0x0016  UUID=12345678-...-56789abcdef0 (proprietary)
 #     h=0x0012  Service Declaration          (read-only; Write Not Permitted)
 #     h=0x0013  Characteristic Declaration
@@ -370,7 +370,7 @@ def _exchange_mtu(sock: socket.socket, mtu: int = 512) -> None:
 def _enable_cccd(sock: socket.socket) -> None:
     """Subscribe to notifications from the drive/status characteristic (CCCD at 0x0015).
 
-    GATT discovery (scripts/gatt_discover.py) confirmed:
+    GATT discovery (tools/gatt_discover.py) confirmed:
       h=0x0014  Drive char  props=Read|WriteNoRsp|Notify  (UUID 12345678-...)
       h=0x0015  CCCD for h=0x0014
 
@@ -435,9 +435,9 @@ def main() -> None:
     if os.geteuid() != 0:
         print(
             "ERROR: This script must be run as root.\n"
-            "  sudo python3 scripts/raw_ble_drive.py\n"
+            "  sudo python3 tools/raw_ble_drive.py\n"
             "  — or —\n"
-            "  echo PASSWORD | sudo -S uv run python scripts/raw_ble_drive.py",
+            "  echo PASSWORD | sudo -S uv run python tools/raw_ble_drive.py",
             file=sys.stderr,
         )
         sys.exit(1)

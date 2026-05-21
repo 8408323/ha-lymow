@@ -43,12 +43,15 @@ custom_components/lymow/   # HA integration (the actual product)
   lawn_mower.py            # LawnMowerEntity platform
   sensor.py                # SensorEntity platform
   manifest.json            # HA integration manifest
-scripts/
+scripts/                   # Cloud/integration dev CLIs (use lymow.* modules)
   cli.py                   # Dev CLI — loads scripts/.env automatically
   query_map.py             # MQTT: send userCtrl=19 and dump zone/map response
   debug_mqtt.py            # MQTT: full debug dump (IoT REST shadow + connect + raw fields)
-  adb_capture.sh           # ADB: logcat + optional tcpdump capture via USB
   .env.example             # Credential template (copy to scripts/.env)
+tools/                     # Capture + BLE reverse-engineering (standalone)
+  capture.py               # mitmproxy addon — REST + MQTT-over-WS capture
+  adb_capture.sh           # ADB: logcat + optional tcpdump capture via USB
+  raw_ble_drive.py         # Raw L2CAP ATT drive (root); gatt_discover/hci_capture siblings
 docs/
   reverse_engineering.md   # Capture methods: MQTT CLI / ADB / mitmproxy
 tests/
@@ -109,7 +112,7 @@ Full instructions: **[docs/reverse_engineering.md](docs/reverse_engineering.md)*
 Three methods — pick what fits:
 
 1. **MQTT CLI** (no phone needed): `uv run python scripts/query_map.py`
-2. **ADB + logcat** (USB, no proxy cert): `bash scripts/adb_capture.sh`
+2. **ADB + logcat** (USB, no proxy cert): `bash tools/adb_capture.sh`
 3. **mitmproxy** (full HTTPS): `mitmdump -s tools/capture.py --listen-host 0.0.0.0 --listen-port 8888 --ssl-insecure`
 
 ### ADB quick reference (WSL2)
