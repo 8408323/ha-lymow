@@ -195,7 +195,8 @@ BLE_DRIVE_CHARACTERISTIC_UUID = "12345678-1234-5678-1234-56789abcdef1"
 BLE_DRIVE_CHARACTERISTIC_HANDLE = 0x0014
 # Velocity ranges confirmed from ADB joystick swipe captures
 BLE_DRIVE_LINEAR_MAX = 0.5  # m/s (forward: +, backward: -)
-BLE_DRIVE_ANGULAR_MAX = 0.6  # rad/s (right: +, left: -)
+# Confirmed from capture (see encode_ble_drive): +0.6 = full left turn (CCW), -0.6 = right.
+BLE_DRIVE_ANGULAR_MAX = 0.6  # rad/s (left: +, right: -)
 # Proprietary GATT service that owns the drive characteristic (sibling ...def0)
 BLE_DRIVE_SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0"
 # The app refreshes the drive characteristic ~10 Hz while the joystick is held.

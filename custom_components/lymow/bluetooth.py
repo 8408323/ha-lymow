@@ -13,7 +13,6 @@ seam lets tests inject a fake BleakClient.
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Callable
 from typing import Any
 
@@ -25,8 +24,6 @@ from .const import (
     BLE_DRIVE_REFRESH_HZ,
 )
 from .protocol import encode_ble_drive
-
-_LOGGER = logging.getLogger(__name__)
 
 ClientFactory = Callable[[str], Any]
 
@@ -71,6 +68,8 @@ class LymowBleController:
     async def _connected_client(self) -> Any:
         if self.is_connected:
             return self._client
+        # Drop any stale (disconnected) client before establishing a fresh one.
+        self._client = None
         client = self._client_factory(self._address)
         await client.connect()
         # start_notify writes the CCCD; the robot ignores angular commands until
@@ -79,15 +78,19 @@ class LymowBleController:
         self._client = client
         return client
 
-    async def async_drive(self, linear: float, angular: float) -> None:
-        """Send one drive frame. Velocities are clamped to the safe range."""
+    async def _write_frame(self, client: Any, linear: float, angular: float) -> None:
+        """Encode + write one clamped drive frame (caller holds the lock)."""
         payload = encode_ble_drive(
             _clamp(float(linear), BLE_DRIVE_LINEAR_MAX),
             _clamp(float(angular), BLE_DRIVE_ANGULAR_MAX),
         )
+        await client.write_gatt_char(BLE_DRIVE_CHARACTERISTIC_UUID, payload, response=False)
+
+    async def async_drive(self, linear: float, angular: float) -> None:
+        """Send one drive frame. Velocities are clamped to the safe range."""
         async with self._lock:
             client = await self._connected_client()
-            await client.write_gatt_char(BLE_DRIVE_CHARACTERISTIC_UUID, payload, response=False)
+            await self._write_frame(client, linear, angular)
 
     async def async_stop(self) -> None:
         """Send a zero frame to halt the robot."""
@@ -97,17 +100,21 @@ class LymowBleController:
         """Stream a drive frame for ``duration`` seconds, then always stop.
 
         Duration is clamped to ``BLE_DRIVE_MAX_DURATION_S`` so a single call can
-        never run the robot away.
+        never run the robot away. The lock is held for the whole timed drive so
+        other tasks can't interleave frames mid-motion. A non-positive duration
+        sends no drive frames — only the final stop.
         """
         duration = max(0.0, min(float(duration), BLE_DRIVE_MAX_DURATION_S))
         interval = 1.0 / BLE_DRIVE_REFRESH_HZ
-        loops = max(1, round(duration / interval))
-        try:
-            for _ in range(loops):
-                await self.async_drive(linear, angular)
-                await asyncio.sleep(interval)
-        finally:
-            await self.async_stop()
+        loops = round(duration / interval)
+        async with self._lock:
+            client = await self._connected_client()
+            try:
+                for _ in range(loops):
+                    await self._write_frame(client, linear, angular)
+                    await asyncio.sleep(interval)
+            finally:
+                await self._write_frame(client, 0.0, 0.0)
 
     async def async_disconnect(self) -> None:
         async with self._lock:
