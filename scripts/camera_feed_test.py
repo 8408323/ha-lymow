@@ -13,6 +13,12 @@ This is the "verify the feed before touching HACS" step. It is a live tool —
 it needs real credentials and the robot online, and the WebRTC/media layer
 typically needs a couple of live iterations to tune.
 
+NOTE: the robot only joins the signaling channel as MASTER (and thus answers
+the offer) when it is awake AND off the dock. While docked & charging
+(workStatus idle, isCharging true) it stays MQTT-online and answers queries
+but does not start the camera, so the offer goes unanswered — that is a robot
+state, not a signaling bug. Run this with the mower off the charging dock.
+
 Requires extra deps (not in the integration); run them ephemerally with uv:
 
     cp scripts/.env.example scripts/.env        # LYMOW_USER / LYMOW_PASS
@@ -128,7 +134,7 @@ async def _resolve_session(client: LymowApiClient, thing: str) -> dict | None:
     return {"arn": arn, "creds": creds, "region": region, "wss": endpoints["WSS"], "ice": ice}
 
 
-async def _view(session: dict) -> bool:
+async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
     try:
         import websockets
         from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
@@ -181,20 +187,36 @@ async def _view(session: dict) -> bool:
 
     client_id = f"ha-lymow-{os.getpid()}"
     url = _presign_wss(session["wss"], session["arn"], client_id, session["region"], session["creds"])
+    answered = asyncio.Event()
     async with websockets.connect(url, max_size=None) as ws:
         print("  WSS connected; sending SDP_OFFER")
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
-        await ws.send(
-            json.dumps(
-                {
-                    "action": "SDP_OFFER",
-                    "messagePayload": base64.b64encode(
-                        json.dumps({"type": "offer", "sdp": pc.localDescription.sdp}).encode()
-                    ).decode(),
-                }
-            )
+        offer_frame = json.dumps(
+            {
+                "action": "SDP_OFFER",
+                "messagePayload": base64.b64encode(
+                    json.dumps({"type": "offer", "sdp": pc.localDescription.sdp}).encode()
+                ).decode(),
+            }
         )
+        await ws.send(offer_frame)
+
+        async def _resend_offer() -> None:
+            # KVS does not buffer an offer for an absent master; the robot's
+            # camera can take 30-60s to wake and join. Resend the offer (and
+            # re-nudge "start") until the master answers.
+            for i in range(1, 30):
+                await asyncio.sleep(4)
+                if answered.is_set():
+                    return
+                if i % 5 == 0:
+                    try:
+                        await client.start_video_session(thing)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"  re-nudge start failed: {type(exc).__name__}")
+                print(f"  no answer yet — resending SDP_OFFER (attempt {i + 1})")
+                await ws.send(offer_frame)
 
         async def _handle_frame(raw, candidate_from_sdp) -> None:
             # KVS interleaves empty (0-byte) keepalive/status frames before the
@@ -215,6 +237,7 @@ async def _view(session: dict) -> bool:
             payload = json.loads(base64.b64decode(raw_payload).decode())
             print(f"  recv {kind}")
             if kind == "SDP_ANSWER":
+                answered.set()
                 await pc.setRemoteDescription(RTCSessionDescription(sdp=payload["sdp"], type="answer"))
             elif kind == "ICE_CANDIDATE" and payload.get("candidate"):
                 cand = candidate_from_sdp(payload["candidate"].split(":", 1)[1])
@@ -228,17 +251,21 @@ async def _view(session: dict) -> bool:
             try:
                 async for raw in ws:
                     await _handle_frame(raw, candidate_from_sdp)
+                print(f"  signaling socket closed by server (code={ws.close_code})")
             except Exception as exc:  # noqa: BLE001 — surface, don't swallow in the task
                 print(f"  signaling loop error: {type(exc).__name__}: {exc}")
 
         loop_task = asyncio.create_task(_signal_loop())
+        resend_task = asyncio.create_task(_resend_offer())
         try:
-            await asyncio.wait_for(got.wait(), timeout=30)
+            await asyncio.wait_for(got.wait(), timeout=120)
             return True
         except asyncio.TimeoutError:
-            print("  [FAIL] no video frame within 30s (check robot online / TURN reachability)")
+            state = "answered" if answered.is_set() else "no SDP_ANSWER — robot never joined as master"
+            print(f"  [FAIL] no video frame within 120s ({state})")
             return False
         finally:
+            resend_task.cancel()
             loop_task.cancel()
             await pc.close()
 
@@ -260,7 +287,7 @@ async def main() -> int:
         for thing in things:
             print(f"=== {thing} ===")
             session = await _resolve_session(client, thing)
-            if session and await _view(session):
+            if session and await _view(session, client, thing):
                 return 0
     return 1
 
