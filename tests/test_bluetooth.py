@@ -6,7 +6,6 @@ import asyncio
 import base64
 
 import pytest
-
 from lymow.bluetooth import LymowBleController, _bleak_client, _clamp
 from lymow.const import (
     BLE_DRIVE_ANGULAR_MAX,
@@ -15,7 +14,7 @@ from lymow.const import (
     BLE_DRIVE_MAX_DURATION_S,
     BLE_DRIVE_REFRESH_HZ,
 )
-from lymow.protocol import _decode_fields, encode_ble_drive
+from lymow.protocol import _decode_fields
 
 
 class FakeClient:
