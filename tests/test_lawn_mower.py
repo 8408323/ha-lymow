@@ -37,6 +37,9 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_query_map = AsyncMock()
     coord.async_query_schedules = AsyncMock()
     coord.async_ble_drive = AsyncMock()
+    coord.async_restore_backup_map = AsyncMock()
+    coord.async_delete_backup_map = AsyncMock()
+    coord.async_rename_backup_map = AsyncMock()
     return coord
 
 
@@ -221,8 +224,9 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 ble_drive.
-    assert hass.services.async_register.call_count == 21
+    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
+    # + 3 backup-map + 1 ble_drive.
+    assert hass.services.async_register.call_count == 24
 
 
 # ---------------------------------------------------------------------------
@@ -979,3 +983,66 @@ async def test_handle_ble_drive_drives_once_for_duplicate_entities() -> None:
     )
     await handlers["ble_drive"](call)
     coord.async_ble_drive.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Backup-map management services
+# ---------------------------------------------------------------------------
+
+
+async def test_handle_restore_backup_map_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"object_key": "dev/map/m1.pb"})
+    await handlers["restore_backup_map"](call)
+    coord.async_restore_backup_map.assert_awaited_once_with(THING, "dev/map/m1.pb")
+
+
+async def test_handle_delete_backup_map_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"object_key": "dev/map/m1.pb"})
+    await handlers["delete_backup_map"](call)
+    coord.async_delete_backup_map.assert_awaited_once_with(THING, "dev/map/m1.pb")
+
+
+async def test_handle_rename_backup_map_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"object_key": "dev/map/m1.pb", "name": "Spring"})
+    await handlers["rename_backup_map"](call)
+    coord.async_rename_backup_map.assert_awaited_once_with(THING, "dev/map/m1.pb", "Spring")
+
+
+async def test_handle_backup_map_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.nope"], {"object_key": "k"})
+    await handlers["delete_backup_map"](call)
+    coord.async_delete_backup_map.assert_not_called()
+
+
+async def test_handle_restore_backup_map_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    await handlers["restore_backup_map"](_make_call(["lawn_mower.nope"], {"object_key": "k"}))
+    coord.async_restore_backup_map.assert_not_called()
+
+
+async def test_handle_rename_backup_map_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    await handlers["rename_backup_map"](_make_call(["lawn_mower.nope"], {"object_key": "k", "name": "x"}))
+    coord.async_rename_backup_map.assert_not_called()

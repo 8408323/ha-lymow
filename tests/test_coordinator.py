@@ -2077,3 +2077,30 @@ async def test_async_shutdown_disconnects_ble_even_if_mqtt_raises(monkeypatch) -
     with pytest.raises(RuntimeError):
         await coord.async_shutdown()
     created[0].async_disconnect.assert_awaited_once()
+
+
+async def test_async_restore_backup_map_requeries() -> None:
+    coord, _, api = _make_coordinator()
+    api.restore_backup_map = AsyncMock()
+    coord.async_query_map = AsyncMock()
+    await coord.async_restore_backup_map(THING, "dev/map/m1.pb")
+    api.restore_backup_map.assert_awaited_once_with(THING, "dev/map/m1.pb")
+    coord.async_query_map.assert_awaited_once_with(THING)
+
+
+async def test_async_delete_backup_map_drops_cache() -> None:
+    coord, _, api = _make_coordinator()
+    api.delete_backup_map = AsyncMock()
+    coord._backup_map_cache[THING] = ("t", {})
+    await coord.async_delete_backup_map(THING, "k")
+    api.delete_backup_map.assert_awaited_once_with("k")
+    assert THING not in coord._backup_map_cache
+
+
+async def test_async_rename_backup_map_drops_cache() -> None:
+    coord, _, api = _make_coordinator()
+    api.rename_backup_map = AsyncMock()
+    coord._backup_map_cache[THING] = ("t", {})
+    await coord.async_rename_backup_map(THING, "k", "Spring")
+    api.rename_backup_map.assert_awaited_once_with("k", "Spring")
+    assert THING not in coord._backup_map_cache

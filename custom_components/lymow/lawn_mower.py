@@ -47,6 +47,10 @@ _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
+_SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
+_SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
+_SERVICE_RENAME_BACKUP_MAP = "rename_backup_map"
+_ATTR_OBJECT_KEY = "object_key"
 _ATTR_POLYGON = "polygon"
 _ATTR_NAME = "name"
 _ATTR_NAMES = "names"
@@ -142,6 +146,19 @@ _PIN_AND_GO_SCHEMA = vol.Schema(
         vol.Optional(_ATTR_RADIUS_M, default=1.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=20.0)),
         vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
         vol.Optional(_ATTR_NAME, default=""): cv.string,
+    }
+)
+_RESTORE_BACKUP_MAP_SCHEMA = vol.Schema(
+    {vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_OBJECT_KEY): cv.string}
+)
+_DELETE_BACKUP_MAP_SCHEMA = vol.Schema(
+    {vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_OBJECT_KEY): cv.string}
+)
+_RENAME_BACKUP_MAP_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_OBJECT_KEY): cv.string,
+        vol.Required(_ATTR_NAME): cv.string,
     }
 )
 _BLE_DRIVE_SCHEMA = vol.Schema(
@@ -321,6 +338,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
         return _handler
 
+    async def handle_restore_backup_map(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        object_key: str = call.data[_ATTR_OBJECT_KEY]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_restore_backup_map(entity._thing_name, object_key)
+
+    async def handle_delete_backup_map(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        object_key: str = call.data[_ATTR_OBJECT_KEY]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_delete_backup_map(entity._thing_name, object_key)
+
+    async def handle_rename_backup_map(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        object_key: str = call.data[_ATTR_OBJECT_KEY]
+        name: str = call.data[_ATTR_NAME]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_rename_backup_map(entity._thing_name, object_key, name)
+
     async def handle_ble_drive(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         linear: float = call.data[ATTR_LINEAR]
@@ -389,6 +437,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         handle_start_video_session,
         schema=_ENTITY_ID_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_RESTORE_BACKUP_MAP, handle_restore_backup_map, schema=_RESTORE_BACKUP_MAP_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_DELETE_BACKUP_MAP, handle_delete_backup_map, schema=_DELETE_BACKUP_MAP_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_RENAME_BACKUP_MAP, handle_rename_backup_map, schema=_RENAME_BACKUP_MAP_SCHEMA
     )
     hass.services.async_register(DOMAIN, SERVICE_BLE_DRIVE, handle_ble_drive, schema=_BLE_DRIVE_SCHEMA)
 

@@ -167,6 +167,50 @@ RE_HISTORY = re.compile(
 RE_BACKUP_MAP = re.compile(
     r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-backup-map"
 )
+_GW_MAP = re.escape(REGION_CONFIG[REGION]["api_map"])
+RE_RESTORE_MAP = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/restore-map-v2")
+RE_DELETE_MAP = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/delete-backup-map")
+RE_RENAME_MAP = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/update-backup-map-metadata")
+
+
+class TestBackupMapManagement:
+    async def test_restore_posts_from_and_to(self, client):
+        with aioresponses() as m:
+            m.post(RE_RESTORE_MAP, payload={"ok": True})
+            result = await client.restore_backup_map("mower-001", "dev/map/m1.pb")
+            req = list(m.requests.values())[0][0]
+        assert result == {"ok": True}
+        assert req.kwargs["json"] == {"fromKey": "dev/map/m1.pb", "toThingName": "mower-001"}
+
+    async def test_delete_posts_object_key(self, client):
+        with aioresponses() as m:
+            m.post(RE_DELETE_MAP, payload={})
+            await client.delete_backup_map("dev/map/m1.pb")
+            req = list(m.requests.values())[0][0]
+        assert req.kwargs["json"] == {"objectKey": "dev/map/m1.pb"}
+
+    async def test_rename_posts_object_key_and_name(self, client):
+        with aioresponses() as m:
+            m.post(RE_RENAME_MAP, payload={})
+            await client.rename_backup_map("dev/map/m1.pb", "Spring")
+            req = list(m.requests.values())[0][0]
+        assert req.kwargs["json"] == {"objectKey": "dev/map/m1.pb", "name": "Spring"}
+
+    async def test_post_map_non_json_returns_empty(self, client):
+        with aioresponses() as m:
+            m.post(RE_DELETE_MAP, body="OK", content_type="text/plain")
+            assert await client.delete_backup_map("k") == {}
+
+    async def test_post_map_non_dict_returns_empty(self, client):
+        with aioresponses() as m:
+            m.post(RE_DELETE_MAP, payload=[1, 2, 3])
+            assert await client.delete_backup_map("k") == {}
+
+    async def test_restore_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.post(RE_RESTORE_MAP, status=500)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.restore_backup_map("mower-001", "k")
 
 
 class TestGetCleanHistory:

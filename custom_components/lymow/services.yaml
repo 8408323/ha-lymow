@@ -95,3 +95,63 @@ ble_drive:
           max: 5.0
           step: 0.5
           unit_of_measurement: s
+
+restore_backup_map:
+  name: Restore backup map
+  description: >
+    Restore a previously saved backup map onto the robot (restore-map-v2),
+    then re-query the active map. The object key comes from the backup-maps
+    sensor's attribute list.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    object_key:
+      name: Object key
+      description: >
+        S3 object key of the backup map — the `file` value from the Backup
+        maps sensor's `backups` attribute.
+      required: true
+      example: "device_xxxx/map/map_20260514T142312Z.pb"
+      selector:
+        text:
+
+delete_backup_map:
+  name: Delete backup map
+  description: Delete a saved backup map (delete-backup-map).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    object_key:
+      name: Object key
+      description: S3 object key (the `file` value from the Backup maps sensor) to delete.
+      required: true
+      example: "device_xxxx/map/map_20260514T142312Z.pb"
+      selector:
+        text:
+
+rename_backup_map:
+  name: Rename backup map
+  description: Set the display name of a saved backup map (update-backup-map-metadata).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    object_key:
+      name: Object key
+      description: S3 object key (the `file` value from the Backup maps sensor) to rename.
+      required: true
+      example: "device_xxxx/map/map_20260514T142312Z.pb"
+      selector:
+        text:
+    name:
+      name: Name
+      description: New display name for the backup map.
+      required: true
+      example: "Spring layout"
+      selector:
+        text:
