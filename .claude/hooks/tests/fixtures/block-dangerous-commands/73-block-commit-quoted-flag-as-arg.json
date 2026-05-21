@@ -1,5 +1,0 @@
-{
-  "name": "block git commit -m x \"--no-verify\" (quoted flag delivered as argv element)",
-  "stdin": { "tool_input": { "command": "git commit -m x \"--no-verify\"" } },
-  "expect_exit": 2
-}

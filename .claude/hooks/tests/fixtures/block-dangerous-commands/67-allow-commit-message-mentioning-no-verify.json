@@ -1,5 +1,0 @@
-{
-  "name": "allow git commit -m \"fix --no-verify thing\" (flag inside quoted message is not an argument)",
-  "stdin": { "tool_input": { "command": "git commit -m \"fix --no-verify thing\"" } },
-  "expect_exit": 0
-}

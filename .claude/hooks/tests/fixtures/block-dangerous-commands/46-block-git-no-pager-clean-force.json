@@ -1,5 +1,0 @@
-{
-  "name": "block git --no-pager clean --force -d (git global flag before clean subcommand)",
-  "stdin": { "tool_input": { "command": "git --no-pager clean --force -d" } },
-  "expect_exit": 2
-}

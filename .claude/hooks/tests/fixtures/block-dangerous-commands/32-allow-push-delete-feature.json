@@ -1,5 +1,0 @@
-{
-  "name": "allow git push --delete origin feat/done (delete non-protected branch)",
-  "stdin": { "tool_input": { "command": "git push --delete origin feat/done" } },
-  "expect_exit": 0
-}

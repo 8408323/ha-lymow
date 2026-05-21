@@ -1,6 +1,0 @@
-{
-  "name": "block git commit x$NV -m msg (embedded shell expansion bash word-splits into a flag at exec)",
-  "stdin": { "tool_input": { "command": "NV=' --no-verify'; git commit x$NV -m msg" } },
-  "expect_exit": 2,
-  "expect_stdout_contains": ["shell-expanded"]
-}

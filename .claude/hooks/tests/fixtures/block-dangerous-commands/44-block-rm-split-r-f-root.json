@@ -1,5 +1,0 @@
-{
-  "name": "block rm -r -f / (recursion and force in separate flag tokens)",
-  "stdin": { "tool_input": { "command": "rm -r -f /" } },
-  "expect_exit": 2
-}

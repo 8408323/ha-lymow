@@ -14,12 +14,16 @@ a source.** If asked, say the information was captured from the Android app.
 
 > The "no third-party repository as a source" rule above is about the **reverse-engineering provenance** of the API/MQTT/protobuf knowledge — that always traces to our own capture, never to an external repo. It does not apply to development *tooling*: the `.claude/` setup below is ordinary tooling whose origin we can name freely.
 
-This project uses the [dotclaude](https://github.com/poshan0126/dotclaude) framework (ported from the equibeam repo) and adapted for this pure-Python integration. The `.claude/` directory contains:
+The engine (hooks, reviewer agents, workflow skills) comes from the [dotclaude](https://github.com/8408323/dotclaude) plugin, installed via its marketplace — not copied into this repo. `.claude/settings.json` wires it up (`extraKnownMarketplaces` + `enabledPlugins`); run `/plugin update dotclaude@dotclaude` to update it. What lives in this repo is only the **project-local layer**:
 
-- `rules/` — modular instruction files (auto-loaded; some always-on, some path-scoped). **Code style lives in `.claude/rules/code-quality.md` — don't duplicate it here.** Always-on: `code-quality.md`, `testing.md`. Path-scoped to `custom_components/lymow/**`: `security.md`, `error-handling.md`. (No `frontend.md` / `database.md` — there's no web UI or DB here.)
-- `skills/` — invokable workflows: `/debug-fix`, `/tdd`, `/ship`, `/pr-review`, `/refactor`, `/explain`, `/test-writer`, `/context-budget`, `/setupdotclaude`.
-- `agents/` — specialized reviewers (subagents): `code-reviewer`, `security-reviewer`, `performance-reviewer`, `doc-reviewer`.
-- `hooks/` — automated guardrails wired through `.claude/settings.json`: secrets scan, format-on-save (ruff), dangerous-command block, file-protection, build-artifact warn, session-start context, post-compaction context-recovery, notify. The format/test hooks auto-detect this repo's `ruff` + `pytest` setup.
+- `.claude/rules/` — project-owned instruction files, tuned for this pure-Python HA integration. Always-on: `code-quality.md`, `testing.md`. Path-scoped to `custom_components/lymow/**`: `security.md`, `error-handling.md`. **Code style lives in `code-quality.md` — don't duplicate it here.** (No `frontend.md` / `database.md` — there's no web UI or DB here.)
+- `.claude/settings.json` — the marketplace/plugin wiring plus this repo's permission allow/deny.
+
+Plugin-provided, available everywhere the plugin is enabled (namespaced `/dotclaude:*`):
+
+- **Skills**: `/dotclaude:debug-fix`, `:tdd`, `:ship`, `:pr-review`, `:refactor`, `:explain`, `:test-writer`, `:context-budget`, and `:init` (rescaffolds the project-local layer / pulls base-config updates).
+- **Agents**: `@code-reviewer`, `@security-reviewer`, `@performance-reviewer`, `@doc-reviewer`.
+- **Hooks** (auto): secrets scan, format-on-save (ruff), dangerous-command block, file-protection, build-artifact warn, session-start context, post-compaction recovery, notify. The format/test hooks auto-detect this repo's `uv` + `ruff` + `pytest` setup.
 
 `CLAUDE.local.md` (gitignored) is the place for personal overrides that should not be shared.
 

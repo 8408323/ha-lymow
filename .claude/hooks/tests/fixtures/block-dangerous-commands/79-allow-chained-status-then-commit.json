@@ -1,5 +1,0 @@
-{
-  "name": "allow git status; git commit -m \"x\" (real shell separator, no bypass)",
-  "stdin": { "tool_input": { "command": "git status; git commit -m \"x\"" } },
-  "expect_exit": 0
-}

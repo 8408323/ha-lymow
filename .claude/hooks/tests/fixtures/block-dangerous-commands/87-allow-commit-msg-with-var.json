@@ -1,5 +1,0 @@
-{
-  "name": "allow git commit -m \"$(date)\" (shell expansion inside the message argument is fine)",
-  "stdin": { "tool_input": { "command": "git commit -m \"$(date)\"" } },
-  "expect_exit": 0
-}
