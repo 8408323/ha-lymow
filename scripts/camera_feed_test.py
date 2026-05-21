@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import hashlib
 import hmac
 import importlib.util
@@ -118,7 +119,7 @@ def _presign_wss(endpoint: str, channel_arn: str, client_id: str, region: str, c
 async def _resolve_session(client: LymowApiClient, thing: str) -> dict | None:
     session = await client.start_video_session(thing)
     arn, creds = session.get("channelARN"), session.get("credentials")
-    region = session.get("region")
+    region = session.get("region") or client._region  # noqa: SLF001 — fall back if response omits it
     if not (arn and isinstance(creds, dict)):
         print("  no channel/creds — camera offline?")
         return None
@@ -189,9 +190,14 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
     url = _presign_wss(session["wss"], session["arn"], client_id, session["region"], session["creds"])
     answered = asyncio.Event()
     async with websockets.connect(url, max_size=None) as ws:
-        print("  WSS connected; sending SDP_OFFER")
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
+        # aiortc has no trickle ICE — wait for gathering to finish so the
+        # offer SDP carries our candidates (the app sends them inline too).
+        # Without this the master has nowhere to send media and never connects.
+        while pc.iceGatheringState != "complete":
+            await asyncio.sleep(0.1)
+        print(f"  WSS connected; ICE gathering complete, sending SDP_OFFER ({pc.iceGatheringState})")
         offer_frame = json.dumps(
             {
                 "action": "SDP_OFFER",
@@ -265,8 +271,10 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
             print(f"  [FAIL] no video frame within 120s ({state})")
             return False
         finally:
-            resend_task.cancel()
-            loop_task.cancel()
+            for task in (resend_task, loop_task):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             await pc.close()
 
 
