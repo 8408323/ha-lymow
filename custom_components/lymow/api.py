@@ -268,6 +268,52 @@ class LymowApiClient:
         servers = data.get("IceServerList", []) if isinstance(data, dict) else []
         return servers if isinstance(servers, list) else []
 
+    def presign_signaling_url(
+        self,
+        wss_endpoint: str,
+        channel_arn: str,
+        client_id: str,
+        creds: dict[str, str],
+        *,
+        role: str = "VIEWER",
+        region: str | None = None,
+        expires: int = 299,
+    ) -> str:
+        """SigV4-presign the KVS signaling WebSocket connect URL.
+
+        The query carries X-Amz-ChannelARN plus, for a VIEWER, X-Amz-ClientId
+        alongside the standard SigV4 params; unlike the IoT MQTT presign the
+        session token is part of the *signed* canonical query string. A MASTER
+        connects without a client id. ``creds`` is the ``credentials`` object
+        from :meth:`start_video_session`.
+        """
+        region = region or self._region
+        host = urlparse(wss_endpoint).netloc
+        now = datetime.now(UTC)
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        date_str = now.strftime("%Y%m%d")
+        scope = f"{date_str}/{region}/kinesisvideo/aws4_request"
+        query = {
+            "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+            "X-Amz-ChannelARN": channel_arn,
+            "X-Amz-Credential": f"{creds['accessKeyId']}/{scope}",
+            "X-Amz-Date": amz_date,
+            "X-Amz-Expires": str(expires),
+            "X-Amz-Security-Token": creds["sessionToken"],
+            "X-Amz-SignedHeaders": "host",
+        }
+        if role == "VIEWER":
+            query["X-Amz-ClientId"] = client_id
+        canonical_qs = "&".join(f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in sorted(query.items()))
+        canonical = f"GET\n/\n{canonical_qs}\nhost:{host}\n\nhost\n{hashlib.sha256(b'').hexdigest()}"
+        sts = f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
+        k = _hmac_sha256(("AWS4" + creds["secretAccessKey"]).encode(), date_str)
+        k = _hmac_sha256(k, region)
+        k = _hmac_sha256(k, "kinesisvideo")
+        k = _hmac_sha256(k, "aws4_request")
+        signature = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
+        return f"{wss_endpoint}/?{canonical_qs}&X-Amz-Signature={signature}"
+
     async def check_update(self, thing_name: str) -> dict[str, Any]:
         """GET /prod/check-update — latest firmware metadata for one device.
 
