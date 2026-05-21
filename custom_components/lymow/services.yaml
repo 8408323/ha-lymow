@@ -109,7 +109,9 @@ restore_backup_map:
   fields:
     object_key:
       name: Object key
-      description: S3 object key of the backup map (the map_file value).
+      description: >
+        S3 object key of the backup map — the `file` value from the Backup
+        maps sensor's `backups` attribute.
       required: true
       example: "device_xxxx/map/map_20260514T142312Z.pb"
       selector:
@@ -125,7 +127,7 @@ delete_backup_map:
   fields:
     object_key:
       name: Object key
-      description: S3 object key of the backup map to delete.
+      description: S3 object key (the `file` value from the Backup maps sensor) to delete.
       required: true
       example: "device_xxxx/map/map_20260514T142312Z.pb"
       selector:
@@ -141,7 +143,7 @@ rename_backup_map:
   fields:
     object_key:
       name: Object key
-      description: S3 object key of the backup map to rename.
+      description: S3 object key (the `file` value from the Backup maps sensor) to rename.
       required: true
       example: "device_xxxx/map/map_20260514T142312Z.pb"
       selector:
