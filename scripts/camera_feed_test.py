@@ -157,14 +157,18 @@ async def _view(session: dict) -> bool:
             return
 
         async def _save():
-            for _ in range(30):  # skip a few frames for the encoder to settle
-                frame = await track.recv()
-            out = os.path.join(os.path.dirname(__file__), "..", "tools", "camera_frame.jpg")
-            frame.to_image().save(out)
-            print(f"  [PASS] live video frame saved → {out} ({frame.width}x{frame.height})")
-            got.set()
+            try:
+                for _ in range(30):  # skip a few frames for the encoder to settle
+                    frame = await track.recv()
+                out = os.path.join(os.path.dirname(__file__), "..", "tools", "camera_frame.jpg")
+                frame.to_image().save(out)
+                print(f"  [PASS] live video frame saved → {out} ({frame.width}x{frame.height})")
+                got.set()
+            except Exception as exc:
+                print(f"  [FAIL] video track error: {exc}")
+                got.set()
 
-        asyncio.ensure_future(_save())
+        asyncio.create_task(_save())
 
     client_id = f"ha-lymow-{os.getpid()}"
     url = _presign_wss(session["wss"], session["arn"], client_id, session["region"], session["creds"])
@@ -196,7 +200,7 @@ async def _view(session: dict) -> bool:
                     cand.sdpMLineIndex = payload.get("sdpMLineIndex")
                     await pc.addIceCandidate(cand)
 
-        loop_task = asyncio.ensure_future(_signal_loop())
+        loop_task = asyncio.create_task(_signal_loop())
         try:
             await asyncio.wait_for(got.wait(), timeout=30)
             return True
