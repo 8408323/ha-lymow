@@ -18,6 +18,8 @@ The engine (hooks, reviewer agents, workflow skills) comes from the [dotclaude](
 
 - `.claude/rules/` — project-owned instruction files, tuned for this pure-Python HA integration. Always-on: `code-quality.md`, `testing.md`. Path-scoped to `custom_components/lymow/**`: `security.md`, `error-handling.md`. **Code style lives in `code-quality.md` — don't duplicate it here.** (No `frontend.md` / `database.md` — there's no web UI or DB here.)
 - `.claude/settings.json` — the marketplace/plugin wiring plus this repo's permission allow/deny.
+- **Copilot instructions are generated from these rules** by `/dotclaude:init` — `.github/copilot-instructions.md` (from the always-on rules) and `.github/instructions/*.instructions.md` (from the path-scoped ones). Don't hand-edit them; change the rule and re-run. `AGENTS.md` is a cross-tool pointer.
+- Project plans go in `.claude/plans/` (gitignored).
 
 Plugin-provided, available everywhere the plugin is enabled (namespaced `/dotclaude:*`):
 

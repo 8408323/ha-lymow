@@ -37,7 +37,11 @@ venv/
 plan.md
 .coverage
 
-# dotclaude personal / runtime files (never commit)
-.claude/settings.local.json
+# dotclaude runtime lock (never commit)
 .claude/scheduled_tasks.lock
+
+# dotclaude:begin
+.claude/plans/
 CLAUDE.local.md
+.claude/settings.local.json
+# dotclaude:end
