@@ -129,8 +129,17 @@ async def _resolve_session(client: LymowApiClient, thing: str) -> dict | None:
 
 
 async def _view(session: dict) -> bool:
-    import websockets
-    from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
+    try:
+        import websockets
+        from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
+    except ModuleNotFoundError as exc:
+        print(
+            f"\nMissing WebRTC dependency: {exc.name}. These aren't part of the integration —\n"
+            "re-run with them loaded ephemerally (from the repo root):\n\n"
+            "  uv run --with aiortc --with websockets python scripts/camera_feed_test.py\n",
+            file=sys.stderr,
+        )
+        raise SystemExit(2) from exc
 
     ice_servers = []
     for s in session["ice"]:
