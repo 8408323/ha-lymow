@@ -214,3 +214,25 @@ async def test_disconnect_noop_when_never_connected():
 def test_default_factory_builds_bleak_client():
     client = _bleak_client("AA:BB:CC:DD:EE:FF")
     assert client is not None
+
+
+async def test_drive_for_zero_duration_sends_only_stop(monkeypatch):
+    async def fake_sleep(delay):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    make, created = _factory()
+    ctrl = LymowBleController("x", client_factory=make)
+    await ctrl.async_drive_for(0.5, 0.0, 0.0)  # non-positive duration -> no drive frames
+    assert len(created[0].writes) == 1  # only the stop frame
+    lin, ang = _drive_floats(created[0].writes[0][1])
+    assert (lin, ang) == (pytest.approx(0.0), pytest.approx(0.0))
+
+
+async def test_reconnects_after_drop(monkeypatch):
+    make, created = _factory()
+    ctrl = LymowBleController("x", client_factory=make)
+    await ctrl.async_drive(0.1, 0.0)
+    created[0].connected = False  # simulate a dropped link
+    await ctrl.async_drive(0.2, 0.0)
+    assert len(created) == 2  # a fresh client was built
