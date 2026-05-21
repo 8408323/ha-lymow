@@ -196,26 +196,40 @@ async def _view(session: dict) -> bool:
             )
         )
 
-        async def _signal_loop():
-            async for raw in ws:
+        async def _handle_frame(raw, candidate_from_sdp) -> None:
+            # KVS interleaves empty (0-byte) keepalive/status frames before the
+            # SDP_ANSWER — skip anything that isn't JSON.
+            if not raw or not str(raw).strip():
+                return
+            try:
                 msg = json.loads(raw)
-                # The master→viewer direction uses "messageType"; viewer→master uses "action".
-                kind = msg.get("messageType") or msg.get("action")
-                raw_payload = msg.get("messagePayload")
-                if not raw_payload:
-                    print(f"  recv {kind} (no payload)")
-                    continue
-                payload = json.loads(base64.b64decode(raw_payload).decode())
-                print(f"  recv {kind}")
-                if kind == "SDP_ANSWER":
-                    await pc.setRemoteDescription(RTCSessionDescription(sdp=payload["sdp"], type="answer"))
-                elif kind == "ICE_CANDIDATE" and payload.get("candidate"):
-                    from aiortc.sdp import candidate_from_sdp
+            except (ValueError, TypeError):
+                print(f"  recv non-JSON frame ({len(raw)}B), skipping")
+                return
+            # master→viewer uses "messageType"; viewer→master uses "action".
+            kind = msg.get("messageType") or msg.get("action")
+            raw_payload = msg.get("messagePayload")
+            if not raw_payload:
+                print(f"  recv {kind} (no payload)")
+                return
+            payload = json.loads(base64.b64decode(raw_payload).decode())
+            print(f"  recv {kind}")
+            if kind == "SDP_ANSWER":
+                await pc.setRemoteDescription(RTCSessionDescription(sdp=payload["sdp"], type="answer"))
+            elif kind == "ICE_CANDIDATE" and payload.get("candidate"):
+                cand = candidate_from_sdp(payload["candidate"].split(":", 1)[1])
+                cand.sdpMid = payload.get("sdpMid")
+                cand.sdpMLineIndex = payload.get("sdpMLineIndex")
+                await pc.addIceCandidate(cand)
 
-                    cand = candidate_from_sdp(payload["candidate"].split(":", 1)[1])
-                    cand.sdpMid = payload.get("sdpMid")
-                    cand.sdpMLineIndex = payload.get("sdpMLineIndex")
-                    await pc.addIceCandidate(cand)
+        async def _signal_loop():
+            from aiortc.sdp import candidate_from_sdp
+
+            try:
+                async for raw in ws:
+                    await _handle_frame(raw, candidate_from_sdp)
+            except Exception as exc:  # noqa: BLE001 — surface, don't swallow in the task
+                print(f"  signaling loop error: {type(exc).__name__}: {exc}")
 
         loop_task = asyncio.create_task(_signal_loop())
         try:
