@@ -42,6 +42,13 @@ This repo runs automatic AI reviews on every PR (Claude, plus Copilot and Codex 
 - Function order: public API first, then helpers in call order.
 - One public class per file unless tightly related (e.g. small entity classes used together in a platform module).
 
+# Pull Request Review Discipline
+
+- **Never merge an unreviewed PR.** Wait until every reviewer in use has responded — either posted review comments, or left a comment/approval explicitly stating there are none. Silence is not sign-off; don't merge on it.
+- **Re-review loop.** Once you've addressed the first round of comments and the PR is ready again, first resolve each fixed review thread, then request re-review in a single comment that mentions every reviewer the repo uses: `@claude review`, `@codex review`, `@codex[agent] review`, `@copilot review`. Give them a few minutes to run before checking back.
+- **One round at a time.** Address all current comments and push the fixes before re-requesting; don't ping reviewers mid-change.
+- **Cross-PR false alarms.** When a reviewer flags a "missing" symbol because it only sees one stacked PR in isolation, explain it in a reply — don't duplicate code across PRs to silence it.
+
 # Testing
 
 - Verify behavior, not implementation. Don't assert mock call counts when output values would do.
