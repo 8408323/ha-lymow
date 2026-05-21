@@ -195,9 +195,13 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
         # aiortc has no trickle ICE — wait for gathering to finish so the
         # offer SDP carries our candidates (the app sends them inline too).
         # Without this the master has nowhere to send media and never connects.
-        while pc.iceGatheringState != "complete":
+        for _t in range(300):  # up to 30 s; fail fast if STUN is unreachable
+            if pc.iceGatheringState == "complete":
+                break
             await asyncio.sleep(0.1)
-        print(f"  WSS connected; ICE gathering complete, sending SDP_OFFER ({pc.iceGatheringState})")
+        else:
+            print("  [WARN] ICE gathering did not complete in 30 s — sending offer with partial candidates")
+        print(f"  WSS connected; ICE gathering {pc.iceGatheringState}, sending SDP_OFFER")
         offer_frame = json.dumps(
             {
                 "action": "SDP_OFFER",
@@ -240,7 +244,11 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
             if not raw_payload:
                 print(f"  recv {kind} (no payload)")
                 return
-            payload = json.loads(base64.b64decode(raw_payload).decode())
+            try:
+                payload = json.loads(base64.b64decode(raw_payload).decode())
+            except Exception as exc:  # noqa: BLE001
+                print(f"  recv {kind} — malformed payload, skipping ({type(exc).__name__})")
+                return
             print(f"  recv {kind}")
             if kind == "SDP_ANSWER":
                 answered.set()
