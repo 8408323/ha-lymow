@@ -195,4 +195,20 @@ BLE_DRIVE_CHARACTERISTIC_UUID = "12345678-1234-5678-1234-56789abcdef1"
 BLE_DRIVE_CHARACTERISTIC_HANDLE = 0x0014
 # Velocity ranges confirmed from ADB joystick swipe captures
 BLE_DRIVE_LINEAR_MAX = 0.5  # m/s (forward: +, backward: -)
-BLE_DRIVE_ANGULAR_MAX = 0.6  # rad/s (right: +, left: -)
+# Confirmed from capture (see encode_ble_drive): +0.6 = full left turn (CCW), -0.6 = right.
+BLE_DRIVE_ANGULAR_MAX = 0.6  # rad/s (left: +, right: -)
+# Proprietary GATT service that owns the drive characteristic (sibling ...def0)
+BLE_DRIVE_SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0"
+# The app refreshes the drive characteristic ~10 Hz while the joystick is held.
+BLE_DRIVE_REFRESH_HZ = 10
+# Safety cap: a single ble_drive service call may not move the robot longer than this.
+BLE_DRIVE_MAX_DURATION_S = 5.0
+
+# Config-entry option holding the robot's BLE MAC (manual-drive transport).
+CONF_BLE_ADDRESS = "ble_address"
+
+# Services
+SERVICE_BLE_DRIVE = "ble_drive"
+ATTR_LINEAR = "linear"
+ATTR_ANGULAR = "angular"
+ATTR_DURATION = "duration"

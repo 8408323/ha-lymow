@@ -3,9 +3,12 @@
 *.pcapng
 *.har
 *.txt
+*.log
+*.cfa
 secrets.yaml
 .env
 capture-*.txt
+tools/_*
 
 # APK analysis binaries (large, not for VCS)
 tools/apk/
