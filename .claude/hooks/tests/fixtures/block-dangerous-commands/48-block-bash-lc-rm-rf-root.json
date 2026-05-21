@@ -1,5 +1,0 @@
-{
-  "name": "block bash -lc 'rm -rf /' (shell-wrapper bypass)",
-  "stdin": { "tool_input": { "command": "bash -lc 'rm -rf /'" } },
-  "expect_exit": 2
-}

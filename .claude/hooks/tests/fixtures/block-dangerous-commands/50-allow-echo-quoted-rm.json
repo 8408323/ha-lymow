@@ -1,5 +1,0 @@
-{
-  "name": "allow echo \"rm -rf /\" (quoted string, not an invocation)",
-  "stdin": { "tool_input": { "command": "echo \"rm -rf /\"" } },
-  "expect_exit": 0
-}

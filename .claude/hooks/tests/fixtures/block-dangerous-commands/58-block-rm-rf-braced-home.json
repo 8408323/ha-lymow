@@ -1,5 +1,0 @@
-{
-  "name": "block rm -rf ${HOME} (braced shell variable expansion)",
-  "stdin": { "tool_input": { "command": "rm -rf ${HOME}" } },
-  "expect_exit": 2
-}

@@ -1,5 +1,0 @@
-{
-  "name": "allow grep -r 'DELETE FROM' . (grep search for SQL pattern across files)",
-  "stdin": { "tool_input": { "command": "grep -r 'DELETE FROM' ." } },
-  "expect_exit": 0
-}

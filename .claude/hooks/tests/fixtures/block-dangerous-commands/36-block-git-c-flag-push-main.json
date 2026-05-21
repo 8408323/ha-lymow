@@ -1,6 +1,0 @@
-{
-  "name": "block git -c X=Y push origin main (git global options before subcommand)",
-  "stdin": { "tool_input": { "command": "git -c core.askPass=echo push origin main" } },
-  "expect_exit": 2,
-  "expect_stdout_contains": ["main"]
-}

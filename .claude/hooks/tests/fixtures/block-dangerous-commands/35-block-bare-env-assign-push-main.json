@@ -1,6 +1,0 @@
-{
-  "name": "block FOO=1 BAR=2 git push origin main (bare env-var assignments)",
-  "stdin": { "tool_input": { "command": "FOO=1 BAR=2 git push origin main" } },
-  "expect_exit": 2,
-  "expect_stdout_contains": ["main"]
-}

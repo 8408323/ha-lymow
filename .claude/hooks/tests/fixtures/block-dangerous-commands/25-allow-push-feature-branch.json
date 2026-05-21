@@ -1,5 +1,0 @@
-{
-  "name": "allow push to a non-protected feature branch via remote+refspec",
-  "stdin": { "tool_input": { "command": "git push origin feat/some-work" } },
-  "expect_exit": 0
-}

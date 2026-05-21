@@ -1,5 +1,0 @@
-{
-  "name": "allow rg \"rm -rf /\" . (ripgrep search pattern, not an invocation)",
-  "stdin": { "tool_input": { "command": "rg \"rm -rf /\" ." } },
-  "expect_exit": 0
-}

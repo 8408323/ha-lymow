@@ -1,6 +1,19 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
 
+  "extraKnownMarketplaces": {
+    "dotclaude": {
+      "source": {
+        "source": "github",
+        "repo": "8408323/dotclaude"
+      }
+    }
+  },
+
+  "enabledPlugins": {
+    "dotclaude@dotclaude": true
+  },
+
   "permissions": {
     "allow": [
       "Bash(uv sync)",
@@ -57,94 +70,6 @@
       "Edit(**/secrets/**)",
       "Edit(**/*.pem)",
       "Edit(**/*.key)"
-    ]
-  },
-
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/protect-files.sh",
-            "timeout": 5000,
-            "statusMessage": "Checking file protections..."
-          },
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/block-build-artifacts.sh",
-            "timeout": 5000,
-            "statusMessage": "Checking for build artifacts..."
-          },
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/scan-secrets.sh",
-            "timeout": 5000,
-            "statusMessage": "Scanning for secrets..."
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/block-dangerous-commands.sh",
-            "timeout": 5000,
-            "statusMessage": "Checking command safety..."
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/format-on-save.sh",
-            "timeout": 15000,
-            "statusMessage": "Formatting..."
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/session-start.sh",
-            "timeout": 5000,
-            "statusMessage": "Loading project context..."
-          }
-        ]
-      },
-      {
-        "matcher": "compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/context-recovery.sh",
-            "timeout": 5000,
-            "statusMessage": "Re-injecting project rules after compaction..."
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/notify.sh",
-            "timeout": 5000
-          }
-        ]
-      }
     ]
   }
 }

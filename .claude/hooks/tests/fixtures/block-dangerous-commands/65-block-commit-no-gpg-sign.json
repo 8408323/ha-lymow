@@ -1,6 +1,0 @@
-{
-  "name": "block git commit --no-gpg-sign (bypasses commit signing per CLAUDE.md)",
-  "stdin": { "tool_input": { "command": "git commit --no-gpg-sign -m \"x\"" } },
-  "expect_exit": 2,
-  "expect_stdout_contains": ["--no-gpg-sign"]
-}

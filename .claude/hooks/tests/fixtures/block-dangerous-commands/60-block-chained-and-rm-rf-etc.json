@@ -1,5 +1,0 @@
-{
-  "name": "block echo a && rm -rf /etc (rm after `&&` separator — exercises portable tr-based splitter)",
-  "stdin": { "tool_input": { "command": "echo a && rm -rf /etc" } },
-  "expect_exit": 2
-}

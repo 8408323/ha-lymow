@@ -1,6 +1,0 @@
-{
-  "name": "block git commit -an (combined short flags including -n)",
-  "stdin": { "tool_input": { "command": "git commit -an -m \"x\"" } },
-  "expect_exit": 2,
-  "expect_stdout_contains": ["-n"]
-}

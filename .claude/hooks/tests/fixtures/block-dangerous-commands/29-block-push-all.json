@@ -1,6 +1,0 @@
-{
-  "name": "block git push --all (pushes every local branch incl. protected)",
-  "stdin": { "tool_input": { "command": "git push --all origin" } },
-  "expect_exit": 2,
-  "expect_stdout_contains": ["--all"]
-}
