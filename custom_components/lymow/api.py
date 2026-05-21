@@ -258,6 +258,18 @@ class LymowApiClient:
                 return {}
             return result if isinstance(result, dict) else {}
 
+    async def rename_device(self, thing_name: str, device_name: str) -> dict[str, Any]:
+        """Set the robot's cloud display name (PATCH /prod/device-update)."""
+        url = _api_url(self._region, "api_device_list", "/prod/device-update")
+        body = {"deviceThingName": thing_name, "deviceName": device_name}
+        async with self._session.patch(url, headers=self._headers, json=body) as resp:
+            resp.raise_for_status()
+            try:
+                result = await resp.json(content_type=None)
+            except (aiohttp.ContentTypeError, ValueError):
+                return {}
+            return result if isinstance(result, dict) else {}
+
     async def restore_backup_map(self, thing_name: str, from_key: str) -> dict[str, Any]:
         """Restore a saved backup map onto the device (POST /prod/restore-map-v2)."""
         return await self._post_map("/prod/restore-map-v2", {"fromKey": from_key, "toThingName": thing_name})

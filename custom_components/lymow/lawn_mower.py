@@ -47,6 +47,7 @@ _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
+_SERVICE_SET_DEVICE_NAME = "set_device_name"
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
 _SERVICE_RENAME_BACKUP_MAP = "rename_backup_map"
@@ -148,6 +149,7 @@ _PIN_AND_GO_SCHEMA = vol.Schema(
         vol.Optional(_ATTR_NAME, default=""): cv.string,
     }
 )
+_SET_DEVICE_NAME_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_NAME): cv.string})
 _RESTORE_BACKUP_MAP_SCHEMA = vol.Schema(
     {vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_OBJECT_KEY): cv.string}
 )
@@ -338,6 +340,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
         return _handler
 
+    async def handle_set_device_name(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        name: str = call.data[_ATTR_NAME]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_rename_device(entity._thing_name, name)
+
     async def handle_restore_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         object_key: str = call.data[_ATTR_OBJECT_KEY]
@@ -437,6 +449,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         handle_start_video_session,
         schema=_ENTITY_ID_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_DEVICE_NAME, handle_set_device_name, schema=_SET_DEVICE_NAME_SCHEMA
     )
     hass.services.async_register(
         DOMAIN, _SERVICE_RESTORE_BACKUP_MAP, handle_restore_backup_map, schema=_RESTORE_BACKUP_MAP_SCHEMA

@@ -2104,3 +2104,22 @@ async def test_async_rename_backup_map_drops_cache() -> None:
     await coord.async_rename_backup_map(THING, "k", "Spring")
     api.rename_backup_map.assert_awaited_once_with("k", "Spring")
     assert THING not in coord._backup_map_cache
+
+
+async def test_async_rename_device_merges_name() -> None:
+    coord, _, api = _make_coordinator()
+    api.rename_device = AsyncMock()
+    coord.data = {THING: {"deviceName": "old"}}
+    coord.async_set_updated_data = MagicMock()
+    await coord.async_rename_device(THING, "New Name")
+    api.rename_device.assert_awaited_once_with(THING, "New Name")
+    sent = coord.async_set_updated_data.call_args.args[0]
+    assert sent[THING]["deviceName"] == "New Name"
+
+
+async def test_async_rename_device_no_data_noop_merge() -> None:
+    coord, _, api = _make_coordinator()
+    api.rename_device = AsyncMock()
+    coord.data = None
+    await coord.async_rename_device(THING, "New Name")
+    api.rename_device.assert_awaited_once_with(THING, "New Name")
