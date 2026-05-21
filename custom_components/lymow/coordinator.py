@@ -724,6 +724,25 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             new_device = {**self.data[thing_name], **fields}
             self.async_set_updated_data({**self.data, thing_name: new_device})
 
+    # ------------------------------------------------------------------
+    # Backup-map management
+    # ------------------------------------------------------------------
+
+    async def async_restore_backup_map(self, thing_name: str, from_key: str) -> None:
+        """Restore a saved backup map onto the device, then re-query the map."""
+        await self._client.restore_backup_map(thing_name, from_key)
+        await self.async_query_map(thing_name)
+
+    async def async_delete_backup_map(self, thing_name: str, object_key: str) -> None:
+        """Delete a saved backup map and drop the cached backup snapshot."""
+        await self._client.delete_backup_map(object_key)
+        self._backup_map_cache.pop(thing_name, None)
+
+    async def async_rename_backup_map(self, thing_name: str, object_key: str, name: str) -> None:
+        """Rename a saved backup map and drop the cached backup snapshot."""
+        await self._client.rename_backup_map(object_key, name)
+        self._backup_map_cache.pop(thing_name, None)
+
     async def _maybe_refresh_ota(self, thing_name: str) -> None:
         """Refresh the OTA snapshot for one device if our cache is stale.
 

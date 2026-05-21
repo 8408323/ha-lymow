@@ -247,6 +247,29 @@ class LymowApiClient:
                 return entry[field]
         return None
 
+    async def _post_map(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        """POST to the map gateway and resiliently parse the JSON reply."""
+        url = _api_url(self._region, "api_map", path)
+        async with self._session.post(url, headers=self._headers, json=body) as resp:
+            resp.raise_for_status()
+            try:
+                result = await resp.json(content_type=None)
+            except (aiohttp.ContentTypeError, ValueError):
+                return {}
+            return result if isinstance(result, dict) else {}
+
+    async def restore_backup_map(self, thing_name: str, from_key: str) -> dict[str, Any]:
+        """Restore a saved backup map onto the device (POST /prod/restore-map-v2)."""
+        return await self._post_map("/prod/restore-map-v2", {"fromKey": from_key, "toThingName": thing_name})
+
+    async def delete_backup_map(self, object_key: str) -> dict[str, Any]:
+        """Delete a saved backup map (POST /prod/delete-backup-map)."""
+        return await self._post_map("/prod/delete-backup-map", {"objectKey": object_key})
+
+    async def rename_backup_map(self, object_key: str, name: str) -> dict[str, Any]:
+        """Rename a saved backup map (POST /prod/update-backup-map-metadata)."""
+        return await self._post_map("/prod/update-backup-map-metadata", {"objectKey": object_key, "name": name})
+
     async def download_map_bytes(self, s3_key: str) -> bytes:
         """Download raw protobuf map bytes from S3 using SigV4-signed credentials."""
         bucket = REGION_CONFIG[self._region]["s3_bucket"]
