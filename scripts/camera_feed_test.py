@@ -145,9 +145,18 @@ async def _view(session: dict) -> bool:
     for s in session["ice"]:
         urls = s.get("Uris") or s.get("uris") or []
         ice_servers.append(RTCIceServer(urls=urls, username=s.get("Username"), credential=s.get("Password")))
+    print(f"  ICE servers: {len(ice_servers)}")
     pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
     pc.addTransceiver("video", direction="recvonly")
     pc.addTransceiver("audio", direction="recvonly")
+
+    @pc.on("iceconnectionstatechange")
+    def _ice():  # noqa: ANN202
+        print(f"  ICE state: {pc.iceConnectionState}")
+
+    @pc.on("connectionstatechange")
+    def _conn():  # noqa: ANN202
+        print(f"  PC state: {pc.connectionState}")
 
     got = asyncio.Event()
 
@@ -173,6 +182,7 @@ async def _view(session: dict) -> bool:
     client_id = f"ha-lymow-{os.getpid()}"
     url = _presign_wss(session["wss"], session["arn"], client_id, session["region"], session["creds"])
     async with websockets.connect(url, max_size=None) as ws:
+        print("  WSS connected; sending SDP_OFFER")
         offer = await pc.createOffer()
         await pc.setLocalDescription(offer)
         await ws.send(
@@ -189,10 +199,17 @@ async def _view(session: dict) -> bool:
         async def _signal_loop():
             async for raw in ws:
                 msg = json.loads(raw)
-                payload = json.loads(base64.b64decode(msg["messagePayload"]).decode())
-                if msg.get("action") == "SDP_ANSWER":
+                # The master→viewer direction uses "messageType"; viewer→master uses "action".
+                kind = msg.get("messageType") or msg.get("action")
+                raw_payload = msg.get("messagePayload")
+                if not raw_payload:
+                    print(f"  recv {kind} (no payload)")
+                    continue
+                payload = json.loads(base64.b64decode(raw_payload).decode())
+                print(f"  recv {kind}")
+                if kind == "SDP_ANSWER":
                     await pc.setRemoteDescription(RTCSessionDescription(sdp=payload["sdp"], type="answer"))
-                elif msg.get("action") == "ICE_CANDIDATE" and payload.get("candidate"):
+                elif kind == "ICE_CANDIDATE" and payload.get("candidate"):
                     from aiortc.sdp import candidate_from_sdp
 
                     cand = candidate_from_sdp(payload["candidate"].split(":", 1)[1])
