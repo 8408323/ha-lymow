@@ -1,6 +1,5 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-
   "extraKnownMarketplaces": {
     "dotclaude": {
       "source": {
@@ -9,11 +8,9 @@
       }
     }
   },
-
   "enabledPlugins": {
     "dotclaude@dotclaude": true
   },
-
   "permissions": {
     "allow": [
       "Bash(uv sync)",
@@ -69,7 +66,10 @@
       "Edit(**/.env.*.local)",
       "Edit(**/secrets/**)",
       "Edit(**/*.pem)",
-      "Edit(**/*.key)"
+      "Edit(**/*.key)",
+      "Read(**/.env.*)",
+      "Write(**/.env.*)",
+      "Edit(**/.env.*)"
     ]
   }
 }
