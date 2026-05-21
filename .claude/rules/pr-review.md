@@ -6,6 +6,7 @@ alwaysApply: true
 # Pull Request Review Discipline
 
 - **Never merge an unreviewed PR.** Wait until every reviewer in use has responded — either posted review comments, or left a comment/approval explicitly stating there are none. Silence is not sign-off; don't merge on it.
-- **Re-review loop.** Once you've addressed the first round of comments and the PR is ready again, first resolve each fixed review thread, then request re-review in a single comment that mentions every reviewer the repo uses: `@claude review`, `@codex review`, `@codex[agent] review`, `@copilot review`. Give them a few minutes to run before checking back.
-- **One round at a time.** Address all current comments and push the fixes before re-requesting; don't ping reviewers mid-change.
+- **Address every comment, then resolve it** — once you've either implemented it or deliberately declined it (reply saying why). **Exception:** if a comment asks you a question or requests more information, reply but **leave the thread open** — don't resolve it.
+- **Re-review loop.** After addressing a round and pushing the fixes, request re-review in a single comment mentioning every reviewer the repo uses: `@claude review`, `@codex review`, `@codex[agent] review`, `@copilot review`. One round at a time — don't ping mid-change.
+- **Iterate until clean.** Repeat address → resolve → re-request → wait until every reviewer explicitly states it has no more comments. Only then is the PR mergeable.
 - **Cross-PR false alarms.** When a reviewer flags a "missing" symbol because it only sees one stacked PR in isolation, explain it in a reply — don't duplicate code across PRs to silence it.
