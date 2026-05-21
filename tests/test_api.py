@@ -278,6 +278,42 @@ class TestKvsWebRTC:
             with pytest.raises(aiohttp.ClientResponseError):
                 await client.get_signaling_channel_endpoint("arn:test", _CREDS)
 
+    def test_presign_viewer_url_signs_query_with_client_id(self, client):
+        wss = "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION
+        url = client.presign_signaling_url(wss, "arn:test:chan", "ha-lymow-123", _CREDS)
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(url)
+        q = parse_qs(parsed.query)
+        assert parsed.scheme == "wss" and parsed.netloc.startswith("v-1.kinesisvideo")
+        # VIEWER carries the client id; the session token is part of the signed query.
+        assert q["X-Amz-ClientId"] == ["ha-lymow-123"]
+        assert q["X-Amz-ChannelARN"] == ["arn:test:chan"]
+        assert q["X-Amz-Security-Token"] == ["tokkvs"]
+        assert q["X-Amz-Credential"][0].endswith("/%s/kinesisvideo/aws4_request" % REGION)
+        assert q["X-Amz-SignedHeaders"] == ["host"]
+        assert len(q["X-Amz-Signature"][0]) == 64  # hex sha256
+
+    def test_presign_master_url_omits_client_id(self, client):
+        wss = "wss://m-1.kinesisvideo.%s.amazonaws.com" % REGION
+        url = client.presign_signaling_url(wss, "arn:test:chan", "ignored", _CREDS, role="MASTER")
+        from urllib.parse import parse_qs, urlparse
+
+        q = parse_qs(urlparse(url).query)
+        assert "X-Amz-ClientId" not in q
+        assert q["X-Amz-Signature"][0]
+
+    def test_presign_signature_changes_with_secret(self, client):
+        wss = "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION
+        from urllib.parse import parse_qs, urlparse
+
+        url_a = client.presign_signaling_url(wss, "arn", "c", _CREDS, expires=60)
+        url_b = client.presign_signaling_url(wss, "arn", "c", {**_CREDS, "secretAccessKey": "other"}, expires=60)
+        sig_a = parse_qs(urlparse(url_a).query)["X-Amz-Signature"][0]
+        sig_b = parse_qs(urlparse(url_b).query)["X-Amz-Signature"][0]
+        assert sig_a != sig_b
+        assert parse_qs(urlparse(url_a).query)["X-Amz-Expires"] == ["60"]
+
 
 class TestBackupMapManagement:
     async def test_restore_posts_from_and_to(self, client):
