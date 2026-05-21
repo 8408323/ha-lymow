@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
+from .bluetooth import LymowBleController
 from .const import (
     DOMAIN,
     POLLING_INTERVAL,
@@ -120,6 +121,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # When we last hit /prod/check-update for each device, so we don't
         # spam the endpoint on every 30 s coordinator tick.
         self._last_ota_check: dict[str, datetime] = {}
+        # Lazily-created BLE manual-drive transport, reused across drive calls.
+        self._ble_controller: LymowBleController | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -129,6 +132,24 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Disconnect MQTT and stop polling."""
         await super().async_shutdown()
         await self._mqtt.disconnect()
+        if self._ble_controller is not None:
+            await self._ble_controller.async_disconnect()
+
+    # ------------------------------------------------------------------
+    # BLE manual drive (local transport, not via MQTT)
+    # ------------------------------------------------------------------
+
+    async def async_ble_drive(self, address: str, linear: float, angular: float, duration: float) -> None:
+        """Stream a manual-drive command to the robot over BLE for ``duration`` s.
+
+        A controller is created lazily and reused; if the configured address
+        changes, the old connection is dropped first.
+        """
+        if self._ble_controller is None or self._ble_controller.address != address:
+            if self._ble_controller is not None:
+                await self._ble_controller.async_disconnect()
+            self._ble_controller = LymowBleController(address)
+        await self._ble_controller.async_drive_for(linear, angular, duration)
 
     # ------------------------------------------------------------------
     # MQTT callbacks (called from mqtt.py via loop.call_soon_threadsafe)

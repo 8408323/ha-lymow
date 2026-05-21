@@ -196,3 +196,47 @@ async def test_step_user_login_failure_does_not_create_entry() -> None:
             await flow.async_step_user(user_input)
 
     flow.async_create_entry.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Options flow (BLE address)
+# ---------------------------------------------------------------------------
+
+
+def _make_options_flow(options: dict | None = None):
+    from lymow.config_flow import LymowOptionsFlow
+
+    flow = LymowOptionsFlow.__new__(LymowOptionsFlow)
+    flow.config_entry = MagicMock()
+    flow.config_entry.options = options or {}
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    return flow
+
+
+def test_async_get_options_flow_returns_options_flow():
+    from lymow.config_flow import LymowOptionsFlow
+
+    flow = LymowConfigFlow.async_get_options_flow(MagicMock())
+    assert isinstance(flow, LymowOptionsFlow)
+
+
+async def test_options_flow_shows_form_when_no_input():
+    flow = _make_options_flow({"ble_address": "AA:BB"})
+    result = await flow.async_step_init(None)
+    assert result["type"] == "form"
+    flow.async_show_form.assert_called_once()
+    assert flow.async_show_form.call_args.kwargs["step_id"] == "init"
+
+
+async def test_options_flow_saves_ble_address():
+    flow = _make_options_flow()
+    await flow.async_step_init({"ble_address": "  AA:BB:CC:DD:EE:FF  "})
+    flow.async_create_entry.assert_called_once()
+    assert flow.async_create_entry.call_args.kwargs["data"]["ble_address"] == "AA:BB:CC:DD:EE:FF"
+
+
+async def test_options_flow_blank_address_when_omitted():
+    flow = _make_options_flow()
+    await flow.async_step_init({})
+    assert flow.async_create_entry.call_args.kwargs["data"]["ble_address"] == ""

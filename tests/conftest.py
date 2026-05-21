@@ -140,10 +140,14 @@ except ImportError:
         def __init_subclass__(cls, domain=None, **kwargs):
             super().__init_subclass__(**kwargs)
 
+    class _OptionsFlow:
+        pass
+
     _ConfigFlowResult = dict
     _ha_ce.ConfigEntry = _ConfigEntry  # type: ignore[attr-defined]
     _ha_ce.ConfigFlow = _ConfigFlow  # type: ignore[attr-defined]
     _ha_ce.ConfigFlowResult = _ConfigFlowResult  # type: ignore[attr-defined]
+    _ha_ce.OptionsFlow = _OptionsFlow  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.config_entries", _ha_ce)
 
     # ── homeassistant.helpers (namespace) ────────────────────────────────────

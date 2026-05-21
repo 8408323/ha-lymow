@@ -48,3 +48,50 @@ start_video_session:
     expire in ~15 minutes. The integration itself does not stream video bytes —
     you need an external WebRTC viewer (go2rtc, aiortc, etc.) to consume the
     response and complete the handshake.
+
+ble_drive:
+  name: Manual drive (BLE)
+  description: >
+    Send a local Bluetooth manual-drive command to the robot. Streams the
+    joystick frame for the given duration, then stops. Velocities are clamped
+    to the safe range and the duration is capped at 5 s. Requires the robot's
+    BLE address to be set in the integration options.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    linear:
+      name: Linear velocity
+      description: Forward (+) / backward (-) speed in m/s.
+      required: true
+      example: 0.3
+      selector:
+        number:
+          min: -0.5
+          max: 0.5
+          step: 0.05
+          unit_of_measurement: m/s
+    angular:
+      name: Angular velocity
+      description: Right (+) / left (-) turn rate in rad/s.
+      required: true
+      example: 0.0
+      selector:
+        number:
+          min: -0.6
+          max: 0.6
+          step: 0.05
+          unit_of_measurement: rad/s
+    duration:
+      name: Duration
+      description: How long to drive before stopping, in seconds (max 5).
+      required: false
+      default: 1.0
+      example: 1.0
+      selector:
+        number:
+          min: 0.0
+          max: 5.0
+          step: 0.5
+          unit_of_measurement: s
