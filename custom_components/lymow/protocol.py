@@ -514,13 +514,14 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             state["rtkStatus"] = _signed32(rtk_status)
 
     # Area / progress info (field 12):
-    #   f1=mowStripCount(int), f2=totalAreaM2(float32), f5=mowProgress(float32 0–1)
+    #   f1=mowStripCount(int), f2=totalTaskArea(float32, the current task's
+    #   total area — denominator for mowProgress), f5=mowProgress(float32 0–1)
     area_raw = _first(fields, 12)
     if isinstance(area_raw, bytes):
         area_fields = _decode_fields(area_raw)
         total_area = _first(area_fields, 2)
         if total_area is not None:
-            state["totalAreaM2"] = _decode_f32(total_area)
+            state["totalTaskAreaM2"] = _decode_f32(total_area)
         strip_count = _first(area_fields, 1)
         if strip_count is not None:
             state["mowStripCount"] = _signed32(strip_count)
