@@ -151,10 +151,12 @@ class LymowMapCard extends HTMLElement {
       const dash = c.isDockingChannel ? ' stroke-dasharray="1,0.6"' : "";
       const stroke = c.isValid === false ? "#bdbdbd" : "#8d6e63";
       // 3+ points form a corridor polygon; a 2-point channel is just a link line.
+      // pointer-events:none so these decorative overlays don't steal taps meant
+      // for the go-zones beneath them (only go-zones are interactive).
       if (poly.length >= 3) {
-        return `<polygon points="${pts}" fill="#d7ccc8" stroke="${stroke}" stroke-width="0.3" opacity="0.7"${dash} />`;
+        return `<polygon points="${pts}" fill="#d7ccc8" stroke="${stroke}" stroke-width="0.3" opacity="0.7" pointer-events="none"${dash} />`;
       }
-      return `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="0.5" opacity="0.8"${dash} />`;
+      return `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="0.5" opacity="0.8" pointer-events="none"${dash} />`;
     }).join("\n");
 
     // ── Edit handles (vertices + edge midpoints) for the zone under edit ──────
