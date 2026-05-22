@@ -5,8 +5,8 @@ alwaysApply: true
 
 # Pull Request Review Discipline
 
-- **Never merge an unreviewed PR.** Wait until every reviewer in use has responded — either posted review comments, or left a comment/approval explicitly stating there are none. Silence is not sign-off; don't merge on it.
-- **Address every comment, then resolve it** — once you've either implemented it or deliberately declined it (reply saying why). **Exception:** if a comment asks you a question or requests more information, reply but **leave the thread open** — don't resolve it.
-- **Re-review loop.** After addressing a round and pushing the fixes, request re-review in a single comment mentioning every reviewer the repo uses: `@claude review`, `@codex review`, `@codex[agent] review`, `@copilot review`. One round at a time — don't ping mid-change.
-- **Iterate until clean.** Repeat address → resolve → re-request → wait until every reviewer explicitly states it has no more comments. Only then is the PR mergeable.
+- **Wait for reviewers to finish before merging.** Green checks and a "clean"/mergeable state are **not** sign-off — a reviewer (Copilot, Codex, …) may still be running with no comments posted yet. Confirm every reviewer has *finished* reviewing the current commit (it's no longer in the PR's requested-reviewers / "reviewing" state and has posted its review or comments) before you merge. Never merge while a review is in progress.
+- **Address every comment, then resolve it** — implemented or deliberately declined (reply saying why). **Exception:** a comment that asks a question or requests more information stays open — reply, don't resolve.
+- **Re-request review after each push you want reviewed.** Resolve the fixed threads first, then request re-review in one comment mentioning every reviewer the repo uses: `@claude review`, `@codex review`, `@codex[agent] review`, `@copilot review`. If you're making several pushes in a row, hold the re-request until the **final** push, then ask once — don't ping reviewers mid-batch.
+- **Iterate** address → resolve → re-request → wait-for-reviewers-to-finish until every reviewer completes a round with no remaining comments. Only then is the PR mergeable.
 - **Cross-PR false alarms.** When a reviewer flags a "missing" symbol because it only sees one stacked PR in isolation, explain it in a reply — don't duplicate code across PRs to silence it.
