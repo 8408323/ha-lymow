@@ -105,6 +105,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._prev_work_status: dict[str, int] = {}
         # Cached backup-map snapshot per device: (fetched_at, fields).
         self._backup_map_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
+        # Schedules accumulated from QUERY_SCHEDULES replies (one entry each).
+        self._schedules: dict[str, list[dict[str, Any]]] = {}
         # RTK auto-pause guard: per-device knobs and tracking.
         # Enabled defaults off — opt-in safety feature.
         self._rtk_guard_enabled: dict[str, bool] = {}
@@ -163,6 +165,14 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def on_mqtt_state(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Receive a state update from MQTT and push to HA."""
+        # Schedules arrive one entry per QUERY_SCHEDULES reply — accumulate the
+        # distinct set (reset when a fresh query is issued) into "schedules".
+        if "scheduleEntry" in patch:
+            entry = patch.pop("scheduleEntry")
+            collected = self._schedules.setdefault(thing_name, [])
+            if entry not in collected:
+                collected.append(entry)
+            patch["schedules"] = list(collected)
         if thing_name not in self._mqtt_state:
             self._mqtt_state[thing_name] = {}
         self._mqtt_state[thing_name].update(patch)
@@ -548,8 +558,25 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             await self.async_query_map(device["deviceThingName"])
 
     async def async_query_schedules(self, thing_name: str) -> None:
-        """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot."""
+        """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot.
+
+        The robot replies with one entry per schedule, so reset the accumulator
+        before asking — the replies repopulate it via :meth:`on_mqtt_state`.
+        Also clear the already-published ``schedules`` so the UI doesn't show
+        stale entries if the robot is slow to reply (or has none left).
+        """
+        self._schedules[thing_name] = []
+        if thing_name in self._mqtt_state:
+            self._mqtt_state[thing_name].pop("schedules", None)
+        if self.data and thing_name in self.data and "schedules" in self.data[thing_name]:
+            cleared = {k: v for k, v in self.data[thing_name].items() if k != "schedules"}
+            self.async_set_updated_data({**self.data, thing_name: cleared})
         await self._mqtt.async_publish_command(thing_name, encode_query_schedules())
+
+    async def async_query_all_schedules(self) -> None:
+        """Request schedules for every registered device."""
+        for device in self.devices:
+            await self.async_query_schedules(device["deviceThingName"])
 
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
         """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*
@@ -846,14 +873,38 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.async_set_updated_data({**self.data, thing_name: new_device})
 
     async def async_start_video_session(self, thing_name: str) -> dict[str, Any]:
-        """Open a Kinesis Video Streams viewer session for the robot's camera.
+        """Open a Kinesis Video Streams viewer session and resolve the full
+        WebRTC connect config for the robot's camera.
 
-        Returns the channelARN + temporary AWS credentials needed for a
-        WebRTC viewer. The HA integration itself does not pipe video bytes
-        (that needs aiortc / go2rtc / similar); this is exposed via a service
-        so users can plumb the WebRTC handshake into their own stack.
+        Chains the captured flow: ``kvs/cmd`` → ``getSignalingChannelEndpoint``
+        → ``get-ice-server-config`` and returns everything a WebRTC viewer
+        needs — channelARN, temporary AWS credentials, the signaling WSS +
+        HTTPS endpoints, and the ICE/TURN server list. The HA integration
+        itself does not pipe video bytes (that needs aiortc / go2rtc / a
+        camera entity); this service hands a viewer the complete handshake
+        inputs. Endpoint/ICE resolution failures are non-fatal — the base
+        session is still returned so a caller can resolve them itself.
         """
-        return await self._client.start_video_session(thing_name)
+        session = await self._client.start_video_session(thing_name)
+        if not isinstance(session, dict):
+            # The gateway should always return a JSON object; anything else is
+            # an error, not a session.
+            raise HomeAssistantError(f"Unexpected kvs/cmd response for {thing_name}: {type(session).__name__}")
+        channel_arn = session.get("channelARN")
+        creds = session.get("credentials")
+        region = session.get("region")
+        if not (channel_arn and isinstance(creds, dict)):
+            return session
+        try:
+            endpoints = await self._client.get_signaling_channel_endpoint(channel_arn, creds, region=region)
+            session["signalingEndpoints"] = endpoints
+            if endpoints.get("HTTPS"):
+                session["iceServers"] = await self._client.get_ice_server_config(
+                    channel_arn, endpoints["HTTPS"], creds, region=region
+                )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("KVS endpoint/ICE resolution failed for %s: %s", thing_name, err)
+        return session
 
     async def async_merge_zones(
         self,

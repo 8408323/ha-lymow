@@ -204,6 +204,160 @@ class TestRenameDevice:
                 await client.rename_device("mower-001", "x")
 
 
+_CREDS = {"accessKeyId": "AKIATESTKVS", "secretAccessKey": "secretkvs", "sessionToken": "tokkvs"}
+RE_KVS_ENDPOINT = re.compile(
+    r"https://kinesisvideo\." + re.escape(REGION) + r"\.amazonaws\.com/getSignalingChannelEndpoint"
+)
+RE_KVS_ICE = re.compile(
+    r"https://r-[a-z0-9]+\.kinesisvideo\." + re.escape(REGION) + r"\.amazonaws\.com/v1/get-ice-server-config"
+)
+
+
+class TestKvsWebRTC:
+    async def test_signaling_endpoint_returns_protocol_map(self, client):
+        client.update_aws_credentials("AK", "SK", "ST")
+        payload = {
+            "ResourceEndpointList": [
+                {"Protocol": "WSS", "ResourceEndpoint": "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION},
+                {"Protocol": "HTTPS", "ResourceEndpoint": "https://r-1.kinesisvideo.%s.amazonaws.com" % REGION},
+            ]
+        }
+        with aioresponses() as m:
+            m.post(RE_KVS_ENDPOINT, payload=payload)
+            eps = await client.get_signaling_channel_endpoint("arn:test", _CREDS)
+            req = list(m.requests.values())[0][0]
+        assert eps["WSS"].startswith("wss://") and eps["HTTPS"].startswith("https://")
+        assert req.kwargs["headers"]["Authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIATESTKVS/")
+        assert "x-amz-security-token" in req.kwargs["headers"]
+
+    async def test_signaling_endpoint_skips_malformed_entries(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ENDPOINT, payload={"ResourceEndpointList": [{"Protocol": "WSS"}, "junk", {}]})
+            eps = await client.get_signaling_channel_endpoint("arn:test", _CREDS)
+        assert eps == {}
+
+    async def test_signaling_endpoint_non_dict_returns_empty(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ENDPOINT, payload=[1, 2, 3])
+            assert await client.get_signaling_channel_endpoint("arn:test", _CREDS) == {}
+
+    async def test_ice_server_config_returns_list(self, client):
+        ice = [{"Uris": ["turn:1.2.3.4:443"], "Username": "u", "Password": "p"}]
+        with aioresponses() as m:
+            m.post(RE_KVS_ICE, payload={"IceServerList": ice})
+            out = await client.get_ice_server_config(
+                "arn:test", "https://r-d1.kinesisvideo.%s.amazonaws.com" % REGION, _CREDS
+            )
+            req = list(m.requests.values())[0][0]
+        assert out == ice
+        assert req.kwargs["headers"]["Authorization"].startswith("AWS4-HMAC-SHA256")
+
+    async def test_ice_server_config_non_dict_returns_empty(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ICE, payload=[1, 2, 3])
+            assert (
+                await client.get_ice_server_config(
+                    "arn:test", "https://r-d1.kinesisvideo.%s.amazonaws.com" % REGION, _CREDS
+                )
+                == []
+            )
+
+    async def test_ice_server_config_non_list_returns_empty(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ICE, payload={"IceServerList": "nope"})
+            assert (
+                await client.get_ice_server_config(
+                    "arn:test", "https://r-d1.kinesisvideo.%s.amazonaws.com" % REGION, _CREDS
+                )
+                == []
+            )
+
+    async def test_signaling_endpoint_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.post(RE_KVS_ENDPOINT, status=403)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.get_signaling_channel_endpoint("arn:test", _CREDS)
+
+    def test_presign_viewer_url_signs_query_with_client_id(self, client):
+        wss = "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION
+        url = client.presign_signaling_url(wss, "arn:test:chan", "ha-lymow-123", _CREDS)
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(url)
+        q = parse_qs(parsed.query)
+        assert parsed.scheme == "wss" and parsed.netloc.startswith("v-1.kinesisvideo")
+        # VIEWER carries the client id; the session token is part of the signed query.
+        assert q["X-Amz-ClientId"] == ["ha-lymow-123"]
+        assert q["X-Amz-ChannelARN"] == ["arn:test:chan"]
+        assert q["X-Amz-Security-Token"] == ["tokkvs"]
+        assert q["X-Amz-Credential"][0].endswith("/%s/kinesisvideo/aws4_request" % REGION)
+        assert q["X-Amz-SignedHeaders"] == ["host"]
+        assert len(q["X-Amz-Signature"][0]) == 64  # hex sha256
+
+    def test_presign_master_url_omits_client_id(self, client):
+        wss = "wss://m-1.kinesisvideo.%s.amazonaws.com" % REGION
+        url = client.presign_signaling_url(wss, "arn:test:chan", "ignored", _CREDS, role="MASTER")
+        from urllib.parse import parse_qs, urlparse
+
+        q = parse_qs(urlparse(url).query)
+        assert "X-Amz-ClientId" not in q
+        assert q["X-Amz-Signature"][0]
+
+    def test_presign_rejects_invalid_role(self, client):
+        wss = "wss://m-1.kinesisvideo.%s.amazonaws.com" % REGION
+        with pytest.raises(ValueError, match="role must be VIEWER or MASTER"):
+            client.presign_signaling_url(wss, "arn:test:chan", "ignored", _CREDS, role="INVALID")
+
+    def test_presign_preserves_endpoint_path(self, client):
+        wss = "wss://v-1.kinesisvideo.%s.amazonaws.com/signaling/connect" % REGION
+        from urllib.parse import urlparse
+
+        url = client.presign_signaling_url(wss, "arn:test:chan", "ha-lymow-123", _CREDS)
+        assert urlparse(url).path == "/signaling/connect"
+
+    def test_presign_signature_changes_with_secret(self, client):
+        wss = "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION
+        from urllib.parse import parse_qs, urlparse
+
+        url_a = client.presign_signaling_url(wss, "arn", "c", _CREDS, expires=60)
+        url_b = client.presign_signaling_url(wss, "arn", "c", {**_CREDS, "secretAccessKey": "other"}, expires=60)
+        url_c = client.presign_signaling_url(wss, "arn", "c", {**_CREDS, "sessionToken": "other-token"}, expires=60)
+        sig_a = parse_qs(urlparse(url_a).query)["X-Amz-Signature"][0]
+        sig_b = parse_qs(urlparse(url_b).query)["X-Amz-Signature"][0]
+        sig_c = parse_qs(urlparse(url_c).query)["X-Amz-Signature"][0]
+        assert sig_a != sig_b
+        assert sig_a != sig_c
+        assert parse_qs(urlparse(url_a).query)["X-Amz-Expires"] == ["60"]
+
+    def test_presign_session_token_is_signed_not_just_appended(self, client):
+        # Changing the session token must change the signature — proving it's
+        # part of the signed canonical query, not merely appended to the URL.
+        wss = "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION
+        from urllib.parse import parse_qs, urlparse
+
+        url_a = client.presign_signaling_url(wss, "arn", "c", _CREDS, expires=60)
+        url_b = client.presign_signaling_url(wss, "arn", "c", {**_CREDS, "sessionToken": "different"}, expires=60)
+        sig_a = parse_qs(urlparse(url_a).query)["X-Amz-Signature"][0]
+        sig_b = parse_qs(urlparse(url_b).query)["X-Amz-Signature"][0]
+        assert sig_a != sig_b
+
+    def test_presign_preserves_endpoint_path_without_double_slash(self, client):
+        from urllib.parse import urlparse
+
+        # No path → single slash; trailing slash → not doubled.
+        for endpoint, expected_path in (
+            ("wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION, "/"),
+            ("wss://v-1.kinesisvideo.%s.amazonaws.com/" % REGION, "/"),
+            ("wss://v-1.kinesisvideo.%s.amazonaws.com/signal" % REGION, "/signal"),
+        ):
+            url = client.presign_signaling_url(endpoint, "arn", "c", _CREDS)
+            assert urlparse(url).path == expected_path
+
+    def test_presign_rejects_unknown_role(self, client):
+        with pytest.raises(ValueError, match="VIEWER"):
+            client.presign_signaling_url("wss://x", "arn", "c", _CREDS, role="OOPS")
+
+
 class TestBackupMapManagement:
     async def test_restore_posts_from_and_to(self, client):
         with aioresponses() as m:

@@ -241,6 +241,49 @@ def test_on_mqtt_state_unknown_thing_ignored() -> None:
     assert coord.data[THING]["battery"] == 90
 
 
+def test_on_mqtt_state_accumulates_schedule_entries_deduped() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    a = {"enabled": True, "start": "06:00", "end": "08:00"}
+    b = {"enabled": False, "start": "19:30", "end": "03:30"}
+    coord.on_mqtt_state(THING, {"scheduleEntry": dict(a)})
+    coord.on_mqtt_state(THING, {"scheduleEntry": dict(b)})
+    coord.on_mqtt_state(THING, {"scheduleEntry": dict(a)})  # duplicate ignored
+    assert coord.data[THING]["schedules"] == [a, b]
+    assert "scheduleEntry" not in coord.data[THING]
+
+
+@pytest.mark.asyncio
+async def test_async_query_schedules_resets_and_publishes() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord._schedules[THING] = [{"enabled": True}]
+    coord._mqtt_state[THING] = {"schedules": [{"enabled": True}], "battery": 50}
+    coord.data = {THING: {"schedules": [{"enabled": True}], "battery": 50}}
+    await coord.async_query_schedules(THING)
+    assert coord._schedules[THING] == []
+    # published schedules cleared (no stale entries), other fields kept
+    assert "schedules" not in coord._mqtt_state[THING]
+    assert "schedules" not in coord.data[THING]
+    assert coord.data[THING]["battery"] == 50
+    mqtt.async_publish_command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_async_query_schedules_no_published_value_is_safe() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"battery": 50}}  # no schedules key yet
+    await coord.async_query_schedules(THING)
+    assert coord._schedules[THING] == []
+    mqtt.async_publish_command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_async_query_all_schedules_covers_every_device() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_query_all_schedules()
+    assert mqtt.async_publish_command.await_count == len(coord.devices)
+
+
 # ---------------------------------------------------------------------------
 # MQTT online callback
 # ---------------------------------------------------------------------------
@@ -2123,3 +2166,48 @@ async def test_async_rename_device_no_data_noop_merge() -> None:
     coord.data = None
     await coord.async_rename_device(THING, "New Name")
     api.rename_device.assert_awaited_once_with(THING, "New Name")
+
+
+async def test_async_start_video_session_chains_endpoints() -> None:
+    coord, _, api = _make_coordinator()
+    creds = {"accessKeyId": "AK", "secretAccessKey": "SK", "sessionToken": "ST"}
+    api.start_video_session = AsyncMock(
+        return_value={"channelARN": "arn:test", "region": "eu-west-1", "credentials": creds}
+    )
+    api.get_signaling_channel_endpoint = AsyncMock(return_value={"WSS": "wss://v", "HTTPS": "https://r"})
+    api.get_ice_server_config = AsyncMock(return_value=[{"Uris": ["turn:x"]}])
+    result = await coord.async_start_video_session(THING)
+    api.get_signaling_channel_endpoint.assert_awaited_once_with("arn:test", creds, region="eu-west-1")
+    api.get_ice_server_config.assert_awaited_once_with("arn:test", "https://r", creds, region="eu-west-1")
+    assert result["signalingEndpoints"] == {"WSS": "wss://v", "HTTPS": "https://r"}
+    assert result["iceServers"] == [{"Uris": ["turn:x"]}]
+
+
+async def test_async_start_video_session_no_creds_returns_base() -> None:
+    coord, _, api = _make_coordinator()
+    api.start_video_session = AsyncMock(return_value={"channelARN": "arn:test"})
+    api.get_signaling_channel_endpoint = AsyncMock()
+    result = await coord.async_start_video_session(THING)
+    api.get_signaling_channel_endpoint.assert_not_awaited()
+    assert result == {"channelARN": "arn:test"}
+
+
+async def test_async_start_video_session_endpoint_failure_is_nonfatal() -> None:
+    coord, _, api = _make_coordinator()
+    creds = {"accessKeyId": "AK", "secretAccessKey": "SK", "sessionToken": "ST"}
+    api.start_video_session = AsyncMock(
+        return_value={"channelARN": "arn:test", "region": "eu-west-1", "credentials": creds}
+    )
+    api.get_signaling_channel_endpoint = AsyncMock(side_effect=RuntimeError("boom"))
+    result = await coord.async_start_video_session(THING)
+    assert result["channelARN"] == "arn:test"  # base session still returned
+    assert "signalingEndpoints" not in result
+
+
+async def test_async_start_video_session_non_dict_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    api.start_video_session = AsyncMock(return_value="unexpected")
+    with pytest.raises(HomeAssistantError):
+        await coord.async_start_video_session(THING)

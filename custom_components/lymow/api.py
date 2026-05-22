@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, urlunparse
 
 import aiohttp
 
@@ -65,6 +66,51 @@ def _s3_sigv4_headers(
         "x-amz-date": amz_date,
         "x-amz-content-sha256": payload_hash,
         "x-amz-security-token": session_token,
+    }
+
+
+def _kvs_sigv4_headers(
+    method: str,
+    host: str,
+    uri: str,
+    body: bytes,
+    region: str,
+    access_key: str,
+    secret_key: str,
+    session_token: str,
+    service: str = "kinesisvideo",
+) -> dict[str, str]:
+    """Build SigV4 request headers for a kinesisvideo (or other AWS) JSON POST.
+
+    Uses the temporary credentials returned by /prod/kvs/cmd. Unlike the S3
+    helper this signs over a JSON body and does not send x-amz-content-sha256.
+    """
+    now = datetime.now(UTC)
+    amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+    date_str = now.strftime("%Y%m%d")
+    payload_hash = hashlib.sha256(body).hexdigest()
+    signed_headers = "host;x-amz-date;x-amz-security-token"
+    canonical = (
+        f"{method}\n{uri}\n\n"
+        f"host:{host}\n"
+        f"x-amz-date:{amz_date}\n"
+        f"x-amz-security-token:{session_token}\n\n"
+        f"{signed_headers}\n"
+        f"{payload_hash}"
+    )
+    scope = f"{date_str}/{region}/{service}/aws4_request"
+    sts = f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
+    k = _hmac_sha256(("AWS4" + secret_key).encode(), date_str)
+    k = _hmac_sha256(k, region)
+    k = _hmac_sha256(k, service)
+    k = _hmac_sha256(k, "aws4_request")
+    signature = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
+    auth = f"AWS4-HMAC-SHA256 Credential={access_key}/{scope}, SignedHeaders={signed_headers}, Signature={signature}"
+    return {
+        "Authorization": auth,
+        "x-amz-date": amz_date,
+        "x-amz-security-token": session_token,
+        "Content-Type": "application/json",
     }
 
 
@@ -153,6 +199,134 @@ class LymowApiClient:
         async with self._session.post(url, headers=self._headers, json=body) as resp:
             resp.raise_for_status()
             return await resp.json(content_type=None)
+
+    async def get_signaling_channel_endpoint(
+        self, channel_arn: str, creds: dict[str, str], *, role: str = "VIEWER", region: str | None = None
+    ) -> dict[str, str]:
+        """Resolve a KVS signaling channel's endpoints (SigV4-signed, KVS temp creds).
+
+        Returns ``{"WSS": "wss://…", "HTTPS": "https://…"}`` from the
+        ResourceEndpointList. ``creds`` is the ``credentials`` object from
+        :meth:`start_video_session` (accessKeyId/secretAccessKey/sessionToken).
+        """
+        region = region or self._region
+        host = f"kinesisvideo.{region}.amazonaws.com"
+        payload = json.dumps(
+            {
+                "ChannelARN": channel_arn,
+                "SingleMasterChannelEndpointConfiguration": {"Protocols": ["WSS", "HTTPS"], "Role": role},
+            }
+        ).encode()
+        headers = _kvs_sigv4_headers(
+            "POST",
+            host,
+            "/getSignalingChannelEndpoint",
+            payload,
+            region,
+            creds["accessKeyId"],
+            creds["secretAccessKey"],
+            creds["sessionToken"],
+        )
+        async with self._session.post(
+            f"https://{host}/getSignalingChannelEndpoint", headers=headers, data=payload
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.json(content_type=None)
+        endpoints = {}
+        items = data.get("ResourceEndpointList", []) if isinstance(data, dict) else []
+        for ep in items if isinstance(items, list) else []:
+            if isinstance(ep, dict) and ep.get("Protocol") and ep.get("ResourceEndpoint"):
+                endpoints[ep["Protocol"]] = ep["ResourceEndpoint"]
+        return endpoints
+
+    async def get_ice_server_config(
+        self, channel_arn: str, https_endpoint: str, creds: dict[str, str], *, region: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Fetch TURN/STUN servers for the channel (SigV4-signed, KVS temp creds).
+
+        ``https_endpoint`` is the HTTPS entry from
+        :meth:`get_signaling_channel_endpoint`. Returns the IceServerList.
+        """
+        region = region or self._region
+        host = urlparse(https_endpoint).netloc
+        payload = json.dumps({"ChannelARN": channel_arn}).encode()
+        headers = _kvs_sigv4_headers(
+            "POST",
+            host,
+            "/v1/get-ice-server-config",
+            payload,
+            region,
+            creds["accessKeyId"],
+            creds["secretAccessKey"],
+            creds["sessionToken"],
+        )
+        async with self._session.post(
+            f"{https_endpoint}/v1/get-ice-server-config", headers=headers, data=payload
+        ) as resp:
+            resp.raise_for_status()
+            data = await resp.json(content_type=None)
+        servers = data.get("IceServerList", []) if isinstance(data, dict) else []
+        return servers if isinstance(servers, list) else []
+
+    def presign_signaling_url(
+        self,
+        wss_endpoint: str,
+        channel_arn: str,
+        client_id: str,
+        creds: dict[str, str],
+        *,
+        role: str = "VIEWER",
+        region: str | None = None,
+        expires: int = 299,
+    ) -> str:
+        """SigV4-presign the KVS signaling WebSocket connect URL.
+
+        The query carries X-Amz-ChannelARN plus, for a VIEWER, X-Amz-ClientId
+        alongside the standard SigV4 params; unlike the IoT MQTT presign the
+        session token is part of the *signed* canonical query string. A MASTER
+        connects without a client id. ``creds`` is the ``credentials`` object
+        from :meth:`start_video_session`.
+        """
+        if role not in {"VIEWER", "MASTER"}:
+            raise ValueError("role must be VIEWER or MASTER")
+
+        parsed_endpoint = urlparse(wss_endpoint)
+        region = region or self._region
+        host = parsed_endpoint.netloc
+        path = parsed_endpoint.path or "/"
+        now = datetime.now(UTC)
+        amz_date = now.strftime("%Y%m%dT%H%M%SZ")
+        date_str = now.strftime("%Y%m%d")
+        scope = f"{date_str}/{region}/kinesisvideo/aws4_request"
+        query = {
+            "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+            "X-Amz-ChannelARN": channel_arn,
+            "X-Amz-Credential": f"{creds['accessKeyId']}/{scope}",
+            "X-Amz-Date": amz_date,
+            "X-Amz-Expires": str(expires),
+            "X-Amz-Security-Token": creds["sessionToken"],
+            "X-Amz-SignedHeaders": "host",
+        }
+        if role == "VIEWER":
+            query["X-Amz-ClientId"] = client_id
+        canonical_qs = "&".join(f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in sorted(query.items()))
+        canonical = f"GET\n{path}\n{canonical_qs}\nhost:{host}\n\nhost\n{hashlib.sha256(b'').hexdigest()}"
+        sts = f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
+        k = _hmac_sha256(("AWS4" + creds["secretAccessKey"]).encode(), date_str)
+        k = _hmac_sha256(k, region)
+        k = _hmac_sha256(k, "kinesisvideo")
+        k = _hmac_sha256(k, "aws4_request")
+        signature = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
+        return urlunparse(
+            (
+                parsed_endpoint.scheme,
+                parsed_endpoint.netloc,
+                path,
+                parsed_endpoint.params,
+                f"{canonical_qs}&X-Amz-Signature={signature}",
+                parsed_endpoint.fragment,
+            )
+        )
 
     async def check_update(self, thing_name: str) -> dict[str, Any]:
         """GET /prod/check-update — latest firmware metadata for one device.

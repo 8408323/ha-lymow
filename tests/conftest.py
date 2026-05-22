@@ -50,6 +50,7 @@ try:
     import homeassistant.helpers.entity_platform  # noqa: F401
     import homeassistant.helpers.selector  # noqa: F401
     import homeassistant.helpers.update_coordinator  # noqa: F401
+    from homeassistant.components import camera as _ha_camera  # noqa: F401
 
     _load_lymow_module("coordinator")
     _load_lymow_module("config_flow")
@@ -58,6 +59,7 @@ try:
     _load_lymow_module("switch")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
+    _load_lymow_module("camera")
     _load_lymow_module("device_tracker")
     _load_lymow_module("lawn_mower")
     _load_lymow_module("update")
@@ -368,6 +370,30 @@ except ImportError:
     _ha_button.ButtonEntity = _ButtonEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.button", _ha_button)
 
+    # ── homeassistant.components.camera ───────────────────────────────────────
+    _ha_camera = types.ModuleType("homeassistant.components.camera")
+
+    class _Camera:
+        def __init__(self):
+            pass
+
+    class _CameraEntityFeature(IntFlag):
+        ON_OFF = 1
+        STREAM = 2
+
+    _ha_camera.Camera = _Camera  # type: ignore[attr-defined]
+    _ha_camera.CameraEntityFeature = _CameraEntityFeature  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.camera", _ha_camera)
+
+    # ── homeassistant.components.ffmpeg ───────────────────────────────────────
+    _ha_ffmpeg = types.ModuleType("homeassistant.components.ffmpeg")
+
+    async def _async_get_image(hass, input_source, **kwargs):  # type: ignore[no-untyped-def]
+        return b""
+
+    _ha_ffmpeg.async_get_image = _async_get_image  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.ffmpeg", _ha_ffmpeg)
+
     # ── homeassistant.components.update ───────────────────────────────────────
     _ha_update = types.ModuleType("homeassistant.components.update")
 
@@ -391,5 +417,6 @@ except ImportError:
     _load_lymow_module("device_tracker")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
+    _load_lymow_module("camera")
     _load_lymow_module("lawn_mower")
     _load_lymow_module("update")

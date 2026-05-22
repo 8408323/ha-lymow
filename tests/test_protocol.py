@@ -21,6 +21,7 @@ from lymow.protocol import (
     _signed32,
     decode_map_response,
     decode_pboutput,
+    decode_schedule_entry,
     delete_zone,
     encode_ble_drive,
     encode_delete_zone,
@@ -1628,3 +1629,52 @@ def test_encode_ble_drive_protobuf_structure() -> None:
     angular = struct.unpack("<f", struct.pack("<I", inner_by_field[2]))[0]
     assert linear == pytest.approx(0.25, rel=1e-5)
     assert angular == pytest.approx(-0.3, rel=1e-5)
+
+
+def _schedule_pb(enabled: bool, start=None, end=None) -> bytes:
+    pb = _field_i32(11, 1 if enabled else 0)
+    if start is not None:
+        pb += _field_bytes(14, _field_i32(1, start[0]) + _field_i32(2, start[1]))
+    if end is not None:
+        pb += _field_bytes(15, _field_i32(1, end[0]) + _field_i32(2, end[1]))
+    return pb
+
+
+def test_decode_schedule_entry_full() -> None:
+    assert decode_schedule_entry(_schedule_pb(True, (19, 30), (3, 30))) == {
+        "enabled": True,
+        "start": "19:30",
+        "end": "03:30",
+    }
+
+
+def test_decode_schedule_entry_disabled_no_times() -> None:
+    assert decode_schedule_entry(_schedule_pb(False)) == {"enabled": False}
+
+
+def test_decode_schedule_entry_zero_pads_hhmm() -> None:
+    entry = decode_schedule_entry(_schedule_pb(False, (3, 5), (16, 28)))
+    assert entry["start"] == "03:05"
+    assert entry["end"] == "16:28"
+
+
+def test_decode_schedule_entry_empty_time_submsg_omitted() -> None:
+    # An empty {h,m} sub-message yields no time string rather than 00:00.
+    pb = _field_i32(11, 1) + _field_bytes(14, b"")
+    assert decode_schedule_entry(pb) == {"enabled": True}
+
+
+def test_decode_pboutput_includes_schedule_entry() -> None:
+    pb = _build_pboutput(work_status=1) + _field_bytes(17, _schedule_pb(True, (6, 0), (8, 0)))
+    state = decode_pboutput(pb)
+    assert state["scheduleEntry"] == {"enabled": True, "start": "06:00", "end": "08:00"}
+
+
+def test_decode_pboutput_no_schedule_when_absent() -> None:
+    assert "scheduleEntry" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
+def test_decode_schedule_entry_out_of_range_time_omitted() -> None:
+    # A malformed sub-message with an impossible hour/minute is not a real time.
+    assert decode_schedule_entry(_schedule_pb(True, (25, 0))) == {"enabled": True}
+    assert decode_schedule_entry(_schedule_pb(True, (12, 70))) == {"enabled": True}
