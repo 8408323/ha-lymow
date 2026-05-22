@@ -2335,3 +2335,18 @@ async def test_async_set_schedules_publishes_then_queries() -> None:
     assert isinstance(_first(f, 11), bytes)  # PbSchedules in field 11
     task = _decode_fields(_first(_decode_fields(_first(f, 11)), 1))
     assert _first(task, 2) == 9  # hour (UTC == local under UTC tz)
+
+
+async def test_async_delete_channel_sends_command_then_queries_map() -> None:
+    from lymow.const import USER_CTRL_DELETE_CHANNEL
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_delete_channel(THING, "ch000001")
+    assert mqtt.async_publish_command.await_count == 2  # delete + query-map
+    thing, pb = mqtt.async_publish_command.await_args_list[0].args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == USER_CTRL_DELETE_CHANNEL
+    channel = _decode_fields(_first(_decode_fields(_first(f, 12)), 3))
+    assert _first(channel, 1) == b"ch000001"

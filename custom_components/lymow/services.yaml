@@ -13,6 +13,22 @@ delete_zone:
       selector:
         text:
 
+delete_channel:
+  name: Delete channel
+  description: >
+    Delete a channel (the path connector between two zones) from the robot's
+    map using USER_CTRL_DELETE_CHANNEL.
+  fields:
+    channel_hash_id:
+      name: Channel hash ID
+      description: >
+        The hash ID of the channel to delete (see the map sensor's channels
+        attribute).
+      required: true
+      example: "ch3Kp9aQ"
+      selector:
+        text:
+
 start_zone:
   name: Start zone mow
   description: >

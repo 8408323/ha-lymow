@@ -414,6 +414,8 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["go_zones"] = map_data["goZones"]
         if "nogoZones" in map_data:
             attrs["nogo_zones"] = map_data["nogoZones"]
+        if "channels" in map_data:
+            attrs["channels"] = map_data["channels"]
         if "gpsOrigin" in map_data:
             attrs["gps_origin"] = map_data["gpsOrigin"]
         if "chargingStation" in map_data:
