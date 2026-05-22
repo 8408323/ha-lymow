@@ -377,8 +377,22 @@ except ImportError:
         def __init__(self):
             pass
 
+    class _CameraEntityFeature(IntFlag):
+        ON_OFF = 1
+        STREAM = 2
+
     _ha_camera.Camera = _Camera  # type: ignore[attr-defined]
+    _ha_camera.CameraEntityFeature = _CameraEntityFeature  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.camera", _ha_camera)
+
+    # ── homeassistant.components.ffmpeg ───────────────────────────────────────
+    _ha_ffmpeg = types.ModuleType("homeassistant.components.ffmpeg")
+
+    async def _async_get_image(hass, input_source, **kwargs):  # type: ignore[no-untyped-def]
+        return b""
+
+    _ha_ffmpeg.async_get_image = _async_get_image  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.ffmpeg", _ha_ffmpeg)
 
     # ── homeassistant.components.update ───────────────────────────────────────
     _ha_update = types.ModuleType("homeassistant.components.update")

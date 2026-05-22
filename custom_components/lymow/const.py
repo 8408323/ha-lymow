@@ -12,6 +12,13 @@ REGION_CHOICES = [REGION_AUTO, "eu-west-1", "us-east-2", "ap-southeast-2", "ap-e
 # How often to poll REST device state (MQTT keeps live state between polls)
 POLLING_INTERVAL = 30  # seconds
 
+# The robot exposes its onboard camera as a local RTSP h264 stream (640x480)
+# on the LAN. Confirmed by capture + a live frame pull from the device:
+#   rtsp://<robot_ip>:10022/h264ESVideoTest
+# (The AWS KVS WebRTC path the app uses is for *remote* viewing.)
+RTSP_PORT = 10022
+RTSP_PATH = "h264ESVideoTest"
+
 # Per-region AWS configuration — all values extracted from traffic capture and APK analysis
 REGION_CONFIG: dict[str, dict[str, str | None]] = {
     "eu-west-1": {
