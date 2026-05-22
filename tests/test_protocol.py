@@ -1705,3 +1705,16 @@ def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     assert _first(cfg, 6) is None  # cutSpeed (field 6) skipped (None)
     with pytest.raises(ValueError, match="unknown task-config field"):
         encode_set_task_config(nonsense=1)
+
+
+def test_encode_rename_zone_structure() -> None:
+    from lymow.protocol import encode_rename_zone
+
+    pb = encode_rename_zone("wsmjco1T", "Front lawn")
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    pb_map = _decode_fields(_first(f, 12))  # PbMap
+    zone = _decode_fields(_first(pb_map, 1))  # PbZone
+    bi = _decode_fields(_first(zone, 1))  # PbZoneBasicInfo
+    assert _first(bi, 2).decode() == "Front lawn"  # name = field 2
+    assert _first(bi, 3).decode() == "wsmjco1T"  # hashId = field 3

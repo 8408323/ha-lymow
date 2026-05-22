@@ -2226,3 +2226,17 @@ async def test_async_start_video_session_non_dict_raises() -> None:
     api.start_video_session = AsyncMock(return_value="unexpected")
     with pytest.raises(HomeAssistantError):
         await coord.async_start_video_session(THING)
+
+
+@pytest.mark.asyncio
+async def test_async_rename_zone_publishes_modify_zone_info() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_rename_zone(THING, "wsmjco1T", "Front lawn")
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    bi = _decode_fields(_first(_decode_fields(_first(_decode_fields(_first(f, 12)), 1)), 1))
+    assert _first(bi, 2).decode() == "Front lawn"

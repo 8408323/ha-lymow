@@ -813,6 +813,24 @@ def encode_delete_zone(hash_id: str) -> bytes:
     return pb
 
 
+def encode_rename_zone(hash_id: str, name: str) -> bytes:
+    """Encode a USER_CTRL_MODIFY_ZONE_INFO command renaming a go-zone.
+
+    Same envelope as delete-zone (PbInput.map → PbMap.goZones → PbZone.basicInfo),
+    but the basicInfo carries the new name. PbZoneBasicInfo.name = field 2
+    (string) confirmed from APK/Hermes analysis of the zone encoder.
+    """
+    from .const import USER_CTRL_MODIFY_ZONE_INFO
+
+    basic_info = _field_str(2, name) + _field_str(3, hash_id)
+    zone = _field_bytes(1, basic_info)
+    pb_map = _field_bytes(1, zone)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO)
+    pb += _field_bytes(12, pb_map)
+    return pb
+
+
 def delete_zone(map_data: dict, hash_id: str) -> dict:
     """Return a deep copy of map_data with the given zone (and its child no-go zones) removed.
 

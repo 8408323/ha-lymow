@@ -221,3 +221,27 @@ set_task_config:
       example: 100
       selector:
         number: { min: 0, max: 1000, step: 1, mode: box }
+
+rename_zone:
+  name: Rename zone
+  description: >
+    Rename a go-zone on the robot's map (USER_CTRL_MODIFY_ZONE_INFO).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone to rename.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    name:
+      name: New name
+      description: The new zone name.
+      required: true
+      example: "Front lawn"
+      selector:
+        text:
