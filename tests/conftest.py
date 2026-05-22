@@ -37,7 +37,6 @@ _load_lymow_module("bluetooth")
 try:
     import homeassistant.components.binary_sensor  # noqa: F401
     import homeassistant.components.button  # noqa: F401
-    import homeassistant.components.camera  # noqa: F401
     import homeassistant.components.device_tracker  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
@@ -51,6 +50,7 @@ try:
     import homeassistant.helpers.entity_platform  # noqa: F401
     import homeassistant.helpers.selector  # noqa: F401
     import homeassistant.helpers.update_coordinator  # noqa: F401
+    from homeassistant.components import camera as _ha_camera  # noqa: F401
 
     _load_lymow_module("coordinator")
     _load_lymow_module("config_flow")

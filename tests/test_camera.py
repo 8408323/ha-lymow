@@ -17,7 +17,6 @@ from unittest.mock import MagicMock
 
 import aiohttp
 import pytest
-from lymow.camera import DOMAIN  # noqa: F401 — triggers module load via the conftest harness
 
 camera = sys.modules["lymow.camera"]
 

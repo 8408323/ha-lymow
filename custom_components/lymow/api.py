@@ -7,7 +7,7 @@ import hmac
 import json
 from datetime import UTC, datetime
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import aiohttp
 
@@ -287,8 +287,13 @@ class LymowApiClient:
         connects without a client id. ``creds`` is the ``credentials`` object
         from :meth:`start_video_session`.
         """
+        if role not in {"VIEWER", "MASTER"}:
+            raise ValueError("role must be VIEWER or MASTER")
+
+        parsed_endpoint = urlparse(wss_endpoint)
         region = region or self._region
-        host = urlparse(wss_endpoint).netloc
+        host = parsed_endpoint.netloc
+        path = parsed_endpoint.path or "/"
         now = datetime.now(UTC)
         amz_date = now.strftime("%Y%m%dT%H%M%SZ")
         date_str = now.strftime("%Y%m%d")
@@ -305,14 +310,23 @@ class LymowApiClient:
         if role == "VIEWER":
             query["X-Amz-ClientId"] = client_id
         canonical_qs = "&".join(f"{quote(k, safe='')}={quote(v, safe='')}" for k, v in sorted(query.items()))
-        canonical = f"GET\n/\n{canonical_qs}\nhost:{host}\n\nhost\n{hashlib.sha256(b'').hexdigest()}"
+        canonical = f"GET\n{path}\n{canonical_qs}\nhost:{host}\n\nhost\n{hashlib.sha256(b'').hexdigest()}"
         sts = f"AWS4-HMAC-SHA256\n{amz_date}\n{scope}\n{hashlib.sha256(canonical.encode()).hexdigest()}"
         k = _hmac_sha256(("AWS4" + creds["secretAccessKey"]).encode(), date_str)
         k = _hmac_sha256(k, region)
         k = _hmac_sha256(k, "kinesisvideo")
         k = _hmac_sha256(k, "aws4_request")
         signature = hmac.new(k, sts.encode(), hashlib.sha256).hexdigest()
-        return f"{wss_endpoint}/?{canonical_qs}&X-Amz-Signature={signature}"
+        return urlunparse(
+            (
+                parsed_endpoint.scheme,
+                parsed_endpoint.netloc,
+                path,
+                parsed_endpoint.params,
+                f"{canonical_qs}&X-Amz-Signature={signature}",
+                parsed_endpoint.fragment,
+            )
+        )
 
     async def check_update(self, thing_name: str) -> dict[str, Any]:
         """GET /prod/check-update — latest firmware metadata for one device.

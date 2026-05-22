@@ -303,15 +303,30 @@ class TestKvsWebRTC:
         assert "X-Amz-ClientId" not in q
         assert q["X-Amz-Signature"][0]
 
+    def test_presign_rejects_invalid_role(self, client):
+        wss = "wss://m-1.kinesisvideo.%s.amazonaws.com" % REGION
+        with pytest.raises(ValueError, match="role must be VIEWER or MASTER"):
+            client.presign_signaling_url(wss, "arn:test:chan", "ignored", _CREDS, role="INVALID")
+
+    def test_presign_preserves_endpoint_path(self, client):
+        wss = "wss://v-1.kinesisvideo.%s.amazonaws.com/signaling/connect" % REGION
+        from urllib.parse import urlparse
+
+        url = client.presign_signaling_url(wss, "arn:test:chan", "ha-lymow-123", _CREDS)
+        assert urlparse(url).path == "/signaling/connect"
+
     def test_presign_signature_changes_with_secret(self, client):
         wss = "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION
         from urllib.parse import parse_qs, urlparse
 
         url_a = client.presign_signaling_url(wss, "arn", "c", _CREDS, expires=60)
         url_b = client.presign_signaling_url(wss, "arn", "c", {**_CREDS, "secretAccessKey": "other"}, expires=60)
+        url_c = client.presign_signaling_url(wss, "arn", "c", {**_CREDS, "sessionToken": "other-token"}, expires=60)
         sig_a = parse_qs(urlparse(url_a).query)["X-Amz-Signature"][0]
         sig_b = parse_qs(urlparse(url_b).query)["X-Amz-Signature"][0]
+        sig_c = parse_qs(urlparse(url_c).query)["X-Amz-Signature"][0]
         assert sig_a != sig_b
+        assert sig_a != sig_c
         assert parse_qs(urlparse(url_a).query)["X-Amz-Expires"] == ["60"]
 
 
