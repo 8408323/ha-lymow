@@ -608,8 +608,25 @@ class LymowMapCard extends HTMLElement {
     const zone = (this._getMapData()?.goZones || []).find((z) => z.hashId === hashId);
     if (!zone || !zone.polygon) return;
     this._editHash = hashId;
-    this._workPoly = zone.polygon.map((p) => ({ x: p.x, y: p.y }));
+    this._workPoly = this._decimatePoly(zone.polygon);
     this._render();
+  }
+
+  /** Reduce dense protobuf vertices to manageable edit handles (min 0.4 m apart). */
+  _decimatePoly(pts) {
+    if (pts.length <= 10) return pts.map((p) => ({ x: p.x, y: p.y }));
+    const MIN_DIST = 0.4; // metres
+    const out = [{ x: pts[0].x, y: pts[0].y }];
+    for (let i = 1; i < pts.length; i++) {
+      const prev = out[out.length - 1];
+      const dx = pts[i].x - prev.x, dy = pts[i].y - prev.y;
+      if (Math.sqrt(dx * dx + dy * dy) >= MIN_DIST) out.push({ x: pts[i].x, y: pts[i].y });
+    }
+    // Always close: ensure last kept point isn't nearly identical to first
+    const last = out[out.length - 1], first = out[0];
+    const dx = last.x - first.x, dy = last.y - first.y;
+    if (Math.sqrt(dx * dx + dy * dy) < MIN_DIST) out.pop();
+    return out;
   }
 
   _startDrag(evt, idx) {
