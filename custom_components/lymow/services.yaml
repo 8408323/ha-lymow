@@ -335,7 +335,7 @@ update_zone_polygon:
         Ordered list of at least 3 vertices, each an {x, y} point in metres
         (local ENU frame).
       required: true
-      example: "[{x: 0.0, y: 0.0}, {x: 5.0, y: 0.0}, {x: 5.0, y: 4.0}]"
+      example: [{ x: 0.0, y: 0.0 }, { x: 5.0, y: 0.0 }, { x: 5.0, y: 4.0 }]
       selector:
         object:
 
@@ -353,7 +353,7 @@ add_zone:
       name: Polygon
       description: Ordered list of at least 3 {x, y} vertices in metres (local ENU frame).
       required: true
-      example: "[{x: 0.0, y: 0.0}, {x: 5.0, y: 0.0}, {x: 5.0, y: 4.0}]"
+      example: [{ x: 0.0, y: 0.0 }, { x: 5.0, y: 0.0 }, { x: 5.0, y: 4.0 }]
       selector:
         object:
     name:
@@ -424,14 +424,14 @@ split_zone:
       name: Cut line point 1
       description: First endpoint of the split line, as {x, y} in metres.
       required: true
-      example: "{x: 2.5, y: 0.0}"
+      example: { x: 2.5, y: 0.0 }
       selector:
         object:
     cut_p2:
       name: Cut line point 2
       description: Second endpoint of the split line, as {x, y} in metres.
       required: true
-      example: "{x: 2.5, y: 4.0}"
+      example: { x: 2.5, y: 4.0 }
       selector:
         object:
     names:
