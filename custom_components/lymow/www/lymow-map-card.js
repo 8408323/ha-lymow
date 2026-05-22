@@ -361,8 +361,8 @@ class LymowMapCard extends HTMLElement {
       chargingStation ? `<div class="legend-item"><svg width="16" height="14" viewBox="0 0 16 14"><circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.3" fill="white"/><text x="8" y="8" text-anchor="middle" dominant-baseline="middle" font-size="5" fill="#1565c0" font-weight="bold">⚡</text></svg>Station</div>` : "",
       poseEastM !== undefined ? `<div class="legend-item"><svg width="18" height="14" viewBox="0 0 18 14"><circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/></svg>Robot</div>` : "",
       rtkEastM !== undefined ? `<div class="legend-item"><svg width="16" height="14" viewBox="0 0 16 14"><polygon points="8,1 2,13 14,13" fill="#7b1fa2" stroke="white" stroke-width="1"/></svg>RTK base</div>` : "",
-      channels.some(c => c.isDockingChannel) ? `<div class="legend-item"><svg width="20" height="12" viewBox="0 0 20 12"><line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="1.5" stroke-dasharray="4,2"/></svg>Docking ch.</div>` : "",
-      channels.some(c => !c.isDockingChannel) ? `<div class="legend-item"><svg width="20" height="12" viewBox="0 0 20 12"><line x1="1" y1="6" x2="19" y2="6" stroke="#6a1b9a" stroke-width="1.5" stroke-dasharray="4,2"/></svg>Mow ch.</div>` : "",
+      channels.some(c => c.isDockingChannel) ? `<div class="legend-item"><svg width="20" height="12" viewBox="0 0 20 12"><line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="1.5" stroke-dasharray="4,2"/></svg>Docking</div>` : "",
+      channels.some(c => !c.isDockingChannel) ? `<div class="legend-item"><svg width="20" height="12" viewBox="0 0 20 12"><line x1="1" y1="6" x2="19" y2="6" stroke="#6a1b9a" stroke-width="1.5" stroke-dasharray="4,2"/></svg>Channel</div>` : "",
     ].filter(Boolean).join("");
 
     const title = this._config.title ?? "Lymow Map";
@@ -464,19 +464,24 @@ class LymowMapCard extends HTMLElement {
       return d;
     };
 
-    const steps = 8;
+    // Also include vertex-average centroid and bbox centre as candidates
+    const vcx = poly.reduce((s, p) => s + p.x, 0) / poly.length;
+    const vcy = poly.reduce((s, p) => s + p.y, 0) / poly.length;
+    const candidates = [{x: cx, y: cy}, {x: vcx, y: vcy}];
+    const steps = 16;
     const sw = (maxX - minX) / steps, sh = (maxY - minY) / steps;
+    for (let r = 0; r <= steps; r++)
+      for (let c = 0; c <= steps; c++)
+        candidates.push({x: minX + c * sw, y: minY + r * sh});
+
     let best = null, bestD = -1;
-    for (let r = 0; r <= steps; r++) {
-      for (let c = 0; c <= steps; c++) {
-        const px = minX + c * sw, py = minY + r * sh;
-        if (pip(px, py)) {
-          const d = edgeDist(px, py);
-          if (d > bestD) { bestD = d; best = {x: px, y: py}; }
-        }
+    for (const {x: px, y: py} of candidates) {
+      if (pip(px, py)) {
+        const d = edgeDist(px, py);
+        if (d > bestD) { bestD = d; best = {x: px, y: py}; }
       }
     }
-    return best || {x: cx, y: cy};
+    return best || {x: vcx, y: vcy};
   }
 
   // ---------------------------------------------------------------------------
