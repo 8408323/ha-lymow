@@ -112,6 +112,7 @@ def _to_day_int(value: Any) -> int:
         raise vol.Invalid("day_of_week must be 0-6 (Sun-Sat) or a weekday name")
     return day
 
+
 # Read-only diagnostic queries: each publishes a bare userCtrl=<code> pbinput.
 # The robot's pboutput reply is handled by decode_pboutput; new field decoders
 # land in a separate slice (issue #40).
@@ -607,9 +608,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)
-    hass.services.async_register(
-        DOMAIN, _SERVICE_SET_SCHEDULES, handle_set_schedules, schema=_SET_SCHEDULES_SCHEMA
-    )
+    hass.services.async_register(DOMAIN, _SERVICE_SET_SCHEDULES, handle_set_schedules, schema=_SET_SCHEDULES_SCHEMA)
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
