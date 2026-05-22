@@ -612,10 +612,10 @@ class LymowMapCard extends HTMLElement {
     this._render();
   }
 
-  /** Reduce dense protobuf vertices to manageable edit handles (min 0.4 m apart). */
+  /** Reduce dense protobuf vertices to manageable edit handles (min 1.5 m apart). */
   _decimatePoly(pts) {
     if (pts.length <= 10) return pts.map((p) => ({ x: p.x, y: p.y }));
-    const MIN_DIST = 0.4; // metres
+    const MIN_DIST = 1.5; // metres
     const out = [{ x: pts[0].x, y: pts[0].y }];
     for (let i = 1; i < pts.length; i++) {
       const prev = out[out.length - 1];
