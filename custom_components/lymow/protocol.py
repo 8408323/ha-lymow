@@ -946,6 +946,24 @@ def encode_delete_zone(hash_id: str) -> bytes:
     return pb
 
 
+def encode_delete_nogo_zone(hash_id: str) -> bytes:
+    """Encode a delete-noGoZone command.
+
+    From deleteZonePartition (fn 8972) type==1 branch: identical to the goZone
+    delete (userCtrl=CLEAR_ZONE=8, PbZone{basicInfo{hashId}}) but placed in
+    PbMap.nogoZones (field 2) instead of goZones (field 1).
+    """
+    from .const import USER_CTRL_CLEAR_ZONE
+
+    basic_info = _field_str(3, hash_id)  # PbZoneBasicInfo { hashId }
+    zone = _field_bytes(1, basic_info)  # PbZone { basicInfo }
+    pb_map = _field_bytes(2, zone)  # PbMap { nogoZones: [PbZone] }
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_CLEAR_ZONE)
+    pb += _field_bytes(12, pb_map)
+    return pb
+
+
 def encode_rename_zone(hash_id: str, name: str) -> bytes:
     """Encode a USER_CTRL_MODIFY_ZONE_INFO command renaming a go-zone.
 

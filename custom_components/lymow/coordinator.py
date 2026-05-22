@@ -612,6 +612,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_delete_channel(hash_id))
         await self.async_query_map(thing_name)
 
+    async def async_delete_nogo_zone(self, thing_name: str, hash_id: str) -> None:
+        """Delete a no-go zone by hashId (USER_CTRL_CLEAR_ZONE), then refresh the map."""
+        from .protocol import encode_delete_nogo_zone
+
+        await self._mqtt.async_publish_command(thing_name, encode_delete_nogo_zone(hash_id))
+        await self.async_query_map(thing_name)
+
     async def async_start_zones(self, thing_name: str, zone_hash_ids: list[str]) -> None:
         """Start mowing specific zones by hashId."""
         await self._mqtt.async_publish_command(thing_name, encode_start_zones(zone_hash_ids))

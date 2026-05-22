@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from lymow.button import (
     AbortOtaButton,
+    BackupMapButton,
     ChargingStationResetButton,
     ClearAllZonesAndChannelsButton,
     CompleteZonePartitionButton,
@@ -24,6 +25,7 @@ from lymow.const import (
     USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
     USER_CTRL_COMPLETE_ZONE_PARTITION,
     USER_CTRL_EXIT_REMOTE,
+    USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
     USER_CTRL_RESTORE_FACTORY,
@@ -128,6 +130,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "RestoreFactoryDefaultsButton",
         "ClearAllZonesAndChannelsButton",
         "ToggleLteAirplaneButton",
+        "BackupMapButton",
     }
 
 
@@ -207,6 +210,19 @@ async def test_toggle_lte_airplane_press_sends_correct_userctrl() -> None:
     coord = _make_coord()
     await ToggleLteAirplaneButton(coord, DEVICE).async_press()
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_SWITCH_LTE_AIRPLANE)
+
+
+def test_backup_map_button_metadata() -> None:
+    coord = _make_coord()
+    e = BackupMapButton(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_backup_map"
+    assert "Back up" in e._attr_name
+
+
+async def test_backup_map_press_sends_floor_backup() -> None:
+    coord = _make_coord()
+    await BackupMapButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_FLOOR_BACKUP)
 
 
 async def test_async_setup_entry_no_devices() -> None:
