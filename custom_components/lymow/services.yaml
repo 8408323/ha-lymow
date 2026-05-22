@@ -311,3 +311,181 @@ set_schedules:
           zones: ["wsmjco1T"]
       selector:
         object:
+
+update_zone_polygon:
+  name: Update zone polygon
+  description: >
+    Replace a go-zone's outline with a new polygon (USER_CTRL_SYNC_MAP). Points
+    are in the robot's local ENU frame (metres). Used by the map card's editor.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone to reshape.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    polygon:
+      name: Polygon
+      description: >
+        Ordered list of at least 3 vertices, each an {x, y} point in metres
+        (local ENU frame).
+      required: true
+      example: [{ x: 0.0, y: 0.0 }, { x: 5.0, y: 0.0 }, { x: 5.0, y: 4.0 }]
+      selector:
+        object:
+
+add_zone:
+  name: Add zone
+  description: >
+    Create a new go-zone from a polygon and push it to the robot's map
+    (USER_CTRL_SYNC_MAP). Points are in the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    polygon:
+      name: Polygon
+      description: Ordered list of at least 3 {x, y} vertices in metres (local ENU frame).
+      required: true
+      example: [{ x: 0.0, y: 0.0 }, { x: 5.0, y: 0.0 }, { x: 5.0, y: 4.0 }]
+      selector:
+        object:
+    name:
+      name: Name
+      description: Optional display name for the new zone.
+      required: false
+      example: "Side strip"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height
+      description: Cutting height for the zone, in millimetres.
+      required: false
+      default: 40
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+
+merge_zones:
+  name: Merge zones
+  description: >
+    Merge two or more adjacent go-zones into one (USER_CTRL_MERGE_ZONE).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_ids:
+      name: Zone hash IDs
+      description: List of at least two go-zone hash IDs to merge.
+      required: true
+      example: ["wsmjco1T", "KX1kGyat"]
+      selector:
+        object:
+    name:
+      name: Name
+      description: Optional display name for the merged zone.
+      required: false
+      example: "Whole lawn"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height
+      description: Optional cutting height for the merged zone, in millimetres.
+      required: false
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+
+split_zone:
+  name: Split zone
+  description: >
+    Split a go-zone into two along the line between two points
+    (USER_CTRL_CUT_ZONE). Points are in the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The hash ID of the go-zone to split.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    cut_p1:
+      name: Cut line point 1
+      description: First endpoint of the split line, as {x, y} in metres.
+      required: true
+      example: { x: 2.5, y: 0.0 }
+      selector:
+        object:
+    cut_p2:
+      name: Cut line point 2
+      description: Second endpoint of the split line, as {x, y} in metres.
+      required: true
+      example: { x: 2.5, y: 4.0 }
+      selector:
+        object:
+    names:
+      name: Names
+      description: Optional two display names for the resulting zones.
+      required: false
+      example: ["Left", "Right"]
+      selector:
+        object:
+
+pin_and_go:
+  name: Pin and go
+  description: >
+    Drop a temporary spot-mow zone of the given radius around a map point and
+    start mowing it. Coordinates are in the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    x:
+      name: X
+      description: X coordinate of the point in metres (local ENU frame).
+      required: true
+      example: 3.5
+      selector:
+        number: { min: -1000, max: 1000, step: 0.1, mode: box }
+    y:
+      name: Y
+      description: Y coordinate of the point in metres (local ENU frame).
+      required: true
+      example: -2.0
+      selector:
+        number: { min: -1000, max: 1000, step: 0.1, mode: box }
+    radius_m:
+      name: Radius
+      description: Radius of the spot-mow circle, in metres.
+      required: false
+      default: 1.0
+      example: 1.0
+      selector:
+        number: { min: 0.1, max: 20.0, step: 0.1, unit_of_measurement: m, mode: box }
+    cut_height_mm:
+      name: Cut height
+      description: Cutting height for the spot zone, in millimetres.
+      required: false
+      default: 40
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+    name:
+      name: Name
+      description: Optional display name for the spot zone.
+      required: false
+      example: "Spot"
+      selector:
+        text:
