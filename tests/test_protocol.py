@@ -1794,3 +1794,77 @@ def test_encode_clear_schedules_is_empty_schedule_field() -> None:
     f = _decode_fields(pb)
     assert _first(f, 2) == 49
     assert _first(f, 11) == b""
+
+
+def test_encode_set_schedules_wraps_version_and_schedule_field() -> None:
+    from lymow.protocol import PB_VERSION, encode_set_schedules
+
+    pb = encode_set_schedules([{"hour": 9, "minute": 30}])
+    f = _decode_fields(pb)
+    assert _first(f, 2) == PB_VERSION
+    assert isinstance(_first(f, 11), bytes)  # PbSchedules in field 11, no userCtrl
+    assert _first(f, 5) is None
+
+
+def test_encode_set_schedules_entry_fields() -> None:
+    from lymow.protocol import encode_set_schedules
+
+    pb = encode_set_schedules(
+        [
+            {
+                "hour": 9,
+                "minute": 30,
+                "dayOfWeek": [1, 3, 5],
+                "zones": [{"hashId": "abc123", "name": "Front", "point": {"x": 1.5, "y": -2.5}}],
+                "isRepeated": True,
+                "config": {"hashId": "abc123", "cutHeight": 60, "moveSpeed": 0.6, "pathSpacing": 90},
+            }
+        ]
+    )
+    schedules = _decode_fields(_first(_decode_fields(pb), 11))
+    task = _decode_fields(_first(schedules, 1))  # PbSchedules.tasks[0] = PbSchedule
+    assert _first(task, 1) == bytes([1, 3, 5])  # dayOfWeek packed
+    assert _first(task, 2) == 9
+    assert _first(task, 3) == 30
+    assert _first(task, 4) == 1  # isRepeated
+    zone = _decode_fields(_first(task, 5))  # zonesInfo = PbZoneBasicInfo
+    assert _first(zone, 2) == b"Front"  # name
+    assert _first(zone, 3) == b"abc123"  # hashId
+    assert _first(zone, 8) == 1  # selected flag
+    point = _decode_fields(_first(zone, 9))  # representative point (f1=x, f2=y float32)
+    assert pytest.approx(_decode_f32(_first(point, 1)), abs=1e-3) == 1.5
+    assert pytest.approx(_decode_f32(_first(point, 2)), abs=1e-3) == -2.5
+    cfg = _decode_fields(_first(task, 11))  # PbScheduleConfig
+    assert _first(cfg, 1) == b"abc123"  # hashId
+    assert _first(cfg, 2) == 60  # cutHeight
+    assert pytest.approx(_decode_f32(_first(cfg, 3)), abs=1e-3) == 0.6  # moveSpeed
+    assert _first(cfg, 4) == 90  # pathSpacing
+
+
+def test_encode_set_schedules_multiple_tasks() -> None:
+    from lymow.protocol import encode_set_schedules
+
+    pb = encode_set_schedules([{"hour": 8, "minute": 0}, {"hour": 18, "minute": 15}])
+    schedules = _decode_fields(_first(_decode_fields(pb), 11))
+    tasks = _all(schedules, 1)
+    assert len(tasks) == 2
+    assert _first(_decode_fields(tasks[1]), 2) == 18  # second entry hour
+
+
+def test_encode_set_schedules_disabled_and_empty() -> None:
+    from lymow.protocol import encode_set_schedules
+
+    pb = encode_set_schedules([{"hour": 0, "minute": 0, "isDisabled": True}])
+    task = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 11)), 1))
+    assert _first(task, 8) == 1  # isDisabled
+    assert _first(task, 1) is None  # no dayOfWeek when omitted
+
+
+def test_encode_set_schedules_optional_fields() -> None:
+    from lymow.protocol import encode_set_schedules
+
+    pb = encode_set_schedules([{"hour": 6, "minute": 0, "id": 7, "timeZone": 2, "isAngleOffset": True}])
+    task = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 11)), 1))
+    assert _first(task, 6) == 7  # id
+    assert _first(task, 7) == 2  # timeZone (UTC offset hours)
+    assert _first(task, 9) == 1  # isAngleOffset

@@ -42,6 +42,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_set_task_config = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
+    coord.async_set_schedules = AsyncMock()
     coord.async_restore_backup_map = AsyncMock()
     coord.async_delete_backup_map = AsyncMock()
     coord.async_rename_backup_map = AsyncMock()
@@ -232,8 +233,8 @@ async def test_async_setup_entry_registers_services() -> None:
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
     # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
-    # + 1 delete-channel.
-    assert hass.services.async_register.call_count == 29
+    # + 1 set-schedules + 1 delete-channel.
+    assert hass.services.async_register.call_count == 30
 
 
 # ---------------------------------------------------------------------------
@@ -1121,6 +1122,87 @@ async def test_handle_set_task_config_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"cut_speed": 100})
     await handlers["set_task_config"](call)
     coord.async_set_task_config.assert_not_called()
+
+
+def _validated_schedule(**overrides) -> dict:
+    """A schedule entry shaped as the voluptuous schema produces (defaults filled)."""
+    base = {"hour": 9, "minute": 30, "day_of_week": [1, 5], "zones": ["abc"], "repeated": True, "disabled": False}
+    base.update(overrides)
+    return base
+
+
+async def test_handle_set_schedules_maps_and_calls() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"schedules": [_validated_schedule()]})
+    await handlers["set_schedules"](call)
+    coord.async_set_schedules.assert_awaited_once_with(
+        "mower-001",
+        [
+            {
+                "hour": 9,
+                "minute": 30,
+                "dayOfWeek": [1, 5],
+                "zones": ["abc"],
+                "isRepeated": True,
+                "isDisabled": False,
+            }
+        ],
+    )
+
+
+async def test_handle_set_schedules_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.other"], {"schedules": [_validated_schedule()]})
+    await handlers["set_schedules"](call)
+    coord.async_set_schedules.assert_not_called()
+
+
+def test_to_day_int_accepts_names_and_ints() -> None:
+    from lymow.lawn_mower import _to_day_int
+
+    assert _to_day_int("MON") == 1
+    assert _to_day_int("sunday") == 0
+    assert _to_day_int(6) == 6
+    assert _to_day_int("3") == 3
+
+
+def test_to_day_int_rejects_out_of_range() -> None:
+    import voluptuous as vol
+    from lymow.lawn_mower import _to_day_int
+
+    with pytest.raises(vol.Invalid):
+        _to_day_int(7)
+
+
+def test_to_day_int_rejects_invalid_string() -> None:
+    import voluptuous as vol
+    from lymow.lawn_mower import _to_day_int
+
+    with pytest.raises(vol.Invalid):
+        _to_day_int("notaday")
+
+
+def test_set_schedules_schema_fills_defaults_and_converts_days() -> None:
+    from lymow.lawn_mower import _SET_SCHEDULES_SCHEMA
+
+    validated = _SET_SCHEDULES_SCHEMA(
+        {"entity_id": ["lawn_mower.mower_1"], "schedules": [{"hour": 8, "minute": 0, "day_of_week": ["tue"]}]}
+    )
+    entry = validated["schedules"][0]
+    assert entry["day_of_week"] == [2]
+    assert entry["repeated"] is True
+    assert entry["disabled"] is False
+    assert entry["zones"] == []
 
 
 def test_discover_ble_address_matches_and_handles_empty(monkeypatch) -> None:

@@ -694,6 +694,81 @@ def encode_clear_schedules() -> bytes:
     return _field_i32(2, PB_VERSION) + _field_bytes(11, b"")
 
 
+# PbSchedule (PbSchedules.tasks) field map — VERIFIED against a live capture of
+# the app's "Save Task" flow. hour/minute are UTC; timeZone is the UTC offset in
+# hours. zonesInfo is PbZoneBasicInfo (name, hashId, a selected flag, and the
+# zone's representative point); config is PbScheduleConfig.
+def _encode_zone_basic_info(zone: dict[str, Any]) -> bytes:
+    """Encode a PbZoneBasicInfo for a schedule's zonesInfo (f5)."""
+    bi = b""
+    bi += _field_str(2, zone.get("name", ""))
+    bi += _field_str(3, zone["hashId"])
+    bi += _field_i32(8, 1)
+    point = zone.get("point")
+    if point is not None:
+        bi += _field_bytes(9, _field_f32(1, float(point.get("x", 0.0))) + _field_f32(2, float(point.get("y", 0.0))))
+    return bi
+
+
+def _encode_schedule_config(cfg: dict[str, Any]) -> bytes:
+    """Encode a PbScheduleConfig (per-task zone overrides, f11)."""
+    pb = b""
+    if "hashId" in cfg:
+        pb += _field_str(1, cfg["hashId"])
+    if "cutHeight" in cfg:
+        pb += _field_i32(2, int(cfg["cutHeight"]))
+    if "moveSpeed" in cfg:
+        pb += _field_f32(3, float(cfg["moveSpeed"]))
+    if "pathSpacing" in cfg:
+        pb += _field_i32(4, int(cfg["pathSpacing"]))
+    return pb
+
+
+def _encode_schedule_entry(entry: dict[str, Any]) -> bytes:
+    """Encode one PbSchedule sub-message.
+
+    Keys: dayOfWeek (list[int]), hour (UTC), minute, isRepeated, zones
+    (list of {hashId, name?, point?}), id, timeZone (UTC offset hours),
+    isDisabled, config ({hashId, cutHeight, moveSpeed, pathSpacing}).
+    """
+    pb = b""
+    days = entry.get("dayOfWeek")
+    if days:
+        pb += _field_bytes(1, b"".join(_encode_varint(int(d) & 0xFFFFFFFF) for d in days))
+    if "hour" in entry:
+        pb += _field_i32(2, int(entry["hour"]))
+    if "minute" in entry:
+        pb += _field_i32(3, int(entry["minute"]))
+    if entry.get("isRepeated"):
+        pb += _field_i32(4, 1)
+    for zone in entry.get("zones", []):
+        pb += _field_bytes(5, _encode_zone_basic_info(zone))
+    if "id" in entry:
+        pb += _field_i32(6, int(entry["id"]))
+    if "timeZone" in entry:
+        pb += _field_i32(7, int(entry["timeZone"]))
+    if entry.get("isDisabled"):
+        pb += _field_i32(8, 1)
+    if entry.get("isAngleOffset"):
+        pb += _field_i32(9, 1)
+    config = entry.get("config")
+    if config:
+        pb += _field_bytes(11, _encode_schedule_config(config))
+    return pb
+
+
+def encode_set_schedules(entries: list[dict[str, Any]]) -> bytes:
+    """Encode a set-schedules command (PbInput.schedule = PbSchedules{tasks}).
+
+    Like clear-schedules, this carries no userCtrl — the robot acts on the
+    presence of field 11. Each entry becomes one PbSchedule in tasks (field 1).
+    """
+    tasks = b"".join(_field_bytes(1, _encode_schedule_entry(e)) for e in entries)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(11, tasks)
+    return pb
+
+
 def encode_delete_channel(hash_id: str) -> bytes:
     """Encode a delete-channel command (USER_CTRL_DELETE_CHANNEL).
 

@@ -270,3 +270,29 @@ clear_schedules:
     entity:
       integration: lymow
       domain: lawn_mower
+
+set_schedules:
+  name: Set schedules
+  description: >
+    Write the robot's full mowing schedule list. Replaces all existing
+    schedules. Each entry runs at the given time; the robot mows autonomously
+    when a schedule fires.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    schedules:
+      name: Schedules
+      description: >
+        List of schedule entries. Each entry needs hour and minute, and may set
+        day_of_week (0-6 Sun-Sat, or names), zones (list of zone hash IDs to
+        mow), repeated (default true), and disabled (default false).
+      required: true
+      example: |
+        - hour: 9
+          minute: 30
+          day_of_week: [mon, wed, fri]
+          zones: ["wsmjco1T"]
+      selector:
+        object:

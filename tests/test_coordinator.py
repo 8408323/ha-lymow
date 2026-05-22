@@ -2252,6 +2252,91 @@ async def test_async_clear_schedules_sends_empty_then_queries() -> None:
     assert mqtt.async_publish_command.await_count == 2  # clear + query
 
 
+def test_build_schedule_entries_converts_utc_and_fills_zone() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from lymow.coordinator import build_schedule_entries
+
+    now = datetime(2026, 5, 22, 12, 0, tzinfo=ZoneInfo("Europe/Stockholm"))  # CEST = UTC+2
+    map_data = {"goZones": [{"hashId": "z1", "name": "Lawn", "innerPoint": {"x": 1.0, "y": 2.0}, "cutHeight": 55}]}
+    specs = [{"hour": 9, "minute": 30, "dayOfWeek": [5], "zones": ["z1"], "isRepeated": True}]
+    [entry] = build_schedule_entries(specs, map_data, now)
+    assert entry["hour"] == 7  # 09:30 CEST -> 07:30 UTC
+    assert entry["minute"] == 30
+    assert entry["timeZone"] == 2  # UTC+2 offset hours
+    assert entry["isRepeated"] is True
+    assert entry["zones"][0] == {"hashId": "z1", "name": "Lawn", "point": {"x": 1.0, "y": 2.0}}
+    assert entry["config"]["cutHeight"] == 55
+    assert entry["config"]["hashId"] == "z1"
+    assert "id" in entry
+
+
+def test_build_schedule_entries_shifts_day_when_utc_crosses_midnight() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from lymow.coordinator import build_schedule_entries
+
+    # 00:30 Monday CEST(UTC+2) -> 22:30 Sunday UTC: day must shift Mon(1) -> Sun(0).
+    now = datetime(2026, 5, 22, 12, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
+    specs = [{"hour": 0, "minute": 30, "dayOfWeek": [1], "zones": []}]
+    [entry] = build_schedule_entries(specs, {}, now)
+    assert entry["hour"] == 22
+    assert entry["minute"] == 30
+    assert entry["dayOfWeek"] == [0]  # Monday shifted back to Sunday in UTC
+
+
+def test_build_schedule_entries_negative_half_hour_offset_truncates() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from lymow.coordinator import build_schedule_entries
+
+    # America/St_Johns is UTC-03:30 (UTC-02:30 in DST) — must truncate toward zero.
+    now = datetime(2026, 1, 15, 12, 0, tzinfo=ZoneInfo("America/St_Johns"))  # -03:30 in winter
+    [entry] = build_schedule_entries([{"hour": 9, "minute": 0, "zones": []}], {}, now)
+    assert entry["timeZone"] == -3  # not -4
+
+
+def test_build_schedule_entries_unknown_zone_defaults() -> None:
+    from datetime import datetime, timezone
+
+    from lymow.coordinator import build_schedule_entries
+
+    now = datetime(2026, 5, 22, 8, 0, tzinfo=timezone.utc)
+    [entry] = build_schedule_entries([{"hour": 8, "minute": 0, "zones": ["missing"]}], {}, now)
+    assert entry["zones"][0] == {"hashId": "missing", "name": "", "point": {"x": 0.0, "y": 0.0}}
+    assert entry["config"]["cutHeight"] == 40  # default when zone/cut unknown
+    assert entry["timeZone"] == 0
+
+
+def test_build_schedule_entries_no_zones_has_no_config() -> None:
+    from datetime import datetime, timezone
+
+    from lymow.coordinator import build_schedule_entries
+
+    now = datetime(2026, 5, 22, 8, 0, tzinfo=timezone.utc)
+    [entry] = build_schedule_entries([{"hour": 8, "minute": 0, "zones": []}], {}, now)
+    assert "config" not in entry
+    assert entry["zones"] == []
+
+
+async def test_async_set_schedules_publishes_then_queries() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.hass.config.time_zone = "UTC"
+    await coord.async_set_schedules(THING, [{"hour": 9, "minute": 30, "zones": []}])
+    assert mqtt.async_publish_command.await_count == 2  # set + query
+    thing, pb = mqtt.async_publish_command.await_args_list[0].args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert isinstance(_first(f, 11), bytes)  # PbSchedules in field 11
+    task = _decode_fields(_first(_decode_fields(_first(f, 11)), 1))
+    assert _first(task, 2) == 9  # hour (UTC == local under UTC tz)
+
+
 async def test_async_delete_channel_sends_command_then_queries_map() -> None:
     from lymow.const import USER_CTRL_DELETE_CHANNEL
     from lymow.protocol import _decode_fields, _first

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -50,6 +52,67 @@ from .protocol import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def build_schedule_entries(
+    specs: list[dict[str, Any]], map_data: dict[str, Any], now_local: datetime
+) -> list[dict[str, Any]]:
+    """Expand user schedule specs into full PbSchedule entries the robot accepts.
+
+    Looks up each zone's name / representative point / cut height from cached
+    map data, converts the local hour:minute to UTC (the robot stores UTC), and
+    records the local UTC offset in hours. When the UTC conversion crosses
+    midnight, ``dayOfWeek`` is shifted to match. Verified against the app's wire
+    format.
+    """
+    offset = now_local.utcoffset()
+    # Truncate toward zero (not floor) so negative / fractional offsets aren't
+    # pushed an hour too far (e.g. UTC-3:30 -> -3, not -4).
+    tz_offset_hours = int(offset.total_seconds() / 3600) if offset else 0
+    zones_by_id = {z.get("hashId"): z for z in map_data.get("goZones", [])}
+    entries: list[dict[str, Any]] = []
+    for i, spec in enumerate(specs):
+        local_ref = now_local.replace(hour=int(spec["hour"]), minute=int(spec["minute"]), second=0, microsecond=0)
+        utc_dt = local_ref.astimezone(UTC)
+        # If converting to UTC moved to the previous/next calendar day, shift
+        # each selected weekday by the same amount so it fires on the right day.
+        day_delta = (utc_dt.date() - local_ref.date()).days
+        days = [(int(d) + day_delta) % 7 for d in spec.get("dayOfWeek", [])]
+        zone_ids: list[str] = spec.get("zones", [])
+        zinfos: list[dict[str, Any]] = []
+        cut_height: int | None = None
+        for hid in zone_ids:
+            zone = zones_by_id.get(hid, {})
+            point = zone.get("innerPoint") or zone.get("boundMin") or {"x": 0.0, "y": 0.0}
+            zinfos.append(
+                {
+                    "hashId": hid,
+                    "name": zone.get("name", ""),
+                    "point": {"x": point.get("x", 0.0), "y": point.get("y", 0.0)},
+                }
+            )
+            if cut_height is None and zone.get("cutHeight") is not None:
+                cut_height = int(zone["cutHeight"])
+        entry: dict[str, Any] = {
+            "dayOfWeek": days,
+            "hour": utc_dt.hour,
+            "minute": utc_dt.minute,
+            "isRepeated": bool(spec.get("isRepeated")),
+            "isDisabled": bool(spec.get("isDisabled")),
+            "id": int(time.time()) % 100_000_000 + i,
+            "timeZone": tz_offset_hours,
+            "zones": zinfos,
+        }
+        if zone_ids:
+            entry["config"] = {
+                "hashId": zone_ids[0],
+                "cutHeight": cut_height if cut_height is not None else 40,
+                "moveSpeed": 0.6,
+                "pathSpacing": 90,
+            }
+        entries.append(entry)
+    return entries
+
 
 # /get-backup-map is fetched on a longer interval than the main coordinator poll
 # (default 30 s) because both backup-map sensors are disabled-by-default and
@@ -596,6 +659,24 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         from .protocol import encode_clear_schedules
 
         await self._mqtt.async_publish_command(thing_name, encode_clear_schedules())
+        await self.async_query_schedules(thing_name)
+
+    async def async_set_schedules(self, thing_name: str, specs: list[dict[str, Any]]) -> None:
+        """Write the full set of mowing schedules, then re-query to refresh state.
+
+        ``specs`` are user-level entries with local ``hour``/``minute``,
+        ``dayOfWeek``, ``zones`` (hash IDs), ``isRepeated`` and ``isDisabled``.
+        Zone name/point/cut-height and the UTC conversion are filled in here from
+        cached map data and Home Assistant's configured time zone — the robot
+        requires the full PbSchedule (verified against the app's wire format).
+        """
+        from .protocol import encode_set_schedules
+
+        tz_name = getattr(self.hass.config, "time_zone", None) or "UTC"
+        now_local = datetime.now(ZoneInfo(tz_name))
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData") or {}
+        entries = build_schedule_entries(specs, map_data, now_local)
+        await self._mqtt.async_publish_command(thing_name, encode_set_schedules(entries))
         await self.async_query_schedules(thing_name)
 
     async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:

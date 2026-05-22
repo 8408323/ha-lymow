@@ -235,6 +235,7 @@ except ImportError:
     _ha_cv.string = str  # type: ignore[attr-defined]
     _ha_cv.entity_ids = lambda v: v  # type: ignore[attr-defined]
     _ha_cv.ensure_list = lambda v: v if isinstance(v, list) else [v]  # type: ignore[attr-defined]
+    _ha_cv.boolean = lambda v: v if isinstance(v, bool) else str(v).strip().lower() in ("1", "true", "yes", "on")  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.config_validation", _ha_cv)
 
     # ── homeassistant.components (namespace) ──────────────────────────────────

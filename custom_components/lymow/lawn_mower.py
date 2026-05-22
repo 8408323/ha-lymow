@@ -68,6 +68,7 @@ _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
 _SERVICE_RENAME_ZONE = "rename_zone"
 _SERVICE_CLEAR_SCHEDULES = "clear_schedules"
+_SERVICE_SET_SCHEDULES = "set_schedules"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 
@@ -94,6 +95,25 @@ _ATTR_Y = "y"
 _ATTR_RADIUS_M = "radius_m"
 _ATTR_CUT_P1 = "cut_p1"
 _ATTR_CUT_P2 = "cut_p2"
+_ATTR_SCHEDULES = "schedules"
+
+_DAY_NAMES = {"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}
+
+
+def _to_day_int(value: Any) -> int:
+    """Coerce a day-of-week given as 0-6 or a SUN..SAT name to its int value."""
+    if isinstance(value, str):
+        key = value.strip().lower()[:3]
+        if key in _DAY_NAMES:
+            return _DAY_NAMES[key]
+    try:
+        day = int(value)
+    except (TypeError, ValueError):
+        raise vol.Invalid("day_of_week must be 0-6 (Sun-Sat) or a weekday name") from None
+    if not 0 <= day <= 6:
+        raise vol.Invalid("day_of_week must be 0-6 (Sun-Sat) or a weekday name")
+    return day
+
 
 # Read-only diagnostic queries: each publishes a bare userCtrl=<code> pbinput.
 # The robot's pboutput reply is handled by decode_pboutput; new field decoders
@@ -199,6 +219,22 @@ _SET_TASK_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         **{vol.Optional(k): vol.Coerce(int) for k in _TASK_CONFIG_SERVICE_FIELDS},
+    }
+)
+_SCHEDULE_ENTRY_SCHEMA = vol.Schema(
+    {
+        vol.Required("hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+        vol.Required("minute"): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
+        vol.Optional("day_of_week", default=list): vol.All(cv.ensure_list, [_to_day_int]),
+        vol.Optional("zones", default=list): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("repeated", default=True): cv.boolean,
+        vol.Optional("disabled", default=False): cv.boolean,
+    }
+)
+_SET_SCHEDULES_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_SCHEDULES): vol.All(cv.ensure_list, [_SCHEDULE_ENTRY_SCHEMA]),
     }
 )
 _SET_DEVICE_NAME_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_NAME): cv.string})
@@ -418,6 +454,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_clear_schedules(entity._thing_name)
 
+    async def handle_set_schedules(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entries = [
+            {
+                "hour": s["hour"],
+                "minute": s["minute"],
+                "dayOfWeek": s["day_of_week"],
+                "zones": s["zones"],
+                "isRepeated": s["repeated"],
+                "isDisabled": s["disabled"],
+            }
+            for s in call.data[_ATTR_SCHEDULES]
+        ]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_schedules(entity._thing_name, entries)
+
     async def handle_rename_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
@@ -578,6 +634,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_SET_SCHEDULES, handle_set_schedules, schema=_SET_SCHEDULES_SCHEMA)
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
