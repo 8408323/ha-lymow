@@ -12,7 +12,6 @@ from a standalone client. Locally, RTSP is simpler and reliable.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
@@ -24,8 +23,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, RTSP_PATH, RTSP_PORT
 from .coordinator import LymowCoordinator
-
-_LOGGER = logging.getLogger(__name__)
 
 # Robot-state keys that may carry the LAN IP, in priority order.
 _IP_KEYS = ("ipAddress", "wifiIp", "ip_address")

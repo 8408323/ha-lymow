@@ -392,27 +392,3 @@ async def test_async_unload_entry_does_not_shutdown_on_failure() -> None:
     assert result is False
     coord.async_shutdown.assert_not_awaited()
     assert "eid-1" in hass.data[DOMAIN]
-
-
-def _make_jwt(claims: dict) -> str:
-    import base64 as _b64
-    import json as _json
-
-    def seg(d):
-        return _b64.urlsafe_b64encode(_json.dumps(d).encode()).rstrip(b"=").decode()
-
-    return f"{seg({'alg': 'none'})}.{seg(claims)}.sig"
-
-
-def test_cognito_sub_extracts_claim() -> None:
-    token = _make_jwt({"sub": "82e584f4-c0c1-7097-18c1-5ac78d6b7372", "email": "x@y.z"})
-    assert _lymow._cognito_sub(token) == "82e584f4-c0c1-7097-18c1-5ac78d6b7372"
-
-
-def test_cognito_sub_missing_claim_returns_empty() -> None:
-    assert _lymow._cognito_sub(_make_jwt({"email": "x@y.z"})) == ""
-
-
-def test_cognito_sub_malformed_returns_empty() -> None:
-    assert _lymow._cognito_sub("not-a-jwt") == ""
-    assert _lymow._cognito_sub("") == ""

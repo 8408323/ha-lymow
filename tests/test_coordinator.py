@@ -2204,8 +2204,10 @@ async def test_async_start_video_session_endpoint_failure_is_nonfatal() -> None:
     assert "signalingEndpoints" not in result
 
 
-async def test_async_start_video_session_non_dict_returned_as_is() -> None:
+async def test_async_start_video_session_non_dict_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
     coord, _, api = _make_coordinator()
     api.start_video_session = AsyncMock(return_value="unexpected")
-    result = await coord.async_start_video_session(THING)
-    assert result == "unexpected"
+    with pytest.raises(HomeAssistantError):
+        await coord.async_start_video_session(THING)

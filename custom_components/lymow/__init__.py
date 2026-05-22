@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
-import json
 import logging
 from pathlib import Path
 
@@ -22,20 +19,6 @@ from .mqtt import LymowMqttClient
 
 _LOGGER = logging.getLogger(__name__)
 _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
-
-
-def _cognito_sub(id_token: str) -> str:
-    """Extract the Cognito 'sub' claim from a JWT id token (no signature check).
-
-    The camera viewer's KVS client id must embed this so the robot's master
-    accepts the offer. Returns "" if the token can't be parsed.
-    """
-    try:
-        payload = id_token.split(".")[1]
-        payload += "=" * ((4 - len(payload) % 4) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload)).get("sub", "")
-    except (IndexError, ValueError, binascii.Error):
-        return ""
 
 
 PLATFORMS = [
@@ -99,7 +82,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     coordinator = LymowCoordinator(hass, client, mqtt_client, devices)
-    coordinator.user_sub = _cognito_sub(tokens["IdToken"])
     await coordinator.async_config_entry_first_refresh()
 
     await mqtt_client.connect(

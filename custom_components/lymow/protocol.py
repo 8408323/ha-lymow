@@ -529,7 +529,13 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
 
 
 def _decode_hhmm(raw: Any) -> str | None:
-    """Decode an {f1=hour, f2=minute} sub-message into 'HH:MM'."""
+    """Decode an {f1=hour, f2=minute} sub-message into 'HH:MM'.
+
+    proto3 omits zero-valued fields, so an on-the-hour time arrives as just
+    {hour} (minute 0 dropped) — defaulting the missing half to 0 reconstructs
+    the real value. Returns None for an empty sub-message or out-of-range
+    values (a malformed entry rather than a real time).
+    """
     if not isinstance(raw, bytes):
         return None
     f = _decode_fields(raw)
@@ -537,7 +543,11 @@ def _decode_hhmm(raw: Any) -> str | None:
     minute = _first(f, 2)
     if hour is None and minute is None:
         return None
-    return f"{int(hour or 0):02d}:{int(minute or 0):02d}"
+    hour = int(hour or 0)
+    minute = int(minute or 0)
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{hour:02d}:{minute:02d}"
 
 
 def decode_schedule_entry(data: bytes) -> dict[str, Any]:

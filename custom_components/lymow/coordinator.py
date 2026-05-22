@@ -100,13 +100,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._client = client
         self._mqtt = mqtt_client
         self.devices = devices
-        # Public read-only handle for entities that need API helpers (e.g. the
-        # camera's WSS presign). Avoids reaching into the private attribute.
-        self.client = client
-        # Owner's Cognito sub — the camera viewer's KVS client id must embed it
-        # ("…_userId_<sub>") or the robot's master ignores the offer. Set by the
-        # config-entry setup once the IdToken is decoded; "" until then.
-        self.user_sub: str = ""
         self._mqtt_state: dict[str, dict[str, Any]] = {}
         # Track work status per device to detect important transitions.
         self._prev_work_status: dict[str, int] = {}
@@ -894,7 +887,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """
         session = await self._client.start_video_session(thing_name)
         if not isinstance(session, dict):
-            return session
+            # The gateway should always return a JSON object; anything else is
+            # an error, not a session.
+            raise HomeAssistantError(f"Unexpected kvs/cmd response for {thing_name}: {type(session).__name__}")
         channel_arn = session.get("channelARN")
         creds = session.get("credentials")
         region = session.get("region")

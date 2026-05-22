@@ -1672,3 +1672,9 @@ def test_decode_pboutput_includes_schedule_entry() -> None:
 
 def test_decode_pboutput_no_schedule_when_absent() -> None:
     assert "scheduleEntry" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
+def test_decode_schedule_entry_out_of_range_time_omitted() -> None:
+    # A malformed sub-message with an impossible hour/minute is not a real time.
+    assert decode_schedule_entry(_schedule_pb(True, (25, 0))) == {"enabled": True}
+    assert decode_schedule_entry(_schedule_pb(True, (12, 70))) == {"enabled": True}
