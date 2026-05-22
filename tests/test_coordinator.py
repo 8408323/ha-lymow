@@ -2250,3 +2250,17 @@ async def test_async_clear_schedules_sends_empty_then_queries() -> None:
     first_pb = mqtt.async_publish_command.await_args_list[0].args[1]
     assert first_pb.hex() == "10315a00"
     assert mqtt.async_publish_command.await_count == 2  # clear + query
+
+
+async def test_async_set_schedules_publishes_then_queries() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_schedules(THING, [{"hour": 9, "minute": 30}])
+    assert mqtt.async_publish_command.await_count == 2  # set + query
+    thing, pb = mqtt.async_publish_command.await_args_list[0].args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert isinstance(_first(f, 11), bytes)  # PbSchedules in field 11
+    task = _decode_fields(_first(_decode_fields(_first(f, 11)), 1))
+    assert _first(task, 2) == 9  # hour

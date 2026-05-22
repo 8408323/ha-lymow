@@ -660,6 +660,57 @@ def encode_clear_schedules() -> bytes:
     return _field_i32(2, PB_VERSION) + _field_bytes(11, b"")
 
 
+# PbSchedule (PbSchedules.tasks) field map — derived from APK (Hermes) analysis
+# of the app's protobufjs encoder. NOTE: this *input* message is distinct from
+# the *output* schedule entry decoded by decode_schedule_entry (different tags).
+_DAYS = {"SUN": 0, "MON": 1, "TUE": 2, "WED": 3, "THU": 4, "FRI": 5, "SAT": 6}
+
+
+def _encode_schedule_entry(entry: dict[str, Any]) -> bytes:
+    """Encode one PbSchedule sub-message.
+
+    Recognised keys: dayOfWeek (list[int]), hour, minute, isRepeated,
+    zones (list[str] hash IDs), id, timeZone, isDisabled, isAngleOffset,
+    mowAngle. Per-schedule config overrides are not encoded yet.
+    """
+    pb = b""
+    days = entry.get("dayOfWeek")
+    if days:
+        packed = b"".join(_encode_varint(int(d) & 0xFFFFFFFF) for d in days)
+        pb += _field_bytes(1, packed)
+    if "hour" in entry:
+        pb += _field_i32(2, int(entry["hour"]))
+    if "minute" in entry:
+        pb += _field_i32(3, int(entry["minute"]))
+    if entry.get("isRepeated"):
+        pb += _field_i32(4, 1)
+    for hash_id in entry.get("zones", []):
+        pb += _field_bytes(5, _field_str(3, hash_id))
+    if "id" in entry:
+        pb += _field_i32(6, int(entry["id"]))
+    if "timeZone" in entry:
+        pb += _field_i32(7, int(entry["timeZone"]))
+    if entry.get("isDisabled"):
+        pb += _field_i32(8, 1)
+    if entry.get("isAngleOffset"):
+        pb += _field_i32(9, 1)
+    if "mowAngle" in entry:
+        pb += _field_i32(10, int(entry["mowAngle"]))
+    return pb
+
+
+def encode_set_schedules(entries: list[dict[str, Any]]) -> bytes:
+    """Encode a set-schedules command (PbInput.schedule = PbSchedules{tasks}).
+
+    Like clear-schedules, this carries no userCtrl — the robot acts on the
+    presence of field 11. Each entry becomes one PbSchedule in tasks (field 1).
+    """
+    tasks = b"".join(_field_bytes(1, _encode_schedule_entry(e)) for e in entries)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(11, tasks)
+    return pb
+
+
 def encode_start_zones(zone_hash_ids: list[str]) -> bytes:
     """Encode a start-zones command targeting specific zone hash IDs."""
     pb = _field_i32(2, PB_VERSION)

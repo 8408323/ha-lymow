@@ -591,6 +591,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_clear_schedules())
         await self.async_query_schedules(thing_name)
 
+    async def async_set_schedules(self, thing_name: str, entries: list[dict[str, Any]]) -> None:
+        """Write the full set of mowing schedules, then re-query to refresh state."""
+        from .protocol import encode_set_schedules
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_schedules(entries))
+        await self.async_query_schedules(thing_name)
+
     async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:
         """Set mowing task-config parameters (USER_CTRL_SET_TASK_CONFIG).
 
