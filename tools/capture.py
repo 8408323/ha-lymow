@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from mitmproxy import http
@@ -73,12 +74,13 @@ def _pretty_body(content: bytes, content_type: str) -> str:
     return f"  binary ({len(content)}B): {content[:64].hex()}..."
 
 
-def _iter_mqtt_packets(buf: bytes):
+def _iter_mqtt_packets(buf: bytes) -> Iterator[tuple[int, int, bytes, int]]:
     """Walk every MQTT control packet coalesced in one WebSocket binary frame.
 
     A single WS frame can carry several MQTT packets back-to-back (e.g. a PUBACK
-    followed by an outbound command PUBLISH). Yields ``(ctrl_type, qos, variable)``
-    for each, where ``variable`` is the bytes after the fixed header.
+    followed by an outbound command PUBLISH). Yields ``(ctrl_type, qos, variable,
+    packet_len)`` for each, where ``variable`` is the bytes after the fixed header
+    and ``packet_len`` is the full on-wire packet size.
     """
     pos, n = 0, len(buf)
     while pos + 2 <= n:
@@ -87,6 +89,7 @@ def _iter_mqtt_packets(buf: bytes):
         p = pos + 1
         multiplier = 1
         rem_len = 0
+        complete = False
         for _ in range(4):
             if p >= n:
                 return
@@ -94,12 +97,15 @@ def _iter_mqtt_packets(buf: bytes):
             p += 1
             rem_len += (b & 0x7F) * multiplier
             if not (b & 0x80):
+                complete = True
                 break
             multiplier *= 128
+        if not complete:
+            return  # malformed Remaining Length (continuation bit past 4 bytes)
         packet_end = p + rem_len
         if packet_end > n:
             return  # truncated — don't guess
-        yield ctrl, qos, buf[p:packet_end]
+        yield ctrl, qos, buf[p:packet_end], packet_end - pos
         pos = packet_end
 
 
@@ -201,7 +207,7 @@ class LymowCapture:
                 continue
             if "iot." not in host or msg.is_text or not isinstance(msg.content, bytes):
                 continue
-            for ctrl, qos, var in _iter_mqtt_packets(msg.content):
+            for ctrl, qos, var, packet_len in _iter_mqtt_packets(msg.content):
                 if ctrl == 3:  # PUBLISH
                     parsed = _decode_publish(qos, var)
                     if parsed:
@@ -210,8 +216,12 @@ class LymowCapture:
                     continue
                 name = _CTRL_NAMES.get(ctrl, f"type{ctrl}")
                 if name not in ("PINGREQ", "PINGRESP"):
-                    _write(f"[{_ts()}] MQTT {arrow} {name} ({len(var)}B)")
+                    _write(f"[{_ts()}] MQTT {arrow} {name} ({packet_len}B)")
         self._ws_seen[flow.id] = len(messages)
+
+    def websocket_end(self, flow: http.HTTPFlow) -> None:
+        """Drop the per-flow message cursor so _ws_seen doesn't grow unbounded."""
+        self._ws_seen.pop(flow.id, None)
 
 
 addons = [LymowCapture()]
