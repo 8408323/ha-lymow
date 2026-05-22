@@ -57,6 +57,7 @@ def _make_ha_stubs() -> None:
         class _Platform:
             BINARY_SENSOR = "binary_sensor"
             BUTTON = "button"
+            CAMERA = "camera"
             DEVICE_TRACKER = "device_tracker"
             LAWN_MOWER = "lawn_mower"
             NUMBER = "number"
