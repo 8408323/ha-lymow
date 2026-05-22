@@ -34,6 +34,10 @@ blueprint:
 
 mode: single
 
+# Blueprint inputs aren't available to Jinja unless mapped into variables first.
+variables:
+  resume_after: !input resume_after
+
 trigger:
   - platform: time
     at: !input quiet_start
@@ -41,12 +45,27 @@ trigger:
   - platform: time
     at: !input quiet_end
     id: quiet_ended
+  # Re-assert the dock if HA restarts while already inside the quiet window —
+  # otherwise the start-time trigger is missed and the mower stays out.
+  - platform: homeassistant
+    event: start
+    id: ha_start
 
 action:
   - choose:
       - conditions:
           - condition: trigger
             id: quiet_started
+        sequence:
+          - service: lawn_mower.dock
+            target:
+              entity_id: !input mower
+      - conditions:
+          - condition: trigger
+            id: ha_start
+          - condition: time
+            after: !input quiet_start
+            before: !input quiet_end
         sequence:
           - service: lawn_mower.dock
             target:

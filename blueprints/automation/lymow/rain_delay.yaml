@@ -31,6 +31,10 @@ blueprint:
 
 mode: single
 
+# Blueprint inputs aren't available to Jinja unless mapped into variables first.
+variables:
+  resume_when_dry: !input resume_when_dry
+
 trigger:
   - platform: state
     entity_id: !input rain_sensor

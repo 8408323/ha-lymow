@@ -15,10 +15,10 @@ configuration.
 ## Importing
 
 In Home Assistant: **Settings → Automations & Scenes → Blueprints → Import
-blueprint**, then paste the raw URL of the blueprint file, e.g.:
+blueprint**, then paste the **raw** URL of the blueprint file, e.g.:
 
 ```
-https://github.com/8408323/ha-lymow/blob/main/blueprints/automation/lymow/rain_delay.yaml
+https://raw.githubusercontent.com/8408323/ha-lymow/main/blueprints/automation/lymow/rain_delay.yaml
 ```
 
 Or copy the `.yaml` file into `config/blueprints/automation/lymow/` and reload
