@@ -108,7 +108,7 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
     ),
     LymowSensorDescription(
         key="total_area_m2",
-        name="Mow task area",
+        name="Map area",
         value_key="totalTaskAreaM2",
         native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
         state_class=SensorStateClass.MEASUREMENT,
