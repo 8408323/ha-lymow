@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
     POLLING_INTERVAL,
     USER_CTRL_CLEAN,
+    USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_PAUSE,
     USER_CTRL_PAUSE_DOCK,
     USER_CTRL_QUERY_CHANNELS,
@@ -875,6 +876,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Restore a saved backup map onto the device, then re-query the map."""
         await self._client.restore_backup_map(thing_name, from_key)
         await self.async_query_map(thing_name)
+
+    async def async_backup_map(self, thing_name: str) -> None:
+        """Snapshot the robot's current map to cloud (USER_CTRL_FLOOR_BACKUP).
+
+        Drops the cached backup snapshot so the backup sensors pick up the new
+        entry on the next poll instead of waiting out the 5-minute cache.
+        """
+        await self._mqtt.async_publish_command(thing_name, encode_userctrl(USER_CTRL_FLOOR_BACKUP))
+        self._backup_map_cache.pop(thing_name, None)
 
     async def async_delete_backup_map(self, thing_name: str, object_key: str) -> None:
         """Delete a saved backup map and drop the cached backup snapshot."""

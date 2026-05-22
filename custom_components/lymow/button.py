@@ -195,3 +195,8 @@ class BackupMapButton(_UserCtrlButton):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Back up map", "mdi:content-save-cog")
+
+    async def async_press(self) -> None:
+        # Route through the coordinator so the backup-map cache is invalidated
+        # and the backup sensors reflect the new snapshot on the next poll.
+        await self.coordinator.async_backup_map(self._thing_name)

@@ -25,7 +25,6 @@ from lymow.const import (
     USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
     USER_CTRL_COMPLETE_ZONE_PARTITION,
     USER_CTRL_EXIT_REMOTE,
-    USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
     USER_CTRL_RESTORE_FACTORY,
@@ -41,6 +40,7 @@ def _make_coord() -> MagicMock:
     coord = MagicMock()
     coord.devices = [DEVICE]
     coord.async_send_user_ctrl = AsyncMock()
+    coord.async_backup_map = AsyncMock()
     return coord
 
 
@@ -219,10 +219,13 @@ def test_backup_map_button_metadata() -> None:
     assert "Back up" in e._attr_name
 
 
-async def test_backup_map_press_sends_floor_backup() -> None:
+async def test_backup_map_press_routes_through_coordinator() -> None:
+    # Routes via async_backup_map (which invalidates the backup cache), not the
+    # generic userCtrl path.
     coord = _make_coord()
     await BackupMapButton(coord, DEVICE).async_press()
-    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_FLOOR_BACKUP)
+    coord.async_backup_map.assert_awaited_once_with(THING)
+    coord.async_send_user_ctrl.assert_not_called()
 
 
 async def test_async_setup_entry_no_devices() -> None:
