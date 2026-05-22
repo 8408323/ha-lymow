@@ -29,6 +29,21 @@ delete_channel:
       selector:
         text:
 
+delete_nogo_zone:
+  name: Delete no-go zone
+  description: >
+    Delete a no-go zone from the robot's map by hash ID (USER_CTRL_CLEAR_ZONE).
+    Tip: back up the map first — deleting a go-zone also removes its child no-go
+    zones, and a cloud restore may not reload them onto the running robot.
+  fields:
+    nogo_hash_id:
+      name: No-go zone hash ID
+      description: The hash ID of the no-go zone to delete (see the map sensor's nogo_zones).
+      required: true
+      example: "f518RwgE"
+      selector:
+        text:
+
 start_zone:
   name: Start zone mow
   description: >

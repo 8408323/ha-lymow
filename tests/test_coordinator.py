@@ -2149,6 +2149,18 @@ async def test_async_delete_backup_map_drops_cache() -> None:
     assert THING not in coord._backup_map_cache
 
 
+async def test_async_backup_map_publishes_and_drops_cache() -> None:
+    from lymow.const import USER_CTRL_FLOOR_BACKUP
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord._backup_map_cache[THING] = ("t", {})
+    await coord.async_backup_map(THING)
+    _thing, pb = mqtt.async_publish_command.await_args.args
+    assert _first(_decode_fields(pb), 5) == USER_CTRL_FLOOR_BACKUP
+    assert THING not in coord._backup_map_cache  # cache invalidated so sensor refreshes
+
+
 async def test_async_rename_backup_map_drops_cache() -> None:
     coord, _, api = _make_coordinator()
     api.rename_backup_map = AsyncMock()
@@ -2344,3 +2356,17 @@ async def test_async_delete_channel_sends_command_then_queries_map() -> None:
     assert _first(f, 5) == USER_CTRL_DELETE_CHANNEL
     channel = _decode_fields(_first(_decode_fields(_first(f, 12)), 3))
     assert _first(channel, 1) == b"ch000001"
+
+
+async def test_async_delete_nogo_zone_sends_command_then_queries_map() -> None:
+    from lymow.const import USER_CTRL_CLEAR_ZONE
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_delete_nogo_zone(THING, "ng1")
+    assert mqtt.async_publish_command.await_count == 2  # delete + query-map
+    _thing, pb = mqtt.async_publish_command.await_args_list[0].args
+    f = _decode_fields(pb)
+    assert _first(f, 5) == USER_CTRL_CLEAR_ZONE
+    zone = _decode_fields(_first(_decode_fields(_first(f, 12)), 2))  # nogoZones (f2) -> PbZone
+    assert _first(_decode_fields(_first(zone, 1)), 3) == b"ng1"  # basicInfo.hashId

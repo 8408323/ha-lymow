@@ -35,6 +35,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_dock = AsyncMock()
     coord.async_delete_zone = AsyncMock()
     coord.async_delete_channel = AsyncMock()
+    coord.async_delete_nogo_zone = AsyncMock()
     coord.async_start_zones = AsyncMock()
     coord.async_query_map = AsyncMock()
     coord.async_query_schedules = AsyncMock()
@@ -233,8 +234,8 @@ async def test_async_setup_entry_registers_services() -> None:
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
     # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
-    # + 1 set-schedules + 1 delete-channel.
-    assert hass.services.async_register.call_count == 30
+    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone.
+    assert hass.services.async_register.call_count == 31
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +397,51 @@ async def test_handle_delete_channel_empty_channels_skips_validation() -> None:
     call = _make_call(["lawn_mower.mower_1"], {"channel_hash_id": "ch-any"})
     await handlers["delete_channel"](call)
     coord.async_delete_channel.assert_awaited_once_with(THING, "ch-any")
+
+
+async def test_handle_delete_nogo_zone_valid_calls_coordinator() -> None:
+    coord = _make_coord({"mapData": {"nogoZones": [{"hashId": "ng1"}]}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"nogo_hash_id": "ng1"})
+    await handlers["delete_nogo_zone"](call)
+    coord.async_delete_nogo_zone.assert_awaited_once_with(THING, "ng1")
+
+
+async def test_handle_delete_nogo_zone_unknown_raises() -> None:
+    coord = _make_coord({"mapData": {"nogoZones": [{"hashId": "ng1"}]}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"nogo_hash_id": "nope"})
+    with pytest.raises(ServiceValidationError):
+        await handlers["delete_nogo_zone"](call)
+    coord.async_delete_nogo_zone.assert_not_called()
+
+
+async def test_handle_delete_nogo_zone_unknown_entity_skips() -> None:
+    coord = _make_coord({"mapData": {"nogoZones": [{"hashId": "ng1"}]}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.other"], {"nogo_hash_id": "ng1"})
+    await handlers["delete_nogo_zone"](call)
+    coord.async_delete_nogo_zone.assert_not_called()
+
+
+async def test_handle_delete_nogo_zone_empty_skips_validation() -> None:
+    coord = _make_coord({"mapData": {"nogoZones": []}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"nogo_hash_id": "ng-any"})
+    await handlers["delete_nogo_zone"](call)
+    coord.async_delete_nogo_zone.assert_awaited_once_with(THING, "ng-any")
 
 
 async def test_handle_delete_zone_empty_go_ids_skips_validation() -> None:

@@ -984,6 +984,20 @@ def test_encode_delete_zone_no_nogo_zones() -> None:
     assert _first(pb_map, 2) is None, "PbMap must not have nogoZones for a goZone delete"
 
 
+def test_encode_delete_nogo_zone_uses_nogo_field_with_pbzone_wrapper() -> None:
+    from lymow.const import USER_CTRL_CLEAR_ZONE
+    from lymow.protocol import encode_delete_nogo_zone
+
+    raw = encode_delete_nogo_zone("ng123")
+    top = _decode_fields(raw)
+    assert _first(top, 5) == USER_CTRL_CLEAR_ZONE
+    pb_map = _decode_fields(_first(top, 12))
+    assert _first(pb_map, 1) is None, "must use nogoZones (f2), not goZones (f1)"
+    zone = _decode_fields(_first(pb_map, 2))  # PbMap.nogoZones[0] = PbZone
+    basic = _decode_fields(_first(zone, 1))  # PbZone.basicInfo
+    assert _first(basic, 3) == b"ng123"  # hashId
+
+
 # ---------------------------------------------------------------------------
 # decode_pboutput — RTK / GPS / pose / area fields
 # ---------------------------------------------------------------------------

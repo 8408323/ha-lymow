@@ -15,6 +15,7 @@ from .const import (
     USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
     USER_CTRL_COMPLETE_ZONE_PARTITION,
     USER_CTRL_EXIT_REMOTE,
+    USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
     USER_CTRL_RESTORE_FACTORY,
@@ -44,6 +45,7 @@ async def async_setup_entry(
                 RestoreFactoryDefaultsButton(coordinator, device),
                 ClearAllZonesAndChannelsButton(coordinator, device),
                 ToggleLteAirplaneButton(coordinator, device),
+                BackupMapButton(coordinator, device),
             ]
         )
     if entities:
@@ -179,3 +181,22 @@ class ToggleLteAirplaneButton(_UserCtrlButton):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Toggle LTE airplane mode", "mdi:airplane")
+
+
+class BackupMapButton(_UserCtrlButton):
+    """Save a backup of the robot's current map (the app's "Back up" action).
+
+    The robot snapshots its map to cloud storage; restore it later with the
+    restore_backup_map service. Verified against hardware (USER_CTRL_FLOOR_BACKUP).
+    """
+
+    _user_ctrl = USER_CTRL_FLOOR_BACKUP
+    _key = "backup_map"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Back up map", "mdi:content-save-cog")
+
+    async def async_press(self) -> None:
+        # Route through the coordinator so the backup-map cache is invalidated
+        # and the backup sensors reflect the new snapshot on the next poll.
+        await self.coordinator.async_backup_map(self._thing_name)
