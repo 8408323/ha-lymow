@@ -108,10 +108,10 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
     ),
     LymowSensorDescription(
         key="total_area_m2",
-        name="Total mowed area",
-        value_key="totalAreaM2",
+        name="Mow task area",
+        value_key="totalTaskAreaM2",
         native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
-        state_class=SensorStateClass.TOTAL_INCREASING,
+        state_class=SensorStateClass.MEASUREMENT,
         suggested_display_precision=0,
         icon="mdi:grass",
         entity_registry_enabled_default=False,

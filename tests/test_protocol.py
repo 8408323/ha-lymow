@@ -1081,7 +1081,7 @@ def test_decode_pboutput_rtk_east_north() -> None:
 def test_decode_pboutput_total_area() -> None:
     pb = _build_pboutput_with_extras(total_area_m2=1234.5)
     state = decode_pboutput(pb)
-    assert abs(state["totalAreaM2"] - 1234.5) < 1.0
+    assert abs(state["totalTaskAreaM2"] - 1234.5) < 1.0
 
 
 def test_decode_pboutput_pose_enu() -> None:
@@ -1099,7 +1099,7 @@ def test_decode_pboutput_no_rtk_when_absent() -> None:
     state = decode_pboutput(pb)
     assert "rtkSatellites" not in state
     assert "rtkEastM" not in state
-    assert "totalAreaM2" not in state
+    assert "totalTaskAreaM2" not in state
     assert "poseEastM" not in state
 
 
@@ -1123,7 +1123,7 @@ def test_decode_pboutput_mow_strip_count_and_progress_together() -> None:
     pb = _build_pboutput_with_extras(total_area_m2=800.0, mow_strip_count=5, mow_progress=0.25)
     state = decode_pboutput(pb)
     assert state["mowStripCount"] == 5
-    assert abs(state["totalAreaM2"] - 800.0) < 1.0
+    assert abs(state["totalTaskAreaM2"] - 800.0) < 1.0
     assert abs(state["mowProgress"] - 25.0) < 1.0
 
 
