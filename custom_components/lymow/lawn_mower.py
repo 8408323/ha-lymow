@@ -263,7 +263,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             thing_name = entity._thing_name
             map_data = coordinator.data.get(thing_name, {}).get("mapData") or {}
-            chan_ids = {c.get("hashId") for c in map_data.get("channels", [])}
+            chan_ids = {cid for c in map_data.get("channels", []) if (cid := c.get("hashId"))}
             if chan_ids and hash_id not in chan_ids:
                 raise ServiceValidationError(
                     f"Channel {hash_id!r} not found in map. Known channels: {sorted(chan_ids)}"

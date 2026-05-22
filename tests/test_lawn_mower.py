@@ -363,6 +363,18 @@ async def test_handle_delete_channel_unknown_raises_validation_error() -> None:
     coord.async_delete_channel.assert_not_called()
 
 
+async def test_handle_delete_channel_ignores_channels_without_hashid() -> None:
+    # A channel dict missing hashId must not poison the validation set (no TypeError on sorted).
+    coord = _make_coord({"mapData": {"channels": [{"hashId": "ch1"}, {"isValid": True}]}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"channel_hash_id": "nope"})
+    with pytest.raises(ServiceValidationError):
+        await handlers["delete_channel"](call)
+
+
 async def test_handle_delete_channel_unknown_entity_skips() -> None:
     coord = _make_coord({"mapData": {"channels": [{"hashId": "ch1"}]}})
     entry = MagicMock()

@@ -540,6 +540,8 @@ def _build_map_response(
         ch += _field_i32(6, 1 if chan.get("isDockingChannel") else 0)
         if chan.get("cutHeight") is not None:
             ch += _field_i32(9, chan["cutHeight"])
+        if chan.get("channelLift") is not None:
+            ch += _field_i32(10, chan["channelLift"])
         content += _field_bytes(3, ch)
 
     wrapper = _field_i32(1, 1) + _field_bytes(3, content)
@@ -678,6 +680,7 @@ def test_decode_map_response_channels() -> None:
                 "isDockingChannel": False,
                 "polygon": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}],
                 "cutHeight": 40,
+                "channelLift": 1,
             },
             {"hashId": "ch000002", "isValid": False, "isDockingChannel": True},
         ]
@@ -692,6 +695,7 @@ def test_decode_map_response_channels() -> None:
     assert c0["isDockingChannel"] is False
     assert len(c0["polygon"]) == 2
     assert c0["cutHeight"] == 40
+    assert c0["channelLift"] == 1
     assert result["channels"][1]["isDockingChannel"] is True
     assert result["channels"][1]["isValid"] is False
 

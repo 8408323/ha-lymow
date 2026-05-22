@@ -426,6 +426,9 @@ def decode_channel(data: bytes) -> dict[str, Any]:
     cut_h = _first(f, 9)
     if cut_h is not None:
         chan["cutHeight"] = cut_h
+    lift = _first(f, 10)
+    if lift is not None:
+        chan["channelLift"] = lift
     return chan
 
 
