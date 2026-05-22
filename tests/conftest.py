@@ -394,6 +394,15 @@ except ImportError:
     _ha_ffmpeg.async_get_image = _async_get_image  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.ffmpeg", _ha_ffmpeg)
 
+    # ── homeassistant.components.bluetooth ────────────────────────────────────
+    _ha_bt = types.ModuleType("homeassistant.components.bluetooth")
+
+    def _async_discovered_service_info(hass, connectable=True):  # type: ignore[no-untyped-def]
+        return []
+
+    _ha_bt.async_discovered_service_info = _async_discovered_service_info  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.bluetooth", _ha_bt)
+
     # ── homeassistant.components.update ───────────────────────────────────────
     _ha_update = types.ModuleType("homeassistant.components.update")
 
