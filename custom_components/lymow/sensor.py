@@ -528,10 +528,13 @@ class LymowRemainingAreaSensor(CoordinatorEntity[LymowCoordinator], SensorEntity
         if task is None or progress is None:
             return None
         try:
-            remaining = float(task) * (1.0 - float(progress) / 100.0)
+            task_f = float(task)
+            remaining = task_f * (1.0 - float(progress) / 100.0)
         except (TypeError, ValueError):
             return None
-        return max(remaining, 0.0)
+        # Bound to [0, task]: progress outside 0–100 (bad/echoed wire data)
+        # must not yield negative area or more than the whole task.
+        return min(max(remaining, 0.0), max(task_f, 0.0))
 
 
 class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
