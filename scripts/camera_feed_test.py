@@ -13,11 +13,13 @@ This is the "verify the feed before touching HACS" step. It is a live tool —
 it needs real credentials and the robot online, and the WebRTC/media layer
 typically needs a couple of live iterations to tune.
 
-NOTE: the robot only joins the signaling channel as MASTER (and thus answers
-the offer) when it is awake AND off the dock. While docked & charging
-(workStatus idle, isCharging true) it stays MQTT-online and answers queries
-but does not start the camera, so the offer goes unanswered — that is a robot
-state, not a signaling bug. Run this with the mower off the charging dock.
+NOTE: the viewer client id must embed the account owner's Cognito sub as
+"…_userId_<sub>" (the app does this; a random id is rejected). Even so, in
+testing the robot only acts as the WebRTC MASTER for the live app's own
+session and behaves as single-viewer — replaying these captured cloud calls
+from a standalone client did not get the robot to answer. The robot streams
+fine while docked (confirmed in the app). Treat a timeout here as "the robot
+isn't serving this session", not a signaling bug.
 
 Requires extra deps (not in the integration); run them ephemerally with uv:
 
@@ -31,7 +33,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import contextlib
 import hashlib
 import hmac
 import importlib.util
@@ -290,10 +291,12 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
             print(f"  [FAIL] no video frame within 120s ({state})")
             return False
         finally:
-            for task in (resend_task, loop_task):
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+            # Cancel both helper tasks and await them together, swallowing any
+            # error they raise during teardown (CancelledError, or a
+            # ConnectionClosed from a resend racing the socket close).
+            resend_task.cancel()
+            loop_task.cancel()
+            await asyncio.gather(resend_task, loop_task, return_exceptions=True)
             await pc.close()
 
 
