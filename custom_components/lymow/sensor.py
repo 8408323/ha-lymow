@@ -431,9 +431,9 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     """Mowing schedules reported by the robot (USER_CTRL_QUERY_SCHEDULES).
 
-    State is the number of schedules. Each schedule's enabled flag and
-    start/end window — the fields whose meaning is unambiguous in the decoded
-    reply — are exposed as attributes. None until the first reply arrives.
+    State is the number of schedules. Each schedule's days, UTC time, target
+    zones, repeat/disabled flags and id are exposed in the ``schedules``
+    attribute. None until the first reply arrives.
     """
 
     _attr_icon = "mdi:calendar-clock"

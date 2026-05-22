@@ -553,53 +553,52 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if theta_rad is not None:
             state["poseThetaRad"] = _decode_f32(theta_rad)
 
-    # Mowing schedule entry (field 17), one per QUERY_SCHEDULES reply — confirmed
-    # by correlating f17-bearing pboutput with preceding userCtrl=20 in capture.
-    schedule_raw = _first(fields, 17)
-    if isinstance(schedule_raw, bytes):
-        state["scheduleEntry"] = decode_schedule_entry(schedule_raw)
+    # Mowing schedules: PbOutput field 16 = PbSchedules { tasks(1) = [PbSchedule] }.
+    # The QUERY_SCHEDULES reply carries the full list (verified against a live
+    # capture of the app — the input and output PbSchedule are the same message).
+    schedules_raw = _first(fields, 16)
+    if isinstance(schedules_raw, bytes):
+        tasks = _all(_decode_fields(schedules_raw), 1)
+        state["schedules"] = [decode_schedule_entry(t) for t in tasks if isinstance(t, bytes)]
 
     return state
 
 
-def _decode_hhmm(raw: Any) -> str | None:
-    """Decode an {f1=hour, f2=minute} sub-message into 'HH:MM'.
-
-    proto3 omits zero-valued fields, so an on-the-hour time arrives as just
-    {hour} (minute 0 dropped) — defaulting the missing half to 0 reconstructs
-    the real value. Returns None for an empty sub-message or out-of-range
-    values (a malformed entry rather than a real time).
-    """
-    if not isinstance(raw, bytes):
-        return None
-    f = _decode_fields(raw)
-    hour = _first(f, 1)
-    minute = _first(f, 2)
-    if hour is None and minute is None:
-        return None
-    hour = int(hour or 0)
-    minute = int(minute or 0)
-    if not (0 <= hour <= 23 and 0 <= minute <= 59):
-        return None
-    return f"{hour:02d}:{minute:02d}"
-
-
 def decode_schedule_entry(data: bytes) -> dict[str, Any]:
-    """Decode a PbSchedule (PbOutput field 17) into a flat dict.
+    """Decode a PbSchedule into a flat dict.
 
-    Field meaning confirmed from capture structure: f11=enabled flag,
-    f14=start {hour,minute}, f15=end {hour,minute}. Only the structurally
-    unambiguous fields are surfaced; other fields are left undecoded rather
-    than guessed.
+    Field layout verified against the app's wire format (see encoder side):
+    f1 dayOfWeek (packed), f2 hour (UTC), f3 minute, f4 isRepeated, f5 zonesInfo
+    (PbZoneBasicInfo, hashId=f3), f6 id, f7 timeZone (UTC offset hours), f8
+    isDisabled. hour/minute are UTC as stored by the robot.
     """
     f = _decode_fields(data)
-    entry: dict[str, Any] = {"enabled": bool(_first(f, 11, 0))}
-    start = _decode_hhmm(_first(f, 14))
-    if start is not None:
-        entry["start"] = start
-    end = _decode_hhmm(_first(f, 15))
-    if end is not None:
-        entry["end"] = end
+    days_raw = _first(f, 1)
+    days = _decode_packed_int32s(days_raw) if isinstance(days_raw, bytes) else []
+    hour = _signed32(_first(f, 2, 0))
+    minute = _signed32(_first(f, 3, 0))
+    # PbOutput is untrusted: bound the wire values so a malformed payload can't
+    # surface garbage (huge / negative) hour, minute or weekday to HA state.
+    entry: dict[str, Any] = {
+        "dayOfWeek": [d for d in days if 0 <= d <= 6],
+        "hour": hour if 0 <= hour <= 23 else 0,
+        "minute": minute if 0 <= minute <= 59 else 0,
+        "isRepeated": bool(_first(f, 4, 0)),
+        "isDisabled": bool(_first(f, 8, 0)),
+    }
+    zone_ids: list[str] = []
+    for zraw in _all(f, 5):
+        if isinstance(zraw, bytes):
+            hash_raw = _first(_decode_fields(zraw), 3)
+            if isinstance(hash_raw, bytes):
+                zone_ids.append(hash_raw.decode("utf-8", errors="replace"))
+    entry["zones"] = zone_ids
+    sched_id = _first(f, 6)
+    if sched_id is not None:
+        entry["id"] = int(sched_id)
+    tz = _first(f, 7)
+    if tz is not None:
+        entry["timeZone"] = _signed32(tz)
     return entry
 
 

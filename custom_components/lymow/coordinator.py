@@ -168,8 +168,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._prev_work_status: dict[str, int] = {}
         # Cached backup-map snapshot per device: (fetched_at, fields).
         self._backup_map_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
-        # Schedules accumulated from QUERY_SCHEDULES replies (one entry each).
-        self._schedules: dict[str, list[dict[str, Any]]] = {}
         # RTK auto-pause guard: per-device knobs and tracking.
         # Enabled defaults off — opt-in safety feature.
         self._rtk_guard_enabled: dict[str, bool] = {}
@@ -228,14 +226,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def on_mqtt_state(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Receive a state update from MQTT and push to HA."""
-        # Schedules arrive one entry per QUERY_SCHEDULES reply — accumulate the
-        # distinct set (reset when a fresh query is issued) into "schedules".
-        if "scheduleEntry" in patch:
-            entry = patch.pop("scheduleEntry")
-            collected = self._schedules.setdefault(thing_name, [])
-            if entry not in collected:
-                collected.append(entry)
-            patch["schedules"] = list(collected)
+        # A QUERY_SCHEDULES reply carries the full schedule list in one message
+        # (decoded into "schedules"); other pushes omit the key, leaving it intact.
         if thing_name not in self._mqtt_state:
             self._mqtt_state[thing_name] = {}
         self._mqtt_state[thing_name].update(patch)
@@ -636,12 +628,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_query_schedules(self, thing_name: str) -> None:
         """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot.
 
-        The robot replies with one entry per schedule, so reset the accumulator
-        before asking — the replies repopulate it via :meth:`on_mqtt_state`.
-        Also clear the already-published ``schedules`` so the UI doesn't show
-        stale entries if the robot is slow to reply (or has none left).
+        The reply (PbOutput field 16) carries the full schedule list in one
+        message, which :meth:`on_mqtt_state` publishes as ``schedules``. Clear
+        any already-published list first so the UI doesn't show stale entries if
+        the robot is slow to reply (or has none left).
         """
-        self._schedules[thing_name] = []
         if thing_name in self._mqtt_state:
             self._mqtt_state[thing_name].pop("schedules", None)
         if self.data and thing_name in self.data and "schedules" in self.data[thing_name]:

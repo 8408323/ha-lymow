@@ -796,8 +796,8 @@ def test_schedules_sensor_none_until_first_reply() -> None:
 
 def test_schedules_sensor_counts_and_exposes_entries() -> None:
     entries = [
-        {"enabled": True, "start": "06:00", "end": "08:00"},
-        {"enabled": False, "start": "19:30", "end": "03:30"},
+        {"dayOfWeek": [1, 3, 5], "hour": 7, "minute": 30, "zones": ["z1"], "isRepeated": True, "isDisabled": False},
+        {"dayOfWeek": [0], "hour": 19, "minute": 0, "zones": [], "isRepeated": False, "isDisabled": True},
     ]
     sensor = LymowSchedulesSensor(_make_coord({"schedules": entries}), DEVICE)
     assert sensor.native_value == 2

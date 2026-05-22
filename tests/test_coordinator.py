@@ -241,26 +241,21 @@ def test_on_mqtt_state_unknown_thing_ignored() -> None:
     assert coord.data[THING]["battery"] == 90
 
 
-def test_on_mqtt_state_accumulates_schedule_entries_deduped() -> None:
+def test_on_mqtt_state_publishes_full_schedule_list() -> None:
+    # A QUERY_SCHEDULES reply decodes the full list at once; it flows through as-is.
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {}}
-    a = {"enabled": True, "start": "06:00", "end": "08:00"}
-    b = {"enabled": False, "start": "19:30", "end": "03:30"}
-    coord.on_mqtt_state(THING, {"scheduleEntry": dict(a)})
-    coord.on_mqtt_state(THING, {"scheduleEntry": dict(b)})
-    coord.on_mqtt_state(THING, {"scheduleEntry": dict(a)})  # duplicate ignored
-    assert coord.data[THING]["schedules"] == [a, b]
-    assert "scheduleEntry" not in coord.data[THING]
+    schedules = [{"hour": 6, "minute": 0, "zones": ["z1"]}, {"hour": 19, "minute": 30, "zones": []}]
+    coord.on_mqtt_state(THING, {"schedules": schedules})
+    assert coord.data[THING]["schedules"] == schedules
 
 
 @pytest.mark.asyncio
-async def test_async_query_schedules_resets_and_publishes() -> None:
+async def test_async_query_schedules_clears_stale_and_publishes() -> None:
     coord, mqtt, _ = _make_coordinator()
-    coord._schedules[THING] = [{"enabled": True}]
-    coord._mqtt_state[THING] = {"schedules": [{"enabled": True}], "battery": 50}
-    coord.data = {THING: {"schedules": [{"enabled": True}], "battery": 50}}
+    coord._mqtt_state[THING] = {"schedules": [{"hour": 6}], "battery": 50}
+    coord.data = {THING: {"schedules": [{"hour": 6}], "battery": 50}}
     await coord.async_query_schedules(THING)
-    assert coord._schedules[THING] == []
     # published schedules cleared (no stale entries), other fields kept
     assert "schedules" not in coord._mqtt_state[THING]
     assert "schedules" not in coord.data[THING]
@@ -273,7 +268,6 @@ async def test_async_query_schedules_no_published_value_is_safe() -> None:
     coord, mqtt, _ = _make_coordinator()
     coord.data = {THING: {"battery": 50}}  # no schedules key yet
     await coord.async_query_schedules(THING)
-    assert coord._schedules[THING] == []
     mqtt.async_publish_command.assert_awaited_once()
 
 

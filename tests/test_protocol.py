@@ -1698,53 +1698,88 @@ def test_encode_ble_drive_protobuf_structure() -> None:
     assert angular == pytest.approx(-0.3, rel=1e-5)
 
 
-def _schedule_pb(enabled: bool, start=None, end=None) -> bytes:
-    pb = _field_i32(11, 1 if enabled else 0)
-    if start is not None:
-        pb += _field_bytes(14, _field_i32(1, start[0]) + _field_i32(2, start[1]))
-    if end is not None:
-        pb += _field_bytes(15, _field_i32(1, end[0]) + _field_i32(2, end[1]))
+def _schedule_pb(
+    days=(), hour=0, minute=0, *, repeated=False, disabled=False, zones=(), sched_id=None, tz=None
+) -> bytes:
+    """Build a PbSchedule (the real, verified layout)."""
+    pb = b""
+    if days:
+        pb += _field_bytes(1, bytes(days))  # packed int32; day values 0-6 are single-byte varints
+    pb += _field_i32(2, hour) + _field_i32(3, minute)
+    if repeated:
+        pb += _field_i32(4, 1)
+    for z in zones:
+        pb += _field_bytes(5, _field_str(3, z))
+    if sched_id is not None:
+        pb += _field_i32(6, sched_id)
+    if tz is not None:
+        pb += _field_i32(7, tz)
+    if disabled:
+        pb += _field_i32(8, 1)
     return pb
 
 
+def _schedules_field16(*tasks: bytes) -> bytes:
+    """Wrap PbSchedule task blobs as PbOutput field 16 = PbSchedules{tasks(1)}."""
+    return _field_bytes(16, b"".join(_field_bytes(1, t) for t in tasks))
+
+
 def test_decode_schedule_entry_full() -> None:
-    assert decode_schedule_entry(_schedule_pb(True, (19, 30), (3, 30))) == {
-        "enabled": True,
-        "start": "19:30",
-        "end": "03:30",
+    entry = decode_schedule_entry(_schedule_pb([1, 3, 5], 7, 30, repeated=True, zones=["z1", "z2"], sched_id=42, tz=2))
+    assert entry == {
+        "dayOfWeek": [1, 3, 5],
+        "hour": 7,
+        "minute": 30,
+        "isRepeated": True,
+        "isDisabled": False,
+        "zones": ["z1", "z2"],
+        "id": 42,
+        "timeZone": 2,
     }
 
 
-def test_decode_schedule_entry_disabled_no_times() -> None:
-    assert decode_schedule_entry(_schedule_pb(False)) == {"enabled": False}
+def test_decode_schedule_entry_minimal_disabled() -> None:
+    entry = decode_schedule_entry(_schedule_pb([], 0, 0, disabled=True))
+    assert entry["dayOfWeek"] == []
+    assert entry["zones"] == []
+    assert entry["isDisabled"] is True
+    assert entry["isRepeated"] is False
+    assert "id" not in entry  # absent when not sent
 
 
-def test_decode_schedule_entry_zero_pads_hhmm() -> None:
-    entry = decode_schedule_entry(_schedule_pb(False, (3, 5), (16, 28)))
-    assert entry["start"] == "03:05"
-    assert entry["end"] == "16:28"
+def test_decode_schedule_entry_negative_timezone() -> None:
+    entry = decode_schedule_entry(_schedule_pb([2], 9, 0, tz=-3))
+    assert entry["timeZone"] == -3
 
 
-def test_decode_schedule_entry_empty_time_submsg_omitted() -> None:
-    # An empty {h,m} sub-message yields no time string rather than 00:00.
-    pb = _field_i32(11, 1) + _field_bytes(14, b"")
-    assert decode_schedule_entry(pb) == {"enabled": True}
+def test_decode_schedule_entry_bounds_untrusted_values() -> None:
+    # Malformed/hostile wire values must not surface as garbage HA state.
+    pb = _field_bytes(1, bytes([2, 9])) + _field_i32(2, 99) + _field_i32(3, 200)
+    entry = decode_schedule_entry(pb)
+    assert entry["dayOfWeek"] == [2]  # 9 dropped (out of 0-6)
+    assert entry["hour"] == 0  # 99 -> 0 (out of 0-23)
+    assert entry["minute"] == 0  # 200 -> 0 (out of 0-59)
 
 
-def test_decode_pboutput_includes_schedule_entry() -> None:
-    pb = _build_pboutput(work_status=1) + _field_bytes(17, _schedule_pb(True, (6, 0), (8, 0)))
+def test_decode_pboutput_includes_schedules_field16() -> None:
+    pb = _build_pboutput(work_status=1) + _schedules_field16(
+        _schedule_pb([5], 12, 47, zones=["wsmjco1T"], sched_id=7),
+        _schedule_pb([0, 6], 6, 0),
+    )
     state = decode_pboutput(pb)
-    assert state["scheduleEntry"] == {"enabled": True, "start": "06:00", "end": "08:00"}
+    assert len(state["schedules"]) == 2
+    assert state["schedules"][0]["hour"] == 12
+    assert state["schedules"][0]["zones"] == ["wsmjco1T"]
+    assert state["schedules"][1]["dayOfWeek"] == [0, 6]
 
 
-def test_decode_pboutput_no_schedule_when_absent() -> None:
-    assert "scheduleEntry" not in decode_pboutput(_build_pboutput(work_status=1))
+def test_decode_pboutput_empty_field16_is_empty_list() -> None:
+    state = decode_pboutput(_build_pboutput(work_status=1) + _field_bytes(16, b""))
+    assert state["schedules"] == []
 
 
-def test_decode_schedule_entry_out_of_range_time_omitted() -> None:
-    # A malformed sub-message with an impossible hour/minute is not a real time.
-    assert decode_schedule_entry(_schedule_pb(True, (25, 0))) == {"enabled": True}
-    assert decode_schedule_entry(_schedule_pb(True, (12, 70))) == {"enabled": True}
+def test_decode_pboutput_no_schedules_key_when_field16_absent() -> None:
+    assert "schedules" not in decode_pboutput(_build_pboutput(work_status=1))
 
 
 def test_encode_set_task_config_wraps_in_pbinput() -> None:
