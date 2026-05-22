@@ -33,6 +33,11 @@ def _make_ha_stubs() -> None:
     ha_comp = types.ModuleType("homeassistant.components")
     sys.modules.setdefault("homeassistant.components", ha_comp)
 
+    # homeassistant.components.frontend — only needs add_extra_js_url
+    ha_frontend = types.ModuleType("homeassistant.components.frontend")
+    ha_frontend.add_extra_js_url = MagicMock()
+    sys.modules.setdefault("homeassistant.components.frontend", ha_frontend)
+
     # homeassistant.components.http — only needs StaticPathConfig
     ha_http = types.ModuleType("homeassistant.components.http")
 
@@ -163,6 +168,7 @@ def _make_hass(www_registered: bool = False) -> MagicMock:
     hass.http.async_register_static_paths = AsyncMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
+    hass.async_create_task = MagicMock()
     return hass
 
 
