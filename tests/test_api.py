@@ -329,6 +329,34 @@ class TestKvsWebRTC:
         assert sig_a != sig_c
         assert parse_qs(urlparse(url_a).query)["X-Amz-Expires"] == ["60"]
 
+    def test_presign_session_token_is_signed_not_just_appended(self, client):
+        # Changing the session token must change the signature — proving it's
+        # part of the signed canonical query, not merely appended to the URL.
+        wss = "wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION
+        from urllib.parse import parse_qs, urlparse
+
+        url_a = client.presign_signaling_url(wss, "arn", "c", _CREDS, expires=60)
+        url_b = client.presign_signaling_url(wss, "arn", "c", {**_CREDS, "sessionToken": "different"}, expires=60)
+        sig_a = parse_qs(urlparse(url_a).query)["X-Amz-Signature"][0]
+        sig_b = parse_qs(urlparse(url_b).query)["X-Amz-Signature"][0]
+        assert sig_a != sig_b
+
+    def test_presign_preserves_endpoint_path_without_double_slash(self, client):
+        from urllib.parse import urlparse
+
+        # No path → single slash; trailing slash → not doubled.
+        for endpoint, expected_path in (
+            ("wss://v-1.kinesisvideo.%s.amazonaws.com" % REGION, "/"),
+            ("wss://v-1.kinesisvideo.%s.amazonaws.com/" % REGION, "/"),
+            ("wss://v-1.kinesisvideo.%s.amazonaws.com/signal" % REGION, "/signal"),
+        ):
+            url = client.presign_signaling_url(endpoint, "arn", "c", _CREDS)
+            assert urlparse(url).path == expected_path
+
+    def test_presign_rejects_unknown_role(self, client):
+        with pytest.raises(ValueError, match="VIEWER"):
+            client.presign_signaling_url("wss://x", "arn", "c", _CREDS, role="OOPS")
+
 
 class TestBackupMapManagement:
     async def test_restore_posts_from_and_to(self, client):
