@@ -19,7 +19,7 @@
 
 - [ ] Branch name uses a type prefix (`feat/`, `fix/`, `chore/`, `tests/`, `docs/`, ...).
 - [ ] `uv run ruff check` and `uv run ruff format --check` pass.
-- [ ] Tests pass with 100% coverage: `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` (plain `pytest` won't enforce coverage; CI does).
+- [ ] `uv run pytest tests/ -v --tb=short --cov=custom_components/lymow --cov-report=term-missing --cov-fail-under=100` passes.
 - [ ] hassfest / HACS validation pass (or N/A).
 - [ ] No sensitive data committed (tokens, PIN, GPS, `thingName`, email, capture artifacts).
 - [ ] Docs/README updated if behavior changed.
