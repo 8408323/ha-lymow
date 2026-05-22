@@ -116,6 +116,13 @@ def _presign_wss(endpoint: str, channel_arn: str, client_id: str, region: str, c
     return f"{endpoint}/?{canonical_qs}&X-Amz-Signature={sig}"
 
 
+def _jwt_sub(token: str) -> str:
+    """Extract the Cognito 'sub' claim from a JWT (no signature check needed)."""
+    payload = token.split(".")[1]
+    payload += "=" * ((4 - len(payload) % 4) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload)).get("sub", "")
+
+
 async def _resolve_session(client: LymowApiClient, thing: str) -> dict | None:
     session = await client.start_video_session(thing)
     arn, creds = session.get("channelARN"), session.get("credentials")
@@ -186,7 +193,11 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
 
         asyncio.create_task(_save())
 
-    client_id = f"ha-lymow-{os.getpid()}"
+    # The robot's master only answers viewers whose KVS client id carries the
+    # owner's Cognito sub as "…_userId_<sub>" (the app uses this format). A
+    # random client id is silently ignored — this is why the offer goes
+    # unanswered even with the master up.
+    client_id = f"ha-lymow_{os.getpid()}_userId_{session['user_sub']}"
     url = _presign_wss(session["wss"], session["arn"], client_id, session["region"], session["creds"])
     answered = asyncio.Event()
     async with websockets.connect(url, max_size=None) as ws:
@@ -298,12 +309,13 @@ async def main() -> int:
         aws = cdata["credentials"]
         client = LymowApiClient(http, tokens["AccessToken"], tokens["region"], cdata["identity_id"])
         client.update_aws_credentials(aws["AccessKeyId"], aws["SecretKey"], aws["SessionToken"])
+        user_sub = _jwt_sub(tokens["IdToken"])
         devices = await client.get_devices()
         things = [d["deviceThingName"] for d in devices if isinstance(d, dict) and "deviceThingName" in d]
         for thing in things:
             print(f"=== {thing} ===")
             session = await _resolve_session(client, thing)
-            if session and await _view(session, client, thing):
+            if session and await _view({**session, "user_sub": user_sub}, client, thing):
                 return 0
     return 1
 
