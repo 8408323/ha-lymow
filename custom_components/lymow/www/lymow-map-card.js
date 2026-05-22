@@ -206,8 +206,7 @@ class LymowMapCard extends HTMLElement {
 
     const goLabels = goZones.map((z) => {
       if (!z.polygon || z.polygon.length < 3) return "";
-      const cx = z.polygon.reduce((s, p) => s + p.x, 0) / z.polygon.length;
-      const cy = z.polygon.reduce((s, p) => s + p.y, 0) / z.polygon.length;
+      const {x: cx, y: cy} = this._polyLabelPoint(z.polygon);
       const label = z.area != null ? `${z.area} m²` : z.hashId.slice(0, 6);
       return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle"
         font-size="${fontSz}" fill="#1b5e20" pointer-events="none" font-weight="bold"
@@ -430,6 +429,54 @@ class LymowMapCard extends HTMLElement {
     const magnitude = Math.pow(10, Math.floor(Math.log10(x)));
     for (const n of [1, 2, 5, 10]) if (n * magnitude >= x) return n * magnitude;
     return 10 * magnitude;
+  }
+
+  // Approximate pole of inaccessibility: grid-sample the bounding box, keep
+  // only interior points, return the one with largest min-distance to any edge.
+  // Falls back to centroid if polygon is degenerate.
+  _polyLabelPoint(poly) {
+    if (!poly || poly.length < 3) return {x: 0, y: 0};
+    const xs = poly.map(p => p.x), ys = poly.map(p => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+
+    // point-in-polygon ray-cast
+    const pip = (px, py) => {
+      let inside = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+        if ((yi > py) !== (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) inside = !inside;
+      }
+      return inside;
+    };
+
+    // min distance from point to any polygon edge
+    const edgeDist = (px, py) => {
+      let d = Infinity;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const ax = poly[j].x, ay = poly[j].y, bx = poly[i].x, by = poly[i].y;
+        const dx = bx - ax, dy = by - ay;
+        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+        const ex = ax + t * dx - px, ey = ay + t * dy - py;
+        d = Math.min(d, ex * ex + ey * ey);
+      }
+      return d;
+    };
+
+    const steps = 8;
+    const sw = (maxX - minX) / steps, sh = (maxY - minY) / steps;
+    let best = null, bestD = -1;
+    for (let r = 0; r <= steps; r++) {
+      for (let c = 0; c <= steps; c++) {
+        const px = minX + c * sw, py = minY + r * sh;
+        if (pip(px, py)) {
+          const d = edgeDist(px, py);
+          if (d > bestD) { bestD = d; best = {x: px, y: py}; }
+        }
+      }
+    }
+    return best || {x: cx, y: cy};
   }
 
   // ---------------------------------------------------------------------------
