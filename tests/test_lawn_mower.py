@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -984,6 +985,61 @@ async def test_handle_ble_drive_drives_once_for_duplicate_entities() -> None:
     )
     await handlers["ble_drive"](call)
     coord.async_ble_drive.assert_awaited_once()
+
+
+async def test_handle_ble_drive_auto_discovers_address(monkeypatch) -> None:
+    import types as _types
+
+    lm = sys.modules["lymow.lawn_mower"]
+
+    coord = _make_coord({"deviceBluetooth": "Lymow_7B6521"})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}  # no configured address → must auto-discover
+    handlers = await _setup_with_entity(coord, entry)
+    monkeypatch.setattr(
+        lm,
+        "async_discovered_service_info",
+        lambda hass, connectable=True: [_types.SimpleNamespace(name="Lymow_7B6521", address="AA:BB:CC:DD:EE:01")],
+    )
+
+    call = _make_call(["lawn_mower.mower_1"], {"linear": 0.2, "angular": 0.0, "duration": 1.0})
+    await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_awaited_once_with("AA:BB:CC:DD:EE:01", 0.2, 0.0, 1.0)
+
+
+async def test_handle_ble_drive_no_ble_match_raises(monkeypatch) -> None:
+    lm = sys.modules["lymow.lawn_mower"]
+
+    coord = _make_coord({"deviceBluetooth": "Lymow_7B6521"})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+    monkeypatch.setattr(lm, "async_discovered_service_info", lambda hass, connectable=True: [])
+
+    call = _make_call(["lawn_mower.mower_1"], {"linear": 0.2, "angular": 0.0, "duration": 1.0})
+    with pytest.raises(ServiceValidationError):
+        await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_not_called()
+
+
+def test_discover_ble_address_matches_and_handles_empty(monkeypatch) -> None:
+    import types as _types
+
+    lm = sys.modules["lymow.lawn_mower"]
+
+    monkeypatch.setattr(
+        lm,
+        "async_discovered_service_info",
+        lambda hass, connectable=True: [
+            _types.SimpleNamespace(name="Other", address="X"),
+            _types.SimpleNamespace(name="Lymow_X", address="AA"),
+        ],
+    )
+    assert lm._discover_ble_address(MagicMock(), "Lymow_X") == "AA"
+    assert lm._discover_ble_address(MagicMock(), "Nope") is None
+    assert lm._discover_ble_address(MagicMock(), "") is None
 
 
 # ---------------------------------------------------------------------------

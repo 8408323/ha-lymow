@@ -54,8 +54,9 @@ ble_drive:
   description: >
     Send a local Bluetooth manual-drive command to the robot. Streams the
     joystick frame for the given duration, then stops. Velocities are clamped
-    to the safe range and the duration is capped at 5 s. Requires the robot's
-    BLE address to be set in the integration options.
+    to the safe range and the duration is capped at 5 s. The robot's BLE
+    address is auto-discovered by name when in range; you can also set it
+    explicitly in the integration options.
   target:
     entity:
       integration: lymow
