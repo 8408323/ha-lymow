@@ -245,3 +245,12 @@ rename_zone:
       example: "Front lawn"
       selector:
         text:
+
+clear_schedules:
+  name: Clear schedules
+  description: >
+    Remove all mowing schedules from the robot (sends an empty schedule list).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower

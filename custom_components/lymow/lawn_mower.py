@@ -65,6 +65,7 @@ _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
 _SERVICE_RENAME_ZONE = "rename_zone"
+_SERVICE_CLEAR_SCHEDULES = "clear_schedules"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 
@@ -383,6 +384,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
         return _handler
 
+    async def handle_clear_schedules(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_clear_schedules(entity._thing_name)
+
     async def handle_rename_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
@@ -541,6 +551,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DOMAIN, _SERVICE_SET_TASK_CONFIG, handle_set_task_config, schema=_SET_TASK_CONFIG_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):

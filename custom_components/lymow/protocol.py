@@ -650,6 +650,16 @@ def encode_query_schedules() -> bytes:
     return pb
 
 
+def encode_clear_schedules() -> bytes:
+    """Encode a clear-all-schedules command.
+
+    Schedules live in PbInput field 11 (PbSchedules). Sending an empty field 11
+    clears every schedule — captured verbatim from the app's delete flow
+    (PbInput { version=49, schedule(11)=<empty> } == 10 31 5a 00).
+    """
+    return _field_i32(2, PB_VERSION) + _field_bytes(11, b"")
+
+
 def encode_start_zones(zone_hash_ids: list[str]) -> bytes:
     """Encode a start-zones command targeting specific zone hash IDs."""
     pb = _field_i32(2, PB_VERSION)

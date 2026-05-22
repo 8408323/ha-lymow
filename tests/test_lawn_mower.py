@@ -40,6 +40,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_ble_drive = AsyncMock()
     coord.async_set_task_config = AsyncMock()
     coord.async_rename_zone = AsyncMock()
+    coord.async_clear_schedules = AsyncMock()
     coord.async_restore_backup_map = AsyncMock()
     coord.async_delete_backup_map = AsyncMock()
     coord.async_rename_backup_map = AsyncMock()
@@ -229,8 +230,8 @@ async def test_async_setup_entry_registers_services() -> None:
     await async_setup_entry(hass, entry, lambda entities: None)
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
-    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone.
-    assert hass.services.async_register.call_count == 27
+    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules.
+    assert hass.services.async_register.call_count == 28
 
 
 # ---------------------------------------------------------------------------
@@ -1180,3 +1181,21 @@ async def test_handle_rename_zone_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"zone_hash_id": "z", "name": "X"})
     await handlers["rename_zone"](call)
     coord.async_rename_zone.assert_not_called()
+
+
+async def test_handle_clear_schedules_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    await handlers["clear_schedules"](_make_call(["lawn_mower.mower_1"], {}))
+    coord.async_clear_schedules.assert_awaited_once_with("mower-001")
+
+
+async def test_handle_clear_schedules_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    await handlers["clear_schedules"](_make_call(["lawn_mower.other"], {}))
+    coord.async_clear_schedules.assert_not_called()
