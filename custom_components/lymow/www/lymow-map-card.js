@@ -374,11 +374,11 @@ class LymowMapCard extends HTMLElement {
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
-        :host(.expanded) { position: fixed; inset: 0; z-index: 9999; background: var(--card-background-color, #1c1c1c); overflow: auto; }
+        :host(.expanded) { position: fixed; inset: 0; z-index: 9999; background: var(--card-background-color, #1c1c1c); overflow: hidden; display: flex; flex-direction: column; }
         ha-card { padding: 12px 12px 8px; box-sizing: border-box; height: 100%; display: flex; flex-direction: column; }
-        :host(.expanded) ha-card { border-radius: 0; }
+        :host(.expanded) ha-card { border-radius: 0; flex: 1 1 0; min-height: 0; }
         .card-header { font-size: 1.05em; font-weight: 500; margin-bottom: 8px; color: var(--primary-text-color); flex-shrink: 0; }
-        .map-wrap { width: 100%; flex: 1 1 auto; position: relative; }
+        .map-wrap { width: 100%; flex: 1 1 0; position: relative; min-height: 0; }
         :host(:not(.expanded)) .map-wrap { aspect-ratio: ${mapAspect}; flex: none; }
         svg { width: 100%; height: 100%; border-radius: 6px; background: #e8f5e9; display: block; touch-action: none; user-select: none; cursor: grab; }
         svg.panning { cursor: grabbing; }
