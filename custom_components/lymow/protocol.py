@@ -581,6 +581,59 @@ def encode_userctrl(command: int) -> bytes:
     return pb
 
 
+# PbTaskConfig field map — (proto field number, wire kind) — derived from APK
+# (Hermes) analysis of the app's ts-proto encoder. The message is carried in
+# PbInput field 26 under USER_CTRL_SET_TASK_CONFIG.
+_TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "raiseCutHeight": (2, "bool"),
+    "lowerCutHeight": (3, "bool"),
+    "moveSpeed": (4, "float"),
+    "brushSpeed": (5, "int"),
+    "cutSpeed": (6, "int"),
+    "cleanMode": (7, "int"),
+    "cleanDir": (8, "int"),
+    "pathSpacing": (9, "int"),
+    "perimeterMowLaps": (10, "int"),
+    "perimeterMowDir": (11, "int"),
+    "noGoMowLaps": (12, "int"),
+    "obsDecMode": (13, "int"),
+    "pathOrder": (14, "bool"),
+    "startProgress": (15, "int"),
+    "relativeCleanDir": (16, "int"),
+    "lineFollowMode": (17, "bool"),
+    "disableOuterDischarge": (18, "bool"),
+    "followDetectMode": (19, "int"),
+}
+
+
+def encode_set_task_config(**fields: Any) -> bytes:
+    """Encode a USER_CTRL_SET_TASK_CONFIG command setting only the given fields.
+
+    Field names match PbTaskConfig (see ``_TASK_CONFIG_FIELDS``); ``None``
+    values are skipped so only explicitly-set parameters are sent. Unknown
+    field names raise ValueError.
+    """
+    cfg = b""
+    for name, value in fields.items():
+        if value is None:
+            continue
+        if name not in _TASK_CONFIG_FIELDS:
+            raise ValueError(f"unknown task-config field: {name}")
+        field_no, kind = _TASK_CONFIG_FIELDS[name]
+        if kind == "bool":
+            cfg += _field_i32(field_no, 1 if value else 0)
+        elif kind == "float":
+            cfg += _field_f32(field_no, float(value))
+        else:
+            cfg += _field_i32(field_no, int(value))
+    from .const import USER_CTRL_SET_TASK_CONFIG
+
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_SET_TASK_CONFIG)
+    pb += _field_bytes(26, cfg)
+    return pb
+
+
 def encode_query_map(queryIndex: int = 0) -> bytes:
     """Encode a query-map command (userCtrl=19)."""
     sub = _field_i32(1, queryIndex) + _field_i32(4, 1)

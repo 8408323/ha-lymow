@@ -284,6 +284,21 @@ async def test_async_query_all_schedules_covers_every_device() -> None:
     assert mqtt.async_publish_command.await_count == len(coord.devices)
 
 
+@pytest.mark.asyncio
+async def test_async_set_task_config_publishes_encoded_command() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_task_config(THING, pathSpacing=250)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
+    cfg = _decode_fields(_first(f, 26))
+    assert _first(cfg, 9) == 250  # pathSpacing
+
+
 # ---------------------------------------------------------------------------
 # MQTT online callback
 # ---------------------------------------------------------------------------
