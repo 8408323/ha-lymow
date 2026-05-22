@@ -535,7 +535,11 @@ def _build_map_response(
         if chan.get("zone2"):
             ch += _field_str(3, chan["zone2"])
         ch += _field_i32(4, 1 if chan.get("isValid", True) else 0)
+        if chan.get("polygon"):
+            ch += _field_bytes(5, _polygon([(p["x"], p["y"]) for p in chan["polygon"]]))
         ch += _field_i32(6, 1 if chan.get("isDockingChannel") else 0)
+        if chan.get("cutHeight") is not None:
+            ch += _field_i32(9, chan["cutHeight"])
         content += _field_bytes(3, ch)
 
     wrapper = _field_i32(1, 1) + _field_bytes(3, content)
@@ -666,7 +670,15 @@ def test_decode_map_response_gps_origin() -> None:
 def test_decode_map_response_channels() -> None:
     pb = _build_map_response(
         channels=[
-            {"hashId": "ch000001", "zone1": "z1", "zone2": "z2", "isValid": True, "isDockingChannel": False},
+            {
+                "hashId": "ch000001",
+                "zone1": "z1",
+                "zone2": "z2",
+                "isValid": True,
+                "isDockingChannel": False,
+                "polygon": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}],
+                "cutHeight": 40,
+            },
             {"hashId": "ch000002", "isValid": False, "isDockingChannel": True},
         ]
     )
@@ -678,6 +690,8 @@ def test_decode_map_response_channels() -> None:
     assert c0["zone2"] == "z2"
     assert c0["isValid"] is True
     assert c0["isDockingChannel"] is False
+    assert len(c0["polygon"]) == 2
+    assert c0["cutHeight"] == 40
     assert result["channels"][1]["isDockingChannel"] is True
     assert result["channels"][1]["isValid"] is False
 
