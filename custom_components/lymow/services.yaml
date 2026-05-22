@@ -36,8 +36,8 @@ delete_nogo_zone:
   name: Delete no-go zone
   description: >
     Delete a no-go zone from the robot's map by hash ID (USER_CTRL_CLEAR_ZONE).
-    Tip: back up the map first — deleting a go-zone also removes its child no-go
-    zones, and a cloud restore may not reload them onto the running robot.
+    Tip: back up first — no-go zones are also removed when their parent go-zone
+    is deleted (see delete_zone for the full warning).
   fields:
     nogo_hash_id:
       name: No-go zone hash ID
