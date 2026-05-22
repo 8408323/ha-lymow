@@ -1718,3 +1718,13 @@ def test_encode_rename_zone_structure() -> None:
     bi = _decode_fields(_first(zone, 1))  # PbZoneBasicInfo
     assert _first(bi, 2).decode() == "Front lawn"  # name = field 2
     assert _first(bi, 3).decode() == "wsmjco1T"  # hashId = field 3
+
+
+def test_encode_clear_schedules_is_empty_schedule_field() -> None:
+    from lymow.protocol import encode_clear_schedules
+
+    pb = encode_clear_schedules()
+    assert pb.hex() == "10315a00"  # version=49, schedule(11)=empty — captured from app
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49
+    assert _first(f, 11) == b""

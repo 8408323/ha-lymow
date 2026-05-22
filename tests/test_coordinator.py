@@ -2240,3 +2240,13 @@ async def test_async_rename_zone_publishes_modify_zone_info() -> None:
     assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
     bi = _decode_fields(_first(_decode_fields(_first(_decode_fields(_first(f, 12)), 1)), 1))
     assert _first(bi, 2).decode() == "Front lawn"
+
+
+@pytest.mark.asyncio
+async def test_async_clear_schedules_sends_empty_then_queries() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_clear_schedules(THING)
+    # first publish = clear (empty schedule field), then a query-schedules
+    first_pb = mqtt.async_publish_command.await_args_list[0].args[1]
+    assert first_pb.hex() == "10315a00"
+    assert mqtt.async_publish_command.await_count == 2  # clear + query
