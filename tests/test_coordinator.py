@@ -885,12 +885,12 @@ async def test_fetch_last_clean_merges_real_shape() -> None:
     }
     result = await coord._async_update_data()
     assert result[THING]["lastCleanAreaM2"] == 345
-    assert result[THING]["lastCleanDurationS"] == 60
+    assert result[THING]["lastCleanDurationMin"] == 60
     assert result[THING]["lastCleanAt"] == datetime.fromtimestamp(1779184292, tz=UTC)
     assert result[THING]["lastCleanPercent"] == 100.0
     assert result[THING]["lastCleanBatteryUsed"] == 49
     assert result[THING]["cleanHistoryCount"] == 14  # cumulative, from total_records
-    assert result[THING]["totalCleanTimeS"] == 829
+    assert result[THING]["totalCleanTimeMin"] == 829
     assert result[THING]["totalCleanHistoryAreaM2"] == 4243
 
 
@@ -1031,7 +1031,7 @@ async def test_fetch_last_clean_handles_non_dict_entry() -> None:
     result = await coord._async_update_data()
     # Aggregates still surface
     assert result[THING]["cleanHistoryCount"] == 7
-    assert result[THING]["totalCleanTimeS"] == 100
+    assert result[THING]["totalCleanTimeMin"] == 100
     assert result[THING]["totalCleanHistoryAreaM2"] == 50
     # No per-entry fields extracted because entries[0] isn't a dict
     assert "lastCleanAreaM2" not in result[THING]
