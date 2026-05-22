@@ -121,7 +121,9 @@ def fake_aiortc(monkeypatch):
 def _envelope(kind, payload):
     return types.SimpleNamespace(
         type=aiohttp.WSMsgType.TEXT,
-        data=json.dumps({"messageType": kind, "messagePayload": base64.b64encode(json.dumps(payload).encode()).decode()}),
+        data=json.dumps(
+            {"messageType": kind, "messagePayload": base64.b64encode(json.dumps(payload).encode()).decode()}
+        ),
     )
 
 
@@ -192,6 +194,26 @@ class TestGrabCameraFrame:
         assert out == b"JPEGBYTES"
         assert json.loads(ws.ws_connect.return_value.sent[0])["action"] == "SDP_OFFER"
 
+    async def test_waits_for_ice_gathering_to_complete(self):
+        # PC reports gathering in progress once, then complete — exercises the wait loop.
+        class _GatheringPC(_FakePC):
+            def __init__(self, config=None):
+                super().__init__(config)
+                self._checks = 0
+
+            @property
+            def iceGatheringState(self):
+                self._checks += 1
+                return "gathering" if self._checks == 1 else "complete"
+
+            @iceGatheringState.setter
+            def iceGatheringState(self, value):
+                pass
+
+        sys.modules["aiortc"].RTCPeerConnection = _GatheringPC
+        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), timeout=2)
+        assert out == b"JPEGBYTES"
+
     @pytest.mark.parametrize(
         "session",
         [
@@ -209,7 +231,9 @@ class TestGrabCameraFrame:
         assert out is None
 
     async def test_relays_ice_candidate_and_ignores_noise(self):
-        ice = _envelope("ICE_CANDIDATE", {"candidate": "candidate:1 1 udp 1 1.2.3.4 5 typ host", "sdpMid": "0", "sdpMLineIndex": 0})
+        ice = _envelope(
+            "ICE_CANDIDATE", {"candidate": "candidate:1 1 udp 1 1.2.3.4 5 typ host", "sdpMid": "0", "sdpMLineIndex": 0}
+        )
         ice_empty = _envelope("ICE_CANDIDATE", {"candidate": None})
         noise_bin = types.SimpleNamespace(type=aiohttp.WSMsgType.BINARY, data=b"\x00")
         empty = types.SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="   ")
