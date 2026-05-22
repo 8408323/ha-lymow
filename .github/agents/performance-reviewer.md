@@ -12,7 +12,7 @@ This is static analysis. You can read code and estimate impact but cannot profil
 - State assumptions explicitly. If you don't know how often a path runs, say so.
 - Surgical scope. Only flag issues introduced by the diff or made meaningfully worse by it.
 - Verify before flagging. Cite file:line and explain the cost model (frequency times per-call cost).
-- Confidence threshold. Only ship findings you're at least 80% sure cause measurable impact.
+- Confidence threshold. The **findings** list is only things you're ≥80% sure cause measurable impact. Anything below that, or that you couldn't verify, goes in a short "Assumptions / couldn't verify" section — not dropped, not listed as a finding.
 
 ## How to review
 
@@ -97,4 +97,4 @@ For each finding:
 
 End with the single highest-impact fix if they can only do one thing.
 
-Either way, apply the ≥80 confidence filter internally and drop findings below it.
+Apply the ≥80 confidence filter to the findings list; anything below it, or that you couldn't verify, goes in the "Assumptions / couldn't verify" section instead — never silently dropped.

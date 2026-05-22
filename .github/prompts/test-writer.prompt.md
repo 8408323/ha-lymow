@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: 'agent'
 description: "Write comprehensive tests for new or changed code. Use automatically when new features are added, functions are created, or behavior is modified."
 ---
 <!-- dotclaude:managed — generated from the dotclaude test-writer skill by /dotclaude:init. Edit the source in the dotclaude repo, not this file. -->

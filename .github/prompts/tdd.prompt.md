@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: 'agent'
 description: "Test-Driven Development loop. Write a failing test first, then the minimum code to pass it, then refactor. Repeat."
 ---
 <!-- dotclaude:managed — generated from the dotclaude tdd skill by /dotclaude:init. Edit the source in the dotclaude repo, not this file. -->

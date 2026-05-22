@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: 'agent'
 description: "Safely refactor code with test coverage as a safety net"
 ---
 <!-- dotclaude:managed — generated from the dotclaude refactor skill by /dotclaude:init. Edit the source in the dotclaude repo, not this file. -->

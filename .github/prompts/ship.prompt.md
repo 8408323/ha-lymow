@@ -1,10 +1,10 @@
 ---
-mode: agent
+agent: 'agent'
 description: "Scan changes, commit, push, and create a PR. With confirmation at each step"
 ---
 <!-- dotclaude:managed — generated from the dotclaude ship skill by /dotclaude:init. Edit the source in the dotclaude repo, not this file. -->
 
-Ship the current changes through commit, push, and PR creation. Confirm with the user before each step using the AskUserQuestion tool.
+Ship the current changes through commit, push, and PR creation. Confirm with the user before each step using the an interactive confirmation.
 
 ## Step 1: Scan
 

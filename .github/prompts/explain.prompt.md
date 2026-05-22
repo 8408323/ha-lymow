@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: 'agent'
 description: "Explain code. Default is a one-sentence summary plus a mental model. Add `verbose` to also get an ASCII diagram, key details, and a modification guide."
 ---
 <!-- dotclaude:managed — generated from the dotclaude explain skill by /dotclaude:init. Edit the source in the dotclaude repo, not this file. -->

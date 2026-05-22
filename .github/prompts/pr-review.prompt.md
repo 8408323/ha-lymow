@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: 'agent'
 description: "Review code changes or a pull request. Delegates to specialist agents for code quality, security, performance, and documentation, in parallel."
 ---
 <!-- dotclaude:managed — generated from the dotclaude pr-review skill by /dotclaude:init. Edit the source in the dotclaude repo, not this file. -->

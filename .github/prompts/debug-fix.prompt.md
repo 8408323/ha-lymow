@@ -1,5 +1,5 @@
 ---
-mode: agent
+agent: 'agent'
 description: "Find and fix a bug. Default is careful (reproduce, investigate, test). Add `--fast` for emergency production mode (hotfix branch, minimal change, ship a PR fast)."
 ---
 <!-- dotclaude:managed — generated from the dotclaude debug-fix skill by /dotclaude:init. Edit the source in the dotclaude repo, not this file. -->
