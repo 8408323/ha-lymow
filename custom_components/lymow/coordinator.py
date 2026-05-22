@@ -61,16 +61,23 @@ def build_schedule_entries(
 
     Looks up each zone's name / representative point / cut height from cached
     map data, converts the local hour:minute to UTC (the robot stores UTC), and
-    records the local UTC offset in hours. Verified against the app's wire format.
+    records the local UTC offset in hours. When the UTC conversion crosses
+    midnight, ``dayOfWeek`` is shifted to match. Verified against the app's wire
+    format.
     """
     offset = now_local.utcoffset()
-    tz_offset_hours = int(offset.total_seconds() // 3600) if offset else 0
+    # Truncate toward zero (not floor) so negative / fractional offsets aren't
+    # pushed an hour too far (e.g. UTC-3:30 -> -3, not -4).
+    tz_offset_hours = int(offset.total_seconds() / 3600) if offset else 0
     zones_by_id = {z.get("hashId"): z for z in map_data.get("goZones", [])}
     entries: list[dict[str, Any]] = []
     for i, spec in enumerate(specs):
-        utc_dt = now_local.replace(
-            hour=int(spec["hour"]), minute=int(spec["minute"]), second=0, microsecond=0
-        ).astimezone(UTC)
+        local_ref = now_local.replace(hour=int(spec["hour"]), minute=int(spec["minute"]), second=0, microsecond=0)
+        utc_dt = local_ref.astimezone(UTC)
+        # If converting to UTC moved to the previous/next calendar day, shift
+        # each selected weekday by the same amount so it fires on the right day.
+        day_delta = (utc_dt.date() - local_ref.date()).days
+        days = [(int(d) + day_delta) % 7 for d in spec.get("dayOfWeek", [])]
         zone_ids: list[str] = spec.get("zones", [])
         zinfos: list[dict[str, Any]] = []
         cut_height: int | None = None
@@ -87,7 +94,7 @@ def build_schedule_entries(
             if cut_height is None and zone.get("cutHeight") is not None:
                 cut_height = int(zone["cutHeight"])
         entry: dict[str, Any] = {
-            "dayOfWeek": spec.get("dayOfWeek", []),
+            "dayOfWeek": days,
             "hour": utc_dt.hour,
             "minute": utc_dt.minute,
             "isRepeated": bool(spec.get("isRepeated")),

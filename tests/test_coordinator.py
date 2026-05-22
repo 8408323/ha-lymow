@@ -2272,6 +2272,33 @@ def test_build_schedule_entries_converts_utc_and_fills_zone() -> None:
     assert "id" in entry
 
 
+def test_build_schedule_entries_shifts_day_when_utc_crosses_midnight() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from lymow.coordinator import build_schedule_entries
+
+    # 00:30 Monday CEST(UTC+2) -> 22:30 Sunday UTC: day must shift Mon(1) -> Sun(0).
+    now = datetime(2026, 5, 22, 12, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
+    specs = [{"hour": 0, "minute": 30, "dayOfWeek": [1], "zones": []}]
+    [entry] = build_schedule_entries(specs, {}, now)
+    assert entry["hour"] == 22
+    assert entry["minute"] == 30
+    assert entry["dayOfWeek"] == [0]  # Monday shifted back to Sunday in UTC
+
+
+def test_build_schedule_entries_negative_half_hour_offset_truncates() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from lymow.coordinator import build_schedule_entries
+
+    # America/St_Johns is UTC-03:30 (UTC-02:30 in DST) — must truncate toward zero.
+    now = datetime(2026, 1, 15, 12, 0, tzinfo=ZoneInfo("America/St_Johns"))  # -03:30 in winter
+    [entry] = build_schedule_entries([{"hour": 9, "minute": 0, "zones": []}], {}, now)
+    assert entry["timeZone"] == -3  # not -4
+
+
 def test_build_schedule_entries_unknown_zone_defaults() -> None:
     from datetime import datetime, timezone
 
