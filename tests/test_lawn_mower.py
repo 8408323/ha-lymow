@@ -1125,6 +1125,14 @@ def test_to_day_int_rejects_out_of_range() -> None:
         _to_day_int(7)
 
 
+def test_to_day_int_rejects_invalid_string() -> None:
+    import voluptuous as vol
+    from lymow.lawn_mower import _to_day_int
+
+    with pytest.raises(vol.Invalid):
+        _to_day_int("notaday")
+
+
 def test_set_schedules_schema_fills_defaults_and_converts_days() -> None:
     from lymow.lawn_mower import _SET_SCHEDULES_SCHEMA
 

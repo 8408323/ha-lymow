@@ -104,7 +104,10 @@ def _to_day_int(value: Any) -> int:
         key = value.strip().lower()[:3]
         if key in _DAY_NAMES:
             return _DAY_NAMES[key]
-    day = int(value)
+    try:
+        day = int(value)
+    except (TypeError, ValueError):
+        raise vol.Invalid("day_of_week must be 0-6 (Sun-Sat) or a weekday name") from None
     if not 0 <= day <= 6:
         raise vol.Invalid("day_of_week must be 0-6 (Sun-Sat) or a weekday name")
     return day
