@@ -15,14 +15,16 @@ def lymow_device_info(coordinator: LymowCoordinator, device: dict[str, Any]) -> 
     thing_name = device["deviceThingName"]
     data = (coordinator.data or {}).get(thing_name) or {}
     name = device.get("deviceName") or data.get("deviceName") or device.get("sn") or thing_name
+    # coordinator.data uses merged keys (deviceType / serialNumber / softwareVersion|fwVersion);
+    # the raw device-list entry uses sn / deviceType. Check both.
     info = DeviceInfo(
         identifiers={(DOMAIN, thing_name)},
         name=name,
         manufacturer="Lymow",
-        model=data.get("model") or device.get("model") or "Robotic Lawn Mower",
+        model=data.get("deviceType") or device.get("deviceType") or "Robotic Lawn Mower",
     )
-    if sn := (device.get("sn") or data.get("sn")):
+    if sn := (data.get("serialNumber") or device.get("sn")):
         info["serial_number"] = sn
-    if fw := (data.get("fwVersion") or device.get("fwVersion")):
+    if fw := (data.get("softwareVersion") or data.get("fwVersion")):
         info["sw_version"] = fw
     return info
