@@ -424,8 +424,8 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["gps_origin"] = map_data["gpsOrigin"]
         if "chargingStation" in map_data:
             attrs["charging_station"] = map_data["chargingStation"]
-        # Include live robot position so the card updates without a separate entity
-        for key in ("poseEastM", "poseNorthM", "poseThetaRad"):
+        # Include live robot + RTK position so the card updates without a separate entity
+        for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM"):
             val = data.get(key)
             if val is not None:
                 attrs[key] = val
