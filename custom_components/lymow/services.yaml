@@ -172,3 +172,52 @@ set_device_name:
       example: "Garden Bot"
       selector:
         text:
+
+set_task_config:
+  name: Set task config
+  description: >
+    Set mowing task parameters on the robot (USER_CTRL_SET_TASK_CONFIG).
+    Only the parameters you provide are sent. Values are passed through to the
+    robot as-is — valid ranges aren't fully characterised, so change one at a
+    time and observe. Wire layout derived from the app.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    path_spacing:
+      name: Path spacing
+      description: Spacing between mowing passes (robot units).
+      example: 200
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+    perimeter_mow_laps:
+      name: Perimeter laps
+      description: Number of perimeter (edge) mowing laps.
+      example: 1
+      selector:
+        number: { min: 0, max: 5, step: 1, mode: box }
+    perimeter_mow_dir:
+      name: Perimeter direction
+      description: Perimeter mowing direction code.
+      example: 0
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    nogo_mow_laps:
+      name: No-go laps
+      description: Number of laps around no-go zones.
+      example: 1
+      selector:
+        number: { min: 0, max: 5, step: 1, mode: box }
+    cut_speed:
+      name: Cut speed
+      description: Cutting speed (robot units).
+      example: 100
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+    brush_speed:
+      name: Brush speed
+      description: Brush/blade speed (robot units).
+      example: 100
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }

@@ -38,6 +38,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_query_map = AsyncMock()
     coord.async_query_schedules = AsyncMock()
     coord.async_ble_drive = AsyncMock()
+    coord.async_set_task_config = AsyncMock()
     coord.async_restore_backup_map = AsyncMock()
     coord.async_delete_backup_map = AsyncMock()
     coord.async_rename_backup_map = AsyncMock()
@@ -227,8 +228,8 @@ async def test_async_setup_entry_registers_services() -> None:
     await async_setup_entry(hass, entry, lambda entities: None)
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
-    # + 1 set-device-name + 3 backup-map + 1 ble_drive.
-    assert hass.services.async_register.call_count == 25
+    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config.
+    assert hass.services.async_register.call_count == 26
 
 
 # ---------------------------------------------------------------------------
@@ -1022,6 +1023,43 @@ async def test_handle_ble_drive_no_ble_match_raises(monkeypatch) -> None:
     with pytest.raises(ServiceValidationError):
         await handlers["ble_drive"](call)
     coord.async_ble_drive.assert_not_called()
+
+
+async def test_handle_set_task_config_maps_and_calls() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"path_spacing": 200, "perimeter_mow_laps": 2})
+    await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_awaited_once_with("mower-001", pathSpacing=200, perimeterMowLaps=2)
+
+
+async def test_handle_set_task_config_no_params_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {})
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_not_called()
+
+
+async def test_handle_set_task_config_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.other"], {"cut_speed": 100})
+    await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_not_called()
 
 
 def test_discover_ble_address_matches_and_handles_empty(monkeypatch) -> None:

@@ -578,6 +578,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         for device in self.devices:
             await self.async_query_schedules(device["deviceThingName"])
 
+    async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:
+        """Set mowing task-config parameters (USER_CTRL_SET_TASK_CONFIG).
+
+        Only the provided PbTaskConfig fields are sent; see
+        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
+        """
+        from .protocol import encode_set_task_config
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_task_config(**fields))
+
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
         """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*
         commands that the robot answers via pboutput."""

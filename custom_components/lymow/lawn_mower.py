@@ -64,7 +64,19 @@ _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
+_SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
+
+# Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
+# subset of PbTaskConfig; the encoder supports more. All optional ints.
+_TASK_CONFIG_SERVICE_FIELDS = {
+    "path_spacing": "pathSpacing",
+    "perimeter_mow_laps": "perimeterMowLaps",
+    "perimeter_mow_dir": "perimeterMowDir",
+    "nogo_mow_laps": "noGoMowLaps",
+    "cut_speed": "cutSpeed",
+    "brush_speed": "brushSpeed",
+}
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
 _SERVICE_RENAME_BACKUP_MAP = "rename_backup_map"
@@ -164,6 +176,12 @@ _PIN_AND_GO_SCHEMA = vol.Schema(
         vol.Optional(_ATTR_RADIUS_M, default=1.0): vol.All(vol.Coerce(float), vol.Range(min=0.1, max=20.0)),
         vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
         vol.Optional(_ATTR_NAME, default=""): cv.string,
+    }
+)
+_SET_TASK_CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        **{vol.Optional(k): vol.Coerce(int) for k in _TASK_CONFIG_SERVICE_FIELDS},
     }
 )
 _SET_DEVICE_NAME_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_NAME): cv.string})
@@ -357,6 +375,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
         return _handler
 
+    async def handle_set_task_config(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        # Map provided snake_case params to PbTaskConfig field names.
+        fields = {proto: call.data[svc] for svc, proto in _TASK_CONFIG_SERVICE_FIELDS.items() if svc in call.data}
+        if not fields:
+            raise ServiceValidationError("set_task_config: provide at least one parameter to set.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_task_config(entity._thing_name, **fields)
+
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
@@ -487,6 +518,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DOMAIN, _SERVICE_RENAME_BACKUP_MAP, handle_rename_backup_map, schema=_RENAME_BACKUP_MAP_SCHEMA
     )
     hass.services.async_register(DOMAIN, SERVICE_BLE_DRIVE, handle_ble_drive, schema=_BLE_DRIVE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_TASK_CONFIG, handle_set_task_config, schema=_SET_TASK_CONFIG_SCHEMA
+    )
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):

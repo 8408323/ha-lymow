@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import struct
 
 import pytest
 from lymow.protocol import (
@@ -1678,3 +1679,29 @@ def test_decode_schedule_entry_out_of_range_time_omitted() -> None:
     # A malformed sub-message with an impossible hour/minute is not a real time.
     assert decode_schedule_entry(_schedule_pb(True, (25, 0))) == {"enabled": True}
     assert decode_schedule_entry(_schedule_pb(True, (12, 70))) == {"enabled": True}
+
+
+def test_encode_set_task_config_wraps_in_pbinput() -> None:
+    from lymow.protocol import encode_set_task_config
+
+    pb = encode_set_task_config(pathSpacing=200, perimeterMowLaps=2, pathOrder=True, moveSpeed=0.5)
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
+    cfg = _decode_fields(_first(f, 26))  # PbTaskConfig sub-message
+    assert _first(cfg, 9) == 200  # pathSpacing
+    assert _first(cfg, 10) == 2  # perimeterMowLaps
+    assert _first(cfg, 14) == 1  # pathOrder (bool -> 1)
+    # moveSpeed is a float32 (wire type 5)
+    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.5, rel=1e-5)
+
+
+def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
+    from lymow.protocol import encode_set_task_config
+
+    pb = encode_set_task_config(cutSpeed=None, brushSpeed=100)
+    cfg = _decode_fields(_first(_decode_fields(pb), 26))
+    assert _first(cfg, 5) == 100  # brushSpeed (field 5) present
+    assert _first(cfg, 6) is None  # cutSpeed (field 6) skipped (None)
+    with pytest.raises(ValueError, match="unknown task-config field"):
+        encode_set_task_config(nonsense=1)
