@@ -32,12 +32,12 @@ class LymowFirmwareUpdate(CoordinatorEntity[LymowCoordinator], UpdateEntity):
 
     _attr_supported_features = UpdateEntityFeature.INSTALL | UpdateEntityFeature.RELEASE_NOTES
     _attr_icon = "mdi:cog-refresh"
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name: str = device["deviceThingName"]
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} Firmware"
+        self._attr_name = "Firmware"
         self._attr_unique_id = f"{self._thing_name}_firmware_update"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
 

@@ -51,6 +51,7 @@ def _robot_ip(data: dict[str, Any]) -> str | None:
 class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
     """The robot's onboard camera, served from its local RTSP h264 stream."""
 
+    _attr_has_entity_name = True
     _attr_supported_features = CameraEntityFeature.STREAM
     _attr_icon = "mdi:cctv"
 
@@ -58,8 +59,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
         self._thing_name: str = device["deviceThingName"]
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} Camera"
+        self._attr_name = "Camera"
         self._attr_unique_id = f"{self._thing_name}_camera"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
 

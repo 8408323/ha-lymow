@@ -60,12 +60,12 @@ class _DeviceFeatureSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     """Base class for boolean device-feature switches backed by /update-device-feature."""
 
     _feature_key: str = ""
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, icon: str) -> None:
         super().__init__(coordinator)
         self._thing_name: str = device["deviceThingName"]
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} {name}"
+        self._attr_name = name
         self._attr_unique_id = f"{self._thing_name}_{self._feature_key}"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_icon = icon
@@ -139,6 +139,7 @@ class MobileNotificationSwitch(_DeviceFeatureSwitch):
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     """Enable / disable a single go-zone. Backed by SYNC_MAP on toggle."""
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:map-marker-radius"
 
     def __init__(self, coordinator: LymowCoordinator, device: dict, hash_id: str) -> None:
@@ -147,8 +148,7 @@ class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         self._hash_id = hash_id
         self._attr_unique_id = f"{self._thing_name}_{hash_id}_enabled"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} Zone {hash_id[:4]}"
+        self._attr_name = f"Zone {hash_id[:4]}"
 
     @property
     def _zone(self) -> dict[str, Any] | None:
@@ -179,16 +179,16 @@ class RtkAutoPauseSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     if RTK status drops to or below the configured threshold, and auto-resumes
     once it recovers — protects against the mower wandering on a degraded fix."""
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:satellite-variant"
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_rtk_auto_pause"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} RTK auto-pause"
+        self._attr_name = "RTK auto-pause"
 
     @property
     def is_on(self) -> bool:

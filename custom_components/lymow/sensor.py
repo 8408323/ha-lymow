@@ -308,6 +308,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
 class LymowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     entity_description: LymowSensorDescription
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator: LymowCoordinator, device: dict, description: LymowSensorDescription) -> None:
         super().__init__(coordinator)
@@ -315,8 +316,6 @@ class LymowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{self._thing_name}_{description.key}"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} {description.name}"
 
     @property
     def native_value(self) -> Any:
@@ -345,6 +344,8 @@ class LymowErrorSensor(LymowSensor):
 class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     """RTK GPS fix quality sensor."""
 
+    _attr_has_entity_name = True
+
     _RTK_LABELS = {
         0: "Not ready",
         1: "Float fix (~40 cm)",
@@ -357,8 +358,7 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._thing_name = device["deviceThingName"]
         self._attr_unique_id = f"{self._thing_name}_rtk_status"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} RTK status"
+        self._attr_name = "RTK status"
         self._attr_icon = "mdi:satellite-variant"
         self._attr_entity_registry_enabled_default = False
 
@@ -391,13 +391,14 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     attribute payload can be large; users may disable it if it causes issues.
     """
 
+    _attr_has_entity_name = True
+
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_map"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} Map"
+        self._attr_name = "Map"
         self._attr_icon = "mdi:map"
 
     @property
@@ -440,15 +441,15 @@ class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     attribute. None until the first reply arrives.
     """
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:calendar-clock"
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_schedules"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} Mow schedules"
+        self._attr_name = "Mow schedules"
 
     @property
     def native_value(self) -> int | None:
@@ -468,6 +469,7 @@ class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     Disabled by default — pose data is diagnostic, not user-facing.
     """
 
+    _attr_has_entity_name = True
     _attr_native_unit_of_measurement = DEGREE
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:compass"
@@ -477,10 +479,9 @@ class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_pose_heading"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} Pose heading"
+        self._attr_name = "Pose heading"
 
     @property
     def native_value(self) -> float | None:
@@ -502,16 +503,16 @@ class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     """Exposes per-session details from the most recent clean-history entry as attributes."""
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:history"
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_last_clean_details"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} Last mow details"
+        self._attr_name = "Last mow details"
 
     @property
     def native_value(self) -> int | None:
@@ -543,6 +544,7 @@ class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], Sensor
 class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     """Exposes the count of available map backups and the full list as an attribute."""
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:cloud-download"
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_entity_registry_enabled_default = False
@@ -550,10 +552,9 @@ class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_backup_maps"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} Backup maps"
+        self._attr_name = "Backup maps"
 
     @property
     def native_value(self) -> int | None:

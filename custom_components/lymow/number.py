@@ -56,6 +56,7 @@ class GeofenceRadiusNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
     how to mutate the radius, not set the initial coords.
     """
 
+    _attr_has_entity_name = True
     _attr_device_class = NumberDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.METERS
     _attr_mode = NumberMode.BOX
@@ -67,10 +68,9 @@ class GeofenceRadiusNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name: str = device["deviceThingName"]
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_geofence_radius"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} Geofence radius"
+        self._attr_name = "Geofence radius"
 
     @property
     def _geofence(self) -> dict[str, Any] | None:
@@ -98,6 +98,7 @@ class GeofenceRadiusNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
 class ZoneCutHeightNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
     """Cut-height (mm) for a single go-zone. Backed by SYNC_MAP on change."""
 
+    _attr_has_entity_name = True
     _attr_device_class = NumberDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
     _attr_mode = NumberMode.BOX
@@ -112,8 +113,7 @@ class ZoneCutHeightNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
         self._hash_id = hash_id
         self._attr_unique_id = f"{self._thing_name}_{hash_id}_cut_height"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} Zone {hash_id[:4]} Cut Height"
+        self._attr_name = f"Zone {hash_id[:4]} Cut Height"
 
     @property
     def _zone(self) -> dict[str, Any] | None:
@@ -145,6 +145,7 @@ class RtkPauseThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity)
     rtkStatus codes ``LymowRtkSensor`` decodes (0=Not ready … 3=RTK fixed).
     """
 
+    _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX
     _attr_native_min_value = 0
     _attr_native_max_value = 3
@@ -155,10 +156,9 @@ class RtkPauseThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity)
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_rtk_pause_threshold"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} RTK pause threshold"
+        self._attr_name = "RTK pause threshold"
 
     @property
     def native_value(self) -> float:

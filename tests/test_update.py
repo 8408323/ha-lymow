@@ -29,14 +29,16 @@ def _make_entity(device_data: dict[str, Any] | None = None) -> LymowFirmwareUpda
 def test_unique_id_and_name() -> None:
     entity = _make_entity()
     assert entity._attr_unique_id == f"{THING}_firmware_update"
-    assert entity._attr_name == "Test Mower Firmware"
+    assert entity._attr_has_entity_name is True
+    assert entity._attr_name == "Firmware"
+    assert entity._attr_device_info["name"] == "Test Mower"
 
 
-def test_name_falls_back_to_serial_then_thing() -> None:
+def test_device_name_falls_back_to_serial_then_thing() -> None:
     entity = LymowFirmwareUpdate(MagicMock(data={THING: {}}), {"deviceThingName": THING, "sn": "SN-99"})
-    assert entity._attr_name == "SN-99 Firmware"
+    assert entity._attr_device_info["name"] == "SN-99"
     bare = LymowFirmwareUpdate(MagicMock(data={THING: {}}), {"deviceThingName": THING})
-    assert bare._attr_name == f"{THING} Firmware"
+    assert bare._attr_device_info["name"] == THING
 
 
 def test_installed_version_from_coordinator() -> None:

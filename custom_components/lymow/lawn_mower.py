@@ -670,14 +670,15 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
     _attr_supported_features = (
         LawnMowerEntityFeature.START_MOWING | LawnMowerEntityFeature.PAUSE | LawnMowerEntityFeature.DOCK
     )
+    # Primary entity for the device: has_entity_name + name=None renders as just the device name.
+    _attr_has_entity_name = True
+    _attr_name = None
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
         self._attr_unique_id = self._thing_name
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = device_label
 
     @property
     def _device_data(self) -> dict:
