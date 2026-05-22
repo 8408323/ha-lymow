@@ -436,11 +436,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         Response envelope:
             {"clean_history": [
-                {"clean_area": <num>, "clean_time": <int sec>, "date": <epoch>,
+                {"clean_area": <num>, "clean_time": <int min>, "date": <epoch>,
                  "used_battery": <int>, "percent": <0..1>, ...},
                 ...],
              "total_records": <int>,
-             "clean_summary": {"total_clean_time": <int>, "total_clean_area": <num>}}
+             "clean_summary": {"total_clean_time": <int min>, "total_clean_area": <num>}}
         """
         from datetime import UTC, datetime
 
@@ -462,7 +462,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         summary = history.get("clean_summary")
         if isinstance(summary, dict):
             if (t := summary.get("total_clean_time")) is not None:
-                out["totalCleanTimeS"] = t
+                out["totalCleanTimeMin"] = t
             if (a := summary.get("total_clean_area")) is not None:
                 out["totalCleanHistoryAreaM2"] = a
 
@@ -480,7 +480,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if (area := last.get("clean_area")) is not None:
             out["lastCleanAreaM2"] = area
         if (t := last.get("clean_time")) is not None:
-            out["lastCleanDurationS"] = t
+            out["lastCleanDurationMin"] = t
         if (epoch := last.get("date")) is not None:
             try:
                 out["lastCleanAt"] = datetime.fromtimestamp(int(epoch), tz=UTC)
