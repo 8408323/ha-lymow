@@ -204,6 +204,21 @@ except ImportError:
     _ha_dr.DeviceInfo = dict  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.device_registry", _ha_dr)
 
+    # ── homeassistant.helpers.entity_registry ───────────────────────────────
+    _ha_er = types.ModuleType("homeassistant.helpers.entity_registry")
+
+    def _er_async_get(hass):  # type: ignore[return]
+        # Tests inject hass._entity_registry; default to an empty registry stub.
+        return getattr(hass, "_entity_registry", None)
+
+    _ha_er.async_get = _er_async_get  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.entity_registry", _ha_er)
+
+    # ── homeassistant.helpers.typing ─────────────────────────────────────────
+    _ha_typing = types.ModuleType("homeassistant.helpers.typing")
+    _ha_typing.ConfigType = dict  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.typing", _ha_typing)
+
     # ── homeassistant.helpers.aiohttp_client ─────────────────────────────────
     _ha_ac = types.ModuleType("homeassistant.helpers.aiohttp_client")
 
