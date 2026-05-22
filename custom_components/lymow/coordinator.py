@@ -569,8 +569,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         The robot replies with one entry per schedule, so reset the accumulator
         before asking — the replies repopulate it via :meth:`on_mqtt_state`.
+        Also clear the already-published ``schedules`` so the UI doesn't show
+        stale entries if the robot is slow to reply (or has none left).
         """
         self._schedules[thing_name] = []
+        if thing_name in self._mqtt_state:
+            self._mqtt_state[thing_name].pop("schedules", None)
+        if self.data and thing_name in self.data and "schedules" in self.data[thing_name]:
+            cleared = {k: v for k, v in self.data[thing_name].items() if k != "schedules"}
+            self.async_set_updated_data({**self.data, thing_name: cleared})
         await self._mqtt.async_publish_command(thing_name, encode_query_schedules())
 
     async def async_query_all_schedules(self) -> None:

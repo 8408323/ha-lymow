@@ -257,6 +257,21 @@ def test_on_mqtt_state_accumulates_schedule_entries_deduped() -> None:
 async def test_async_query_schedules_resets_and_publishes() -> None:
     coord, mqtt, _ = _make_coordinator()
     coord._schedules[THING] = [{"enabled": True}]
+    coord._mqtt_state[THING] = {"schedules": [{"enabled": True}], "battery": 50}
+    coord.data = {THING: {"schedules": [{"enabled": True}], "battery": 50}}
+    await coord.async_query_schedules(THING)
+    assert coord._schedules[THING] == []
+    # published schedules cleared (no stale entries), other fields kept
+    assert "schedules" not in coord._mqtt_state[THING]
+    assert "schedules" not in coord.data[THING]
+    assert coord.data[THING]["battery"] == 50
+    mqtt.async_publish_command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_async_query_schedules_no_published_value_is_safe() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"battery": 50}}  # no schedules key yet
     await coord.async_query_schedules(THING)
     assert coord._schedules[THING] == []
     mqtt.async_publish_command.assert_awaited_once()
