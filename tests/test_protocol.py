@@ -1752,6 +1752,15 @@ def test_decode_schedule_entry_negative_timezone() -> None:
     assert entry["timeZone"] == -3
 
 
+def test_decode_schedule_entry_bounds_untrusted_values() -> None:
+    # Malformed/hostile wire values must not surface as garbage HA state.
+    pb = _field_bytes(1, bytes([2, 9])) + _field_i32(2, 99) + _field_i32(3, 200)
+    entry = decode_schedule_entry(pb)
+    assert entry["dayOfWeek"] == [2]  # 9 dropped (out of 0-6)
+    assert entry["hour"] == 0  # 99 -> 0 (out of 0-23)
+    assert entry["minute"] == 0  # 200 -> 0 (out of 0-59)
+
+
 def test_decode_pboutput_includes_schedules_field16() -> None:
     pb = _build_pboutput(work_status=1) + _schedules_field16(
         _schedule_pb([5], 12, 47, zones=["wsmjco1T"], sched_id=7),

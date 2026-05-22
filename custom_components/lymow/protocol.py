@@ -574,10 +574,15 @@ def decode_schedule_entry(data: bytes) -> dict[str, Any]:
     """
     f = _decode_fields(data)
     days_raw = _first(f, 1)
+    days = _decode_packed_int32s(days_raw) if isinstance(days_raw, bytes) else []
+    hour = _signed32(_first(f, 2, 0))
+    minute = _signed32(_first(f, 3, 0))
+    # PbOutput is untrusted: bound the wire values so a malformed payload can't
+    # surface garbage (huge / negative) hour, minute or weekday to HA state.
     entry: dict[str, Any] = {
-        "dayOfWeek": _decode_packed_int32s(days_raw) if isinstance(days_raw, bytes) else [],
-        "hour": int(_first(f, 2, 0)),
-        "minute": int(_first(f, 3, 0)),
+        "dayOfWeek": [d for d in days if 0 <= d <= 6],
+        "hour": hour if 0 <= hour <= 23 else 0,
+        "minute": minute if 0 <= minute <= 59 else 0,
         "isRepeated": bool(_first(f, 4, 0)),
         "isDisabled": bool(_first(f, 8, 0)),
     }
