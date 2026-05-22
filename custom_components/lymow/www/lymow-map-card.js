@@ -451,13 +451,15 @@ class LymowMapCard extends HTMLElement {
       return inside;
     };
 
-    // min distance from point to any polygon edge
+    // min squared distance from point to any polygon edge
     const edgeDist = (px, py) => {
       let d = Infinity;
       for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
         const ax = poly[j].x, ay = poly[j].y, bx = poly[i].x, by = poly[i].y;
         const dx = bx - ax, dy = by - ay;
-        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)));
+        const len2 = dx * dx + dy * dy;
+        if (len2 === 0) continue; // skip degenerate (zero-length) edges
+        const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
         const ex = ax + t * dx - px, ey = ay + t * dy - py;
         d = Math.min(d, ex * ex + ey * ey);
       }
