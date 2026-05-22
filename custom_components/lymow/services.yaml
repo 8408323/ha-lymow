@@ -1,8 +1,11 @@
 delete_zone:
   name: Delete zone
   description: >
-    Delete a mowing zone from the robot’s map using USER_CTRL_CLEAR_ZONE.
-    Only go-zones can be targeted; child no-go zones are removed server-side.
+    Delete a go-zone from the robot’s map using USER_CTRL_CLEAR_ZONE.
+    WARNING: this also removes the go-zone's child no-go zones, and that is
+    NOT reversible — a cloud backup restore (or even a robot reboot) will not
+    bring those no-go zones back; they must be re-drawn in the app. Back up
+    first, and prefer delete_nogo_zone if you only want to remove a no-go zone.
   fields:
     zone_hash_id:
       name: Zone hash ID
