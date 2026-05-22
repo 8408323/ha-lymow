@@ -522,3 +522,26 @@ async def test_async_create_dashboard_skips_when_no_map_or_mower() -> None:
     await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
     hass._collection.async_create_item.assert_not_awaited()
     assert _DASHBOARD_CREATED_KEY not in hass.data
+
+
+def test_card_url_falls_back_when_manifest_unreadable() -> None:
+    with patch.object(_lymow.json, "loads", side_effect=ValueError("bad")):
+        url = _lymow._card_url()
+    assert url.endswith("v=0")
+
+
+async def test_async_create_dashboard_skips_when_no_collection() -> None:
+    hass = MagicMock()
+    hass.data = {"lovelace": {"dashboards": {}, "dashboards_collection": None}}
+    hass._entity_registry = _FakeRegistry({"t_map": "sensor.t_map"})
+    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
+    assert _DASHBOARD_CREATED_KEY not in hass.data
+
+
+async def test_async_create_dashboard_swallows_errors() -> None:
+    reg = _FakeRegistry({"t_map": "sensor.t_map", "t": "lawn_mower.t"})
+    hass = _lovelace_hass(reg)
+    hass._collection.async_create_item = AsyncMock(side_effect=RuntimeError("boom"))
+    # Must not raise; flag stays unset so a later setup can retry.
+    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
+    assert _DASHBOARD_CREATED_KEY not in hass.data
