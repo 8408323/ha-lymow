@@ -1,0 +1,65 @@
+blueprint:
+  name: Lymow — Rain delay
+  description: >
+    Send the Lymow mower back to its dock when rain is detected, and
+    (optionally) resume mowing once it's dry again. Pair any binary sensor that
+    reads "on" while raining (e.g. a rain sensor, or a template sensor derived
+    from a weather entity).
+  domain: automation
+  author: ha-lymow
+  input:
+    mower:
+      name: Mower
+      description: The Lymow lawn mower to control.
+      selector:
+        entity:
+          filter:
+            domain: lawn_mower
+            integration: lymow
+    rain_sensor:
+      name: Rain sensor
+      description: A binary sensor that is "on" while it is raining.
+      selector:
+        entity:
+          domain: binary_sensor
+    resume_when_dry:
+      name: Resume when dry
+      description: Start mowing again when the rain sensor turns back off.
+      default: false
+      selector:
+        boolean:
+
+mode: single
+
+# Blueprint inputs aren't available to Jinja unless mapped into variables first.
+variables:
+  resume_when_dry: !input resume_when_dry
+
+trigger:
+  - platform: state
+    entity_id: !input rain_sensor
+    to: "on"
+    id: rain_started
+  - platform: state
+    entity_id: !input rain_sensor
+    to: "off"
+    id: rain_stopped
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: rain_started
+        sequence:
+          - service: lawn_mower.dock
+            target:
+              entity_id: !input mower
+      - conditions:
+          - condition: trigger
+            id: rain_stopped
+          - condition: template
+            value_template: "{{ resume_when_dry }}"
+        sequence:
+          - service: lawn_mower.start_mowing
+            target:
+              entity_id: !input mower
