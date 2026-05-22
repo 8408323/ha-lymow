@@ -32,6 +32,7 @@ async def async_setup_entry(
                 TheftLockSwitch(coordinator, device),
                 FindRobotSwitch(coordinator, device),
                 MobileNotificationSwitch(coordinator, device),
+                AlertsOnlySwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
             ]
         )
@@ -111,11 +112,14 @@ class FindRobotSwitch(_DeviceFeatureSwitch):
 
 
 class MobileNotificationSwitch(_DeviceFeatureSwitch):
-    """Push notification toggle. Wire value is integer ``0`` (off) / ``2`` (on)
-    — not a Python bool — so the on/off methods PATCH the matching int."""
+    """Push-notification master toggle. The wire value is a tristate int (matches
+    the app's Notifications page): 0 = off, 1 = alerts only, 2 = all. On/off here
+    map to 0 and 2; "alerts only" (1) is exposed as ``AlertsOnlySwitch`` and still
+    counts as on."""
 
     _feature_key = "mobileNotificationSwitch"
     _OFF_VALUE = 0
+    _ALERTS_ONLY_VALUE = 1
     _ON_VALUE = 2
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
@@ -125,15 +129,61 @@ class MobileNotificationSwitch(_DeviceFeatureSwitch):
     def is_on(self) -> bool | None:
         data = (self.coordinator.data or {}).get(self._thing_name) or {}
         value = data.get(self._feature_key)
-        if value is None:
+        # Untrusted wire data: only 0/1/2 are known. Report unknown for anything
+        # else rather than silently claiming "off".
+        if value not in (self._OFF_VALUE, self._ALERTS_ONLY_VALUE, self._ON_VALUE):
             return None
-        return value == self._ON_VALUE
+        return value in (self._ALERTS_ONLY_VALUE, self._ON_VALUE)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: self._ON_VALUE})
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: self._OFF_VALUE})
+
+
+class AlertsOnlySwitch(_DeviceFeatureSwitch):
+    """Mirrors the app's "Alerts only" sub-toggle, backed by the same
+    ``mobileNotificationSwitch`` tristate: on = 1 (alerts only), off = 2 (all).
+    Unavailable only when the master toggle is explicitly off (0), like the app
+    hides the row then."""
+
+    _feature_key = "mobileNotificationSwitch"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Alerts only", "mdi:bell-alert-outline")
+        # Shares the mobileNotificationSwitch field with MobileNotificationSwitch,
+        # so override the feature-key-derived unique_id to avoid a collision.
+        self._attr_unique_id = f"{self._thing_name}_alerts_only"
+
+    @property
+    def available(self) -> bool:
+        data = (self.coordinator.data or {}).get(self._thing_name) or {}
+        # Available unless notifications are explicitly off; unknown (None, e.g.
+        # before the first poll) stays available rather than flickering out.
+        return data.get(self._feature_key) != MobileNotificationSwitch._OFF_VALUE
+
+    @property
+    def is_on(self) -> bool | None:
+        data = (self.coordinator.data or {}).get(self._thing_name) or {}
+        value = data.get(self._feature_key)
+        if value not in (
+            MobileNotificationSwitch._OFF_VALUE,
+            MobileNotificationSwitch._ALERTS_ONLY_VALUE,
+            MobileNotificationSwitch._ON_VALUE,
+        ):
+            return None
+        return value == MobileNotificationSwitch._ALERTS_ONLY_VALUE
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_feature(
+            self._thing_name, **{self._feature_key: MobileNotificationSwitch._ALERTS_ONLY_VALUE}
+        )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_feature(
+            self._thing_name, **{self._feature_key: MobileNotificationSwitch._ON_VALUE}
+        )
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):

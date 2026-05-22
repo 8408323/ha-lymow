@@ -357,6 +357,7 @@ async def test_async_setup_entry_creates_feature_switches() -> None:
     assert "TheftLockSwitch" in feature_types
     assert "FindRobotSwitch" in feature_types
     assert "MobileNotificationSwitch" in feature_types
+    assert "AlertsOnlySwitch" in feature_types
 
 
 # ---------------------------------------------------------------------------
@@ -389,14 +390,13 @@ def test_mobile_notification_switch_is_off_when_value_is_zero() -> None:
     assert e.is_on is False
 
 
-def test_mobile_notification_switch_is_off_when_value_is_unknown_int() -> None:
-    """Anything that isn't the observed ON value (2) is treated as off, since
-    we haven't seen any other state on the wire."""
+def test_mobile_notification_switch_is_on_when_alerts_only() -> None:
+    """Value 1 = "alerts only" (app's sub-mode) still counts as on."""
     from lymow.switch import MobileNotificationSwitch
 
     coord = _make_feature_coord({"mobileNotificationSwitch": 1})
     e = MobileNotificationSwitch(coord, DEVICE)
-    assert e.is_on is False
+    assert e.is_on is True
 
 
 def test_mobile_notification_switch_is_none_when_missing() -> None:
@@ -424,6 +424,86 @@ async def test_mobile_notification_switch_turn_off_sends_int_zero() -> None:
     e = MobileNotificationSwitch(coord, DEVICE)
     await e.async_turn_off()
     coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=0)
+
+
+# ---------------------------------------------------------------------------
+# AlertsOnlySwitch — the app's "Alerts only" sub-toggle (mobileNotificationSwitch 1/2)
+# ---------------------------------------------------------------------------
+
+
+def test_alerts_only_unique_id_distinct_from_master() -> None:
+    """Both back the same mobileNotificationSwitch field; their unique_ids must
+    differ or HA would drop one entity on a registry collision."""
+    from lymow.switch import AlertsOnlySwitch, MobileNotificationSwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 2})
+    master = MobileNotificationSwitch(coord, DEVICE)
+    alerts = AlertsOnlySwitch(coord, DEVICE)
+    assert alerts._attr_unique_id == f"{THING}_alerts_only"
+    assert alerts._attr_unique_id != master._attr_unique_id
+
+
+def test_mobile_notification_unknown_value_is_none() -> None:
+    """Untrusted wire data: an unexpected int reports unknown, not off."""
+    from lymow.switch import MobileNotificationSwitch
+
+    e = MobileNotificationSwitch(_make_feature_coord({"mobileNotificationSwitch": 9}), DEVICE)
+    assert e.is_on is None
+
+
+def test_alerts_only_available_when_value_missing() -> None:
+    """Before the first poll (value None) the sub-toggle stays available, not flickering out."""
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({}), DEVICE)
+    assert e.available is True
+
+
+def test_alerts_only_on_when_value_is_one() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({"mobileNotificationSwitch": 1}), DEVICE)
+    assert e.is_on is True
+    assert e.available is True
+
+
+def test_alerts_only_off_when_value_is_two() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({"mobileNotificationSwitch": 2}), DEVICE)
+    assert e.is_on is False
+    assert e.available is True
+
+
+def test_alerts_only_unavailable_when_notifications_off() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({"mobileNotificationSwitch": 0}), DEVICE)
+    assert e.available is False
+    assert e.is_on is False
+
+
+def test_alerts_only_is_none_when_missing() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({}), DEVICE)
+    assert e.is_on is None
+
+
+async def test_alerts_only_turn_on_sends_one() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 2})
+    await AlertsOnlySwitch(coord, DEVICE).async_turn_on()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=1)
+
+
+async def test_alerts_only_turn_off_sends_two() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 1})
+    await AlertsOnlySwitch(coord, DEVICE).async_turn_off()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=2)
 
 
 # ---------------------------------------------------------------------------
