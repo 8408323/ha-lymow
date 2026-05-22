@@ -168,7 +168,9 @@ def _make_hass(www_registered: bool = False) -> MagicMock:
     hass.http.async_register_static_paths = AsyncMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
-    hass.async_create_task = MagicMock()
+    # Close the scheduled coroutine instead of leaking it (avoids
+    # "coroutine was never awaited" warnings); we don't run it here.
+    hass.async_create_task = MagicMock(side_effect=lambda coro, *a, **k: coro.close())
     return hass
 
 
