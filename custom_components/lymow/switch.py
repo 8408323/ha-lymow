@@ -129,7 +129,9 @@ class MobileNotificationSwitch(_DeviceFeatureSwitch):
     def is_on(self) -> bool | None:
         data = (self.coordinator.data or {}).get(self._thing_name) or {}
         value = data.get(self._feature_key)
-        if value is None:
+        # Untrusted wire data: only 0/1/2 are known. Report unknown for anything
+        # else rather than silently claiming "off".
+        if value not in (self._OFF_VALUE, self._ALERTS_ONLY_VALUE, self._ON_VALUE):
             return None
         return value in (self._ALERTS_ONLY_VALUE, self._ON_VALUE)
 
@@ -143,26 +145,33 @@ class MobileNotificationSwitch(_DeviceFeatureSwitch):
 class AlertsOnlySwitch(_DeviceFeatureSwitch):
     """Mirrors the app's "Alerts only" sub-toggle, backed by the same
     ``mobileNotificationSwitch`` tristate: on = 1 (alerts only), off = 2 (all).
-    Unavailable while the master toggle is off (0), like the app hides it."""
+    Unavailable only when the master toggle is explicitly off (0), like the app
+    hides the row then."""
 
     _feature_key = "mobileNotificationSwitch"
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Alerts only", "mdi:bell-alert-outline")
+        # Shares the mobileNotificationSwitch field with MobileNotificationSwitch,
+        # so override the feature-key-derived unique_id to avoid a collision.
+        self._attr_unique_id = f"{self._thing_name}_alerts_only"
 
     @property
     def available(self) -> bool:
         data = (self.coordinator.data or {}).get(self._thing_name) or {}
-        return data.get(self._feature_key) in (
-            MobileNotificationSwitch._ALERTS_ONLY_VALUE,
-            MobileNotificationSwitch._ON_VALUE,
-        )
+        # Available unless notifications are explicitly off; unknown (None, e.g.
+        # before the first poll) stays available rather than flickering out.
+        return data.get(self._feature_key) != MobileNotificationSwitch._OFF_VALUE
 
     @property
     def is_on(self) -> bool | None:
         data = (self.coordinator.data or {}).get(self._thing_name) or {}
         value = data.get(self._feature_key)
-        if value is None:
+        if value not in (
+            MobileNotificationSwitch._OFF_VALUE,
+            MobileNotificationSwitch._ALERTS_ONLY_VALUE,
+            MobileNotificationSwitch._ON_VALUE,
+        ):
             return None
         return value == MobileNotificationSwitch._ALERTS_ONLY_VALUE
 

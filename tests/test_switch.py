@@ -431,6 +431,34 @@ async def test_mobile_notification_switch_turn_off_sends_int_zero() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_alerts_only_unique_id_distinct_from_master() -> None:
+    """Both back the same mobileNotificationSwitch field; their unique_ids must
+    differ or HA would drop one entity on a registry collision."""
+    from lymow.switch import AlertsOnlySwitch, MobileNotificationSwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 2})
+    master = MobileNotificationSwitch(coord, DEVICE)
+    alerts = AlertsOnlySwitch(coord, DEVICE)
+    assert alerts._attr_unique_id == f"{THING}_alerts_only"
+    assert alerts._attr_unique_id != master._attr_unique_id
+
+
+def test_mobile_notification_unknown_value_is_none() -> None:
+    """Untrusted wire data: an unexpected int reports unknown, not off."""
+    from lymow.switch import MobileNotificationSwitch
+
+    e = MobileNotificationSwitch(_make_feature_coord({"mobileNotificationSwitch": 9}), DEVICE)
+    assert e.is_on is None
+
+
+def test_alerts_only_available_when_value_missing() -> None:
+    """Before the first poll (value None) the sub-toggle stays available, not flickering out."""
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({}), DEVICE)
+    assert e.available is True
+
+
 def test_alerts_only_on_when_value_is_one() -> None:
     from lymow.switch import AlertsOnlySwitch
 
