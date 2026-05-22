@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import aiohttp
 import pytest
 
+# conftest loads lymow.camera into sys.modules via its importlib harness.
 camera = sys.modules["lymow.camera"]
 
 
