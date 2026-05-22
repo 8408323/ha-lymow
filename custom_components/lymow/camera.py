@@ -70,6 +70,7 @@ async def async_grab_camera_frame(
     api: LymowApiClient,
     session: dict[str, Any],
     ws_session: aiohttp.ClientSession,
+    client_id: str,
     *,
     timeout: float = _HANDSHAKE_TIMEOUT,
 ) -> bytes | None:
@@ -112,7 +113,6 @@ async def async_grab_camera_frame(
 
         asyncio.ensure_future(_grab())  # noqa: RUF006 — lifetime bounded by got/timeout below
 
-    client_id = f"ha-lymow-{uuid4().hex[:8]}"
     url = api.presign_signaling_url(wss, arn, client_id, creds, region=region)
     try:
         async with ws_session.ws_connect(url, max_msg_size=0) as ws:
@@ -192,5 +192,8 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
             return None
         if not isinstance(session, dict):
             return None
+        # The robot's master only answers a viewer whose client id embeds the
+        # owner's Cognito sub as "…_userId_<sub>"; a random id is ignored.
+        client_id = f"ha-lymow_{uuid4().hex[:8]}_userId_{self.coordinator.user_sub}"
         ws_session = async_get_clientsession(self.coordinator.hass)
-        return await async_grab_camera_frame(self.coordinator.client, session, ws_session)
+        return await async_grab_camera_frame(self.coordinator.client, session, ws_session, client_id)

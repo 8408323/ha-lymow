@@ -103,6 +103,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # Public read-only handle for entities that need API helpers (e.g. the
         # camera's WSS presign). Avoids reaching into the private attribute.
         self.client = client
+        # Owner's Cognito sub — the camera viewer's KVS client id must embed it
+        # ("…_userId_<sub>") or the robot's master ignores the offer. Set by the
+        # config-entry setup once the IdToken is decoded; "" until then.
+        self.user_sub: str = ""
         self._mqtt_state: dict[str, dict[str, Any]] = {}
         # Track work status per device to detect important transitions.
         self._prev_work_status: dict[str, int] = {}

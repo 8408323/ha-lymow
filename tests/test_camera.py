@@ -172,6 +172,7 @@ _SESSION = {
 }
 
 _ANSWER = _envelope("SDP_ANSWER", {"sdp": "v=0 answer", "type": "answer"})
+_CID = "ha-lymow_test_userId_82e584f4-c0c1-7097-18c1-5ac78d6b7372"
 
 
 class TestBuildIceServers:
@@ -190,7 +191,7 @@ class TestBuildIceServers:
 class TestGrabCameraFrame:
     async def test_returns_jpeg_on_answer_and_frame(self):
         ws = _ws_session([_ANSWER])
-        out = await camera.async_grab_camera_frame(_API, _SESSION, ws, timeout=2)
+        out = await camera.async_grab_camera_frame(_API, _SESSION, ws, _CID, timeout=2)
         assert out == b"JPEGBYTES"
         assert json.loads(ws.ws_connect.return_value.sent[0])["action"] == "SDP_OFFER"
 
@@ -211,7 +212,7 @@ class TestGrabCameraFrame:
                 pass
 
         sys.modules["aiortc"].RTCPeerConnection = _GatheringPC
-        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), timeout=2)
+        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), _CID, timeout=2)
         assert out == b"JPEGBYTES"
 
     @pytest.mark.parametrize(
@@ -223,11 +224,11 @@ class TestGrabCameraFrame:
         ],
     )
     async def test_returns_none_when_session_incomplete(self, session):
-        assert await camera.async_grab_camera_frame(_API, session, _ws_session([]), timeout=1) is None
+        assert await camera.async_grab_camera_frame(_API, session, _ws_session([]), _CID, timeout=1) is None
 
     async def test_timeout_returns_none_when_no_frame(self):
         # No SDP_ANSWER ever arrives → no track → got never set → timeout.
-        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([]), timeout=0.2)
+        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([]), _CID, timeout=0.2)
         assert out is None
 
     async def test_relays_ice_candidate_and_ignores_noise(self):
@@ -240,22 +241,22 @@ class TestGrabCameraFrame:
         bad_json = types.SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="{not json")
         no_payload = types.SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data=json.dumps({"messageType": "STATUS"}))
         ws = _ws_session([noise_bin, empty, bad_json, no_payload, ice, ice_empty, _ANSWER])
-        out = await camera.async_grab_camera_frame(_API, _SESSION, ws, timeout=2)
+        out = await camera.async_grab_camera_frame(_API, _SESSION, ws, _CID, timeout=2)
         assert out == b"JPEGBYTES"
 
     async def test_non_video_track_is_ignored(self):
         _FakePC.track_to_emit = _FakeTrack(kind="audio")
-        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), timeout=0.3)
+        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), _CID, timeout=0.3)
         assert out is None
 
     async def test_no_track_emitted_times_out(self):
         _FakePC.track_to_emit = None
-        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), timeout=0.3)
+        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), _CID, timeout=0.3)
         assert out is None
 
     async def test_frame_grab_error_yields_none(self):
         _FakePC.track_to_emit = _FakeTrack(raise_after=0)
-        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), timeout=2)
+        out = await camera.async_grab_camera_frame(_API, _SESSION, _ws_session([_ANSWER]), _CID, timeout=2)
         assert out is None
 
 
@@ -266,6 +267,7 @@ class _Coord:
         self.client = _API
         self.hass = MagicMock()
         self.devices = devices or []
+        self.user_sub = "82e584f4-c0c1-7097-18c1-5ac78d6b7372"
 
     async def async_start_video_session(self, thing):
         if self._raise:
@@ -282,10 +284,19 @@ class TestLymowCamera:
     async def test_image_happy_path(self, monkeypatch):
         coord = _Coord(_SESSION)
         ent = self._entity(coord)
-        monkeypatch.setattr(camera, "async_get_clientsession", lambda hass: _ws_session([_ANSWER]))
+        captured = {}
+
+        async def _grab(api, session, ws, client_id, **kw):
+            captured["client_id"] = client_id
+            return b"JPEGBYTES"
+
+        monkeypatch.setattr(camera, "async_get_clientsession", lambda hass: MagicMock())
+        monkeypatch.setattr(camera, "async_grab_camera_frame", _grab)
         assert ent._attr_unique_id == "device_x_camera"
         assert ent._attr_name == "Mower Camera"
         assert await ent.async_camera_image() == b"JPEGBYTES"
+        # client id must embed the owner's Cognito sub as "…_userId_<sub>"
+        assert captured["client_id"].endswith("_userId_82e584f4-c0c1-7097-18c1-5ac78d6b7372")
 
     async def test_image_none_when_session_raises(self):
         ent = self._entity(_Coord(None, raise_session=True))
