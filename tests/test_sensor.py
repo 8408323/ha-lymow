@@ -59,25 +59,28 @@ def test_sensor_init_sets_unique_id() -> None:
     assert sensor._attr_unique_id == f"{THING}_battery"
 
 
-def test_sensor_name_uses_device_name() -> None:
+def test_sensor_uses_has_entity_name_and_description_name() -> None:
     coord = _make_coord()
     desc = next(d for d in SENSORS if d.key == "battery")
     sensor = LymowSensor(coord, DEVICE, desc)
-    assert sensor._attr_name == "Mower 1 Battery"
+    # has_entity_name=True with no _attr_name → HA renders description.name under the device.
+    assert sensor._attr_has_entity_name is True
+    assert sensor.entity_description.name == "Battery"
+    assert sensor._attr_device_info["name"] == "Mower 1"
 
 
-def test_sensor_name_falls_back_to_sn() -> None:
+def test_sensor_device_name_falls_back_to_sn() -> None:
     coord = _make_coord()
     desc = next(d for d in SENSORS if d.key == "battery")
     sensor = LymowSensor(coord, DEVICE_NO_NAME, desc)
-    assert "SN123" in sensor._attr_name
+    assert sensor._attr_device_info["name"] == "SN123"
 
 
-def test_sensor_name_falls_back_to_thing_name() -> None:
+def test_sensor_device_name_falls_back_to_thing_name() -> None:
     coord = _make_coord()
     desc = next(d for d in SENSORS if d.key == "battery")
     sensor = LymowSensor(coord, DEVICE_BARE, desc)
-    assert THING in sensor._attr_name
+    assert sensor._attr_device_info["name"] == THING
 
 
 def test_sensor_native_value_returns_value() -> None:
@@ -568,8 +571,8 @@ def test_pose_heading_sensor_unique_id_and_name() -> None:
     coord.data = {"mower-001": {}}
     e = LymowPoseHeadingSensor(coord, {"deviceThingName": "mower-001", "deviceName": "Mower 1"})
     assert e._attr_unique_id == "mower-001_pose_heading"
-    assert "Pose heading" in e._attr_name
-    assert "Mower 1" in e._attr_name
+    assert e._attr_name == "Pose heading"
+    assert e._attr_device_info["name"] == "Mower 1"
 
 
 async def test_async_setup_entry_registers_pose_heading_sensor() -> None:
@@ -672,8 +675,8 @@ def test_clean_history_details_unique_id_and_name() -> None:
     coord = _make_coord({})
     e = LymowCleanHistoryDetailsSensor(coord, DEVICE)
     assert e._attr_unique_id == f"{THING}_last_clean_details"
-    assert "Last mow details" in e._attr_name
-    assert "Mower 1" in e._attr_name
+    assert e._attr_name == "Last mow details"
+    assert e._attr_device_info["name"] == "Mower 1"
 
 
 async def test_async_setup_entry_registers_clean_history_details_sensor() -> None:
@@ -803,7 +806,7 @@ def test_schedules_sensor_counts_and_exposes_entries() -> None:
     assert sensor.native_value == 2
     assert sensor.extra_state_attributes == {"schedules": entries}
     assert sensor._attr_unique_id == f"{THING}_schedules"
-    assert sensor._attr_name == "Mower 1 Mow schedules"
+    assert sensor._attr_name == "Mow schedules"
 
 
 def test_schedules_sensor_empty_list_is_zero() -> None:

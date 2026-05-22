@@ -66,21 +66,24 @@ def test_mower_unique_id() -> None:
     assert m._attr_unique_id == THING
 
 
-def test_mower_name() -> None:
+def test_mower_is_primary_device_entity() -> None:
     m = _make_mower()
-    assert m._attr_name == "Mower 1"
+    # Primary entity: has_entity_name + name=None renders as just the device name.
+    assert m._attr_has_entity_name is True
+    assert m._attr_name is None
+    assert m._attr_device_info["name"] == "Mower 1"
 
 
-def test_mower_name_fallback_sn() -> None:
+def test_mower_device_name_fallback_sn() -> None:
     coord = _make_coord()
     m = LymowMower(coord, {"deviceThingName": THING, "sn": "SN001"})
-    assert m._attr_name == "SN001"
+    assert m._attr_device_info["name"] == "SN001"
 
 
-def test_mower_name_fallback_thing() -> None:
+def test_mower_device_name_fallback_thing() -> None:
     coord = _make_coord()
     m = LymowMower(coord, {"deviceThingName": THING})
-    assert m._attr_name == THING
+    assert m._attr_device_info["name"] == THING
 
 
 def test_mower_supported_features() -> None:
