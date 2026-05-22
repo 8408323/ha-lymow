@@ -22,8 +22,9 @@ def test_metadata() -> None:
     coord = _make_coord({})
     e = LymowDeviceTracker(coord, DEVICE)
     assert e._attr_unique_id == f"{THING}_location"
-    assert "Location" in e._attr_name
-    assert "Mower 1" in e._attr_name
+    assert e._attr_has_entity_name is True
+    assert e._attr_name == "Location"
+    assert e._attr_device_info["name"] == "Mower 1"
 
 
 def test_coords_returns_lat_lon_from_robot_location() -> None:

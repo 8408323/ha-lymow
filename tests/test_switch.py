@@ -53,14 +53,15 @@ def test_unique_id() -> None:
 
 def test_name() -> None:
     e = _make_entity()
+    assert e._attr_has_entity_name is True
     assert HASH_ID[:4] in e._attr_name
-    assert "Mower 1" in e._attr_name
+    assert e._attr_device_info["name"] == "Mower 1"
 
 
-def test_name_fallback_sn() -> None:
+def test_device_name_fallback_sn() -> None:
     coord = _make_coord({"mapData": {"goZones": [_ZONE_ON]}})
     e = ZoneEnabledSwitch(coord, {"deviceThingName": THING, "sn": "SN1"}, HASH_ID)
-    assert "SN1" in e._attr_name
+    assert e._attr_device_info["name"] == "SN1"
 
 
 # ---------------------------------------------------------------------------

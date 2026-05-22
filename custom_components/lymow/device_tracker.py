@@ -35,14 +35,14 @@ class LymowDeviceTracker(CoordinatorEntity[LymowCoordinator], TrackerEntity):
     pinning the map to (0, 0) in the Atlantic.
     """
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:robot-mower"
     _attr_source_type = SourceType.GPS
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name: str = device["deviceThingName"]
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} Location"
+        self._attr_name = "Location"
         self._attr_unique_id = f"{self._thing_name}_location"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
 

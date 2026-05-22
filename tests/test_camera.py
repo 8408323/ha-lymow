@@ -45,12 +45,14 @@ class TestLymowCamera:
     def test_identity_and_features(self):
         ent = _entity({"ipAddress": "192.168.1.85"})
         assert ent._attr_unique_id == f"{THING}_camera"
-        assert ent._attr_name == "Mower Camera"
+        assert ent._attr_has_entity_name is True
+        assert ent._attr_name == "Camera"
+        assert ent._attr_device_info["name"] == "Mower"
         assert ent._attr_supported_features is camera.CameraEntityFeature.STREAM
 
-    def test_name_falls_back_to_sn_then_thing(self):
-        assert _entity({}, {"deviceThingName": THING, "sn": "SN1"})._attr_name == "SN1 Camera"
-        assert _entity({}, {"deviceThingName": THING})._attr_name == f"{THING} Camera"
+    def test_device_name_falls_back_to_sn_then_thing(self):
+        assert _entity({}, {"deviceThingName": THING, "sn": "SN1"})._attr_device_info["name"] == "SN1"
+        assert _entity({}, {"deviceThingName": THING})._attr_device_info["name"] == THING
 
     async def test_stream_source_builds_rtsp_url(self):
         ent = _entity({"ipAddress": "192.168.1.85"})

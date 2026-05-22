@@ -38,6 +38,7 @@ DEVICE = {"deviceThingName": THING, "deviceName": "Mower 1"}
 
 def _make_coord() -> MagicMock:
     coord = MagicMock()
+    coord.data = {}
     coord.devices = [DEVICE]
     coord.async_send_user_ctrl = AsyncMock()
     coord.async_backup_map = AsyncMock()
@@ -48,8 +49,9 @@ def test_lock_button_metadata() -> None:
     coord = _make_coord()
     e = LockRobotButton(coord, DEVICE)
     assert e._attr_unique_id == f"{THING}_lock_robot"
+    assert e._attr_has_entity_name is True
     assert "Lock" in e._attr_name
-    assert "Mower 1" in e._attr_name
+    assert e._attr_device_info["name"] == "Mower 1"
 
 
 def test_self_check_button_metadata() -> None:
@@ -101,10 +103,10 @@ async def test_charging_station_reset_press_sends_user_ctrl() -> None:
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_CHARGING_STATION_RESET)
 
 
-async def test_button_name_fallback_to_sn() -> None:
+async def test_button_device_name_fallback_to_sn() -> None:
     coord = _make_coord()
     e = LockRobotButton(coord, {"deviceThingName": THING, "sn": "SN42"})
-    assert "SN42" in e._attr_name
+    assert e._attr_device_info["name"] == "SN42"
 
 
 async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
