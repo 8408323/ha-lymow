@@ -58,6 +58,7 @@ class LymowMapCard extends HTMLElement {
     return {
       goZones: a.go_zones || [],
       nogoZones: a.nogo_zones || [],
+      channels: a.channels || [],
       gpsOrigin: a.gps_origin || null,
       chargingStation: a.charging_station || null,
       poseEastM: a.poseEastM,
@@ -77,7 +78,7 @@ class LymowMapCard extends HTMLElement {
       return;
     }
 
-    const { goZones, nogoZones, chargingStation, poseEastM, poseNorthM, poseThetaRad } = mapData;
+    const { goZones, nogoZones, channels, chargingStation, poseEastM, poseNorthM, poseThetaRad } = mapData;
     const allZones = [...goZones, ...nogoZones];
 
     if (allZones.length === 0) {
@@ -96,6 +97,7 @@ class LymowMapCard extends HTMLElement {
       if (y > maxY) maxY = y;
     };
     for (const z of allZones) for (const p of z.polygon || []) acc(p.x, p.y);
+    for (const c of channels) for (const p of c.polygon || []) acc(p.x, p.y);
     if (this._workPoly) for (const p of this._workPoly) acc(p.x, p.y);
     if (chargingStation) acc(chargingStation.x, chargingStation.y);
     if (poseEastM !== undefined && poseNorthM !== undefined) acc(poseEastM, poseNorthM);
@@ -139,6 +141,22 @@ class LymowMapCard extends HTMLElement {
     const nogoPaths = nogoZones.map((z) => {
       const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
       return `<polygon points="${pts}" fill="#ffcccc" stroke="#c62828" stroke-width="0.35" opacity="0.8" />`;
+    }).join("\n");
+
+    // ── Channels (path corridors connecting zones; docking channel dashed) ────
+    const channelPaths = channels.map((c) => {
+      const poly = c.polygon || [];
+      if (poly.length < 2) return "";
+      const pts = poly.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      const dash = c.isDockingChannel ? ' stroke-dasharray="1,0.6"' : "";
+      const stroke = c.isValid === false ? "#bdbdbd" : "#8d6e63";
+      // 3+ points form a corridor polygon; a 2-point channel is just a link line.
+      // pointer-events:none so these decorative overlays don't steal taps meant
+      // for the go-zones beneath them (only go-zones are interactive).
+      if (poly.length >= 3) {
+        return `<polygon points="${pts}" fill="#d7ccc8" stroke="${stroke}" stroke-width="0.3" opacity="0.7" pointer-events="none"${dash} />`;
+      }
+      return `<polyline points="${pts}" fill="none" stroke="${stroke}" stroke-width="0.5" opacity="0.8" pointer-events="none"${dash} />`;
     }).join("\n");
 
     // ── Edit handles (vertices + edge midpoints) for the zone under edit ──────
@@ -249,6 +267,7 @@ class LymowMapCard extends HTMLElement {
         <svg viewBox="0 0 ${VBOX_W.toFixed(2)} ${VBOX_H.toFixed(2)}" xmlns="http://www.w3.org/2000/svg">
           ${nogoPaths}
           ${goPaths}
+          ${channelPaths}
           ${goLabels}
           ${csHtml}
           ${robotHtml}
