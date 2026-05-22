@@ -28,8 +28,8 @@ Run the same checks CI enforces:
 
 ```bash
 # Lint + format
-uv run ruff check custom_components/ tests/ scripts/
-uv run ruff format --check custom_components/ tests/ scripts/
+uv run ruff check custom_components/ tests/ scripts/ tools/
+uv run ruff format --check custom_components/ tests/ scripts/ tools/
 
 # Tests — 100% coverage is required
 uv run pytest tests/ -v --tb=short \
