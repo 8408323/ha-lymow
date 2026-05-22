@@ -112,6 +112,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._prev_work_status: dict[str, int] = {}
         # Cached backup-map snapshot per device: (fetched_at, fields).
         self._backup_map_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
+        # Schedules accumulated from QUERY_SCHEDULES replies (one entry each).
+        self._schedules: dict[str, list[dict[str, Any]]] = {}
         # RTK auto-pause guard: per-device knobs and tracking.
         # Enabled defaults off — opt-in safety feature.
         self._rtk_guard_enabled: dict[str, bool] = {}
@@ -170,6 +172,14 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def on_mqtt_state(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Receive a state update from MQTT and push to HA."""
+        # Schedules arrive one entry per QUERY_SCHEDULES reply — accumulate the
+        # distinct set (reset when a fresh query is issued) into "schedules".
+        if "scheduleEntry" in patch:
+            entry = patch.pop("scheduleEntry")
+            collected = self._schedules.setdefault(thing_name, [])
+            if entry not in collected:
+                collected.append(entry)
+            patch["schedules"] = list(collected)
         if thing_name not in self._mqtt_state:
             self._mqtt_state[thing_name] = {}
         self._mqtt_state[thing_name].update(patch)
@@ -555,8 +565,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             await self.async_query_map(device["deviceThingName"])
 
     async def async_query_schedules(self, thing_name: str) -> None:
-        """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot."""
+        """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot.
+
+        The robot replies with one entry per schedule, so reset the accumulator
+        before asking — the replies repopulate it via :meth:`on_mqtt_state`.
+        """
+        self._schedules[thing_name] = []
         await self._mqtt.async_publish_command(thing_name, encode_query_schedules())
+
+    async def async_query_all_schedules(self) -> None:
+        """Request schedules for every registered device."""
+        for device in self.devices:
+            await self.async_query_schedules(device["deviceThingName"])
 
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
         """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*

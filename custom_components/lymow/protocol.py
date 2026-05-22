@@ -519,7 +519,44 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if theta_rad is not None:
             state["poseThetaRad"] = _decode_f32(theta_rad)
 
+    # Mowing schedule entry (field 17), one per QUERY_SCHEDULES reply — confirmed
+    # by correlating f17-bearing pboutput with preceding userCtrl=20 in capture.
+    schedule_raw = _first(fields, 17)
+    if isinstance(schedule_raw, bytes):
+        state["scheduleEntry"] = decode_schedule_entry(schedule_raw)
+
     return state
+
+
+def _decode_hhmm(raw: Any) -> str | None:
+    """Decode an {f1=hour, f2=minute} sub-message into 'HH:MM'."""
+    if not isinstance(raw, bytes):
+        return None
+    f = _decode_fields(raw)
+    hour = _first(f, 1)
+    minute = _first(f, 2)
+    if hour is None and minute is None:
+        return None
+    return f"{int(hour or 0):02d}:{int(minute or 0):02d}"
+
+
+def decode_schedule_entry(data: bytes) -> dict[str, Any]:
+    """Decode a PbSchedule (PbOutput field 17) into a flat dict.
+
+    Field meaning confirmed from capture structure: f11=enabled flag,
+    f14=start {hour,minute}, f15=end {hour,minute}. Only the structurally
+    unambiguous fields are surfaced; other fields are left undecoded rather
+    than guessed.
+    """
+    f = _decode_fields(data)
+    entry: dict[str, Any] = {"enabled": bool(_first(f, 11, 0))}
+    start = _decode_hhmm(_first(f, 14))
+    if start is not None:
+        entry["start"] = start
+    end = _decode_hhmm(_first(f, 15))
+    if end is not None:
+        entry["end"] = end
+    return entry
 
 
 # ---------------------------------------------------------------------------
