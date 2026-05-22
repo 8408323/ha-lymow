@@ -812,3 +812,66 @@ def test_schedules_sensor_counts_and_exposes_entries() -> None:
 def test_schedules_sensor_empty_list_is_zero() -> None:
     sensor = LymowSchedulesSensor(_make_coord({"schedules": []}), DEVICE)
     assert sensor.native_value == 0
+
+
+def test_remaining_area_derived_from_task_and_progress() -> None:
+    from lymow.sensor import LymowRemainingAreaSensor
+
+    # 1567 m² task, 25% done -> 1175.25 remaining
+    e = LymowRemainingAreaSensor(_make_coord({"totalTaskAreaM2": 1567.0, "mowProgress": 25.0}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_remaining_area"
+    assert abs(e.native_value - 1175.25) < 0.01
+
+
+def test_remaining_area_full_when_progress_zero() -> None:
+    from lymow.sensor import LymowRemainingAreaSensor
+
+    e = LymowRemainingAreaSensor(_make_coord({"totalTaskAreaM2": 1567.0, "mowProgress": 0.0}), DEVICE)
+    assert e.native_value == 1567.0
+
+
+def test_remaining_area_clamps_at_zero() -> None:
+    from lymow.sensor import LymowRemainingAreaSensor
+
+    e = LymowRemainingAreaSensor(_make_coord({"totalTaskAreaM2": 1567.0, "mowProgress": 110.0}), DEVICE)
+    assert e.native_value == 0.0
+
+
+def test_remaining_area_clamps_at_task_for_negative_progress() -> None:
+    from lymow.sensor import LymowRemainingAreaSensor
+
+    e = LymowRemainingAreaSensor(_make_coord({"totalTaskAreaM2": 1567.0, "mowProgress": -10.0}), DEVICE)
+    assert e.native_value == 1567.0
+
+
+def test_remaining_area_none_when_fields_missing() -> None:
+    from lymow.sensor import LymowRemainingAreaSensor
+
+    assert LymowRemainingAreaSensor(_make_coord({"totalTaskAreaM2": 1567.0}), DEVICE).native_value is None
+    assert LymowRemainingAreaSensor(_make_coord({"mowProgress": 10.0}), DEVICE).native_value is None
+
+
+def test_remaining_area_none_on_bad_type() -> None:
+    from lymow.sensor import LymowRemainingAreaSensor
+
+    e = LymowRemainingAreaSensor(_make_coord({"totalTaskAreaM2": "x", "mowProgress": 10.0}), DEVICE)
+    assert e.native_value is None
+
+
+async def test_async_setup_entry_registers_remaining_area_sensor() -> None:
+    from unittest.mock import MagicMock
+
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowRemainingAreaSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert any(isinstance(e, LymowRemainingAreaSensor) for e in added)

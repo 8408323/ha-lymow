@@ -301,6 +301,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowRtkSensor(coordinator, device))
         entities.append(LymowMapSensor(coordinator, device))
         entities.append(LymowPoseHeadingSensor(coordinator, device))
+        entities.append(LymowRemainingAreaSensor(coordinator, device))
         entities.append(LymowCleanHistoryDetailsSensor(coordinator, device))
         entities.append(LymowBackupMapsSensor(coordinator, device))
         entities.append(LymowSchedulesSensor(coordinator, device))
@@ -499,6 +500,41 @@ class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             return math.degrees(float(rad)) % 360.0
         except (TypeError, ValueError):
             return None
+
+
+class LymowRemainingAreaSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Area still to mow in the current task, mirroring the app's remaining-area
+    figure. Derived from the live ``totalTaskAreaM2`` and ``mowProgress`` (0–100)
+    fields — the robot doesn't report remaining area directly in pboutput."""
+
+    _attr_has_entity_name = True
+    _attr_native_unit_of_measurement = UnitOfArea.SQUARE_METERS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+    _attr_icon = "mdi:grass"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_remaining_area"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Remaining area"
+
+    @property
+    def native_value(self) -> float | None:
+        data = self.coordinator.data.get(self._thing_name) or {}
+        task = data.get("totalTaskAreaM2")
+        progress = data.get("mowProgress")
+        if task is None or progress is None:
+            return None
+        try:
+            task_f = float(task)
+            remaining = task_f * (1.0 - float(progress) / 100.0)
+        except (TypeError, ValueError):
+            return None
+        # Bound to [0, task]: progress outside 0–100 (bad/echoed wire data)
+        # must not yield negative area or more than the whole task.
+        return min(max(remaining, 0.0), max(task_f, 0.0))
 
 
 class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
