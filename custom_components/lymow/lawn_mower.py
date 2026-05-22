@@ -33,6 +33,7 @@ from .const import (
     WORK_STATUS_RETURNING_GROUP,
 )
 from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -674,6 +675,7 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
         self._attr_unique_id = self._thing_name
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = device_label
 

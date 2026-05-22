@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 
 async def async_setup_entry(
@@ -66,6 +67,7 @@ class _DeviceFeatureSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} {name}"
         self._attr_unique_id = f"{self._thing_name}_{self._feature_key}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_icon = icon
 
     @property
@@ -144,6 +146,7 @@ class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         self._thing_name: str = device["deviceThingName"]
         self._hash_id = hash_id
         self._attr_unique_id = f"{self._thing_name}_{hash_id}_enabled"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} Zone {hash_id[:4]}"
 
@@ -184,6 +187,7 @@ class RtkAutoPauseSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         self._thing_name = device["deviceThingName"]
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_rtk_auto_pause"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = f"{device_label} RTK auto-pause"
 
     @property

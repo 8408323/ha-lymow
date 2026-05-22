@@ -23,6 +23,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, RTSP_PATH, RTSP_PORT
 from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 # Robot-state keys that may carry the LAN IP, in priority order.
 _IP_KEYS = ("ipAddress", "wifiIp", "ip_address")
@@ -60,6 +61,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} Camera"
         self._attr_unique_id = f"{self._thing_name}_camera"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
 
     def _stream_url(self) -> str | None:
         data = (self.coordinator.data or {}).get(self._thing_name) or {}

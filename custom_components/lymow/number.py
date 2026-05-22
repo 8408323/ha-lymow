@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 
 async def async_setup_entry(
@@ -68,6 +69,7 @@ class GeofenceRadiusNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
         self._thing_name: str = device["deviceThingName"]
         device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_geofence_radius"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = f"{device_label} Geofence radius"
 
     @property
@@ -109,6 +111,7 @@ class ZoneCutHeightNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
         self._thing_name: str = device["deviceThingName"]
         self._hash_id = hash_id
         self._attr_unique_id = f"{self._thing_name}_{hash_id}_cut_height"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} Zone {hash_id[:4]} Cut Height"
 
@@ -154,6 +157,7 @@ class RtkPauseThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity)
         self._thing_name = device["deviceThingName"]
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_rtk_pause_threshold"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = f"{device_label} RTK pause threshold"
 
     @property

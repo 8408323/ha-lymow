@@ -19,6 +19,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, ERROR_DESCRIPTIONS
 from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -313,6 +314,7 @@ class LymowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._thing_name = device["deviceThingName"]
         self.entity_description = description
         self._attr_unique_id = f"{self._thing_name}_{description.key}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} {description.name}"
 
@@ -354,6 +356,7 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
         self._attr_unique_id = f"{self._thing_name}_rtk_status"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} RTK status"
         self._attr_icon = "mdi:satellite-variant"
@@ -393,6 +396,7 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._thing_name = device["deviceThingName"]
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_map"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = f"{device_label} Map"
         self._attr_icon = "mdi:map"
 
@@ -443,6 +447,7 @@ class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._thing_name = device["deviceThingName"]
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_schedules"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = f"{device_label} Mow schedules"
 
     @property
@@ -474,6 +479,7 @@ class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._thing_name = device["deviceThingName"]
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_pose_heading"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = f"{device_label} Pose heading"
 
     @property
@@ -504,6 +510,7 @@ class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], Sensor
         self._thing_name = device["deviceThingName"]
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_last_clean_details"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = f"{device_label} Last mow details"
 
     @property
@@ -545,6 +552,7 @@ class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._thing_name = device["deviceThingName"]
         device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_backup_maps"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = f"{device_label} Backup maps"
 
     @property
