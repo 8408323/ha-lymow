@@ -64,6 +64,7 @@ Once the PR is open (or after the final push you want reviewed):
    gh api repos/{owner}/{repo}/issues/<n>/timeline   # shows "review_requested" / Copilot "is reviewing"
    ```
    A reviewer still in `reviewRequests` (or shown reviewing in the timeline) is **not done** — keep waiting. The round is finished when every expected reviewer (Copilot, Codex, …) has posted its review/comments on the **current head commit** and none remain pending. Don't evaluate comments or merge until then.
+   - **Timeout path (deterministic):** if ~10 min elapses and an expected reviewer still hasn't posted for the current commit, re-request that reviewer once. If it still doesn't engage after another short wait, stop polling and tell the user which reviewer is missing — ask whether to wait longer or proceed without it. Never wait indefinitely, and never merge counting a missing reviewer as approval.
 2. **Address each comment:** implement it, or decline with a short reply. **Resolve the thread** for each handled comment (`gh api graphql` → `resolveReviewThread`). **Don't resolve** a thread that asks a question / for more info — reply and leave it open.
 3. **Pushing fixes is a new push to review.** Resolve the fixed threads, then re-request in one comment, and go back to step 1:
    ```
