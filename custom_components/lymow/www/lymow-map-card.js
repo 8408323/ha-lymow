@@ -3,10 +3,10 @@
  *
  * Features:
  *   • Renders go-zones, no-go zones, channels, charging station, robot pose
- *   • Tap a go-zone to select it → "Mow selected zones" button
- *   • Mouse wheel / pinch to zoom; click-drag on background to pan
+ *   • Mouse wheel / pinch to zoom; drag anywhere on map to pan
  *   • Edit mode: tap a go-zone → drag vertex handles to reshape; tap edge
  *     midpoint (+) to insert a vertex; tap vertex ✕ to delete; Save / Cancel
+ *   • North arrow + scale bar overlay (fixed to viewport corners via SVG foreignObject)
  *
  * YAML config example:
  *   type: custom:lymow-map-card
@@ -31,18 +31,24 @@ class LymowMapCard extends HTMLElement {
     this._editHash = null;
     this._workPoly = null;
     this._dragIdx = null;
+    // Optimistic polygon overrides: hashId → [{x,y}] applied until next hass update
+    this._polyOverrides = {};
 
     // Pan/zoom state (in SVG user units)
     this._vx = 0; this._vy = 0; this._vw = 100; this._vh = 100;
-    this._mapReady = false; // true once bounding box has been computed
+    this._mapReady = false;
 
-    // Pan gesture
+    // Pan gesture (mouse/pointer)
     this._panning = false;
-    this._panStart = null; // {clientX, clientY, vx, vy}
+    this._panStart = null; // {x, y, vx, vy}
+    this._panMoved = false; // distinguish pan from click
+
+    // Pinch zoom
+    this._pinchStart = null;
 
     // Bounds (set on first render with data)
-    this._bounds = null; // {minX, maxX, minY, maxY} in ENU metres
-    this._scale = 1;     // SVG user-units per metre
+    this._bounds = null;
+    this._scale = 1;
   }
 
   setConfig(config) {
@@ -67,8 +73,14 @@ class LymowMapCard extends HTMLElement {
     const state = this._hass && this._hass.states[this._config.entity];
     if (!state) return null;
     const a = state.attributes;
+    // Apply any optimistic polygon overrides (applied after a successful save)
+    const goZones = (a.go_zones || []).map((z) =>
+      this._polyOverrides[z.hashId]
+        ? { ...z, polygon: this._polyOverrides[z.hashId] }
+        : z
+    );
     return {
-      goZones: a.go_zones || [],
+      goZones,
       nogoZones: a.nogo_zones || [],
       channels: a.channels || [],
       gpsOrigin: a.gps_origin || null,
@@ -79,7 +91,6 @@ class LymowMapCard extends HTMLElement {
     };
   }
 
-  /** Compute bounding box over all geometry (zones, station, robot, channels). */
   _computeBounds(mapData) {
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     const acc = (x, y) => {
@@ -102,11 +113,9 @@ class LymowMapCard extends HTMLElement {
   // Coordinate transforms
   // ---------------------------------------------------------------------------
 
-  /** ENU → SVG user units. Y is flipped (north=up in ENU, down in SVG). */
   _sx(x) { return ((x - this._bounds.minX) * this._scale).toFixed(3); }
   _sy(y) { return ((this._bounds.maxY - y) * this._scale).toFixed(3); }
 
-  /** SVG user units → ENU metres (inverse of above). */
   _toEnu(svgX, svgY) {
     return {
       x: svgX / this._scale + this._bounds.minX,
@@ -114,7 +123,6 @@ class LymowMapCard extends HTMLElement {
     };
   }
 
-  /** Client pointer coords → ENU metres via the SVG CTM. */
   _clientToEnu(evt) {
     const svg = this.shadowRoot.querySelector("svg");
     if (!svg) return null;
@@ -149,23 +157,24 @@ class LymowMapCard extends HTMLElement {
       return;
     }
 
-    // Compute bounds once (or when editing adds new workPoly extent)
     const newBounds = this._computeBounds(mapData);
     if (!newBounds) { this.shadowRoot.innerHTML = this._wrapMsg("Empty map."); return; }
 
-    if (!this._mapReady || this._editing) {
+    if (!this._mapReady) {
       this._bounds = newBounds;
       const W = newBounds.maxX - newBounds.minX;
       const H = newBounds.maxY - newBounds.minY;
       this._scale = 100 / W;
-      if (!this._mapReady) {
-        // Initialise viewbox to show the whole map
-        this._vw = 100;
-        this._vh = H * this._scale;
-        this._vx = 0;
-        this._vy = 0;
-        this._mapReady = true;
-      }
+      this._vw = 100;
+      this._vh = H * this._scale;
+      this._vx = 0;
+      this._vy = 0;
+      this._mapReady = true;
+    } else if (this._editing) {
+      // Recompute bounds to include workPoly extent but don't reset viewport
+      this._bounds = newBounds;
+      const W = newBounds.maxX - newBounds.minX;
+      this._scale = 100 / W;
     }
 
     const { _bounds: b, _scale: sc } = this;
@@ -185,20 +194,7 @@ class LymowMapCard extends HTMLElement {
       return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="0.4" stroke-dasharray="${dash}" opacity="0.7"/>`;
     }).join("\n");
 
-    // ── No-go zones ───────────────────────────────────────────────────────────
-    const nogoPaths = nogoZones.map((z) => {
-      const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
-      return `<polygon points="${pts}" fill="#ff5252" fill-opacity="0.25" stroke="#c62828" stroke-width="0.5" stroke-dasharray="1,0.5"/>`;
-    }).join("\n");
-
-    const nogoLabels = nogoZones.map((z) => {
-      if (!z.polygon || z.polygon.length < 3) return "";
-      const cx = z.polygon.reduce((s, p) => s + p.x, 0) / z.polygon.length;
-      const cy = z.polygon.reduce((s, p) => s + p.y, 0) / z.polygon.length;
-      return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle" font-size="${(parseFloat(fontSz)*0.85).toFixed(2)}" fill="#c62828" pointer-events="none">⛔</text>`;
-    }).join("\n");
-
-    // ── Go-zones ──────────────────────────────────────────────────────────────
+    // ── Go-zones (rendered BEFORE no-go so nogo appears on top) ──────────────
     const goPaths = goZones.map((z) => {
       const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
       const selected = this._selectedZones.has(z.hashId);
@@ -220,11 +216,23 @@ class LymowMapCard extends HTMLElement {
         font-size="${fontSz}" fill="#1b5e20" pointer-events="none" font-weight="bold">${label}</text>`;
     }).join("\n");
 
-    // ── Edit handles: working polygon + vertex/midpoint handles ───────────────
+    // ── No-go zones (on top of go-zones) ─────────────────────────────────────
+    const nogoPaths = nogoZones.map((z) => {
+      const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      return `<polygon points="${pts}" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="0.6" stroke-dasharray="1,0.5"/>`;
+    }).join("\n");
+
+    const nogoLabels = nogoZones.map((z) => {
+      if (!z.polygon || z.polygon.length < 3) return "";
+      const cx = z.polygon.reduce((s, p) => s + p.x, 0) / z.polygon.length;
+      const cy = z.polygon.reduce((s, p) => s + p.y, 0) / z.polygon.length;
+      return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle" font-size="${(parseFloat(fontSz)*0.85).toFixed(2)}" fill="#c62828" pointer-events="none">⛔</text>`;
+    }).join("\n");
+
+    // ── Edit handles ──────────────────────────────────────────────────────────
     let editOverlay = "";
     if (this._editing && this._workPoly && this._workPoly.length >= 3) {
       const poly = this._workPoly;
-      // Render the working polygon outline on top
       const workPts = poly.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
       const workOutline = `<polygon points="${workPts}" fill="#ef6c0022" stroke="#ef6c00" stroke-width="0.5" stroke-dasharray="1.5,0.5" pointer-events="none"/>`;
 
@@ -281,33 +289,37 @@ class LymowMapCard extends HTMLElement {
       const ay = (parseFloat(ry) - Math.sin(theta) * arrowLen).toFixed(3);
       robotHtml = `
         <circle cx="${rx}" cy="${ry}" r="${r}" fill="#e65100" stroke="white" stroke-width="0.35"/>
-        <line x1="${rx}" y1="${ry}" x2="${ax}" y2="${ay}" stroke="#e65100" stroke-width="0.6" stroke-linecap="round"/>
-        <text x="${rx}" y="${(parseFloat(ry) + parseFloat(r) * 2.5).toFixed(3)}"
-          text-anchor="middle" font-size="${(parseFloat(r)*0.9).toFixed(2)}" fill="#e65100" pointer-events="none">🤖</text>`;
+        <line x1="${rx}" y1="${ry}" x2="${ax}" y2="${ay}" stroke="#e65100" stroke-width="0.6" stroke-linecap="round"/>`;
     }
 
-    // ── North arrow ───────────────────────────────────────────────────────────
-    const NX = (TOTAL_W - 5).toFixed(1);
+    // ── North arrow (fixed to top-right of viewport) ──────────────────────────
+    // Uses viewBox-relative coordinates so it stays in corner regardless of zoom/pan.
+    const NX = (this._vx + this._vw - 5).toFixed(2);
+    const NY = (this._vy + 5).toFixed(2);
     const northHtml = `
-      <g transform="translate(${NX}, 5)">
-        <circle r="3.5" fill="white" opacity="0.8"/>
-        <line x1="0" y1="3" x2="0" y2="-3" stroke="#333" stroke-width="0.5"/>
-        <polygon points="0,-3 -1,-0.5 1,-0.5" fill="#c0392b"/>
-        <text x="0" y="6" text-anchor="middle" font-size="2" fill="#333" font-weight="bold">N</text>
+      <g data-overlay="north" transform="translate(${NX}, ${NY})" pointer-events="none">
+        <circle r="3.5" fill="white" opacity="0.85"/>
+        <line x1="0" y1="2.5" x2="0" y2="-2.5" stroke="#333" stroke-width="0.5"/>
+        <polygon points="0,-2.5 -0.9,-0.3 0.9,-0.3" fill="#c0392b"/>
+        <text x="0" y="5.5" text-anchor="middle" font-size="2" fill="#333" font-weight="bold">N</text>
       </g>`;
 
-    // ── Scale bar ─────────────────────────────────────────────────────────────
-    // Pick a nice round number of metres that fits ~15% of the view width
+    // ── Scale bar (fixed to bottom-left of viewport) ──────────────────────────
     const viewMetres = this._vw / sc;
-    const niceMetres = this._niceNumber(viewMetres * 0.15);
+    const niceMetres = this._niceNumber(viewMetres * 0.18);
     const barW = (niceMetres * sc).toFixed(3);
-    const bx = 3, by = (TOTAL_H - 3).toFixed(1);
+    const bx = (this._vx + 3).toFixed(2);
+    const by = (this._vy + this._vh - 3).toFixed(2);
+    const byTick = (this._vy + this._vh - 2).toFixed(2);
+    const byLabel = (this._vy + this._vh - 4.5).toFixed(2);
+    const bx2 = (parseFloat(bx) + parseFloat(barW)).toFixed(2);
+    const bxMid = (parseFloat(bx) + parseFloat(barW) / 2).toFixed(2);
     const scaleBarHtml = `
-      <g>
-        <rect x="${bx}" y="${by}" width="${barW}" height="1" fill="#555" opacity="0.8"/>
-        <line x1="${bx}" y1="${by}" x2="${bx}" y2="${(TOTAL_H - 2).toFixed(1)}" stroke="#555" stroke-width="0.4" opacity="0.8"/>
-        <line x1="${(bx + parseFloat(barW)).toFixed(2)}" y1="${by}" x2="${(bx + parseFloat(barW)).toFixed(2)}" y2="${(TOTAL_H - 2).toFixed(1)}" stroke="#555" stroke-width="0.4" opacity="0.8"/>
-        <text x="${(bx + parseFloat(barW) / 2).toFixed(2)}" y="${(TOTAL_H - 4.5).toFixed(1)}" text-anchor="middle" font-size="1.8" fill="#555">${niceMetres} m</text>
+      <g pointer-events="none">
+        <rect data-overlay="scalebar" x="${bx}" y="${by}" width="${barW}" height="0.9" fill="#555" opacity="0.85"/>
+        <line data-overlay="scalebar" x1="${bx}" y1="${by}" x2="${bx}" y2="${byTick}" stroke="#555" stroke-width="0.4" opacity="0.85"/>
+        <line data-overlay="scalebar" x1="${bx2}" y1="${by}" x2="${bx2}" y2="${byTick}" stroke="#555" stroke-width="0.4" opacity="0.85"/>
+        <text data-overlay="scalebar" x="${bxMid}" y="${byLabel}" text-anchor="middle" font-size="1.8" fill="#555">${niceMetres} m</text>
       </g>`;
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
@@ -315,7 +327,7 @@ class LymowMapCard extends HTMLElement {
     let toolbar;
     if (this._editing) {
       const msg = this._editHash
-        ? `Editing zone — drag handles • tap + to insert • ✕ to delete`
+        ? `Editing zone — drag handles · tap + to insert · ✕ to delete`
         : `Tap a go-zone to start editing its boundary.`;
       toolbar = `
         <div class="edit-bar">${msg}</div>
@@ -344,7 +356,8 @@ class LymowMapCard extends HTMLElement {
         ha-card { padding: 12px 12px 8px; box-sizing: border-box; }
         .card-header { font-size: 1.05em; font-weight: 500; margin-bottom: 8px; color: var(--primary-text-color); }
         .map-wrap { width: 100%; aspect-ratio: ${(TOTAL_W / TOTAL_H).toFixed(4)}; position: relative; }
-        svg { width: 100%; height: 100%; border-radius: 6px; background: #e8f5e9; display: block; touch-action: none; user-select: none; }
+        svg { width: 100%; height: 100%; border-radius: 6px; background: #e8f5e9; display: block; touch-action: none; user-select: none; cursor: grab; }
+        svg.panning { cursor: grabbing; }
         .btn-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
         .btn { flex: 1; min-width: 80px; padding: 9px 6px; border: none; border-radius: 6px;
                font-size: 0.84em; font-weight: 600; cursor: pointer; color: white; }
@@ -368,10 +381,10 @@ class LymowMapCard extends HTMLElement {
                xmlns="http://www.w3.org/2000/svg"
                preserveAspectRatio="xMidYMid meet">
             ${channelPaths}
-            ${nogoPaths}
-            ${nogoLabels}
             ${goPaths}
             ${goLabels}
+            ${nogoPaths}
+            ${nogoLabels}
             ${csHtml}
             ${robotHtml}
             ${editOverlay}
@@ -382,9 +395,9 @@ class LymowMapCard extends HTMLElement {
         ${toolbar}
         <div class="legend">
           <div class="legend-item"><div class="legend-dot" style="background:#a8d8a8;border:1px solid #388e3c"></div>Go zone</div>
-          ${nogoZones.length ? '<div class="legend-item"><div class="legend-dot" style="background:#ff5252;opacity:0.4;border:1px solid #c62828"></div>No-go zone</div>' : ""}
+          ${nogoZones.length ? '<div class="legend-item"><div class="legend-dot" style="background:#ff5252;opacity:0.5;border:1px solid #c62828"></div>No-go zone</div>' : ""}
           ${chargingStation ? '<div class="legend-item"><div class="legend-dot" style="background:#1565c0"></div>Charging station ⚡</div>' : ""}
-          ${poseEastM !== undefined ? '<div class="legend-item"><div class="legend-dot" style="background:#e65100"></div>Robot 🤖</div>' : ""}
+          ${poseEastM !== undefined ? '<div class="legend-item"><div class="legend-dot" style="background:#e65100"></div>Robot</div>' : ""}
           ${channels.some(c => c.isDockingChannel) ? '<div class="legend-item"><div class="legend-dot" style="background:none;border-bottom:2px dashed #1565c0;border-radius:0;width:16px"></div>Docking channel</div>' : ""}
           ${channels.some(c => !c.isDockingChannel) ? '<div class="legend-item"><div class="legend-dot" style="background:none;border-bottom:2px dashed #6a1b9a;border-radius:0;width:16px"></div>Mow channel</div>' : ""}
         </div>
@@ -396,8 +409,7 @@ class LymowMapCard extends HTMLElement {
   _niceNumber(x) {
     if (x <= 0) return 5;
     const magnitude = Math.pow(10, Math.floor(Math.log10(x)));
-    const nice = [1, 2, 5, 10];
-    for (const n of nice) if (n * magnitude >= x) return n * magnitude;
+    for (const n of [1, 2, 5, 10]) if (n * magnitude >= x) return n * magnitude;
     return 10 * magnitude;
   }
 
@@ -409,17 +421,15 @@ class LymowMapCard extends HTMLElement {
     const svg = this.shadowRoot.querySelector("svg");
     if (!svg) return;
 
-    // Zoom on wheel
     svg.addEventListener("wheel", (e) => this._onWheel(e), { passive: false });
-
-    // Pinch zoom via touch
     svg.addEventListener("touchstart", (e) => this._onTouchStart(e), { passive: false });
     svg.addEventListener("touchmove", (e) => this._onTouchMove(e), { passive: false });
     svg.addEventListener("touchend", (e) => this._onTouchEnd(e));
 
     if (this._editing) {
+      // Zone selection (click without drag)
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
-        el.addEventListener("click", () => this._chooseEditZone(el.dataset.hash));
+        el.addEventListener("click", (e) => { if (!this._panMoved) this._chooseEditZone(el.dataset.hash); });
       });
       this.shadowRoot.querySelectorAll(".midpoint").forEach((el) => {
         el.addEventListener("click", (e) => { e.stopPropagation(); this._insertVertex(+el.dataset.edge); });
@@ -428,31 +438,37 @@ class LymowMapCard extends HTMLElement {
         el.addEventListener("click", (e) => { e.stopPropagation(); this._deleteVertex(+el.dataset.idx); });
       });
       this.shadowRoot.querySelectorAll(".vertex").forEach((el) => {
-        el.addEventListener("pointerdown", (e) => { e.stopPropagation(); this._startDrag(e, +el.dataset.idx); });
+        el.addEventListener("pointerdown", (e) => { e.stopPropagation(); this._panMoved = false; this._startDrag(e, +el.dataset.idx); });
       });
       if (this._editHash) {
         svg.addEventListener("pointermove", (e) => this._onDrag(e));
-        svg.addEventListener("pointerup", () => this._endDrag());
-        svg.addEventListener("pointerleave", () => this._endDrag());
+        svg.addEventListener("pointerup", (e) => this._endDrag(e));
+        svg.addEventListener("pointercancel", () => this._endDrag(null));
       }
-      // Background click while editing but no zone chosen yet: deselect
-      svg.addEventListener("click", (e) => {
-        if (e.target === svg && !this._editHash) return;
-      });
     } else {
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
-        el.addEventListener("click", (e) => { e.stopPropagation(); this._toggleZone(el.dataset.hash); });
+        el.addEventListener("click", (e) => { if (!this._panMoved) { e.stopPropagation(); this._toggleZone(el.dataset.hash); } });
       });
-      // Pan on background drag
-      svg.addEventListener("pointerdown", (e) => {
-        if (e.target !== svg) return;
-        this._panning = true;
-        this._panStart = { x: e.clientX, y: e.clientY, vx: this._vx, vy: this._vy };
-        svg.setPointerCapture(e.pointerId);
-      });
-      svg.addEventListener("pointermove", (e) => this._onPan(e));
-      svg.addEventListener("pointerup", () => { this._panning = false; });
     }
+
+    // Pan: works on any pointerdown on the SVG (not on vertex handles in edit mode)
+    svg.addEventListener("pointerdown", (e) => {
+      if (this._dragIdx != null) return; // vertex drag takes priority
+      this._panning = true;
+      this._panMoved = false;
+      this._panStart = { x: e.clientX, y: e.clientY, vx: this._vx, vy: this._vy };
+      svg.setPointerCapture(e.pointerId);
+      svg.classList.add("panning");
+    });
+    svg.addEventListener("pointermove", (e) => this._onPan(e));
+    svg.addEventListener("pointerup", () => {
+      this._panning = false;
+      svg.classList.remove("panning");
+    });
+    svg.addEventListener("pointercancel", () => {
+      this._panning = false;
+      svg.classList.remove("panning");
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -464,11 +480,8 @@ class LymowMapCard extends HTMLElement {
     const svg = this.shadowRoot.querySelector("svg");
     if (!svg) return;
     const rect = svg.getBoundingClientRect();
-
-    // Pivot point in SVG user units
     const px = this._vx + (evt.clientX - rect.left) / rect.width * this._vw;
     const py = this._vy + (evt.clientY - rect.top) / rect.height * this._vh;
-
     const factor = evt.deltaY < 0 ? 0.85 : 1 / 0.85;
     this._applyZoom(factor, px, py);
   }
@@ -514,6 +527,8 @@ class LymowMapCard extends HTMLElement {
   _applyZoom(factor, pivotX, pivotY) {
     this._setViewBox(this._vw * factor, this._vh * factor, pivotX, pivotY);
     this._updateViewBox();
+    // Reposition fixed overlays (north arrow, scale bar) after zoom/pan
+    this._updateOverlays();
   }
 
   _setViewBox(newW, newH, pivotX, pivotY) {
@@ -522,9 +537,8 @@ class LymowMapCard extends HTMLElement {
     const minW = TOTAL_W / _ZOOM_MAX;
     const maxW = TOTAL_W / _ZOOM_MIN;
     newW = Math.max(minW, Math.min(maxW, newW));
-    newH = newW * (TOTAL_H / TOTAL_W); // maintain aspect ratio
+    newH = newW * (TOTAL_H / TOTAL_W);
 
-    // Keep pivot stationary
     const ratioX = (pivotX - this._vx) / this._vw;
     const ratioY = (pivotY - this._vy) / this._vh;
     this._vx = pivotX - ratioX * newW;
@@ -532,7 +546,6 @@ class LymowMapCard extends HTMLElement {
     this._vw = newW;
     this._vh = newH;
 
-    // Clamp pan so map can't be dragged entirely off screen
     this._vx = Math.max(-TOTAL_W * 0.3, Math.min(TOTAL_W * 1.3 - newW, this._vx));
     this._vy = Math.max(-TOTAL_H * 0.3, Math.min(TOTAL_H * 1.3 - newH, this._vy));
   }
@@ -540,6 +553,39 @@ class LymowMapCard extends HTMLElement {
   _updateViewBox() {
     const svg = this.shadowRoot.querySelector("svg");
     if (svg) svg.setAttribute("viewBox", `${this._vx.toFixed(3)} ${this._vy.toFixed(3)} ${this._vw.toFixed(3)} ${this._vh.toFixed(3)}`);
+  }
+
+  /** Move north arrow and scale bar to stay at viewport corners after zoom/pan. */
+  _updateOverlays() {
+    const root = this.shadowRoot;
+    const sc = this._scale;
+
+    // North arrow: top-right
+    const NX = (this._vx + this._vw - 5).toFixed(2);
+    const NY = (this._vy + 5).toFixed(2);
+    const northG = root.querySelector("g[data-overlay='north']");
+    if (northG) northG.setAttribute("transform", `translate(${NX}, ${NY})`);
+
+    // Scale bar: bottom-left
+    const viewMetres = this._vw / sc;
+    const niceMetres = this._niceNumber(viewMetres * 0.18);
+    const barW = (niceMetres * sc).toFixed(3);
+    const bx = (this._vx + 3).toFixed(2);
+    const by = (this._vy + this._vh - 3).toFixed(2);
+    const byTick = (this._vy + this._vh - 2).toFixed(2);
+    const byLabel = (this._vy + this._vh - 4.5).toFixed(2);
+    const bx2 = (parseFloat(bx) + parseFloat(barW)).toFixed(2);
+    const bxMid = (parseFloat(bx) + parseFloat(barW) / 2).toFixed(2);
+
+    const barRect = root.querySelector("rect[data-overlay='scalebar']");
+    if (barRect) {
+      barRect.setAttribute("x", bx); barRect.setAttribute("y", by); barRect.setAttribute("width", barW);
+    }
+    const barLines = root.querySelectorAll("line[data-overlay='scalebar']");
+    if (barLines[0]) { barLines[0].setAttribute("x1", bx); barLines[0].setAttribute("y1", by); barLines[0].setAttribute("x2", bx); barLines[0].setAttribute("y2", byTick); }
+    if (barLines[1]) { barLines[1].setAttribute("x1", bx2); barLines[1].setAttribute("y1", by); barLines[1].setAttribute("x2", bx2); barLines[1].setAttribute("y2", byTick); }
+    const barText = root.querySelector("text[data-overlay='scalebar']");
+    if (barText) { barText.setAttribute("x", bxMid); barText.setAttribute("y", byLabel); barText.textContent = `${niceMetres} m`; }
   }
 
   _resetView() {
@@ -552,15 +598,19 @@ class LymowMapCard extends HTMLElement {
   // ---------------------------------------------------------------------------
 
   _onPan(e) {
-    if (!this._panning || !this._panStart) return;
+    if (!this._panning || !this._panStart || this._dragIdx != null) return;
+    const dx = e.clientX - this._panStart.x;
+    const dy = e.clientY - this._panStart.y;
+    // Only start panning after 3px movement to preserve click detection
+    if (!this._panMoved && Math.sqrt(dx * dx + dy * dy) < 3) return;
+    this._panMoved = true;
     const svg = this.shadowRoot.querySelector("svg");
     if (!svg) return;
     const rect = svg.getBoundingClientRect();
-    const dx = (e.clientX - this._panStart.x) / rect.width * this._vw;
-    const dy = (e.clientY - this._panStart.y) / rect.height * this._vh;
-    this._vx = this._panStart.vx - dx;
-    this._vy = this._panStart.vy - dy;
+    this._vx = this._panStart.vx - dx / rect.width * this._vw;
+    this._vy = this._panStart.vy - dy / rect.height * this._vh;
     this._updateViewBox();
+    this._updateOverlays();
   }
 
   // ---------------------------------------------------------------------------
@@ -616,7 +666,6 @@ class LymowMapCard extends HTMLElement {
   _decimatePoly(pts) {
     const MAX_VERTS = 32;
     if (pts.length <= MAX_VERTS) return pts.map((p) => ({ x: p.x, y: p.y }));
-    // Compute perimeter so we can pick an adaptive minimum distance.
     let perim = 0;
     for (let i = 0; i < pts.length; i++) {
       const q = pts[(i + 1) % pts.length];
@@ -630,7 +679,6 @@ class LymowMapCard extends HTMLElement {
       const dx = pts[i].x - prev.x, dy = pts[i].y - prev.y;
       if (Math.sqrt(dx * dx + dy * dy) >= minDist) out.push({ x: pts[i].x, y: pts[i].y });
     }
-    // Drop last if nearly identical to first (closing point)
     if (out.length > 1) {
       const last = out[out.length - 1], first = out[0];
       const dx = last.x - first.x, dy = last.y - first.y;
@@ -642,6 +690,7 @@ class LymowMapCard extends HTMLElement {
   _startDrag(evt, idx) {
     evt.preventDefault();
     this._dragIdx = idx;
+    this._panning = false; // cancel any pan in progress
     try { evt.target.setPointerCapture(evt.pointerId); } catch (_) {}
   }
 
@@ -651,23 +700,18 @@ class LymowMapCard extends HTMLElement {
     const enu = this._clientToEnu(evt);
     if (!enu) return;
     this._workPoly[this._dragIdx] = enu;
-    // Fast incremental update: just update vertex and work-polygon positions
-    // without a full re-render (avoids flicker during drag)
     this._updateDragHandles();
   }
 
-  /** Lightweight DOM update during drag — moves only the affected SVG elements. */
   _updateDragHandles() {
     const poly = this._workPoly;
     const root = this.shadowRoot;
 
-    // Update working polygon outline
     const workPoly = root.querySelector("polygon[stroke='#ef6c00']");
     if (workPoly) {
       workPoly.setAttribute("points", poly.map((p) => `${this._sx(p.x)},${this._sy(p.y)}`).join(" "));
     }
 
-    // Update vertex circles and delete badges
     root.querySelectorAll(".vertex").forEach((el) => {
       const i = +el.dataset.idx;
       el.setAttribute("cx", this._sx(poly[i].x));
@@ -679,8 +723,6 @@ class LymowMapCard extends HTMLElement {
       el.setAttribute("x", (parseFloat(this._sx(poly[i].x)) + r * 1.3).toFixed(3));
       el.setAttribute("y", (parseFloat(this._sy(poly[i].y)) - r * 1.3).toFixed(3));
     });
-
-    // Update midpoint circles
     root.querySelectorAll(".midpoint").forEach((el) => {
       const edgeIdx = +el.dataset.edge;
       const p = poly[edgeIdx], q = poly[(edgeIdx + 1) % poly.length];
@@ -690,12 +732,17 @@ class LymowMapCard extends HTMLElement {
       if (circle) { circle.setAttribute("cx", this._sx(mx)); circle.setAttribute("cy", this._sy(my)); }
       if (text) { text.setAttribute("x", this._sx(mx)); text.setAttribute("y", this._sy(my)); }
     });
+
+    // Also update the go-zone polygon so it tracks the edit in real time
+    const goPolygon = root.querySelector(`polygon[data-hash="${this._editHash}"]`);
+    if (goPolygon) {
+      goPolygon.setAttribute("points", poly.map((p) => `${this._sx(p.x)},${this._sy(p.y)}`).join(" "));
+    }
   }
 
-  _endDrag() {
+  _endDrag(evt) {
     if (this._dragIdx != null) {
       this._dragIdx = null;
-      // Full re-render once drag ends to update go-zone outline and labels
       this._render();
     }
   }
@@ -716,16 +763,22 @@ class LymowMapCard extends HTMLElement {
   async _saveEdit() {
     if (!this._hass || !this._editHash || !this._workPoly || !this._config.mower_entity) return;
     const polygon = this._workPoly.map((p) => ({ x: +p.x.toFixed(4), y: +p.y.toFixed(4) }));
+    const hashId = this._editHash;
+    // Optimistic update: apply the new polygon immediately so the map updates
+    // before HA state propagates back (which may take several seconds).
+    this._polyOverrides[hashId] = polygon;
+    this._cancelEdit(); // exits edit mode and re-renders with the override applied
     try {
       await this._hass.callService("lymow", "update_zone_polygon", {
         entity_id: this._config.mower_entity,
-        zone_hash_id: this._editHash,
+        zone_hash_id: hashId,
         polygon,
       });
-      this._cancelEdit();
     } catch (err) {
       console.error("lymow-map-card: save failed", err);
-      // Show error briefly without losing edit state
+      // Roll back optimistic update and show error
+      delete this._polyOverrides[hashId];
+      this._render();
       const bar = this.shadowRoot.querySelector(".edit-bar");
       if (bar) bar.textContent = `⚠️ Save failed: ${err?.message || err}`;
     }
