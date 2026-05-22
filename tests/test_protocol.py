@@ -1781,3 +1781,16 @@ def test_encode_set_schedules_disabled_and_empty() -> None:
     task = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 11)), 1))
     assert _first(task, 8) == 1  # isDisabled
     assert _first(task, 1) is None  # no dayOfWeek when omitted
+
+
+def test_encode_set_schedules_optional_fields() -> None:
+    from lymow.protocol import encode_set_schedules
+
+    pb = encode_set_schedules(
+        [{"hour": 6, "minute": 0, "id": 7, "timeZone": 120, "isAngleOffset": True, "mowAngle": 45}]
+    )
+    task = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 11)), 1))
+    assert _first(task, 6) == 7  # id
+    assert _first(task, 7) == 120  # timeZone
+    assert _first(task, 9) == 1  # isAngleOffset
+    assert _first(task, 10) == 45  # mowAngle

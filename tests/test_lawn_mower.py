@@ -1119,7 +1119,6 @@ def test_to_day_int_accepts_names_and_ints() -> None:
 
 def test_to_day_int_rejects_out_of_range() -> None:
     import voluptuous as vol
-
     from lymow.lawn_mower import _to_day_int
 
     with pytest.raises(vol.Invalid):
