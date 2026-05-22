@@ -14,6 +14,7 @@ from lymow.button import (
     LockRobotButton,
     RestoreFactoryDefaultsButton,
     SelfCheckButton,
+    ToggleLteAirplaneButton,
     async_setup_entry,
 )
 from lymow.const import (
@@ -27,6 +28,7 @@ from lymow.const import (
     USER_CTRL_LOCK,
     USER_CTRL_RESTORE_FACTORY,
     USER_CTRL_SELF_CHECKING,
+    USER_CTRL_SWITCH_LTE_AIRPLANE,
 )
 
 THING = "mower-001"
@@ -125,6 +127,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "ExitRemoteControlButton",
         "RestoreFactoryDefaultsButton",
         "ClearAllZonesAndChannelsButton",
+        "ToggleLteAirplaneButton",
     }
 
 
@@ -187,6 +190,23 @@ async def test_clear_all_zones_press_sends_correct_userctrl() -> None:
     coord = _make_coord()
     await ClearAllZonesAndChannelsButton(coord, DEVICE).async_press()
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_CLEAR_ALL_ZONES_CHANNELS)
+
+
+def test_toggle_lte_airplane_button_disabled_by_default() -> None:
+    _check_disabled_default(ToggleLteAirplaneButton)
+
+
+def test_toggle_lte_airplane_button_metadata() -> None:
+    coord = _make_coord()
+    e = ToggleLteAirplaneButton(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_toggle_lte_airplane"
+    assert "airplane" in e._attr_name.lower()
+
+
+async def test_toggle_lte_airplane_press_sends_correct_userctrl() -> None:
+    coord = _make_coord()
+    await ToggleLteAirplaneButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_SWITCH_LTE_AIRPLANE)
 
 
 async def test_async_setup_entry_no_devices() -> None:

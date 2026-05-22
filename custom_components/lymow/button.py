@@ -19,6 +19,7 @@ from .const import (
     USER_CTRL_LOCK,
     USER_CTRL_RESTORE_FACTORY,
     USER_CTRL_SELF_CHECKING,
+    USER_CTRL_SWITCH_LTE_AIRPLANE,
 )
 from .coordinator import LymowCoordinator
 
@@ -42,6 +43,7 @@ async def async_setup_entry(
                 ExitRemoteControlButton(coordinator, device),
                 RestoreFactoryDefaultsButton(coordinator, device),
                 ClearAllZonesAndChannelsButton(coordinator, device),
+                ToggleLteAirplaneButton(coordinator, device),
             ]
         )
     if entities:
@@ -161,3 +163,19 @@ class ClearAllZonesAndChannelsButton(_UserCtrlButton):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Clear all zones & channels", "mdi:delete-sweep")
+
+
+class ToggleLteAirplaneButton(_UserCtrlButton):
+    """Toggle the robot's LTE airplane mode.
+
+    The command carries no payload — it flips the current state, so it is a
+    button rather than a stateful switch. Disabled by default since it affects
+    cellular connectivity.
+    """
+
+    _user_ctrl = USER_CTRL_SWITCH_LTE_AIRPLANE
+    _key = "toggle_lte_airplane"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Toggle LTE airplane mode", "mdi:airplane")
