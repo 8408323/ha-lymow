@@ -544,6 +544,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Delete a go-zone by hashId using USER_CTRL_CLEAR_ZONE=8."""
         await self._mqtt.async_publish_command(thing_name, encode_delete_zone(hash_id))
 
+    async def async_rename_zone(self, thing_name: str, hash_id: str, name: str) -> None:
+        """Rename a go-zone by hashId using USER_CTRL_MODIFY_ZONE_INFO=9."""
+        from .protocol import encode_rename_zone
+
+        await self._mqtt.async_publish_command(thing_name, encode_rename_zone(hash_id, name))
+
     async def async_start_zones(self, thing_name: str, zone_hash_ids: list[str]) -> None:
         """Start mowing specific zones by hashId."""
         await self._mqtt.async_publish_command(thing_name, encode_start_zones(zone_hash_ids))
