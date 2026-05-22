@@ -241,6 +241,34 @@ def test_on_mqtt_state_unknown_thing_ignored() -> None:
     assert coord.data[THING]["battery"] == 90
 
 
+def test_on_mqtt_state_accumulates_schedule_entries_deduped() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    a = {"enabled": True, "start": "06:00", "end": "08:00"}
+    b = {"enabled": False, "start": "19:30", "end": "03:30"}
+    coord.on_mqtt_state(THING, {"scheduleEntry": dict(a)})
+    coord.on_mqtt_state(THING, {"scheduleEntry": dict(b)})
+    coord.on_mqtt_state(THING, {"scheduleEntry": dict(a)})  # duplicate ignored
+    assert coord.data[THING]["schedules"] == [a, b]
+    assert "scheduleEntry" not in coord.data[THING]
+
+
+@pytest.mark.asyncio
+async def test_async_query_schedules_resets_and_publishes() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord._schedules[THING] = [{"enabled": True}]
+    await coord.async_query_schedules(THING)
+    assert coord._schedules[THING] == []
+    mqtt.async_publish_command.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_async_query_all_schedules_covers_every_device() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_query_all_schedules()
+    assert mqtt.async_publish_command.await_count == len(coord.devices)
+
+
 # ---------------------------------------------------------------------------
 # MQTT online callback
 # ---------------------------------------------------------------------------

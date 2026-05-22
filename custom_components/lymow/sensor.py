@@ -301,6 +301,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowPoseHeadingSensor(coordinator, device))
         entities.append(LymowCleanHistoryDetailsSensor(coordinator, device))
         entities.append(LymowBackupMapsSensor(coordinator, device))
+        entities.append(LymowSchedulesSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -423,6 +424,34 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             if val is not None:
                 attrs[key] = val
         return attrs
+
+
+class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Mowing schedules reported by the robot (USER_CTRL_QUERY_SCHEDULES).
+
+    State is the number of schedules. Each schedule's enabled flag and
+    start/end window — the fields whose meaning is unambiguous in the decoded
+    reply — are exposed as attributes. None until the first reply arrives.
+    """
+
+    _attr_icon = "mdi:calendar-clock"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
+        self._attr_unique_id = f"{self._thing_name}_schedules"
+        self._attr_name = f"{device_label} Mow schedules"
+
+    @property
+    def native_value(self) -> int | None:
+        schedules = (self.coordinator.data.get(self._thing_name) or {}).get("schedules")
+        return None if schedules is None else len(schedules)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        schedules = (self.coordinator.data.get(self._thing_name) or {}).get("schedules") or []
+        return {"schedules": schedules}
 
 
 class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):

@@ -109,9 +109,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session_token=aws.get("SessionToken"),
     )
 
-    # Proactively request map data so zone entities populate without waiting
-    # for the user to trigger a map query manually.
+    # Proactively request map + schedule data so zone and schedule entities
+    # populate without waiting for the user to trigger a query manually.
     await coordinator.async_query_all_maps()
+    await coordinator.async_query_all_schedules()
 
     _LOGGER.debug("Lymow setup complete: %d device(s) in region %s", len(devices), region)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

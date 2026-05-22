@@ -9,6 +9,7 @@ from lymow.sensor import (
     LymowErrorSensor,
     LymowMapSensor,
     LymowRtkSensor,
+    LymowSchedulesSensor,
     LymowSensor,
     LymowSensorDescription,
     async_setup_entry,
@@ -773,3 +774,31 @@ async def test_async_setup_entry_registers_backup_maps_sensor() -> None:
     backup = [e for e in added if isinstance(e, LymowBackupMapsSensor)]
     assert len(backup) == 1
     assert backup[0]._thing_name == THING
+
+
+# ---------------------------------------------------------------------------
+# LymowSchedulesSensor
+# ---------------------------------------------------------------------------
+
+
+def test_schedules_sensor_none_until_first_reply() -> None:
+    sensor = LymowSchedulesSensor(_make_coord({}), DEVICE)
+    assert sensor.native_value is None
+    assert sensor.extra_state_attributes == {"schedules": []}
+
+
+def test_schedules_sensor_counts_and_exposes_entries() -> None:
+    entries = [
+        {"enabled": True, "start": "06:00", "end": "08:00"},
+        {"enabled": False, "start": "19:30", "end": "03:30"},
+    ]
+    sensor = LymowSchedulesSensor(_make_coord({"schedules": entries}), DEVICE)
+    assert sensor.native_value == 2
+    assert sensor.extra_state_attributes == {"schedules": entries}
+    assert sensor._attr_unique_id == f"{THING}_schedules"
+    assert sensor._attr_name == "Mower 1 Mow schedules"
+
+
+def test_schedules_sensor_empty_list_is_zero() -> None:
+    sensor = LymowSchedulesSensor(_make_coord({"schedules": []}), DEVICE)
+    assert sensor.native_value == 0
