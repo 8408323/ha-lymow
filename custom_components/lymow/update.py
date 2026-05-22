@@ -13,6 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 
 async def async_setup_entry(
@@ -38,6 +39,7 @@ class LymowFirmwareUpdate(CoordinatorEntity[LymowCoordinator], UpdateEntity):
         device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} Firmware"
         self._attr_unique_id = f"{self._thing_name}_firmware_update"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
 
     @property
     def _device_data(self) -> dict[str, Any]:

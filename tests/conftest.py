@@ -53,6 +53,7 @@ try:
     from homeassistant.components import camera as _ha_camera  # noqa: F401
 
     _load_lymow_module("coordinator")
+    _load_lymow_module("entity")
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
     _load_lymow_module("number")
@@ -197,6 +198,11 @@ except ImportError:
     _ha_ep = types.ModuleType("homeassistant.helpers.entity_platform")
     _ha_ep.AddEntitiesCallback = None  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.entity_platform", _ha_ep)
+
+    # ── homeassistant.helpers.device_registry ───────────────────────────────
+    _ha_dr = types.ModuleType("homeassistant.helpers.device_registry")
+    _ha_dr.DeviceInfo = dict  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.device_registry", _ha_dr)
 
     # ── homeassistant.helpers.aiohttp_client ─────────────────────────────────
     _ha_ac = types.ModuleType("homeassistant.helpers.aiohttp_client")
@@ -420,6 +426,7 @@ except ImportError:
 
     # Now load the platform modules that depend on the above stubs.
     _load_lymow_module("coordinator")
+    _load_lymow_module("entity")
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
     _load_lymow_module("number")

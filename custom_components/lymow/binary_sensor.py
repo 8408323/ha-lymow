@@ -12,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 
 async def async_setup_entry(
@@ -45,6 +46,7 @@ class _LymowBinarySensor(CoordinatorEntity[LymowCoordinator], BinarySensorEntity
         device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} {name}"
         self._attr_unique_id = f"{self._thing_name}_{suffix}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
 
     @property
     def _device_data(self) -> dict[str, Any]:

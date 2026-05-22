@@ -23,6 +23,7 @@ from .const import (
     USER_CTRL_SWITCH_LTE_AIRPLANE,
 )
 from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 
 async def async_setup_entry(
@@ -64,6 +65,7 @@ class _UserCtrlButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
         device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_name = f"{device_label} {name}"
         self._attr_unique_id = f"{self._thing_name}_{self._key}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_icon = icon
 
     async def async_press(self) -> None:
