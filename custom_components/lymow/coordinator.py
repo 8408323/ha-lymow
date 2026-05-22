@@ -100,6 +100,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._client = client
         self._mqtt = mqtt_client
         self.devices = devices
+        # Public read-only handle for entities that need API helpers (e.g. the
+        # camera's WSS presign). Avoids reaching into the private attribute.
+        self.client = client
         self._mqtt_state: dict[str, dict[str, Any]] = {}
         # Track work status per device to detect important transitions.
         self._prev_work_status: dict[str, int] = {}

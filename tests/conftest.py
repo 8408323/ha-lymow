@@ -37,6 +37,7 @@ _load_lymow_module("bluetooth")
 try:
     import homeassistant.components.binary_sensor  # noqa: F401
     import homeassistant.components.button  # noqa: F401
+    import homeassistant.components.camera  # noqa: F401
     import homeassistant.components.device_tracker  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
@@ -58,6 +59,7 @@ try:
     _load_lymow_module("switch")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
+    _load_lymow_module("camera")
     _load_lymow_module("device_tracker")
     _load_lymow_module("lawn_mower")
     _load_lymow_module("update")
@@ -368,6 +370,16 @@ except ImportError:
     _ha_button.ButtonEntity = _ButtonEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.button", _ha_button)
 
+    # ── homeassistant.components.camera ───────────────────────────────────────
+    _ha_camera = types.ModuleType("homeassistant.components.camera")
+
+    class _Camera:
+        def __init__(self):
+            pass
+
+    _ha_camera.Camera = _Camera  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.camera", _ha_camera)
+
     # ── homeassistant.components.update ───────────────────────────────────────
     _ha_update = types.ModuleType("homeassistant.components.update")
 
@@ -391,5 +403,6 @@ except ImportError:
     _load_lymow_module("device_tracker")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
+    _load_lymow_module("camera")
     _load_lymow_module("lawn_mower")
     _load_lymow_module("update")
