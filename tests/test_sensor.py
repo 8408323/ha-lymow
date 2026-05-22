@@ -269,6 +269,13 @@ def test_map_sensor_extra_attrs_has_nogo_zones() -> None:
     assert sensor.extra_state_attributes["nogo_zones"] == nogo
 
 
+def test_map_sensor_extra_attrs_has_channels() -> None:
+    channels = [{"hashId": "ch1", "zone1": "z1", "zone2": "z2"}]
+    coord = _make_coord({"mapData": {"channels": channels}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["channels"] == channels
+
+
 def test_map_sensor_extra_attrs_has_gps_origin() -> None:
     origin = {"lat": 12.0, "lon": 65.0}
     coord = _make_coord({"mapData": {"gpsOrigin": origin}})

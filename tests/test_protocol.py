@@ -468,6 +468,7 @@ def _build_map_response(
     nogo_zones: list[dict] | None = None,
     charging_station: dict | None = None,
     gps_origin: dict | None = None,
+    channels: list[dict] | None = None,
 ) -> bytes:
     """Build a minimal PbMapResponse blob for testing decode_map_response."""
     content = b""
@@ -526,6 +527,22 @@ def _build_map_response(
     if gps_origin:
         gps = _field_f32(1, gps_origin["lat"]) + _field_f32(2, gps_origin["lon"])
         content += _field_bytes(7, gps)
+
+    for chan in channels or []:
+        ch = _field_str(1, chan["hashId"])
+        if chan.get("zone1"):
+            ch += _field_str(2, chan["zone1"])
+        if chan.get("zone2"):
+            ch += _field_str(3, chan["zone2"])
+        ch += _field_i32(4, 1 if chan.get("isValid", True) else 0)
+        if chan.get("polygon"):
+            ch += _field_bytes(5, _polygon([(p["x"], p["y"]) for p in chan["polygon"]]))
+        ch += _field_i32(6, 1 if chan.get("isDockingChannel") else 0)
+        if chan.get("cutHeight") is not None:
+            ch += _field_i32(9, chan["cutHeight"])
+        if chan.get("channelLift") is not None:
+            ch += _field_i32(10, chan["channelLift"])
+        content += _field_bytes(3, ch)
 
     wrapper = _field_i32(1, 1) + _field_bytes(3, content)
     outer = _field_bytes(2, wrapper)
@@ -650,6 +667,55 @@ def test_decode_map_response_gps_origin() -> None:
     gps = result["gpsOrigin"]
     assert pytest.approx(gps["lat"], abs=1e-3) == 12.3456
     assert pytest.approx(gps["lon"], abs=1e-3) == 65.4321
+
+
+def test_decode_map_response_channels() -> None:
+    pb = _build_map_response(
+        channels=[
+            {
+                "hashId": "ch000001",
+                "zone1": "z1",
+                "zone2": "z2",
+                "isValid": True,
+                "isDockingChannel": False,
+                "polygon": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}],
+                "cutHeight": 40,
+                "channelLift": 1,
+            },
+            {"hashId": "ch000002", "isValid": False, "isDockingChannel": True},
+        ]
+    )
+    result = decode_map_response(pb)
+    assert len(result["channels"]) == 2
+    c0 = result["channels"][0]
+    assert c0["hashId"] == "ch000001"
+    assert c0["zone1"] == "z1"
+    assert c0["zone2"] == "z2"
+    assert c0["isValid"] is True
+    assert c0["isDockingChannel"] is False
+    assert len(c0["polygon"]) == 2
+    assert c0["cutHeight"] == 40
+    assert c0["channelLift"] == 1
+    assert result["channels"][1]["isDockingChannel"] is True
+    assert result["channels"][1]["isValid"] is False
+
+
+def test_decode_map_response_no_channels_is_empty_list() -> None:
+    result = decode_map_response(_build_map_response(go_zones=[]))
+    assert result["channels"] == []
+
+
+def test_encode_delete_channel_wraps_hash_in_map() -> None:
+    from lymow.const import USER_CTRL_DELETE_CHANNEL
+    from lymow.protocol import PB_VERSION, encode_delete_channel
+
+    pb = encode_delete_channel("ch000001")
+    f = _decode_fields(pb)
+    assert _first(f, 2) == PB_VERSION
+    assert _first(f, 5) == USER_CTRL_DELETE_CHANNEL
+    pb_map = _decode_fields(_first(f, 12))  # PbMap
+    channel = _decode_fields(_first(pb_map, 3))  # PbMap.channels = f3
+    assert _first(channel, 1) == b"ch000001"  # PbChannel.hashId = f1
 
 
 def test_decode_map_response_full() -> None:

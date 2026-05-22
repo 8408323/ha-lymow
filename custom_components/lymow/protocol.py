@@ -191,6 +191,7 @@ def _decode_map_polygon(data: bytes) -> list[dict[str, float]]:
 # Map content field numbers (inside the double-wrapped f23→f2→f3 structure)
 _MAP_CONTENT_GO_ZONES = 1
 _MAP_CONTENT_NOGO_ZONES = 2
+_MAP_CONTENT_CHANNELS = 3
 _MAP_CONTENT_CHARGING_STATION = 4
 _MAP_CONTENT_GPS_ORIGIN = 7
 
@@ -371,6 +372,13 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
         nogo_zones.append(nogo)
     result["nogoZones"] = nogo_zones
 
+    # ---- Channels (f3, repeated) — path connectors between zones ---------
+    channels: list[dict[str, Any]] = []
+    for chan_raw in _all(content, _MAP_CONTENT_CHANNELS):
+        if isinstance(chan_raw, bytes):
+            channels.append(decode_channel(chan_raw))
+    result["channels"] = channels
+
     # ---- Charging station pose (f4) — x/y/theta as i32 floats -----------
     cs_raw = _first(content, _MAP_CONTENT_CHARGING_STATION)
     if isinstance(cs_raw, bytes):
@@ -396,6 +404,32 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
         }
 
     return result
+
+
+def decode_channel(data: bytes) -> dict[str, Any]:
+    """Decode a PbChannel (path connector between two zones).
+
+    Field layout from PbChannel.encode (Hermes): f1 hashId, f2 zone1, f3 zone2,
+    f4 isValid, f5 polygon, f6 isDockingChannel, f9 cutHeight, f10 channelLift.
+    """
+    f = _decode_fields(data)
+    chan: dict[str, Any] = {}
+    for key, fn in (("hashId", 1), ("zone1", 2), ("zone2", 3)):
+        raw = _first(f, fn)
+        if isinstance(raw, bytes):
+            chan[key] = raw.decode("utf-8", errors="replace")
+    chan["isValid"] = bool(_first(f, 4, 0))
+    chan["isDockingChannel"] = bool(_first(f, 6, 0))
+    poly_raw = _first(f, 5)
+    if isinstance(poly_raw, bytes):
+        chan["polygon"] = _decode_map_polygon(poly_raw)
+    cut_h = _first(f, 9)
+    if cut_h is not None:
+        chan["cutHeight"] = cut_h
+    lift = _first(f, 10)
+    if lift is not None:
+        chan["channelLift"] = lift
+    return chan
 
 
 # ---------------------------------------------------------------------------
@@ -658,6 +692,21 @@ def encode_clear_schedules() -> bytes:
     (PbInput { version=49, schedule(11)=<empty> } == 10 31 5a 00).
     """
     return _field_i32(2, PB_VERSION) + _field_bytes(11, b"")
+
+
+def encode_delete_channel(hash_id: str) -> bytes:
+    """Encode a delete-channel command (USER_CTRL_DELETE_CHANNEL).
+
+    Mirrors the app: PbInput.map (f12) = PbMap { channels (f3) = [PbChannel{hashId}] }.
+    """
+    from .const import USER_CTRL_DELETE_CHANNEL
+
+    channel = _field_str(1, hash_id)  # PbChannel.hashId = f1
+    pb_map = _field_bytes(3, channel)  # PbMap.channels = f3
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_DELETE_CHANNEL)
+    pb += _field_bytes(12, pb_map)
+    return pb
 
 
 def encode_start_zones(zone_hash_ids: list[str]) -> bytes:

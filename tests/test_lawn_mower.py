@@ -34,6 +34,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_pause = AsyncMock()
     coord.async_dock = AsyncMock()
     coord.async_delete_zone = AsyncMock()
+    coord.async_delete_channel = AsyncMock()
     coord.async_start_zones = AsyncMock()
     coord.async_query_map = AsyncMock()
     coord.async_query_schedules = AsyncMock()
@@ -230,8 +231,9 @@ async def test_async_setup_entry_registers_services() -> None:
     await async_setup_entry(hass, entry, lambda entities: None)
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
-    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules.
-    assert hass.services.async_register.call_count == 28
+    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
+    # + 1 delete-channel.
+    assert hass.services.async_register.call_count == 29
 
 
 # ---------------------------------------------------------------------------
@@ -336,6 +338,63 @@ async def test_handle_delete_zone_unknown_zone_raises_validation_error() -> None
     call = _make_call(["lawn_mower.mower_1"], {"zone_hash_id": "z-unknown"})
     with pytest.raises(ServiceValidationError):
         await handlers2["delete_zone"](call)
+
+
+async def test_handle_delete_channel_valid_calls_coordinator() -> None:
+    coord = _make_coord({"mapData": {"channels": [{"hashId": "ch1"}]}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"channel_hash_id": "ch1"})
+    await handlers["delete_channel"](call)
+    coord.async_delete_channel.assert_awaited_once_with(THING, "ch1")
+
+
+async def test_handle_delete_channel_unknown_raises_validation_error() -> None:
+    coord = _make_coord({"mapData": {"channels": [{"hashId": "ch1"}]}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"channel_hash_id": "nope"})
+    with pytest.raises(ServiceValidationError):
+        await handlers["delete_channel"](call)
+    coord.async_delete_channel.assert_not_called()
+
+
+async def test_handle_delete_channel_ignores_channels_without_hashid() -> None:
+    # A channel dict missing hashId must not poison the validation set (no TypeError on sorted).
+    coord = _make_coord({"mapData": {"channels": [{"hashId": "ch1"}, {"isValid": True}]}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"channel_hash_id": "nope"})
+    with pytest.raises(ServiceValidationError):
+        await handlers["delete_channel"](call)
+
+
+async def test_handle_delete_channel_unknown_entity_skips() -> None:
+    coord = _make_coord({"mapData": {"channels": [{"hashId": "ch1"}]}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.other"], {"channel_hash_id": "ch1"})
+    await handlers["delete_channel"](call)
+    coord.async_delete_channel.assert_not_called()
+
+
+async def test_handle_delete_channel_empty_channels_skips_validation() -> None:
+    coord = _make_coord({"mapData": {"channels": []}})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"channel_hash_id": "ch-any"})
+    await handlers["delete_channel"](call)
+    coord.async_delete_channel.assert_awaited_once_with(THING, "ch-any")
 
 
 async def test_handle_delete_zone_empty_go_ids_skips_validation() -> None:
