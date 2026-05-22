@@ -612,20 +612,30 @@ class LymowMapCard extends HTMLElement {
     this._render();
   }
 
-  /** Reduce dense protobuf vertices to manageable edit handles (min 1.5 m apart). */
+  /** Reduce dense protobuf vertices to at most MAX_VERTS edit handles. */
   _decimatePoly(pts) {
-    if (pts.length <= 10) return pts.map((p) => ({ x: p.x, y: p.y }));
-    const MIN_DIST = 1.5; // metres
+    const MAX_VERTS = 32;
+    if (pts.length <= MAX_VERTS) return pts.map((p) => ({ x: p.x, y: p.y }));
+    // Compute perimeter so we can pick an adaptive minimum distance.
+    let perim = 0;
+    for (let i = 0; i < pts.length; i++) {
+      const q = pts[(i + 1) % pts.length];
+      const dx = q.x - pts[i].x, dy = q.y - pts[i].y;
+      perim += Math.sqrt(dx * dx + dy * dy);
+    }
+    const minDist = perim / MAX_VERTS;
     const out = [{ x: pts[0].x, y: pts[0].y }];
     for (let i = 1; i < pts.length; i++) {
       const prev = out[out.length - 1];
       const dx = pts[i].x - prev.x, dy = pts[i].y - prev.y;
-      if (Math.sqrt(dx * dx + dy * dy) >= MIN_DIST) out.push({ x: pts[i].x, y: pts[i].y });
+      if (Math.sqrt(dx * dx + dy * dy) >= minDist) out.push({ x: pts[i].x, y: pts[i].y });
     }
-    // Always close: ensure last kept point isn't nearly identical to first
-    const last = out[out.length - 1], first = out[0];
-    const dx = last.x - first.x, dy = last.y - first.y;
-    if (Math.sqrt(dx * dx + dy * dy) < MIN_DIST) out.pop();
+    // Drop last if nearly identical to first (closing point)
+    if (out.length > 1) {
+      const last = out[out.length - 1], first = out[0];
+      const dx = last.x - first.x, dy = last.y - first.y;
+      if (Math.sqrt(dx * dx + dy * dy) < minDist * 0.5) out.pop();
+    }
     return out;
   }
 
