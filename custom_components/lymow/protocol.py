@@ -952,8 +952,7 @@ def encode_delete_nogo_zone(hash_id: str) -> bytes:
     From deleteZonePartition (fn 8972) type==1 branch: identical to the goZone
     delete (userCtrl=CLEAR_ZONE=8, PbZone{basicInfo{hashId}}) but placed in
     PbMap.nogoZones (field 2) instead of goZones (field 1). Hardware-validated;
-    a directly-deleted no-go zone is recoverable via backup restore (unlike a
-    no-go zone orphaned by a cascading go-zone delete — see issue #111).
+    deleted no-go zones are recoverable by restoring a prior map backup.
     """
     from .const import USER_CTRL_CLEAR_ZONE
 
