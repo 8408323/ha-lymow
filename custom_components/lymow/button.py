@@ -18,6 +18,7 @@ from .const import (
     USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
+    USER_CTRL_MODIFY_STATION,
     USER_CTRL_RESTORE_FACTORY,
     USER_CTRL_SELF_CHECKING,
     USER_CTRL_SWITCH_LTE_AIRPLANE,
@@ -40,6 +41,7 @@ async def async_setup_entry(
                 SelfCheckButton(coordinator, device),
                 ForceReinitButton(coordinator, device),
                 ChargingStationResetButton(coordinator, device),
+                SetChargingStationHereButton(coordinator, device),
                 AbortOtaButton(coordinator, device),
                 CompleteZonePartitionButton(coordinator, device),
                 ExitRemoteControlButton(coordinator, device),
@@ -109,6 +111,24 @@ class ChargingStationResetButton(_UserCtrlButton):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Reset charging station", "mdi:home-lightning-bolt")
+
+
+class SetChargingStationHereButton(_UserCtrlButton):
+    """Record the robot's current position as the new charging-station location.
+
+    Counterpart to ``ChargingStationResetButton``: that one clears the recorded
+    station so the robot has to relearn its position; this one captures wherever
+    the mower is parked right now as the station's map location (the app's
+    "Set station here" action; payload-less command per APK startCtrlCharging
+    encoder).
+    """
+
+    _user_ctrl = USER_CTRL_MODIFY_STATION
+    _key = "set_charging_station_here"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Set charging station here", "mdi:home-map-marker")
 
 
 class AbortOtaButton(_UserCtrlButton):
