@@ -106,7 +106,9 @@ def _parse_mqtt_packets(buf: bytes) -> tuple[list[tuple[int, int, bytes, int]], 
             multiplier *= 128
         if not complete:
             if p - pos > 4:
-                pos = p  # malformed Remaining Length (>4 bytes) — skip it
+                # Continuation bit still set after the 4th Remaining Length byte:
+                # the field is malformed per MQTT spec — skip past it and resync.
+                pos = p
             break
         packet_end = p + rem_len
         if packet_end > n:
@@ -152,6 +154,11 @@ def _pretty_mqtt_payload(body: bytes) -> str:
 
 
 _CTRL_NAMES = {1: "CONNECT", 2: "CONNACK", 4: "PUBACK", 8: "SUB", 9: "SUBACK", 12: "PINGREQ", 13: "PINGRESP"}
+
+# Cap on per-direction MQTT reassembly tail. A real PUBLISH carrying map data is
+# only ~tens of KB, so anything past this is a corrupt/hostile Remaining Length
+# stalling the parser — drop the tail and resync rather than buffer forever.
+_WS_BUF_MAX = 1 << 20  # 1 MiB
 
 
 class LymowCapture:
@@ -224,6 +231,9 @@ class LymowCapture:
             buf += msg.content
             packets, consumed = _parse_mqtt_packets(bytes(buf))
             del buf[:consumed]
+            if len(buf) > _WS_BUF_MAX:
+                _write(f"[{_ts()}] MQTT {arrow} (dropped {len(buf)}B unparsed tail — resyncing)")
+                buf.clear()
             for ctrl, qos, var, packet_len in packets:
                 if ctrl == 3:  # PUBLISH
                     parsed = _decode_publish(qos, var)
