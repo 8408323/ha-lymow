@@ -15,6 +15,7 @@ from lymow.button import (
     LockRobotButton,
     RestoreFactoryDefaultsButton,
     SelfCheckButton,
+    SetChargingStationHereButton,
     ToggleLteAirplaneButton,
     async_setup_entry,
 )
@@ -27,6 +28,7 @@ from lymow.const import (
     USER_CTRL_EXIT_REMOTE,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
+    USER_CTRL_MODIFY_STATION,
     USER_CTRL_RESTORE_FACTORY,
     USER_CTRL_SELF_CHECKING,
     USER_CTRL_SWITCH_LTE_AIRPLANE,
@@ -103,6 +105,19 @@ async def test_charging_station_reset_press_sends_user_ctrl() -> None:
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_CHARGING_STATION_RESET)
 
 
+def test_set_charging_station_here_button_disabled_by_default() -> None:
+    coord = _make_coord()
+    e = SetChargingStationHereButton(coord, DEVICE)
+    assert e._attr_entity_registry_enabled_default is False
+    assert e._attr_unique_id == f"{THING}_set_charging_station_here"
+
+
+async def test_set_charging_station_here_press_sends_user_ctrl() -> None:
+    coord = _make_coord()
+    await SetChargingStationHereButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_MODIFY_STATION)
+
+
 async def test_button_device_name_fallback_to_sn() -> None:
     coord = _make_coord()
     e = LockRobotButton(coord, {"deviceThingName": THING, "sn": "SN42"})
@@ -126,6 +141,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "SelfCheckButton",
         "ForceReinitButton",
         "ChargingStationResetButton",
+        "SetChargingStationHereButton",
         "AbortOtaButton",
         "CompleteZonePartitionButton",
         "ExitRemoteControlButton",
