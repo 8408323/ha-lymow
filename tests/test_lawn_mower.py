@@ -592,7 +592,7 @@ async def test_handle_resume_calls_coordinator() -> None:
 
     await async_setup_entry(hass, entry, _add)
     await handlers2["resume"](_make_call(["lawn_mower.mower_1"]))
-    coord.async_resume.assert_called_once_with(THING)
+    coord.async_resume.assert_awaited_once_with(THING)
 
 
 async def test_handle_resume_unknown_entity_skips() -> None:
@@ -614,7 +614,7 @@ async def test_handle_resume_unknown_entity_skips() -> None:
     hass.services.async_register.side_effect = _register2
     await async_setup_entry(hass, entry, lambda entities: None)
     await handlers2["resume"](_make_call(["lawn_mower.does_not_exist"]))
-    coord.async_resume.assert_not_called()
+    coord.async_resume.assert_not_awaited()
 
 
 async def test_handle_query_schedules_calls_coordinator() -> None:
