@@ -59,6 +59,17 @@ start_zone:
       selector:
         object:
 
+pause:
+  name: Pause mowing
+  description: >
+    Pause the robot. Sends USER_CTRL_PAUSE during a mow or USER_CTRL_PAUSE_DOCK
+    while it is returning to the dock. Provided in addition to lawn_mower.pause
+    so card automations (e.g. RTK auto-pause) can stay in the lymow domain.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
 query_map:
   name: Refresh map
   description: >
