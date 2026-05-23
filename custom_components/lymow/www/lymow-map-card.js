@@ -102,6 +102,8 @@ class LymowMapCard extends HTMLElement {
       poseThetaRad: a.poseThetaRad,
       rtkEastM: a.rtkEastM,
       rtkNorthM: a.rtkNorthM,
+      rtkStatus: a.rtkStatus,
+      workStatus: a.workStatus,
     };
   }
 
@@ -166,7 +168,12 @@ class LymowMapCard extends HTMLElement {
       return;
     }
 
-    const { goZones, nogoZones, channels, chargingStation, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM } = mapData;
+    const { goZones, nogoZones, channels, chargingStation, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, workStatus } = mapData;
+
+    // RTK auto-pause: if enabled, pause mowing when fix quality drops below threshold
+    if (this._config.rtk_autopause && this._config.mower_entity) {
+      this._checkRtkAutopause(rtkStatus, workStatus);
+    }
 
     if ([...goZones, ...nogoZones].length === 0 && !chargingStation) {
       this.shadowRoot.innerHTML = this._wrapMsg(`No map data yet. Call <em>lymow.query_map</em> or wait for the robot to connect.`);
@@ -364,7 +371,18 @@ class LymowMapCard extends HTMLElement {
         ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" onclick="${host}._toggleSettings()" title="Mowing settings">⚙</button>` : "";
       const expandBtn = `<button class="btn expand" onclick="${host}._toggleExpand()" title="${this._expanded ? "Collapse" : "Expand map"}">${this._expanded ? "⊠" : "⊞"}</button>`;
       const resetBtn = `<button class="btn reset" onclick="${host}._resetView()" title="Reset zoom">⊡</button>`;
-      toolbar = `<div class="btn-row">${mowBtn}${editBtn}${settingsBtn}${expandBtn}${resetBtn}</div>`;
+      // RTK status badge
+      const rtkBadge = (() => {
+        if (rtkStatus === undefined || rtkStatus === null) return "";
+        const labels = { 0: "No fix", 1: "Float", 2: "Fixed", 3: "RTK" };
+        const colors = { 0: "#c62828", 1: "#ef6c00", 2: "#2e7d32", 3: "#1565c0" };
+        const n = parseInt(rtkStatus);
+        const color = colors[n] ?? "#757575";
+        const label = labels[n] ?? `RTK ${n}`;
+        const autopauseNote = this._config.rtk_autopause ? " · auto-pause on" : "";
+        return `<span class="rtk-badge" style="background:${color}" title="RTK fix quality${autopauseNote}">📡 ${label}</span>`;
+      })();
+      toolbar = `<div class="btn-row">${mowBtn}${editBtn}${settingsBtn}${expandBtn}${resetBtn}${rtkBadge}</div>`;
     }
 
     // ── Legend with matching SVG symbols ─────────────────────────────────────
@@ -376,7 +394,7 @@ class LymowMapCard extends HTMLElement {
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
       poseEastM !== undefined ? _li(`<circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/>`, "0 0 18 14", "Robot") : "",
       rtkEastM !== undefined ? _li(`<polygon points="8,1 2,13 14,13" fill="#7b1fa2" stroke="white" stroke-width="1"/>`, "0 0 16 14", "RTK") : "",
-      channels.some(c => c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Docking ch.") : "",
+      channels.some(c => c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Channel (dock)") : "",
       channels.some(c => !c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#6a1b9a" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Channel") : "",
     ].filter(Boolean).join("");
 
@@ -484,6 +502,7 @@ class LymowMapCard extends HTMLElement {
         .sp-status { font-size: 0.75em; color: var(--secondary-text-color); margin-top: 4px; min-height: 1.2em; }
         .btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .btn:not(:disabled):hover { filter: brightness(1.1); }
+        .rtk-badge { flex: 0; padding: 5px 8px; border-radius: 6px; font-size: 0.78em; font-weight: 600; color: white; white-space: nowrap; align-self: center; }
         .edit-bar { font-size: 0.8em; color: var(--secondary-text-color); margin-top: 6px; flex-shrink: 0; }
         .msg { padding: 14px; color: var(--secondary-text-color); font-size: 0.9em; line-height: 1.5; }
         code { background: var(--code-editor-background-color,#f0f0f0); padding: 1px 4px; border-radius: 3px; }
@@ -818,6 +837,30 @@ class LymowMapCard extends HTMLElement {
     });
     this._selectedZones.clear();
     this._render();
+  }
+
+  // ---------------------------------------------------------------------------
+  // RTK auto-pause
+  // ---------------------------------------------------------------------------
+
+  // Called every render when rtk_autopause is enabled in config.
+  // Pauses the mower if fix quality drops to float or worse (rtkStatus < 2)
+  // while mowing. Won't re-pause more than once per degraded episode.
+  _checkRtkAutopause(rtkStatus, workStatus) {
+    if (rtkStatus === undefined || rtkStatus === null) return;
+    const fix = parseInt(rtkStatus);
+    // workStatus 1 = mowing (from captured protocol). Only pause when actually cutting.
+    const isMowing = workStatus !== undefined && parseInt(workStatus) === 1;
+    const minFix = this._config.rtk_autopause_min_fix ?? 2; // default: require Fixed or RTK
+    const fixLow = fix < minFix;
+
+    if (fixLow && isMowing && !this._rtkPauseSent) {
+      this._rtkPauseSent = true;
+      this._hass.callService("lymow", "pause", { entity_id: this._config.mower_entity })
+        .catch((err) => console.warn("lymow-map-card: RTK auto-pause failed:", err));
+    }
+    // Reset once fix recovers so next degradation episode can pause again
+    if (!fixLow) this._rtkPauseSent = false;
   }
 
   // ---------------------------------------------------------------------------
