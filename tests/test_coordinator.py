@@ -293,6 +293,22 @@ async def test_async_set_task_config_publishes_encoded_command() -> None:
     assert _first(cfg, 9) == 250  # pathSpacing
 
 
+@pytest.mark.asyncio
+async def test_async_set_run_time_config_publishes_encoded_command() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_run_time_config(THING, cutHeight=55)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 50  # USER_CTRL_SET_RUN_TIME_CONFIG
+    pb_map = _decode_fields(_first(f, 12))
+    cfg = _decode_fields(_first(pb_map, 13))
+    assert _first(cfg, 1) == 55  # cutHeight
+
+
 # ---------------------------------------------------------------------------
 # MQTT online callback
 # ---------------------------------------------------------------------------

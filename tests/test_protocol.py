@@ -1822,6 +1822,33 @@ def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
         encode_set_task_config(nonsense=1)
 
 
+def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
+    from lymow.protocol import encode_set_run_time_config
+
+    pb = encode_set_run_time_config(cutHeight=45, moveSpeed=0.6, cutSpeed=120)
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    assert _first(f, 5) == 50  # USER_CTRL_SET_RUN_TIME_CONFIG
+    # PbInput.map (field 12) → PbMap.runTimeConfig (field 13) → PbRunTimeConfig
+    pb_map = _decode_fields(_first(f, 12))
+    cfg = _decode_fields(_first(pb_map, 13))
+    assert _first(cfg, 1) == 45  # cutHeight
+    assert _first(cfg, 6) == 120  # cutSpeed
+    # moveSpeed is float32 (wire type 5)
+    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.6, rel=1e-5)
+
+
+def test_encode_set_run_time_config_skips_none_and_rejects_unknown() -> None:
+    from lymow.protocol import encode_set_run_time_config
+
+    pb = encode_set_run_time_config(cutHeight=None, cutSpeed=80)
+    cfg = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 12)), 13))
+    assert _first(cfg, 6) == 80  # cutSpeed present
+    assert _first(cfg, 1) is None  # cutHeight (None) skipped
+    with pytest.raises(ValueError, match="unknown run-time-config field"):
+        encode_set_run_time_config(nonsense=1)
+
+
 def test_encode_rename_zone_structure() -> None:
     from lymow.protocol import encode_rename_zone
 

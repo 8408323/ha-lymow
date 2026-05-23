@@ -668,6 +668,45 @@ def encode_set_task_config(**fields: Any) -> bytes:
     return pb
 
 
+# PbRunTimeConfig field map — (proto field number, wire kind) — derived from APK
+# (Hermes) analysis of the app's ts-proto encoder (PbRunTimeConfig.encode). The
+# message is carried at PbInput.map.runTimeConfig (PbInput field 12 → PbMap
+# field 13) under USER_CTRL_SET_RUN_TIME_CONFIG. ``channelConfig`` (PbChannelConfig,
+# field 7) is intentionally omitted — per-channel overrides aren't exposed here.
+_RUN_TIME_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "cutHeight": (1, "int"),
+    "moveSpeed": (4, "float"),
+    "cutSpeed": (6, "int"),
+}
+
+
+def encode_set_run_time_config(**fields: Any) -> bytes:
+    """Encode a USER_CTRL_SET_RUN_TIME_CONFIG command setting only the given fields.
+
+    Field names match PbRunTimeConfig (see ``_RUN_TIME_CONFIG_FIELDS``); ``None``
+    values are skipped so only explicitly-set parameters are sent. Unknown
+    field names raise ValueError.
+    """
+    cfg = b""
+    for name, value in fields.items():
+        if value is None:
+            continue
+        if name not in _RUN_TIME_CONFIG_FIELDS:
+            raise ValueError(f"unknown run-time-config field: {name}")
+        field_no, kind = _RUN_TIME_CONFIG_FIELDS[name]
+        if kind == "float":
+            cfg += _field_f32(field_no, float(value))
+        else:
+            cfg += _field_i32(field_no, int(value))
+    from .const import USER_CTRL_SET_RUN_TIME_CONFIG
+
+    pb_map = _field_bytes(13, cfg)  # PbMap.runTimeConfig
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_SET_RUN_TIME_CONFIG)
+    pb += _field_bytes(12, pb_map)  # PbInput.map
+    return pb
+
+
 def encode_query_map(queryIndex: int = 0) -> bytes:
     """Encode a query-map command (userCtrl=19)."""
     sub = _field_i32(1, queryIndex) + _field_i32(4, 1)

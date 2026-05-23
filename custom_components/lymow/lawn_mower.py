@@ -74,6 +74,7 @@ _SERVICE_RENAME_ZONE = "rename_zone"
 _SERVICE_CLEAR_SCHEDULES = "clear_schedules"
 _SERVICE_SET_SCHEDULES = "set_schedules"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
+_SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
@@ -85,6 +86,18 @@ _TASK_CONFIG_SERVICE_FIELDS = {
     "nogo_mow_laps": "noGoMowLaps",
     "cut_speed": "cutSpeed",
     "brush_speed": "brushSpeed",
+}
+
+# Service-field (snake_case) → PbRunTimeConfig field (camelCase) + safe numeric
+# bounds. Run-time config overrides settings on the currently-running task (vs
+# set_task_config, which is the next-mow default). cut_height is mm, move_speed
+# is m/s. Bounds match the documented UI selectors in services.yaml so non-UI
+# callers (automations, REST) can't bypass the selector ranges and push out-of-
+# range values straight to the mower.
+_RUN_TIME_CONFIG_SERVICE_FIELDS = {
+    "cut_height": ("cutHeight", "int", (20, 100)),
+    "move_speed": ("moveSpeed", "float", (0.1, 1.5)),
+    "cut_speed": ("cutSpeed", "int", (0, 1000)),
 }
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
@@ -229,6 +242,18 @@ _SET_TASK_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         **{vol.Optional(k): vol.Coerce(int) for k in _TASK_CONFIG_SERVICE_FIELDS},
+    }
+)
+_SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        **{
+            vol.Optional(k): vol.All(
+                vol.Coerce(float) if kind == "float" else vol.Coerce(int),
+                vol.Range(min=lo, max=hi),
+            )
+            for k, (_proto, kind, (lo, hi)) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items()
+        },
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -537,6 +562,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_task_config(entity._thing_name, **fields)
 
+    async def handle_set_run_time_config(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        fields = {
+            proto: call.data[svc]
+            for svc, (proto, _kind, _range) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items()
+            if svc in call.data
+        }
+        if not fields:
+            raise ServiceValidationError("set_run_time_config: provide at least one parameter to set.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_run_time_config(entity._thing_name, **fields)
+
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
@@ -674,6 +715,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     hass.services.async_register(DOMAIN, SERVICE_BLE_DRIVE, handle_ble_drive, schema=_BLE_DRIVE_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_TASK_CONFIG, handle_set_task_config, schema=_SET_TASK_CONFIG_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_RUN_TIME_CONFIG, handle_set_run_time_config, schema=_SET_RUN_TIME_CONFIG_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)

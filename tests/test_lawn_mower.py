@@ -41,6 +41,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_query_schedules = AsyncMock()
     coord.async_ble_drive = AsyncMock()
     coord.async_set_task_config = AsyncMock()
+    coord.async_set_run_time_config = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
     coord.async_set_schedules = AsyncMock()
@@ -235,10 +236,10 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
-    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
-    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
-    assert hass.services.async_register.call_count == 32
+    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 set-device-name
+    # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 rename-zone
+    # + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
+    assert hass.services.async_register.call_count == 33
 
 
 # ---------------------------------------------------------------------------
@@ -1220,6 +1221,66 @@ async def test_handle_set_task_config_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"cut_speed": 100})
     await handlers["set_task_config"](call)
     coord.async_set_task_config.assert_not_called()
+
+
+async def test_handle_set_run_time_config_maps_and_calls() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"cut_height": 45, "move_speed": 0.6, "cut_speed": 120})
+    await handlers["set_run_time_config"](call)
+    coord.async_set_run_time_config.assert_awaited_once_with("mower-001", cutHeight=45, moveSpeed=0.6, cutSpeed=120)
+
+
+async def test_handle_set_run_time_config_no_params_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {})
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_run_time_config"](call)
+    coord.async_set_run_time_config.assert_not_awaited()
+
+
+async def test_handle_set_run_time_config_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.other"], {"cut_height": 45})
+    await handlers["set_run_time_config"](call)
+    coord.async_set_run_time_config.assert_not_awaited()
+
+
+def test_set_run_time_config_schema_enforces_ranges() -> None:
+    """Non-UI callers (automations, REST) must not bypass the documented bounds."""
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_RUN_TIME_CONFIG_SCHEMA
+
+    valid = _SET_RUN_TIME_CONFIG_SCHEMA(
+        {"entity_id": ["lawn_mower.x"], "cut_height": 40, "move_speed": 0.5, "cut_speed": 100}
+    )
+    assert valid["cut_height"] == 40 and valid["move_speed"] == 0.5 and valid["cut_speed"] == 100
+
+    # cut_height bounds (20..100 mm), move_speed (0.1..1.5 m/s), cut_speed (0..1000)
+    for bad in (
+        {"cut_height": 5},
+        {"cut_height": 500},
+        {"move_speed": 0.0},
+        {"move_speed": 9.9},
+        {"cut_speed": -1},
+        {"cut_speed": 10000},
+    ):
+        with pytest.raises(vol_.Invalid):
+            _SET_RUN_TIME_CONFIG_SCHEMA({"entity_id": ["lawn_mower.x"], **bad})
 
 
 def _validated_schedule(**overrides) -> dict:

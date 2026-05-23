@@ -688,6 +688,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_set_task_config(**fields))
 
+    async def async_set_run_time_config(self, thing_name: str, **fields: Any) -> None:
+        """Set run-time config parameters (USER_CTRL_SET_RUN_TIME_CONFIG).
+
+        Unlike task-config (which is the next-mow default), run-time-config
+        overrides settings on the currently-running task. Only the provided
+        PbRunTimeConfig fields are sent; see :data:`protocol._RUN_TIME_CONFIG_FIELDS`
+        for the supported names.
+        """
+        from .protocol import encode_set_run_time_config
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_run_time_config(**fields))
+
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
         """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*
         commands that the robot answers via pboutput."""
