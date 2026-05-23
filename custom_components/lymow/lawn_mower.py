@@ -62,6 +62,7 @@ _ATTR_NOGO_HASH_ID = "nogo_hash_id"
 _SERVICE_START_ZONE = "start_zone"
 _ATTR_ZONE_HASH_IDS = "zone_hash_ids"
 _SERVICE_QUERY_MAP = "query_map"
+_SERVICE_RESUME = "resume"
 _SERVICE_QUERY_SCHEDULES = "query_schedules"
 _SERVICE_START_VIDEO_SESSION = "start_video_session"
 _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
@@ -353,6 +354,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_query_map(entity._thing_name)
 
+    async def handle_resume(call: ServiceCall) -> None:
+        # Resume a paused/returning mow without losing progress. HA's standard
+        # start_mowing sends USER_CTRL_CLEAN (a fresh task); this sends
+        # USER_CTRL_RESUME so the robot picks up where it left off.
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_resume(entity._thing_name)
+
     async def handle_query_schedules(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
@@ -599,6 +612,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(DOMAIN, _SERVICE_START_ZONE, handle_start_zone, schema=_START_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_MAP, handle_query_map, schema=_ENTITY_ID_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_RESUME, handle_resume, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_SCHEDULES, handle_query_schedules, schema=_ENTITY_ID_SCHEMA)
     for service_name, method_name in _QUERY_SERVICES:
         hass.services.async_register(
