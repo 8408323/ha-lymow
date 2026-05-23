@@ -657,6 +657,19 @@ class LymowMapCard extends HTMLElement {
 
     this._updateScaleBar();
     this._wireEvents();
+    // If _pxPerUnit came from the fallback estimate, re-render once after layout
+    // using the real measured SVG width. The tolerance check prevents re-render loops.
+    requestAnimationFrame(() => {
+      const svg = this.shadowRoot?.querySelector("svg");
+      if (!svg) return;
+      const r = svg.getBoundingClientRect();
+      if (!r.width) return;
+      const truePpu = r.width / this._vw;
+      if (Math.abs(truePpu - this._pxPerUnit) > 0.2) {
+        this._pxPerUnit = truePpu;
+        this._render();
+      }
+    });
   }
 
   _niceNumber(x) {
