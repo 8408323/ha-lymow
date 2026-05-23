@@ -116,10 +116,11 @@ class ChargingStationResetButton(_UserCtrlButton):
 class SetChargingStationHereButton(_UserCtrlButton):
     """Record the robot's current position as the new charging-station location.
 
-    Counterpart to ``ChargingStationResetButton``: where that clears the recorded
-    station and forces re-pairing, this captures wherever the mower is parked
-    right now as the station's map location (the app's "Set station here"
-    action; payload-less command per APK startCtrlCharging encoder).
+    Counterpart to ``ChargingStationResetButton``: that one clears the recorded
+    station so the robot has to relearn its position; this one captures wherever
+    the mower is parked right now as the station's map location (the app's
+    "Set station here" action; payload-less command per APK startCtrlCharging
+    encoder).
     """
 
     _user_ctrl = USER_CTRL_MODIFY_STATION
