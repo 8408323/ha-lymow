@@ -42,6 +42,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_ble_drive = AsyncMock()
     coord.async_set_task_config = AsyncMock()
     coord.async_set_run_time_config = AsyncMock()
+    coord.async_set_robot_config = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
     coord.async_set_schedules = AsyncMock()
@@ -237,9 +238,9 @@ async def test_async_setup_entry_registers_services() -> None:
     await async_setup_entry(hass, entry, lambda entities: None)
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 set-device-name
-    # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 rename-zone
-    # + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
-    assert hass.services.async_register.call_count == 33
+    # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 set-network-priority
+    # + 1 rename-zone + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
+    assert hass.services.async_register.call_count == 34
 
 
 # ---------------------------------------------------------------------------
@@ -1281,6 +1282,51 @@ def test_set_run_time_config_schema_enforces_ranges() -> None:
     ):
         with pytest.raises(vol_.Invalid):
             _SET_RUN_TIME_CONFIG_SCHEMA({"entity_id": ["lawn_mower.x"], **bad})
+
+
+async def test_handle_set_network_priority_4g_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_network_priority"](_make_call(["lawn_mower.mower_1"], {"preferred": "4g"}))
+    coord.async_set_robot_config.assert_awaited_once_with("mower-001", metric_4g=True)
+
+
+async def test_handle_set_network_priority_wifi_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_network_priority"](_make_call(["lawn_mower.mower_1"], {"preferred": "wifi"}))
+    coord.async_set_robot_config.assert_awaited_once_with("mower-001", metric_4g=False)
+
+
+async def test_handle_set_network_priority_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_network_priority"](_make_call(["lawn_mower.other"], {"preferred": "4g"}))
+    coord.async_set_robot_config.assert_not_awaited()
+
+
+def test_set_network_priority_schema_rejects_bad_choice() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_NETWORK_PRIORITY_SCHEMA
+
+    assert _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"], "preferred": "4g"})["preferred"] == "4g"
+    assert _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"], "preferred": "wifi"})["preferred"] == "wifi"
+    with pytest.raises(vol_.Invalid):
+        _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"], "preferred": "ethernet"})
+    with pytest.raises(vol_.Invalid):
+        _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"]})  # preferred missing
 
 
 def _validated_schedule(**overrides) -> dict:

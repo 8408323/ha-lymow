@@ -309,6 +309,21 @@ async def test_async_set_run_time_config_publishes_encoded_command() -> None:
     assert _first(cfg, 1) == 55  # cutHeight
 
 
+@pytest.mark.asyncio
+async def test_async_set_robot_config_publishes_metric_4g_without_userctrl() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_robot_config(THING, metric_4g=True)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) is None  # no userCtrl on robotConfig writes
+    cfg = _decode_fields(_first(f, 13))  # PbInput.robotConfig
+    assert _first(cfg, 11) == 1  # metric_4g
+
+
 # ---------------------------------------------------------------------------
 # MQTT online callback
 # ---------------------------------------------------------------------------

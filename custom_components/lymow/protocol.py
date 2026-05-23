@@ -668,6 +668,37 @@ def encode_set_task_config(**fields: Any) -> bytes:
     return pb
 
 
+# PbRobotConfig field map — (proto field number) — derived from APK (Hermes)
+# analysis of PbRobotConfig.encode (fn #9506 at offset 0x004a7ce8). Carried in
+# PbInput.robotConfig (field 13) for device-config writes; the app omits
+# userCtrl on these — the robot dispatches based on the submessage shape (see
+# setNetworkType fn #8970). Only the bool fields we expose today are listed
+# here; broaden the codec when adding non-bool fields (audioVolume int,
+# rcCutHeight int, etc.).
+_ROBOT_CONFIG_BOOL_FIELDS: dict[str, int] = {
+    "metric_4g": 11,  # true = 4G preferred, false = WiFi preferred
+}
+
+
+def encode_set_robot_config(**fields: Any) -> bytes:
+    """Encode a PbInput carrying only a PbRobotConfig sub-message.
+
+    Unlike SET_TASK_CONFIG / SET_RUN_TIME_CONFIG, robotConfig writes don't set
+    userCtrl — the robot routes on the submessage shape itself. Only the named
+    PbRobotConfig fields are sent; ``None`` is skipped. Unknown names raise.
+    """
+    cfg = b""
+    for name, value in fields.items():
+        if value is None:
+            continue
+        if name not in _ROBOT_CONFIG_BOOL_FIELDS:
+            raise ValueError(f"unknown robot-config field: {name}")
+        cfg += _field_i32(_ROBOT_CONFIG_BOOL_FIELDS[name], 1 if value else 0)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
 # PbRunTimeConfig field map — (proto field number, wire kind) — derived from APK
 # (Hermes) analysis of the app's ts-proto encoder (PbRunTimeConfig.encode). The
 # message is carried at PbInput.map.runTimeConfig (PbInput field 12 → PbMap

@@ -688,6 +688,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_set_task_config(**fields))
 
+    async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
+        """Set PbRobotConfig fields on the robot — currently just network priority.
+
+        These writes don't set userCtrl — the robot dispatches by the presence
+        of the robotConfig submessage. Supported field names are listed in
+        :data:`protocol._ROBOT_CONFIG_BOOL_FIELDS` (extend it, and
+        :func:`protocol.encode_set_robot_config`, to add non-bool fields).
+        """
+        from .protocol import encode_set_robot_config
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_robot_config(**fields))
+
     async def async_set_run_time_config(self, thing_name: str, **fields: Any) -> None:
         """Set run-time config parameters (USER_CTRL_SET_RUN_TIME_CONFIG).
 
