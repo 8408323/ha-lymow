@@ -86,6 +86,7 @@ _TASK_CONFIG_SERVICE_FIELDS = {
     "nogo_mow_laps": "noGoMowLaps",
     "cut_speed": "cutSpeed",
     "brush_speed": "brushSpeed",
+    "obs_dec_mode": "obsDecMode",
 }
 # Fields that accept floats rather than ints.
 _TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}

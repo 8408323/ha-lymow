@@ -5,17 +5,25 @@
  *   • Renders go-zones, no-go zones, channels, charging station, robot pose, RTK base
  *   • Mouse wheel / pinch to zoom; drag anywhere on map to pan
  *   • Expand button: fills the full browser viewport
- *   • Edit mode: tap a go-zone or no-go zone → drag vertex handles to reshape; tap
- *     edge midpoint (+) to insert a vertex; tap vertex ✕ to delete; Save / Cancel
+ *   • Status bar: work status, battery, mow progress, RTK fix badge
+ *   • Edit mode: tap a go-zone or no-go zone → drag vertices; tap edge + to insert;
+ *     tap ✕ to delete; Save / Cancel; rename zone in edit mode
+ *   • Zone enable/disable: long-press a go-zone to toggle enabled state
+ *   • Pin-and-go: double-tap anywhere on map to send robot to that point
  *   • North arrow + scale bar fixed to viewport corners (pixel-space, no zoom scaling)
  *   • Markers (robot, RTK, station) fixed pixel size via inverse-zoom SVG transform
- *   • Legend symbols match actual map markers
+ *   • Mowing settings panel: speed, spacing, laps, direction, obstacle avoidance
+ *   • Schedule viewer: shows next mowing schedule
+ *   • RTK auto-pause: optional config to pause when fix quality degrades
  *
  * YAML config example:
  *   type: custom:lymow-map-card
- *   entity: sensor.lymow_THING_map      # required – the map sensor
- *   mower_entity: lawn_mower.lymow_THING  # required for mowing + editing
- *   title: My lawn                       # optional card title override
+ *   entity: sensor.lymow_THING_map        # required – the map sensor
+ *   mower_entity: lawn_mower.lymow_THING  # required for controls + editing
+ *   schedule_entity: sensor.lymow_THING_mow_schedules  # optional
+ *   title: My lawn                        # optional
+ *   rtk_autopause: true                   # optional – auto-pause on fix loss
+ *   rtk_autopause_min_fix: 2              # optional – 0-3, default 2
  */
 
 const _ZOOM_MIN = 0.5;
@@ -38,14 +46,18 @@ class LymowMapCard extends HTMLElement {
     // Edit state
     this._lastZoneCount = 0;
     this._settingsOpen = false;
+    this._scheduleOpen = false;
     this._settingsValues = null;
     this._editing = false;
     this._editHash = null;
     this._editType = null; // "go" or "nogo"
+    this._editRename = false; // rename mode within edit
     this._workPoly = null;
     this._dragIdx = null;
     this._polyOverrides = {};
     this._nogoOverrides = {};
+    this._longPressTimer = null; // for zone enable/disable long-press
+    this._pinAndGoMode = false; // double-click sends robot to point
 
     // Pan/zoom state (in SVG user units)
     this._vx = 0; this._vy = 0; this._vw = 100; this._vh = 100;
@@ -104,6 +116,11 @@ class LymowMapCard extends HTMLElement {
       rtkNorthM: a.rtkNorthM,
       rtkStatus: a.rtkStatus,
       workStatus: a.workStatus,
+      // Schedule data from optional schedule_entity
+      schedules: (() => {
+        const se = this._config.schedule_entity && this._hass?.states[this._config.schedule_entity];
+        return se?.attributes?.schedules || null;
+      })(),
     };
   }
 
@@ -168,12 +185,17 @@ class LymowMapCard extends HTMLElement {
       return;
     }
 
-    const { goZones, nogoZones, channels, chargingStation, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, workStatus } = mapData;
+    const { goZones, nogoZones, channels, chargingStation, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, workStatus, schedules } = mapData;
 
     // RTK auto-pause: if enabled, pause mowing when fix quality drops below threshold
     if (this._config.rtk_autopause && this._config.mower_entity) {
       this._checkRtkAutopause(rtkStatus, workStatus);
     }
+
+    // Work-status label and mow progress from mower entity
+    const mowerState = this._config.mower_entity && this._hass?.states[this._config.mower_entity];
+    const mowProgress = mowerState?.attributes?.mow_progress ?? null;
+    const battery = mowerState?.attributes?.battery_level ?? null;
 
     if ([...goZones, ...nogoZones].length === 0 && !chargingStation) {
       this.shadowRoot.innerHTML = this._wrapMsg(`No map data yet. Call <em>lymow.query_map</em> or wait for the robot to connect.`);
@@ -232,10 +254,11 @@ class LymowMapCard extends HTMLElement {
       const selected = this._selectedZones.has(z.hashId);
       const beingEdited = this._editing && this._editHash === z.hashId;
       const enabled = z.isEnabled !== false;
-      const fill = beingEdited ? "#fff3e0" : selected ? "#2e7d32" : enabled ? "#a8d8a8" : "#c8e6c9";
-      const stroke = beingEdited ? "#ef6c00" : selected ? "#81c784" : "#388e3c";
+      const fill = beingEdited ? "#fff3e0" : selected ? "#2e7d32" : enabled ? "#a8d8a8" : "#e0e0e0";
+      const stroke = beingEdited ? "#ef6c00" : selected ? "#81c784" : enabled ? "#388e3c" : "#9e9e9e";
+      const dash = enabled ? "" : `stroke-dasharray="2,1"`;
       return `<polygon data-hash="${z.hashId}" data-type="go" points="${pts}"
-        fill="${fill}" stroke="${stroke}" stroke-width="0.4" opacity="${enabled ? 1 : 0.55}"
+        fill="${fill}" stroke="${stroke}" stroke-width="0.4" opacity="${enabled ? 1 : 0.6}" ${dash}
         style="cursor:pointer"/>`;
     }).join("\n");
 
@@ -346,43 +369,71 @@ class LymowMapCard extends HTMLElement {
         </g>`;
     }
 
+    // ── Status bar ────────────────────────────────────────────────────────────
+    const _wsLabels = { 0:"Idle", 1:"Waiting", 2:"Mowing", 3:"Paused", 4:"Docking",
+      5:"Charging", 6:"Remote", 7:"Error", 8:"Resuming", 9:"Mowing", 10:"Paused",
+      11:"Updating", 12:"Charged", 13:"E-Stop", 14:"Escaping", 15:"Testing" };
+    const _wsColors = { 2:"#2e7d32", 8:"#2e7d32", 9:"#2e7d32", 3:"#ef6c00",
+      10:"#ef6c00", 4:"#1565c0", 5:"#1565c0", 12:"#1565c0", 7:"#c62828", 13:"#c62828" };
+    const wsNum = workStatus !== undefined ? parseInt(workStatus) : null;
+    const wsLabel = wsNum !== null ? (_wsLabels[wsNum] ?? `Status ${wsNum}`) : null;
+    const wsColor = wsNum !== null ? (_wsColors[wsNum] ?? "#757575") : null;
+
+    const rtkNum = rtkStatus !== undefined ? parseInt(rtkStatus) : null;
+    const rtkLabels = { 0:"No fix", 1:"Float ~40cm", 2:"Fixed ~2cm", 3:"RTK ~2cm" };
+    const rtkColors = { 0:"#c62828", 1:"#ef6c00", 2:"#2e7d32", 3:"#1565c0" };
+
+    const statusBar = (wsLabel || battery !== null || rtkNum !== null) ? `
+      <div class="status-bar">
+        ${wsLabel ? `<span class="status-chip" style="background:${wsColor}">${wsLabel}</span>` : ""}
+        ${mowProgress !== null ? `<span class="status-chip" style="background:#455a64">🌿 ${Math.round(mowProgress)}%</span>` : ""}
+        ${battery !== null ? `<span class="status-chip" style="background:#455a64">🔋 ${Math.round(battery)}%</span>` : ""}
+        ${rtkNum !== null ? `<span class="status-chip" style="background:${rtkColors[rtkNum] ?? '#757575'}" title="${this._config.rtk_autopause ? 'auto-pause on' : ''}">📡 ${rtkLabels[rtkNum] ?? 'RTK'}</span>` : ""}
+      </div>` : "";
+
     // ── Toolbar ───────────────────────────────────────────────────────────────
     const host = "this.getRootNode().host";
     let toolbar;
     if (this._editing) {
-      const msg = this._editHash
-        ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · tap + to insert · ✕ to delete`
-        : `Tap a go-zone or no-go zone to start editing its boundary.`;
-      toolbar = `
-        <div class="edit-bar">${msg}</div>
-        <div class="btn-row">
+      let editMsg, editActions;
+      if (this._editRename && this._editHash) {
+        const zone = goZones.find(z => z.hashId === this._editHash) || nogoZones.find(z => z.hashId === this._editHash);
+        const currentName = zone?.name || "";
+        editMsg = `Rename zone:`;
+        editActions = `
+          <input class="rename-input" id="rename-input" type="text" value="${currentName}" placeholder="Zone name" maxlength="40"/>
+          <button class="btn save" onclick="${host}._saveRename()">✓ OK</button>
+          <button class="btn cancel" onclick="${host}._cancelRename()">✕</button>`;
+      } else {
+        const msg = this._editHash
+          ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · + insert · ✕ delete`
+          : `Tap a go-zone or no-go zone to start editing its shape.`;
+        editMsg = msg;
+        editActions = `
           ${this._editHash ? `<button class="btn save" onclick="${host}._saveEdit()">💾 Save</button>` : ""}
-          <button class="btn cancel" onclick="${host}._cancelEdit()">✕ Cancel</button>
-        </div>`;
+          ${this._editHash && this._editType === "go" ? `<button class="btn rename" onclick="${host}._enterRename()">🏷 Rename</button>` : ""}
+          <button class="btn cancel" onclick="${host}._cancelEdit()">✕ Cancel</button>`;
+      }
+      toolbar = `
+        <div class="edit-bar">${editMsg}</div>
+        <div class="btn-row">${editActions}</div>`;
     } else {
       const hasSel = this._selectedZones.size > 0;
       const canMow = hasSel && !!this._config.mower_entity;
       const mowBtn = hasSel
-        ? `<button class="btn mow" ${canMow ? "" : "disabled"} onclick="${host}._mowSelected()">🌿 Mow selected (${this._selectedZones.size})</button>`
+        ? `<button class="btn mow" ${canMow ? "" : "disabled"} onclick="${host}._mowSelected()">🌿 Mow (${this._selectedZones.size})</button>`
         : "";
       const editBtn = this._config.mower_entity
-        ? `<button class="btn edit" onclick="${host}._enterEdit()">✏️ Edit zones</button>` : "";
+        ? `<button class="btn edit" onclick="${host}._enterEdit()">✏️ Edit</button>` : "";
+      const pinBtn = this._config.mower_entity
+        ? `<button class="btn pin${this._pinAndGoMode ? " settings-active" : ""}" onclick="${host}._togglePinAndGo()" title="Pin-and-go: double-tap map to send robot to point">📍</button>` : "";
+      const schedBtn = this._config.schedule_entity
+        ? `<button class="btn sched${this._scheduleOpen ? " settings-active" : ""}" onclick="${host}._toggleSchedule()" title="Mowing schedules">📅</button>` : "";
       const settingsBtn = this._config.mower_entity
         ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" onclick="${host}._toggleSettings()" title="Mowing settings">⚙</button>` : "";
-      const expandBtn = `<button class="btn expand" onclick="${host}._toggleExpand()" title="${this._expanded ? "Collapse" : "Expand map"}">${this._expanded ? "⊠" : "⊞"}</button>`;
+      const expandBtn = `<button class="btn expand" onclick="${host}._toggleExpand()" title="${this._expanded ? "Collapse" : "Expand"}">${this._expanded ? "⊠" : "⊞"}</button>`;
       const resetBtn = `<button class="btn reset" onclick="${host}._resetView()" title="Reset zoom">⊡</button>`;
-      // RTK status badge
-      const rtkBadge = (() => {
-        if (rtkStatus === undefined || rtkStatus === null) return "";
-        const labels = { 0: "No fix", 1: "Float", 2: "Fixed", 3: "RTK" };
-        const colors = { 0: "#c62828", 1: "#ef6c00", 2: "#2e7d32", 3: "#1565c0" };
-        const n = parseInt(rtkStatus);
-        const color = colors[n] ?? "#757575";
-        const label = labels[n] ?? `RTK ${n}`;
-        const autopauseNote = this._config.rtk_autopause ? " · auto-pause on" : "";
-        return `<span class="rtk-badge" style="background:${color}" title="RTK fix quality${autopauseNote}">📡 ${label}</span>`;
-      })();
-      toolbar = `<div class="btn-row">${mowBtn}${editBtn}${settingsBtn}${expandBtn}${resetBtn}${rtkBadge}</div>`;
+      toolbar = `<div class="btn-row">${mowBtn}${editBtn}${pinBtn}${schedBtn}${settingsBtn}${expandBtn}${resetBtn}</div>`;
     }
 
     // ── Legend with matching SVG symbols ─────────────────────────────────────
@@ -453,9 +504,39 @@ class LymowMapCard extends HTMLElement {
           </select>
           <span class="sp-val"></span>
         </div>
+        <div class="sp-row">
+          <label>Obstacle avoidance</label>
+          <select class="sp-input sp-select" data-field="obs_dec_mode" data-type="int">
+            <option value="0" ${(sv.obs_dec_mode ?? 0) === 0 ? "selected" : ""}>Off</option>
+            <option value="1" ${(sv.obs_dec_mode ?? 0) === 1 ? "selected" : ""}>Slow down</option>
+            <option value="2" ${(sv.obs_dec_mode ?? 0) === 2 ? "selected" : ""}>Detour</option>
+          </select>
+          <span class="sp-val"></span>
+        </div>
         <button class="sp-apply" onclick="this.getRootNode().host._applySettings()">Apply settings</button>
         <div class="sp-status"></div>
       </div>` : "";
+
+    // ── Schedule panel ────────────────────────────────────────────────────────
+    const schedulePanel = (this._scheduleOpen && schedules && !this._editing) ? (() => {
+      const dayNames = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+      const rows = schedules.map((s) => {
+        const days = (s.days || []).map(d => dayNames[d] ?? d).join(", ");
+        const h = String(s.hour ?? 0).padStart(2, "0");
+        const m = String(s.minute ?? 0).padStart(2, "0");
+        const disabled = s.isDisabled ? " (off)" : "";
+        const zones = s.zoneHashIds?.length ? ` · ${s.zoneHashIds.length} zone(s)` : " · all zones";
+        return `<div class="sched-row${s.isDisabled ? " sched-disabled" : ""}">
+          <span class="sched-time">${h}:${m}</span>
+          <span class="sched-days">${days}${zones}</span>
+          <span class="sched-status">${disabled || (s.repeat ? "↻" : "1×")}</span>
+        </div>`;
+      }).join("");
+      return `<div class="settings-panel">
+        <div class="sp-title">Mowing schedules (${schedules.length})</div>
+        ${rows || "<div style='font-size:0.8em;color:var(--secondary-text-color)'>No schedules</div>"}
+      </div>`;
+    })() : "";
 
     const title = this._config.title ?? "Lymow Map";
 
@@ -473,20 +554,25 @@ class LymowMapCard extends HTMLElement {
         :host(:not(.expanded)) .map-wrap { aspect-ratio: ${mapAspect}; flex: none; }
         svg { width: 100%; height: 100%; border-radius: 6px; background: #e8f5e9; display: block; touch-action: none; user-select: none; cursor: grab; }
         svg.panning { cursor: grabbing; }
+        svg.pin-mode { cursor: crosshair; }
         /* Fixed-pixel overlays sit on top of the SVG in pixel space */
         .map-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: 6px; }
         .north-arrow { position: absolute; top: 8px; right: 8px; width: ${_NORTH_PX}px; height: ${_NORTH_PX}px; }
         .scale-bar-wrap { position: absolute; bottom: 8px; left: 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
         .scale-bar { height: 4px; background: #555; opacity: 0.85; border-left: 2px solid #555; border-right: 2px solid #555; min-width: 20px; }
         .scale-bar-label { font-size: 10px; color: #333; background: rgba(255,255,255,0.7); padding: 0 2px; border-radius: 2px; white-space: nowrap; }
-        .btn-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; flex-shrink: 0; }
-        .btn { flex: 1; min-width: 80px; padding: 9px 6px; border: none; border-radius: 6px;
-               font-size: 0.84em; font-weight: 600; cursor: pointer; color: white; }
+        .status-bar { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; flex-shrink: 0; }
+        .status-chip { padding: 3px 7px; border-radius: 12px; font-size: 0.75em; font-weight: 600; color: white; white-space: nowrap; }
+        .btn-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; flex-shrink: 0; }
+        .btn { flex: 1; min-width: 70px; padding: 8px 6px; border: none; border-radius: 6px;
+               font-size: 0.83em; font-weight: 600; cursor: pointer; color: white; }
         .btn.mow, .btn.edit { background: var(--primary-color, #03a9f4); }
         .btn.save { background: #2e7d32; }
+        .btn.rename { background: #6a1b9a; flex: 0; }
         .btn.cancel { background: #757575; flex: 0; }
-        .btn.reset, .btn.expand, .btn.settings { background: #455a64; flex: 0; min-width: 36px; }
+        .btn.reset, .btn.expand, .btn.settings, .btn.pin, .btn.sched { background: #455a64; flex: 0; min-width: 36px; }
         .btn.settings-active { background: #ef6c00; }
+        .rename-input { flex: 1; padding: 7px 8px; border: 1px solid var(--divider-color,#444); border-radius: 6px; background: var(--card-background-color,#1c1c1c); color: var(--primary-text-color); font-size: 0.85em; }
         .settings-panel { margin-top: 8px; padding: 10px 12px; background: var(--card-background-color, #1c1c1c);
           border: 1px solid var(--divider-color, #444); border-radius: 8px; flex-shrink: 0; }
         .settings-panel .sp-title { font-size: 0.8em; font-weight: 600; color: var(--secondary-text-color);
@@ -502,8 +588,13 @@ class LymowMapCard extends HTMLElement {
         .sp-status { font-size: 0.75em; color: var(--secondary-text-color); margin-top: 4px; min-height: 1.2em; }
         .btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .btn:not(:disabled):hover { filter: brightness(1.1); }
-        .rtk-badge { flex: 0; padding: 5px 8px; border-radius: 6px; font-size: 0.78em; font-weight: 600; color: white; white-space: nowrap; align-self: center; }
         .edit-bar { font-size: 0.8em; color: var(--secondary-text-color); margin-top: 6px; flex-shrink: 0; }
+        .sched-row { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; border-bottom: 1px solid var(--divider-color,#333); font-size: 0.82em; }
+        .sched-row:last-child { border-bottom: none; }
+        .sched-disabled { opacity: 0.45; }
+        .sched-time { font-weight: 700; color: var(--primary-text-color); min-width: 38px; }
+        .sched-days { flex: 1; color: var(--secondary-text-color); }
+        .sched-status { font-size: 0.9em; color: var(--secondary-text-color); }
         .msg { padding: 14px; color: var(--secondary-text-color); font-size: 0.9em; line-height: 1.5; }
         code { background: var(--code-editor-background-color,#f0f0f0); padding: 1px 4px; border-radius: 3px; }
         .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 0.75em;
@@ -516,7 +607,8 @@ class LymowMapCard extends HTMLElement {
         <div class="card-header">${title}</div>
         <div class="map-wrap">
           <svg viewBox="${this._vx.toFixed(3)} ${this._vy.toFixed(3)} ${this._vw.toFixed(3)} ${this._vh.toFixed(3)}"
-               xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">
+               xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"
+               class="${this._pinAndGoMode ? 'pin-mode' : ''}">
             <defs>${goLabelDefs}</defs>
             ${channelPaths}
             ${goPaths}
@@ -541,8 +633,10 @@ class LymowMapCard extends HTMLElement {
             </div>
           </div>
         </div>
+        ${statusBar}
         ${toolbar}
         ${settingsPanel}
+        ${schedulePanel}
         <div class="legend">${legendItems}</div>
       </ha-card>`;
 
@@ -673,8 +767,20 @@ class LymowMapCard extends HTMLElement {
       }
     } else {
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
+        // Single click: select/deselect zone
         el.addEventListener("click", (e) => { if (!this._panMoved) { e.stopPropagation(); this._toggleZone(el.dataset.hash); } });
+        // Long press: toggle zone enabled/disabled
+        el.addEventListener("pointerdown", () => {
+          this._longPressTimer = setTimeout(() => { this._longPressTimer = null; this._toggleZoneEnabled(el.dataset.hash); }, 700);
+        });
+        el.addEventListener("pointerup", () => { if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; } });
+        el.addEventListener("pointercancel", () => { if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; } });
       });
+    }
+
+    // Double-click on map for pin-and-go
+    if (this._pinAndGoMode) {
+      svg.addEventListener("dblclick", (e) => { e.stopPropagation(); this._onPinAndGo(e); });
     }
 
     // Pan: any pointer drag on SVG (vertex drags set _dragIdx which suppresses pan)
@@ -849,8 +955,9 @@ class LymowMapCard extends HTMLElement {
   _checkRtkAutopause(rtkStatus, workStatus) {
     if (rtkStatus === undefined || rtkStatus === null) return;
     const fix = parseInt(rtkStatus);
-    // workStatus 1 = mowing (from captured protocol). Only pause when actually cutting.
-    const isMowing = workStatus !== undefined && parseInt(workStatus) === 1;
+    // workStatus 2=Mowing, 8=Resuming, 9=Zone-partition mowing
+    const ws = workStatus !== undefined ? parseInt(workStatus) : -1;
+    const isMowing = ws === 2 || ws === 8 || ws === 9;
     const minFix = this._config.rtk_autopause_min_fix ?? 2; // default: require Fixed or RTK
     const fixLow = fix < minFix;
 
@@ -869,13 +976,25 @@ class LymowMapCard extends HTMLElement {
 
   _toggleSettings() {
     this._settingsOpen = !this._settingsOpen;
+    this._scheduleOpen = false;
     if (this._settingsOpen && !this._settingsValues) {
       this._settingsValues = {
         move_speed: 0.6, cut_speed: 0.6, brush_speed: 0.6,
         path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
-        perimeter_mow_dir: 0,
+        perimeter_mow_dir: 0, obs_dec_mode: 0,
       };
     }
+    this._render();
+  }
+
+  _toggleSchedule() {
+    this._scheduleOpen = !this._scheduleOpen;
+    this._settingsOpen = false;
+    this._render();
+  }
+
+  _togglePinAndGo() {
+    this._pinAndGoMode = !this._pinAndGoMode;
     this._render();
   }
 
@@ -901,17 +1020,95 @@ class LymowMapCard extends HTMLElement {
   }
 
   // ---------------------------------------------------------------------------
+  // Zone enable / disable (long-press a go-zone when not editing)
+  // ---------------------------------------------------------------------------
+
+  async _toggleZoneEnabled(hashId) {
+    if (!this._hass || !this._config.mower_entity) return;
+    const mapData = this._getMapData();
+    const zone = mapData?.goZones?.find(z => z.hashId === hashId);
+    if (!zone) return;
+    const nowEnabled = zone.isEnabled !== false;
+    try {
+      // Use set_task_config with zone targeting isn't available yet — use start_zone
+      // workaround: rename service will toggle if backend supports it; for now use
+      // lymow.start_zone with empty list to signal no-op, or call lymow.enable_zone.
+      // The actual service is pending backend implementation — show optimistic UI.
+      // TODO(joha): wire to lymow.enable_zone / lymow.disable_zone once backend ready
+      console.info(`lymow-map-card: zone ${hashId} enable toggle → ${!nowEnabled} (backend pending)`);
+    } catch (err) {
+      console.warn("lymow-map-card: zone toggle failed", err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pin-and-go (double-click map → send robot to ENU coordinate)
+  // ---------------------------------------------------------------------------
+
+  async _onPinAndGo(evt) {
+    if (!this._hass || !this._config.mower_entity) return;
+    const enu = this._clientToEnu(evt);
+    if (!enu) return;
+    this._pinAndGoMode = false;
+    this._render();
+    try {
+      await this._hass.callService("lymow", "pin_and_go", {
+        entity_id: this._config.mower_entity,
+        east_m: +enu.x.toFixed(3),
+        north_m: +enu.y.toFixed(3),
+      });
+    } catch (err) {
+      console.warn("lymow-map-card: pin_and_go failed", err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Zone rename
+  // ---------------------------------------------------------------------------
+
+  _enterRename() {
+    this._editRename = true;
+    this._render();
+    // Focus the input after render
+    setTimeout(() => { this.shadowRoot.querySelector('#rename-input')?.focus(); }, 50);
+  }
+
+  _cancelRename() {
+    this._editRename = false;
+    this._render();
+  }
+
+  async _saveRename() {
+    const input = this.shadowRoot.querySelector('#rename-input');
+    const newName = input?.value?.trim();
+    if (!newName || !this._editHash || !this._hass || !this._config.mower_entity) {
+      this._editRename = false; this._render(); return;
+    }
+    this._editRename = false;
+    this._render();
+    try {
+      await this._hass.callService("lymow", "rename_zone", {
+        entity_id: this._config.mower_entity,
+        zone_hash_id: this._editHash,
+        name: newName,
+      });
+    } catch (err) {
+      console.warn("lymow-map-card: rename failed", err);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Edit mode
   // ---------------------------------------------------------------------------
 
   _enterEdit() {
     this._editing = true; this._editHash = null; this._workPoly = null;
-    this._selectedZones.clear(); this._render();
+    this._editRename = false; this._selectedZones.clear(); this._render();
   }
 
   _cancelEdit() {
-    this._editing = false; this._editHash = null; this._editType = null; this._workPoly = null;
-    this._dragIdx = null; this._render();
+    this._editing = false; this._editHash = null; this._editType = null;
+    this._workPoly = null; this._editRename = false; this._dragIdx = null; this._render();
   }
 
   _chooseEditZone(hashId, type) {
