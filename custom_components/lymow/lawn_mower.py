@@ -75,7 +75,9 @@ _SERVICE_CLEAR_SCHEDULES = "clear_schedules"
 _SERVICE_SET_SCHEDULES = "set_schedules"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
+_SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
+_ATTR_PREFERRED = "preferred"
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
 # subset of PbTaskConfig; the encoder supports more. All optional ints.
@@ -254,6 +256,12 @@ _SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
             )
             for k, (_proto, kind, (lo, hi)) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items()
         },
+    }
+)
+_SET_NETWORK_PRIORITY_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_PREFERRED): vol.In(("4g", "wifi")),
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -578,6 +586,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_run_time_config(entity._thing_name, **fields)
 
+    async def handle_set_network_priority(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        preferred: str = call.data[_ATTR_PREFERRED]
+        metric_4g = preferred == "4g"
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_robot_config(entity._thing_name, metric_4g=metric_4g)
+
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
@@ -718,6 +737,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_RUN_TIME_CONFIG, handle_set_run_time_config, schema=_SET_RUN_TIME_CONFIG_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_NETWORK_PRIORITY, handle_set_network_priority, schema=_SET_NETWORK_PRIORITY_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)

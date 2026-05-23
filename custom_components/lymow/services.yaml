@@ -253,6 +253,29 @@ set_task_config:
       selector:
         number: { min: 0, max: 1000, step: 1, mode: box }
 
+set_network_priority:
+  name: Set network priority
+  description: >
+    Choose whether the mower should prefer cellular (4G) or Wi-Fi when both
+    are available. Maps to PbRobotConfig.metric_4g (true = 4G preferred,
+    false = Wi-Fi preferred) — the same option as the app's
+    Network Settings → Network Priority screen.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    preferred:
+      name: Preferred network
+      description: "4g = always use cellular when available; wifi = prefer Wi-Fi, fall back to 4G if it drops."
+      required: true
+      example: "wifi"
+      selector:
+        select:
+          options:
+            - "4g"
+            - "wifi"
+
 set_run_time_config:
   name: Set run-time config
   description: >

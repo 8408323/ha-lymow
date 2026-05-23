@@ -1822,6 +1822,34 @@ def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
         encode_set_task_config(nonsense=1)
 
 
+def test_encode_set_robot_config_no_userctrl_just_submessage() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(metric_4g=True)
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    # robotConfig writes skip userCtrl — the robot dispatches by submessage shape
+    assert _first(f, 5) is None
+    cfg = _decode_fields(_first(f, 13))  # PbInput.robotConfig
+    assert _first(cfg, 11) == 1  # metric_4g (bool encoded as varint 1)
+
+
+def test_encode_set_robot_config_false_and_unknown_rejected() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb_false = encode_set_robot_config(metric_4g=False)
+    cfg = _decode_fields(_first(_decode_fields(pb_false), 13))
+    assert _first(cfg, 11) == 0
+
+    # None is skipped (no field 11)
+    pb_skip = encode_set_robot_config(metric_4g=None)
+    cfg_skip = _decode_fields(_first(_decode_fields(pb_skip), 13))
+    assert _first(cfg_skip, 11) is None
+
+    with pytest.raises(ValueError, match="unknown robot-config field"):
+        encode_set_robot_config(nonsense=1)
+
+
 def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     from lymow.protocol import encode_set_run_time_config
 
