@@ -1260,6 +1260,29 @@ async def test_handle_set_run_time_config_unknown_entity_skips() -> None:
     coord.async_set_run_time_config.assert_not_awaited()
 
 
+def test_set_run_time_config_schema_enforces_ranges() -> None:
+    """Non-UI callers (automations, REST) must not bypass the documented bounds."""
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_RUN_TIME_CONFIG_SCHEMA
+
+    valid = _SET_RUN_TIME_CONFIG_SCHEMA(
+        {"entity_id": ["lawn_mower.x"], "cut_height": 40, "move_speed": 0.5, "cut_speed": 100}
+    )
+    assert valid["cut_height"] == 40 and valid["move_speed"] == 0.5 and valid["cut_speed"] == 100
+
+    # cut_height bounds (20..100 mm), move_speed (0.1..1.5 m/s), cut_speed (0..1000)
+    for bad in (
+        {"cut_height": 5},
+        {"cut_height": 500},
+        {"move_speed": 0.0},
+        {"move_speed": 9.9},
+        {"cut_speed": -1},
+        {"cut_speed": 10000},
+    ):
+        with pytest.raises(vol_.Invalid):
+            _SET_RUN_TIME_CONFIG_SCHEMA({"entity_id": ["lawn_mower.x"], **bad})
+
+
 def _validated_schedule(**overrides) -> dict:
     """A schedule entry shaped as the voluptuous schema produces (defaults filled)."""
     base = {"hour": 9, "minute": 30, "day_of_week": [1, 5], "zones": ["abc"], "repeated": True, "disabled": False}

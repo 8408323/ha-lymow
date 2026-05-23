@@ -88,13 +88,16 @@ _TASK_CONFIG_SERVICE_FIELDS = {
     "brush_speed": "brushSpeed",
 }
 
-# Service-field (snake_case) → PbRunTimeConfig field (camelCase). Run-time config
-# overrides settings on the currently-running task (vs set_task_config, which
-# is the next-mow default). cut_height is mm; move_speed is m/s.
+# Service-field (snake_case) → PbRunTimeConfig field (camelCase) + safe numeric
+# bounds. Run-time config overrides settings on the currently-running task (vs
+# set_task_config, which is the next-mow default). cut_height is mm, move_speed
+# is m/s. Bounds match the documented UI selectors in services.yaml so non-UI
+# callers (automations, REST) can't bypass the selector ranges and push out-of-
+# range values straight to the mower.
 _RUN_TIME_CONFIG_SERVICE_FIELDS = {
-    "cut_height": ("cutHeight", "int"),
-    "move_speed": ("moveSpeed", "float"),
-    "cut_speed": ("cutSpeed", "int"),
+    "cut_height": ("cutHeight", "int", (20, 100)),
+    "move_speed": ("moveSpeed", "float", (0.1, 1.5)),
+    "cut_speed": ("cutSpeed", "int", (0, 1000)),
 }
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
@@ -245,8 +248,11 @@ _SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         **{
-            vol.Optional(k): (vol.Coerce(float) if kind == "float" else vol.Coerce(int))
-            for k, (_proto, kind) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items()
+            vol.Optional(k): vol.All(
+                vol.Coerce(float) if kind == "float" else vol.Coerce(int),
+                vol.Range(min=lo, max=hi),
+            )
+            for k, (_proto, kind, (lo, hi)) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items()
         },
     }
 )
@@ -559,7 +565,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_set_run_time_config(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         fields = {
-            proto: call.data[svc] for svc, (proto, _kind) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items() if svc in call.data
+            proto: call.data[svc]
+            for svc, (proto, _kind, _range) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items()
+            if svc in call.data
         }
         if not fields:
             raise ServiceValidationError("set_run_time_config: provide at least one parameter to set.")
