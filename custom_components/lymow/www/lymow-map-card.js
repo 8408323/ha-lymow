@@ -5,9 +5,10 @@
  *   • Renders go-zones, no-go zones, channels, charging station, robot pose, RTK base
  *   • Mouse wheel / pinch to zoom; drag anywhere on map to pan
  *   • Expand button: fills the full browser viewport
- *   • Edit mode: tap a go-zone → drag vertex handles to reshape; tap edge
- *     midpoint (+) to insert a vertex; tap vertex ✕ to delete; Save / Cancel
- *   • North arrow + scale bar fixed to viewport corners
+ *   • Edit mode: tap a go-zone or no-go zone → drag vertex handles to reshape; tap
+ *     edge midpoint (+) to insert a vertex; tap vertex ✕ to delete; Save / Cancel
+ *   • North arrow + scale bar fixed to viewport corners (pixel-space, no zoom scaling)
+ *   • Markers (robot, RTK, station) fixed pixel size via inverse-zoom SVG transform
  *   • Legend symbols match actual map markers
  *
  * YAML config example:
@@ -19,6 +20,11 @@
 
 const _ZOOM_MIN = 0.5;
 const _ZOOM_MAX = 20;
+
+// Fixed pixel sizes for overlays (independent of zoom level)
+const _MARKER_PX = 18;   // robot / RTK / station marker diameter in px
+const _NORTH_PX  = 44;   // north arrow circle diameter in px
+const _SCALEBAR_PX_W = 80; // target scale bar width in px
 
 class LymowMapCard extends HTMLElement {
   constructor() {
@@ -139,6 +145,15 @@ class LymowMapCard extends HTMLElement {
   }
 
   // ---------------------------------------------------------------------------
+  // Zoom factor (initial viewport width / current viewport width)
+  // ---------------------------------------------------------------------------
+
+  _zoomFactor() {
+    const TOTAL_W = (this._bounds.maxX - this._bounds.minX) * this._scale;
+    return TOTAL_W / this._vw;
+  }
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
 
@@ -190,6 +205,11 @@ class LymowMapCard extends HTMLElement {
     const fontSz = Math.max(1.2, Math.min(3, TOTAL_W / 25)).toFixed(2);
     const nodeR = Math.max(0.8, TOTAL_W / 70).toFixed(2);
 
+    // Zoom factor: >1 means zoomed in, <1 means zoomed out.
+    // We use 1/zf as SVG scale for fixed-pixel markers so they appear constant size.
+    const zf = this._zoomFactor();
+    const invZf = (1 / zf).toFixed(6);
+
     // ── Channels ─────────────────────────────────────────────────────────────
     const channelPaths = channels.map((ch) => {
       const pts = (ch.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
@@ -213,7 +233,6 @@ class LymowMapCard extends HTMLElement {
     }).join("\n");
 
     // For each go-zone: clip label to polygon so it never renders outside the zone.
-    // Uses SVG clipPath so even concave polygons clip correctly.
     const goLabelDefs = goZones.map((z) => {
       if (!z.polygon || z.polygon.length < 3) return "";
       const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
@@ -278,78 +297,47 @@ class LymowMapCard extends HTMLElement {
       editOverlay = workOutline + midpoints + verts;
     }
 
-    // ── Charging station ──────────────────────────────────────────────────────
+    // ── Charging station (fixed pixel size via inverse-zoom scale) ────────────
+    // Each marker is translated to its map position, then scaled by 1/zf so the
+    // rendered pixel size stays constant regardless of zoom level.
     let csHtml = "";
     if (chargingStation) {
       const cx = sx(chargingStation.x), cy = sy(chargingStation.y);
-      const r = Math.max(1.2, TOTAL_W / 55).toFixed(2);
+      // r=9 in "initial-zoom" units; scaled back by invZf = constant ~9px radius
       csHtml = `
-        <circle cx="${cx}" cy="${cy}" r="${r}" fill="#1565c0" opacity="0.9"/>
-        <circle cx="${cx}" cy="${cy}" r="${(parseFloat(r) * 0.55).toFixed(2)}" fill="white"/>
-        <text x="${cx}" y="${cy}" text-anchor="middle" dominant-baseline="middle"
-          font-size="${(parseFloat(r) * 0.9).toFixed(2)}" fill="#1565c0" pointer-events="none" font-weight="bold">⚡</text>`;
+        <g data-marker="cs" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy}) scale(${invZf})" pointer-events="none">
+          <circle r="9" fill="#1565c0" opacity="0.9"/>
+          <circle r="5" fill="white"/>
+          <text text-anchor="middle" dominant-baseline="middle" font-size="8" fill="#1565c0" font-weight="bold">⚡</text>
+        </g>`;
     }
 
-    // ── Robot position ────────────────────────────────────────────────────────
+    // ── Robot position (fixed pixel size) ────────────────────────────────────
     let robotHtml = "";
     if (poseEastM !== undefined && poseNorthM !== undefined) {
       const rx = sx(poseEastM), ry = sy(poseNorthM);
-      const r = Math.max(0.9, TOTAL_W / 70).toFixed(2);
       const theta = poseThetaRad || 0;
-      const arrowLen = parseFloat(r) * 2.5;
-      const ax = (parseFloat(rx) + Math.cos(theta) * arrowLen).toFixed(3);
-      const ay = (parseFloat(ry) - Math.sin(theta) * arrowLen).toFixed(3);
+      // Arrow points in heading direction; in SVG y is flipped so negate sin
+      const arrowX = (Math.cos(theta) * 22).toFixed(3);
+      const arrowY = (-Math.sin(theta) * 22).toFixed(3);
       robotHtml = `
-        <circle cx="${rx}" cy="${ry}" r="${r}" fill="#e65100" stroke="white" stroke-width="0.3"/>
-        <line x1="${rx}" y1="${ry}" x2="${ax}" y2="${ay}" stroke="#e65100" stroke-width="0.7" stroke-linecap="round"/>`;
+        <g data-marker="robot" data-cx="${rx}" data-cy="${ry}" transform="translate(${rx},${ry}) scale(${invZf})" pointer-events="none">
+          <circle r="8" fill="#e65100" stroke="white" stroke-width="2"/>
+          <line x1="0" y1="0" x2="${arrowX}" y2="${arrowY}" stroke="#e65100" stroke-width="4" stroke-linecap="round"/>
+        </g>`;
     }
 
-    // ── RTK base station ─────────────────────────────────────────────────────
+    // ── RTK base station (fixed pixel size) ───────────────────────────────────
     let rtkHtml = "";
     if (rtkEastM !== undefined && rtkNorthM !== undefined) {
       const rx = sx(rtkEastM), ry = sy(rtkNorthM);
-      const r = Math.max(1.0, TOTAL_W / 65).toFixed(2);
-      // Triangle marker (surveying convention for base station)
-      const rF = parseFloat(r);
-      const pts = [
-        `${parseFloat(rx).toFixed(3)},${(parseFloat(ry) - rF * 1.5).toFixed(3)}`,
-        `${(parseFloat(rx) - rF * 1.2).toFixed(3)},${(parseFloat(ry) + rF * 0.8).toFixed(3)}`,
-        `${(parseFloat(rx) + rF * 1.2).toFixed(3)},${(parseFloat(ry) + rF * 0.8).toFixed(3)}`,
-      ].join(" ");
+      // Triangle: tip up, base down; centered at (0,0)
       rtkHtml = `
-        <polygon points="${pts}" fill="#7b1fa2" stroke="white" stroke-width="0.3" opacity="0.9"/>
-        <text x="${rx}" y="${(parseFloat(ry) + rF * 2.5).toFixed(3)}" text-anchor="middle"
-          font-size="${(rF * 0.85).toFixed(2)}" fill="#7b1fa2" pointer-events="none">RTK</text>`;
+        <g data-marker="rtk" data-cx="${rx}" data-cy="${ry}" transform="translate(${rx},${ry}) scale(${invZf})" pointer-events="none">
+          <polygon points="0,-11 -9,7 9,7" fill="#7b1fa2" stroke="white" stroke-width="2" opacity="0.9"/>
+          <text y="18" text-anchor="middle" font-size="8" fill="#7b1fa2">RTK</text>
+        </g>`;
     }
-
-    // ── North arrow (viewport-fixed, top-right) ───────────────────────────────
-    const NX = (this._vx + this._vw - 5).toFixed(2);
-    const NY = (this._vy + 5).toFixed(2);
-    const northHtml = `
-      <g data-overlay="north" transform="translate(${NX}, ${NY})" pointer-events="none">
-        <circle r="3.5" fill="white" opacity="0.85"/>
-        <line x1="0" y1="2.5" x2="0" y2="-2.5" stroke="#333" stroke-width="0.5"/>
-        <polygon points="0,-2.5 -0.9,-0.3 0.9,-0.3" fill="#c0392b"/>
-        <text x="0" y="5.5" text-anchor="middle" font-size="2" fill="#333" font-weight="bold">N</text>
-      </g>`;
-
-    // ── Scale bar (viewport-fixed, bottom-left) ───────────────────────────────
-    const viewMetres = this._vw / sc;
-    const niceMetres = this._niceNumber(viewMetres * 0.18);
-    const barW = (niceMetres * sc).toFixed(3);
-    const bx = (this._vx + 3).toFixed(2);
-    const by = (this._vy + this._vh - 3).toFixed(2);
-    const byTick = (this._vy + this._vh - 2).toFixed(2);
-    const byLabel = (this._vy + this._vh - 4.5).toFixed(2);
-    const bx2 = (parseFloat(bx) + parseFloat(barW)).toFixed(2);
-    const bxMid = (parseFloat(bx) + parseFloat(barW) / 2).toFixed(2);
-    const scaleBarHtml = `
-      <g pointer-events="none">
-        <rect data-overlay="scalebar" x="${bx}" y="${by}" width="${barW}" height="0.9" fill="#555" opacity="0.85"/>
-        <line data-overlay="scalebar" x1="${bx}" y1="${by}" x2="${bx}" y2="${byTick}" stroke="#555" stroke-width="0.4" opacity="0.85"/>
-        <line data-overlay="scalebar" x1="${bx2}" y1="${by}" x2="${bx2}" y2="${byTick}" stroke="#555" stroke-width="0.4" opacity="0.85"/>
-        <text data-overlay="scalebar" x="${bxMid}" y="${byLabel}" text-anchor="middle" font-size="1.8" fill="#555">${niceMetres} m</text>
-      </g>`;
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
     const host = "this.getRootNode().host";
@@ -388,41 +376,64 @@ class LymowMapCard extends HTMLElement {
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
       poseEastM !== undefined ? _li(`<circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/>`, "0 0 18 14", "Robot") : "",
       rtkEastM !== undefined ? _li(`<polygon points="8,1 2,13 14,13" fill="#7b1fa2" stroke="white" stroke-width="1"/>`, "0 0 16 14", "RTK") : "",
-      channels.some(c => c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Docking") : "",
+      channels.some(c => c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Docking ch.") : "",
       channels.some(c => !c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#6a1b9a" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Channel") : "",
     ].filter(Boolean).join("");
 
-    // ── Settings panel ────────────────────────────────────────────────────────
-    const settingsPanel = this._settingsOpen ? `
+    // ── Settings panel (hidden during edit mode) ──────────────────────────────
+    const sv = this._settingsValues || {};
+    const settingsPanel = (this._settingsOpen && !this._editing) ? `
       <div class="settings-panel">
         <div class="sp-title">Mowing settings</div>
         <div class="sp-row">
           <label>Speed (m/s)</label>
           <input type="range" class="sp-input" data-field="move_speed" data-type="float"
-            min="0.1" max="1.0" step="0.1" value="${this._settingsValues.move_speed ?? 0.6}"
+            min="0.1" max="1.0" step="0.1" value="${sv.move_speed ?? 0.6}"
             oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(1)"/>
-          <span class="sp-val">${(this._settingsValues.move_speed ?? 0.6).toFixed(1)}</span>
+          <span class="sp-val">${(sv.move_speed ?? 0.6).toFixed(1)}</span>
+        </div>
+        <div class="sp-row">
+          <label>Cut speed (m/s)</label>
+          <input type="range" class="sp-input" data-field="cut_speed" data-type="float"
+            min="0.1" max="1.0" step="0.1" value="${sv.cut_speed ?? 0.6}"
+            oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(1)"/>
+          <span class="sp-val">${(sv.cut_speed ?? 0.6).toFixed(1)}</span>
+        </div>
+        <div class="sp-row">
+          <label>Brush speed (m/s)</label>
+          <input type="range" class="sp-input" data-field="brush_speed" data-type="float"
+            min="0.1" max="1.0" step="0.1" value="${sv.brush_speed ?? 0.6}"
+            oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(1)"/>
+          <span class="sp-val">${(sv.brush_speed ?? 0.6).toFixed(1)}</span>
         </div>
         <div class="sp-row">
           <label>Path spacing (mm)</label>
           <input type="range" class="sp-input" data-field="path_spacing" data-type="int"
-            min="50" max="250" step="10" value="${this._settingsValues.path_spacing ?? 90}"
+            min="50" max="250" step="10" value="${sv.path_spacing ?? 90}"
             oninput="this.nextElementSibling.textContent=this.value"/>
-          <span class="sp-val">${this._settingsValues.path_spacing ?? 90}</span>
+          <span class="sp-val">${sv.path_spacing ?? 90}</span>
         </div>
         <div class="sp-row">
           <label>Perimeter laps</label>
           <input type="range" class="sp-input" data-field="perimeter_mow_laps" data-type="int"
-            min="0" max="5" step="1" value="${this._settingsValues.perimeter_mow_laps ?? 1}"
+            min="0" max="5" step="1" value="${sv.perimeter_mow_laps ?? 1}"
             oninput="this.nextElementSibling.textContent=this.value"/>
-          <span class="sp-val">${this._settingsValues.perimeter_mow_laps ?? 1}</span>
+          <span class="sp-val">${sv.perimeter_mow_laps ?? 1}</span>
         </div>
         <div class="sp-row">
           <label>No-go laps</label>
           <input type="range" class="sp-input" data-field="nogo_mow_laps" data-type="int"
-            min="0" max="5" step="1" value="${this._settingsValues.nogo_mow_laps ?? 1}"
+            min="0" max="5" step="1" value="${sv.nogo_mow_laps ?? 1}"
             oninput="this.nextElementSibling.textContent=this.value"/>
-          <span class="sp-val">${this._settingsValues.nogo_mow_laps ?? 1}</span>
+          <span class="sp-val">${sv.nogo_mow_laps ?? 1}</span>
+        </div>
+        <div class="sp-row">
+          <label>Cut direction</label>
+          <select class="sp-input sp-select" data-field="perimeter_mow_dir" data-type="int">
+            <option value="0" ${(sv.perimeter_mow_dir ?? 0) === 0 ? "selected" : ""}>Clockwise</option>
+            <option value="1" ${(sv.perimeter_mow_dir ?? 0) === 1 ? "selected" : ""}>Counter-clockwise</option>
+          </select>
+          <span class="sp-val"></span>
         </div>
         <button class="sp-apply" onclick="this.getRootNode().host._applySettings()">Apply settings</button>
         <div class="sp-status"></div>
@@ -444,6 +455,12 @@ class LymowMapCard extends HTMLElement {
         :host(:not(.expanded)) .map-wrap { aspect-ratio: ${mapAspect}; flex: none; }
         svg { width: 100%; height: 100%; border-radius: 6px; background: #e8f5e9; display: block; touch-action: none; user-select: none; cursor: grab; }
         svg.panning { cursor: grabbing; }
+        /* Fixed-pixel overlays sit on top of the SVG in pixel space */
+        .map-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: 6px; }
+        .north-arrow { position: absolute; top: 8px; right: 8px; width: ${_NORTH_PX}px; height: ${_NORTH_PX}px; }
+        .scale-bar-wrap { position: absolute; bottom: 8px; left: 8px; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+        .scale-bar { height: 4px; background: #555; opacity: 0.85; border-left: 2px solid #555; border-right: 2px solid #555; min-width: 20px; }
+        .scale-bar-label { font-size: 10px; color: #333; background: rgba(255,255,255,0.7); padding: 0 2px; border-radius: 2px; white-space: nowrap; }
         .btn-row { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; flex-shrink: 0; }
         .btn { flex: 1; min-width: 80px; padding: 9px 6px; border: none; border-radius: 6px;
                font-size: 0.84em; font-weight: 600; cursor: pointer; color: white; }
@@ -456,9 +473,10 @@ class LymowMapCard extends HTMLElement {
           border: 1px solid var(--divider-color, #444); border-radius: 8px; flex-shrink: 0; }
         .settings-panel .sp-title { font-size: 0.8em; font-weight: 600; color: var(--secondary-text-color);
           text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
-        .sp-row { display: grid; grid-template-columns: 110px 1fr 42px; align-items: center; gap: 6px; margin-bottom: 6px; }
+        .sp-row { display: grid; grid-template-columns: 120px 1fr 42px; align-items: center; gap: 6px; margin-bottom: 6px; }
         .sp-row label { font-size: 0.8em; color: var(--primary-text-color); }
         .sp-row input[type=range] { width: 100%; accent-color: var(--primary-color, #03a9f4); }
+        .sp-select { width: 100%; background: var(--card-background-color, #1c1c1c); color: var(--primary-text-color); border: 1px solid var(--divider-color, #444); border-radius: 4px; padding: 2px 4px; font-size: 0.8em; }
         .sp-row .sp-val { font-size: 0.8em; color: var(--secondary-text-color); text-align: right; }
         .sp-apply { margin-top: 6px; width: 100%; padding: 7px; border: none; border-radius: 6px;
           background: var(--primary-color, #03a9f4); color: white; font-size: 0.85em; font-weight: 600; cursor: pointer; }
@@ -490,15 +508,26 @@ class LymowMapCard extends HTMLElement {
             ${robotHtml}
             ${rtkHtml}
             ${editOverlay}
-            ${northHtml}
-            ${scaleBarHtml}
           </svg>
+          <div class="map-overlay" id="map-overlay">
+            <svg class="north-arrow" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="22" cy="22" r="20" fill="white" opacity="0.85"/>
+              <line x1="22" y1="30" x2="22" y2="12" stroke="#333" stroke-width="2"/>
+              <polygon points="22,10 17,20 27,20" fill="#c0392b"/>
+              <text x="22" y="40" text-anchor="middle" font-size="9" fill="#333" font-weight="bold">N</text>
+            </svg>
+            <div class="scale-bar-wrap" id="scale-bar-wrap">
+              <span class="scale-bar-label" id="scale-bar-label">…</span>
+              <div class="scale-bar" id="scale-bar"></div>
+            </div>
+          </div>
         </div>
         ${toolbar}
         ${settingsPanel}
         <div class="legend">${legendItems}</div>
       </ha-card>`;
 
+    this._updateScaleBar();
     this._wireEvents();
   }
 
@@ -507,6 +536,31 @@ class LymowMapCard extends HTMLElement {
     const magnitude = Math.pow(10, Math.floor(Math.log10(x)));
     for (const n of [1, 2, 5, 10]) if (n * magnitude >= x) return n * magnitude;
     return 10 * magnitude;
+  }
+
+  // Update the pixel-space scale bar to reflect current zoom without re-render.
+  _updateScaleBar() {
+    const wrap = this.shadowRoot.getElementById("scale-bar-wrap");
+    const bar = this.shadowRoot.getElementById("scale-bar");
+    const label = this.shadowRoot.getElementById("scale-bar-label");
+    if (!wrap || !bar || !label || !this._bounds) return;
+
+    const svg = this.shadowRoot.querySelector("svg");
+    if (!svg) return;
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+
+    // px per SVG user unit at current zoom
+    const pxPerUnit = rect.width / this._vw;
+    // px per metre
+    const pxPerMetre = pxPerUnit * this._scale;
+    // target pixel width → metres → round nicely
+    const targetMetres = _SCALEBAR_PX_W / pxPerMetre;
+    const niceMetres = this._niceNumber(targetMetres);
+    const barPx = Math.round(niceMetres * pxPerMetre);
+
+    bar.style.width = `${barPx}px`;
+    label.textContent = niceMetres >= 1000 ? `${niceMetres / 1000} km` : `${niceMetres} m`;
   }
 
   // Approximate pole of inaccessibility: grid-sample the bounding box, keep
@@ -692,29 +746,19 @@ class LymowMapCard extends HTMLElement {
   }
 
   _updateOverlays() {
-    const root = this.shadowRoot;
-    const sc = this._scale;
+    // Scale bar is in pixel space — just recompute its width from current zoom
+    this._updateScaleBar();
+    // Update fixed-pixel marker scales (robot/RTK/station use SVG scale transform)
+    this._updateMarkerScales();
+  }
 
-    const northG = root.querySelector("g[data-overlay='north']");
-    if (northG) northG.setAttribute("transform", `translate(${(this._vx + this._vw - 5).toFixed(2)}, ${(this._vy + 5).toFixed(2)})`);
-
-    const viewMetres = this._vw / sc;
-    const niceMetres = this._niceNumber(viewMetres * 0.18);
-    const barW = (niceMetres * sc).toFixed(3);
-    const bx = (this._vx + 3).toFixed(2);
-    const by = (this._vy + this._vh - 3).toFixed(2);
-    const byTick = (this._vy + this._vh - 2).toFixed(2);
-    const byLabel = (this._vy + this._vh - 4.5).toFixed(2);
-    const bx2 = (parseFloat(bx) + parseFloat(barW)).toFixed(2);
-    const bxMid = (parseFloat(bx) + parseFloat(barW) / 2).toFixed(2);
-
-    const barRect = root.querySelector("rect[data-overlay='scalebar']");
-    if (barRect) { barRect.setAttribute("x", bx); barRect.setAttribute("y", by); barRect.setAttribute("width", barW); }
-    const barLines = root.querySelectorAll("line[data-overlay='scalebar']");
-    if (barLines[0]) { barLines[0].setAttribute("x1", bx); barLines[0].setAttribute("y1", by); barLines[0].setAttribute("x2", bx); barLines[0].setAttribute("y2", byTick); }
-    if (barLines[1]) { barLines[1].setAttribute("x1", bx2); barLines[1].setAttribute("y1", by); barLines[1].setAttribute("x2", bx2); barLines[1].setAttribute("y2", byTick); }
-    const barText = root.querySelector("text[data-overlay='scalebar']");
-    if (barText) { barText.setAttribute("x", bxMid); barText.setAttribute("y", byLabel); barText.textContent = `${niceMetres} m`; }
+  _updateMarkerScales() {
+    if (!this._bounds) return;
+    const invZf = (1 / this._zoomFactor()).toFixed(6);
+    this.shadowRoot.querySelectorAll("g[data-marker]").forEach((g) => {
+      const cx = g.dataset.cx, cy = g.dataset.cy;
+      g.setAttribute("transform", `translate(${cx},${cy}) scale(${invZf})`);
+    });
   }
 
   _resetView() { this._mapReady = false; this._render(); }
@@ -727,7 +771,6 @@ class LymowMapCard extends HTMLElement {
     this._expanded = !this._expanded;
     if (this._expanded) {
       this.classList.add("expanded");
-      // Prevent body scroll when expanded
       document.documentElement.style.overflow = "hidden";
     } else {
       this.classList.remove("expanded");
@@ -778,17 +821,17 @@ class LymowMapCard extends HTMLElement {
   }
 
   // ---------------------------------------------------------------------------
-  // Edit mode
-  // ---------------------------------------------------------------------------
-
-  // ---------------------------------------------------------------------------
   // Settings panel
   // ---------------------------------------------------------------------------
 
   _toggleSettings() {
     this._settingsOpen = !this._settingsOpen;
     if (this._settingsOpen && !this._settingsValues) {
-      this._settingsValues = { move_speed: 0.6, path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1 };
+      this._settingsValues = {
+        move_speed: 0.6, cut_speed: 0.6, brush_speed: 0.6,
+        path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
+        perimeter_mow_dir: 0,
+      };
     }
     this._render();
   }
