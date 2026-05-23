@@ -407,7 +407,6 @@ class LymowMapCard extends HTMLElement {
       </div>` : "";
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
-    const host = "this.getRootNode().host";
     let toolbar;
     if (this._editing) {
       let editMsg, editActions;
@@ -417,17 +416,17 @@ class LymowMapCard extends HTMLElement {
         editMsg = `Rename zone:`;
         editActions = `
           <input class="rename-input" id="rename-input" type="text" value="${currentName}" placeholder="Zone name" maxlength="40"/>
-          <button class="btn save" onclick="${host}._saveRename()">✓ OK</button>
-          <button class="btn cancel" onclick="${host}._cancelRename()">✕</button>`;
+          <button class="btn save" data-action="save-rename">✓ OK</button>
+          <button class="btn cancel" data-action="cancel-rename">✕</button>`;
       } else {
         const msg = this._editHash
           ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · + insert · ✕ delete`
           : `Tap a go-zone or no-go zone to start editing its shape.`;
         editMsg = msg;
         editActions = `
-          ${this._editHash ? `<button class="btn save" onclick="${host}._saveEdit()">💾 Save</button>` : ""}
-          ${this._editHash && this._editType === "go" ? `<button class="btn rename" onclick="${host}._enterRename()">🏷 Rename</button>` : ""}
-          <button class="btn cancel" onclick="${host}._cancelEdit()">✕ Cancel</button>`;
+          ${this._editHash ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
+          ${this._editHash && this._editType === "go" ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
+          <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
       }
       toolbar = `
         <div class="edit-bar">${editMsg}</div>
@@ -436,18 +435,18 @@ class LymowMapCard extends HTMLElement {
       const hasSel = this._selectedZones.size > 0;
       const canMow = hasSel && !!this._config.mower_entity;
       const mowBtn = hasSel
-        ? `<button class="btn mow" ${canMow ? "" : "disabled"} onclick="${host}._mowSelected()">🌿 Mow (${this._selectedZones.size})</button>`
+        ? `<button class="btn mow" ${canMow ? "" : "disabled"} data-action="mow">🌿 Mow (${this._selectedZones.size})</button>`
         : "";
       const editBtn = this._config.mower_entity
-        ? `<button class="btn edit" onclick="${host}._enterEdit()">✏️ Edit</button>` : "";
+        ? `<button class="btn edit" data-action="edit">✏️ Edit</button>` : "";
       const pinBtn = this._config.mower_entity
-        ? `<button class="btn pin${this._pinAndGoMode ? " settings-active" : ""}" onclick="${host}._togglePinAndGo()" title="Pin-and-go: double-tap map to send robot to point">📍</button>` : "";
+        ? `<button class="btn pin${this._pinAndGoMode ? " settings-active" : ""}" data-action="pin" title="Pin-and-go: double-tap map to send robot to point">📍</button>` : "";
       const schedBtn = this._config.schedule_entity
-        ? `<button class="btn sched${this._scheduleOpen ? " settings-active" : ""}" onclick="${host}._toggleSchedule()" title="Mowing schedules">📅</button>` : "";
+        ? `<button class="btn sched${this._scheduleOpen ? " settings-active" : ""}" data-action="sched" title="Mowing schedules">📅</button>` : "";
       const settingsBtn = this._config.mower_entity
-        ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" onclick="${host}._toggleSettings()" title="Mowing settings">⚙</button>` : "";
-      const expandBtn = `<button class="btn expand" onclick="${host}._toggleExpand()" title="${this._expanded ? "Collapse" : "Expand"}">${this._expanded ? "⊠" : "⊞"}</button>`;
-      const resetBtn = `<button class="btn reset" onclick="${host}._resetView()" title="Reset zoom">⊡</button>`;
+        ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" data-action="settings" title="Mowing settings">⚙</button>` : "";
+      const expandBtn = `<button class="btn expand" data-action="expand" title="${this._expanded ? "Collapse" : "Expand"}">${this._expanded ? "⊠" : "⊞"}</button>`;
+      const resetBtn = `<button class="btn reset" data-action="reset" title="Reset zoom">⊡</button>`;
       toolbar = `<div class="btn-row">${mowBtn}${editBtn}${pinBtn}${schedBtn}${settingsBtn}${expandBtn}${resetBtn}</div>`;
     }
 
@@ -460,8 +459,7 @@ class LymowMapCard extends HTMLElement {
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
       poseEastM !== undefined ? _li(`<circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/>`, "0 0 18 14", "Robot") : "",
       rtkEastM !== undefined ? _li(`<polygon points="8,1 2,13 14,13" fill="#7b1fa2" stroke="white" stroke-width="1"/>`, "0 0 16 14", "RTK") : "",
-      channels.some(c => c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Channel (dock)") : "",
-      channels.some(c => !c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#6a1b9a" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Channel") : "",
+      channels.length ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Channel") : "",
     ].filter(Boolean).join("");
 
     // ── Settings panel (hidden during edit mode) ──────────────────────────────
@@ -493,7 +491,7 @@ class LymowMapCard extends HTMLElement {
         <div class="sp-row">
           <label>Path spacing (mm)</label>
           <input type="range" class="sp-input" data-field="path_spacing" data-type="int"
-            min="50" max="250" step="10" value="${sv.path_spacing ?? 90}"
+            min="50" max="350" step="10" value="${sv.path_spacing ?? 90}"
             oninput="this.nextElementSibling.textContent=this.value"/>
           <span class="sp-val">${sv.path_spacing ?? 90}</span>
         </div>
@@ -516,6 +514,7 @@ class LymowMapCard extends HTMLElement {
           <select class="sp-input sp-select" data-field="perimeter_mow_dir" data-type="int">
             <option value="0" ${(sv.perimeter_mow_dir ?? 0) === 0 ? "selected" : ""}>Clockwise</option>
             <option value="1" ${(sv.perimeter_mow_dir ?? 0) === 1 ? "selected" : ""}>Counter-clockwise</option>
+            <option value="2" ${(sv.perimeter_mow_dir ?? 0) === 2 ? "selected" : ""}>Random</option>
           </select>
           <span class="sp-val"></span>
         </div>
@@ -528,7 +527,7 @@ class LymowMapCard extends HTMLElement {
           </select>
           <span class="sp-val"></span>
         </div>
-        <button class="sp-apply" onclick="this.getRootNode().host._applySettings()">Apply settings</button>
+        <button class="sp-apply" data-action="apply-settings">Apply settings</button>
         <div class="sp-status"></div>
       </div>` : "";
 
@@ -766,6 +765,28 @@ class LymowMapCard extends HTMLElement {
   _wireEvents() {
     const svg = this.shadowRoot.querySelector("svg");
     if (!svg) return;
+
+    // Wire toolbar buttons via data-action (more reliable than inline onclick in Shadow DOM)
+    this.shadowRoot.querySelectorAll("[data-action]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        switch (btn.dataset.action) {
+          case "edit":           this._enterEdit(); break;
+          case "pin":            this._togglePinAndGo(); break;
+          case "sched":          this._toggleSchedule(); break;
+          case "settings":       this._toggleSettings(); break;
+          case "expand":         this._toggleExpand(); break;
+          case "reset":          this._resetView(); break;
+          case "mow":            this._mowSelected(); break;
+          case "save-edit":      this._saveEdit(); break;
+          case "cancel-edit":    this._cancelEdit(); break;
+          case "enter-rename":   this._enterRename(); break;
+          case "save-rename":    this._saveRename(); break;
+          case "cancel-rename":  this._cancelRename(); break;
+          case "apply-settings": this._applySettings(); break;
+        }
+      });
+    });
 
     svg.addEventListener("wheel", (e) => this._onWheel(e), { passive: false });
     svg.addEventListener("touchstart", (e) => this._onTouchStart(e), { passive: false });
