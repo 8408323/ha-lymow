@@ -65,6 +65,7 @@ _SERVICE_QUERY_MAP = "query_map"
 _SERVICE_QUERY_SCHEDULES = "query_schedules"
 _SERVICE_START_VIDEO_SESSION = "start_video_session"
 _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
+_SERVICE_UPDATE_NOGO_POLYGON = "update_nogo_polygon"
 _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
@@ -196,6 +197,13 @@ _UPDATE_ZONE_POLYGON_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
+    }
+)
+_UPDATE_NOGO_POLYGON_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_NOGO_HASH_ID): cv.string,
         vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
     }
 )
@@ -372,6 +380,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             await coordinator.async_update_zone_polygon(entity._thing_name, hash_id, polygon)
+
+    async def handle_update_nogo_polygon(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
+        polygon: list[dict] = call.data[_ATTR_POLYGON]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_update_nogo_polygon(entity._thing_name, hash_id, polygon)
 
     async def handle_add_zone(call: ServiceCall) -> dict[str, Any]:
         entity_ids: list[str] = call.data["entity_id"]
@@ -609,6 +628,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         )
     hass.services.async_register(
         DOMAIN, _SERVICE_UPDATE_ZONE_POLYGON, handle_update_zone_polygon, schema=_UPDATE_ZONE_POLYGON_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_UPDATE_NOGO_POLYGON, handle_update_nogo_polygon, schema=_UPDATE_NOGO_POLYGON_SCHEMA
     )
     hass.services.async_register(
         DOMAIN,
