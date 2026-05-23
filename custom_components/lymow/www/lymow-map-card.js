@@ -355,14 +355,16 @@ class LymowMapCard extends HTMLElement {
     }
 
     // ── Legend with matching SVG symbols ─────────────────────────────────────
+    const _li = (svgInner, vb, label) =>
+      `<div class="legend-item"><span class="lsym"><svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">${svgInner}</svg></span>${label}</div>`;
     const legendItems = [
-      `<div class="legend-item"><svg width="16" height="12" viewBox="0 0 16 12"><rect x="1" y="1" width="14" height="10" fill="#a8d8a8" stroke="#388e3c" stroke-width="1.5" rx="1"/></svg>Go zone</div>`,
-      nogoZones.length ? `<div class="legend-item"><svg width="16" height="12" viewBox="0 0 16 12"><rect x="1" y="1" width="14" height="10" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="1.5" rx="1" stroke-dasharray="3,2"/></svg>No-go zone</div>` : "",
-      chargingStation ? `<div class="legend-item"><svg width="16" height="14" viewBox="0 0 16 14"><circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.3" fill="white"/><text x="8" y="8" text-anchor="middle" dominant-baseline="middle" font-size="5" fill="#1565c0" font-weight="bold">⚡</text></svg>Station</div>` : "",
-      poseEastM !== undefined ? `<div class="legend-item"><svg width="18" height="14" viewBox="0 0 18 14"><circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/></svg>Robot</div>` : "",
-      rtkEastM !== undefined ? `<div class="legend-item"><svg width="16" height="14" viewBox="0 0 16 14"><polygon points="8,1 2,13 14,13" fill="#7b1fa2" stroke="white" stroke-width="1"/></svg>RTK base</div>` : "",
-      channels.some(c => c.isDockingChannel) ? `<div class="legend-item"><svg width="20" height="12" viewBox="0 0 20 12"><line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="1.5" stroke-dasharray="4,2"/></svg>Docking</div>` : "",
-      channels.some(c => !c.isDockingChannel) ? `<div class="legend-item"><svg width="20" height="12" viewBox="0 0 20 12"><line x1="1" y1="6" x2="19" y2="6" stroke="#6a1b9a" stroke-width="1.5" stroke-dasharray="4,2"/></svg>Channel</div>` : "",
+      _li(`<rect x="1" y="1" width="14" height="10" fill="#a8d8a8" stroke="#388e3c" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
+      nogoZones.length ? _li(`<rect x="1" y="1" width="14" height="10" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="1.5" rx="1" stroke-dasharray="3,2"/>`, "0 0 16 12", "No-go") : "",
+      chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
+      poseEastM !== undefined ? _li(`<circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/>`, "0 0 18 14", "Robot") : "",
+      rtkEastM !== undefined ? _li(`<polygon points="8,1 2,13 14,13" fill="#7b1fa2" stroke="white" stroke-width="1"/>`, "0 0 16 14", "RTK") : "",
+      channels.some(c => c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Docking") : "",
+      channels.some(c => !c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#6a1b9a" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Channel") : "",
     ].filter(Boolean).join("");
 
     const title = this._config.title ?? "Lymow Map";
@@ -393,10 +395,11 @@ class LymowMapCard extends HTMLElement {
         .edit-bar { font-size: 0.8em; color: var(--secondary-text-color); margin-top: 6px; flex-shrink: 0; }
         .msg { padding: 14px; color: var(--secondary-text-color); font-size: 0.9em; line-height: 1.5; }
         code { background: var(--code-editor-background-color,#f0f0f0); padding: 1px 4px; border-radius: 3px; }
-        .legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 6px; font-size: 0.75em;
+        .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 0.75em;
                   color: var(--secondary-text-color); align-items: center; flex-shrink: 0; }
-        .legend-item { display: flex; align-items: center; gap: 4px; }
-        .legend-item svg { flex-shrink: 0; }
+        .legend-item { display: flex; align-items: center; gap: 3px; white-space: nowrap; }
+        .lsym { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 14px; flex-shrink: 0; }
+        .lsym svg { width: 100%; height: 100%; display: block; }
       </style>
       <ha-card>
         <div class="card-header">${title}</div>
