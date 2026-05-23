@@ -15,7 +15,6 @@ from __future__ import annotations
 import base64
 import json
 import os
-from collections.abc import Iterator
 from datetime import UTC, datetime
 
 from mitmproxy import http
@@ -74,14 +73,19 @@ def _pretty_body(content: bytes, content_type: str) -> str:
     return f"  binary ({len(content)}B): {content[:64].hex()}..."
 
 
-def _iter_mqtt_packets(buf: bytes) -> Iterator[tuple[int, int, bytes, int]]:
-    """Walk every MQTT control packet coalesced in one WebSocket binary frame.
+def _parse_mqtt_packets(buf: bytes) -> tuple[list[tuple[int, int, bytes, int]], int]:
+    """Parse complete MQTT packets from the front of a byte stream.
 
-    A single WS frame can carry several MQTT packets back-to-back (e.g. a PUBACK
-    followed by an outbound command PUBLISH). Yields ``(ctrl_type, qos, variable,
-    packet_len)`` for each, where ``variable`` is the bytes after the fixed header
-    and ``packet_len`` is the full on-wire packet size.
+    MQTT-over-WebSocket chunks the MQTT byte stream across WS messages
+    arbitrarily, so a single packet (e.g. a large command PUBLISH + config) can
+    span message boundaries while several small packets share one message. This
+    parses every *complete* packet from the front and reports how many bytes were
+    consumed, so the caller can carry the unparsed remainder into the next message.
+
+    Returns ``(packets, consumed)`` where each packet is
+    ``(ctrl_type, qos, variable, packet_len)``.
     """
+    packets: list[tuple[int, int, bytes, int]] = []
     pos, n = 0, len(buf)
     while pos + 2 <= n:
         ctrl = buf[pos] >> 4
@@ -92,7 +96,7 @@ def _iter_mqtt_packets(buf: bytes) -> Iterator[tuple[int, int, bytes, int]]:
         complete = False
         for _ in range(4):
             if p >= n:
-                return
+                break  # length field itself is incomplete — wait for more bytes
             b = buf[p]
             p += 1
             rem_len += (b & 0x7F) * multiplier
@@ -101,12 +105,17 @@ def _iter_mqtt_packets(buf: bytes) -> Iterator[tuple[int, int, bytes, int]]:
                 break
             multiplier *= 128
         if not complete:
-            return  # malformed Remaining Length (continuation bit past 4 bytes)
+            if p - pos > 4:
+                # Continuation bit still set after the 4th Remaining Length byte:
+                # the field is malformed per MQTT spec — skip past it and resync.
+                pos = p
+            break
         packet_end = p + rem_len
         if packet_end > n:
-            return  # truncated — don't guess
-        yield ctrl, qos, buf[p:packet_end], packet_end - pos
+            break  # packet continues in a later WS message — keep remainder
+        packets.append((ctrl, qos, buf[p:packet_end], packet_end - pos))
         pos = packet_end
+    return packets, pos
 
 
 def _decode_publish(qos: int, var: bytes) -> tuple[str, bytes] | None:
@@ -146,6 +155,11 @@ def _pretty_mqtt_payload(body: bytes) -> str:
 
 _CTRL_NAMES = {1: "CONNECT", 2: "CONNACK", 4: "PUBACK", 8: "SUB", 9: "SUBACK", 12: "PINGREQ", 13: "PINGRESP"}
 
+# Cap on per-direction MQTT reassembly tail. A real PUBLISH carrying map data is
+# only ~tens of KB, so anything past this is a corrupt/hostile Remaining Length
+# stalling the parser — drop the tail and resync rather than buffer forever.
+_WS_BUF_MAX = 1 << 20  # 1 MiB
+
 
 class LymowCapture:
     def __init__(self) -> None:
@@ -153,6 +167,9 @@ class LymowCapture:
         # message (mitmproxy may deliver several between handler invocations)
         # instead of only the latest.
         self._ws_seen: dict[str, int] = {}
+        # Per (flow, direction) MQTT byte-stream remainder: an MQTT packet can
+        # span multiple WS messages, so we carry the unparsed tail forward.
+        self._ws_buf: dict[tuple[str, bool], bytearray] = {}
 
     def request(self, flow: http.HTTPFlow) -> None:
         if not _is_lymow(flow):
@@ -207,7 +224,17 @@ class LymowCapture:
                 continue
             if "iot." not in host or msg.is_text or not isinstance(msg.content, bytes):
                 continue
-            for ctrl, qos, var, packet_len in _iter_mqtt_packets(msg.content):
+            # Append to the per-direction byte stream, parse complete packets,
+            # and keep any partial packet for the next message.
+            key = (flow.id, msg.from_client)
+            buf = self._ws_buf.setdefault(key, bytearray())
+            buf += msg.content
+            packets, consumed = _parse_mqtt_packets(bytes(buf))
+            del buf[:consumed]
+            if len(buf) > _WS_BUF_MAX:
+                _write(f"[{_ts()}] MQTT {arrow} (dropped {len(buf)}B unparsed tail — resyncing)")
+                buf.clear()
+            for ctrl, qos, var, packet_len in packets:
                 if ctrl == 3:  # PUBLISH
                     parsed = _decode_publish(qos, var)
                     if parsed:
@@ -220,8 +247,10 @@ class LymowCapture:
         self._ws_seen[flow.id] = len(messages)
 
     def websocket_end(self, flow: http.HTTPFlow) -> None:
-        """Drop the per-flow message cursor so _ws_seen doesn't grow unbounded."""
+        """Drop the per-flow cursors/buffers so they don't grow unbounded."""
         self._ws_seen.pop(flow.id, None)
+        self._ws_buf.pop((flow.id, True), None)
+        self._ws_buf.pop((flow.id, False), None)
 
 
 addons = [LymowCapture()]
