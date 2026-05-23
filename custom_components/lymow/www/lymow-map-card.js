@@ -32,9 +32,11 @@ class LymowMapCard extends HTMLElement {
     // Edit state
     this._editing = false;
     this._editHash = null;
+    this._editType = null; // "go" or "nogo"
     this._workPoly = null;
     this._dragIdx = null;
     this._polyOverrides = {};
+    this._nogoOverrides = {};
 
     // Pan/zoom state (in SVG user units)
     this._vx = 0; this._vy = 0; this._vw = 100; this._vh = 100;
@@ -77,9 +79,12 @@ class LymowMapCard extends HTMLElement {
     const goZones = (a.go_zones || []).map((z) =>
       this._polyOverrides[z.hashId] ? { ...z, polygon: this._polyOverrides[z.hashId] } : z
     );
+    const nogoZones = (a.nogo_zones || []).map((z) =>
+      this._nogoOverrides[z.hashId] ? { ...z, polygon: this._nogoOverrides[z.hashId] } : z
+    );
     return {
       goZones,
-      nogoZones: a.nogo_zones || [],
+      nogoZones,
       channels: a.channels || [],
       gpsOrigin: a.gps_origin || null,
       chargingStation: a.charging_station || null,
@@ -216,7 +221,14 @@ class LymowMapCard extends HTMLElement {
     // ── No-go zones (on top of go-zones) ─────────────────────────────────────
     const nogoPaths = nogoZones.map((z) => {
       const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
-      return `<polygon points="${pts}" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="0.6" stroke-dasharray="1,0.5"/>`;
+      const beingEdited = this._editing && this._editType === "nogo" && this._editHash === z.hashId;
+      const stroke = beingEdited ? "#ef6c00" : "#c62828";
+      const fill = beingEdited ? "#fff3e0" : "#ff5252";
+      const fillOpacity = beingEdited ? "0.5" : "0.35";
+      const cursor = this._editing ? "pointer" : "default";
+      return `<polygon data-hash="${z.hashId}" data-type="nogo" points="${pts}"
+        fill="${fill}" fill-opacity="${fillOpacity}" stroke="${stroke}" stroke-width="0.6" stroke-dasharray="1,0.5"
+        style="cursor:${cursor}"/>`;
     }).join("\n");
 
     const nogoLabels = nogoZones.map((z) => {
@@ -333,8 +345,8 @@ class LymowMapCard extends HTMLElement {
     let toolbar;
     if (this._editing) {
       const msg = this._editHash
-        ? `Editing zone — drag handles · tap + to insert · ✕ to delete`
-        : `Tap a go-zone to start editing its boundary.`;
+        ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · tap + to insert · ✕ to delete`
+        : `Tap a go-zone or no-go zone to start editing its boundary.`;
       toolbar = `
         <div class="edit-bar">${msg}</div>
         <div class="btn-row">
@@ -504,7 +516,10 @@ class LymowMapCard extends HTMLElement {
 
     if (this._editing) {
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
-        el.addEventListener("click", () => { if (!this._panMoved) this._chooseEditZone(el.dataset.hash); });
+        el.addEventListener("click", () => { if (!this._panMoved) this._chooseEditZone(el.dataset.hash, "go"); });
+      });
+      this.shadowRoot.querySelectorAll('polygon[data-type="nogo"]').forEach((el) => {
+        el.addEventListener("click", () => { if (!this._panMoved) this._chooseEditZone(el.dataset.hash, "nogo"); });
       });
       this.shadowRoot.querySelectorAll(".midpoint").forEach((el) => {
         el.addEventListener("click", (e) => { e.stopPropagation(); this._insertVertex(+el.dataset.edge); });
@@ -709,15 +724,18 @@ class LymowMapCard extends HTMLElement {
   }
 
   _cancelEdit() {
-    this._editing = false; this._editHash = null; this._workPoly = null;
+    this._editing = false; this._editHash = null; this._editType = null; this._workPoly = null;
     this._dragIdx = null; this._render();
   }
 
-  _chooseEditZone(hashId) {
+  _chooseEditZone(hashId, type) {
     if (this._editHash === hashId) return;
-    const zone = (this._getMapData()?.goZones || []).find((z) => z.hashId === hashId);
+    const mapData = this._getMapData();
+    const list = type === "nogo" ? (mapData?.nogoZones || []) : (mapData?.goZones || []);
+    const zone = list.find((z) => z.hashId === hashId);
     if (!zone || !zone.polygon) return;
     this._editHash = hashId;
+    this._editType = type;
     this._workPoly = this._decimatePoly(zone.polygon);
     this._render();
   }
@@ -808,17 +826,30 @@ class LymowMapCard extends HTMLElement {
     if (!this._hass || !this._editHash || !this._workPoly || !this._config.mower_entity) return;
     const polygon = this._workPoly.map((p) => ({ x: +p.x.toFixed(4), y: +p.y.toFixed(4) }));
     const hashId = this._editHash;
-    this._polyOverrides[hashId] = polygon;
+    const isNogo = this._editType === "nogo";
+    if (isNogo) {
+      this._nogoOverrides[hashId] = polygon;
+    } else {
+      this._polyOverrides[hashId] = polygon;
+    }
     this._cancelEdit();
     try {
-      await this._hass.callService("lymow", "update_zone_polygon", {
-        entity_id: this._config.mower_entity,
-        zone_hash_id: hashId,
-        polygon,
-      });
+      if (isNogo) {
+        await this._hass.callService("lymow", "update_nogo_polygon", {
+          entity_id: this._config.mower_entity,
+          nogo_hash_id: hashId,
+          polygon,
+        });
+      } else {
+        await this._hass.callService("lymow", "update_zone_polygon", {
+          entity_id: this._config.mower_entity,
+          zone_hash_id: hashId,
+          polygon,
+        });
+      }
     } catch (err) {
       console.error("lymow-map-card: save failed", err);
-      delete this._polyOverrides[hashId];
+      if (isNogo) delete this._nogoOverrides[hashId]; else delete this._polyOverrides[hashId];
       this._render();
       const bar = this.shadowRoot.querySelector(".edit-bar");
       if (bar) bar.textContent = `⚠️ Save failed: ${err?.message || err}`;

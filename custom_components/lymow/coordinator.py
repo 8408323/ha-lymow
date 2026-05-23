@@ -775,6 +775,34 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             updated["modifyHashs"] = [*existing_modified, hash_id]
         await self.async_sync_map(thing_name, updated)
 
+    async def async_update_nogo_polygon(self, thing_name: str, hash_id: str, polygon: list[dict]) -> None:
+        """Replace a no-go zone's polygon with the caller-supplied vertices and SYNC_MAP."""
+        import copy
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            raise HomeAssistantError(
+                f"Polygon needs at least 3 vertices, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
+            )
+        for pt in polygon:
+            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
+                raise HomeAssistantError("Polygon vertices must be dicts with 'x' and 'y' keys")
+        updated = copy.deepcopy(map_data)
+        target = None
+        for z in updated.get("nogoZones", []):
+            if z.get("hashId") == hash_id:
+                target = z
+                break
+        if target is None:
+            raise HomeAssistantError(f"No-go zone {hash_id!r} not found in map")
+        target["polygon"] = [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon]
+        existing_modified = updated.get("modifyHashs") or []
+        if hash_id not in existing_modified:
+            updated["modifyHashs"] = [*existing_modified, hash_id]
+        await self.async_sync_map(thing_name, updated)
+
     async def async_add_zone(
         self,
         thing_name: str,
