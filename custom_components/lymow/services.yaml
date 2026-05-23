@@ -489,3 +489,15 @@ pin_and_go:
       example: "Spot"
       selector:
         text:
+
+resume:
+  name: Resume mowing
+  description: >
+    Resume a paused or in-flight mow without restarting it. HA's standard
+    "start mowing" service starts a fresh task (USER_CTRL_CLEAN); this sends
+    USER_CTRL_RESUME so the robot picks up from where it was — useful after a
+    pause or after telling it to dock mid-mow.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower

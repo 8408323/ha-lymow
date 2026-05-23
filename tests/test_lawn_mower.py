@@ -237,8 +237,8 @@ async def test_async_setup_entry_registers_services() -> None:
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
     # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
-    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone.
-    assert hass.services.async_register.call_count == 31
+    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
+    assert hass.services.async_register.call_count == 32
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +566,55 @@ async def test_handle_query_map_calls_coordinator() -> None:
     call = _make_call(["lawn_mower.mower_1"])
     await handlers2["query_map"](call)
     coord.async_query_map.assert_called_once_with(THING)
+
+
+async def test_handle_resume_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_resume = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers2: dict = {}
+
+    def _register2(domain, service, handler, schema=None, supports_response=False):
+        handlers2[service] = handler
+
+    hass.services.async_register.side_effect = _register2
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    await handlers2["resume"](_make_call(["lawn_mower.mower_1"]))
+    coord.async_resume.assert_awaited_once_with(THING)
+
+
+async def test_handle_resume_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_resume = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers2: dict = {}
+
+    def _register2(domain, service, handler, schema=None, supports_response=False):
+        handlers2[service] = handler
+
+    hass.services.async_register.side_effect = _register2
+    await async_setup_entry(hass, entry, lambda entities: None)
+    await handlers2["resume"](_make_call(["lawn_mower.does_not_exist"]))
+    coord.async_resume.assert_not_awaited()
 
 
 async def test_handle_query_schedules_calls_coordinator() -> None:
