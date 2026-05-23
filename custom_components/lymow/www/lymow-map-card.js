@@ -30,6 +30,7 @@ class LymowMapCard extends HTMLElement {
     this._expanded = false;
 
     // Edit state
+    this._lastZoneCount = 0;
     this._editing = false;
     this._editHash = null;
     this._editType = null; // "go" or "nogo"
@@ -158,6 +159,13 @@ class LymowMapCard extends HTMLElement {
     const newBounds = this._computeBounds(mapData);
     if (!newBounds) { this.shadowRoot.innerHTML = this._wrapMsg("Empty map."); return; }
 
+    // Reset view if zone count changed since we last fitted — handles the case
+    // where the card first renders with only robot/channel data (no zones) and
+    // later receives full map data with zones (much larger bounds).
+    const zoneCount = goZones.length + nogoZones.length;
+    if (this._mapReady && zoneCount !== (this._lastZoneCount || 0) && zoneCount > 0) {
+      this._mapReady = false;
+    }
     if (!this._mapReady) {
       this._bounds = newBounds;
       const W = newBounds.maxX - newBounds.minX;
@@ -166,6 +174,7 @@ class LymowMapCard extends HTMLElement {
       this._vw = 100; this._vh = H * this._scale;
       this._vx = 0; this._vy = 0;
       this._mapReady = true;
+      this._lastZoneCount = zoneCount;
     } else if (this._editing) {
       this._bounds = newBounds;
       this._scale = 100 / (newBounds.maxX - newBounds.minX);
