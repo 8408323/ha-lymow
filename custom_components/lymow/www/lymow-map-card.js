@@ -31,6 +31,8 @@ class LymowMapCard extends HTMLElement {
 
     // Edit state
     this._lastZoneCount = 0;
+    this._settingsOpen = false;
+    this._settingsValues = null;
     this._editing = false;
     this._editHash = null;
     this._editType = null; // "go" or "nogo"
@@ -370,9 +372,11 @@ class LymowMapCard extends HTMLElement {
         : "";
       const editBtn = this._config.mower_entity
         ? `<button class="btn edit" onclick="${host}._enterEdit()">✏️ Edit zones</button>` : "";
+      const settingsBtn = this._config.mower_entity
+        ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" onclick="${host}._toggleSettings()" title="Mowing settings">⚙</button>` : "";
       const expandBtn = `<button class="btn expand" onclick="${host}._toggleExpand()" title="${this._expanded ? "Collapse" : "Expand map"}">${this._expanded ? "⊠" : "⊞"}</button>`;
       const resetBtn = `<button class="btn reset" onclick="${host}._resetView()" title="Reset zoom">⊡</button>`;
-      toolbar = `<div class="btn-row">${mowBtn}${editBtn}${expandBtn}${resetBtn}</div>`;
+      toolbar = `<div class="btn-row">${mowBtn}${editBtn}${settingsBtn}${expandBtn}${resetBtn}</div>`;
     }
 
     // ── Legend with matching SVG symbols ─────────────────────────────────────
@@ -387,6 +391,42 @@ class LymowMapCard extends HTMLElement {
       channels.some(c => c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#1565c0" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Docking") : "",
       channels.some(c => !c.isDockingChannel) ? _li(`<line x1="1" y1="6" x2="19" y2="6" stroke="#6a1b9a" stroke-width="2" stroke-dasharray="4,2"/>`, "0 0 20 12", "Channel") : "",
     ].filter(Boolean).join("");
+
+    // ── Settings panel ────────────────────────────────────────────────────────
+    const settingsPanel = this._settingsOpen ? `
+      <div class="settings-panel">
+        <div class="sp-title">Mowing settings</div>
+        <div class="sp-row">
+          <label>Speed (m/s)</label>
+          <input type="range" class="sp-input" data-field="move_speed" data-type="float"
+            min="0.1" max="1.0" step="0.1" value="${this._settingsValues.move_speed ?? 0.6}"
+            oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(1)"/>
+          <span class="sp-val">${(this._settingsValues.move_speed ?? 0.6).toFixed(1)}</span>
+        </div>
+        <div class="sp-row">
+          <label>Path spacing (mm)</label>
+          <input type="range" class="sp-input" data-field="path_spacing" data-type="int"
+            min="50" max="250" step="10" value="${this._settingsValues.path_spacing ?? 90}"
+            oninput="this.nextElementSibling.textContent=this.value"/>
+          <span class="sp-val">${this._settingsValues.path_spacing ?? 90}</span>
+        </div>
+        <div class="sp-row">
+          <label>Perimeter laps</label>
+          <input type="range" class="sp-input" data-field="perimeter_mow_laps" data-type="int"
+            min="0" max="5" step="1" value="${this._settingsValues.perimeter_mow_laps ?? 1}"
+            oninput="this.nextElementSibling.textContent=this.value"/>
+          <span class="sp-val">${this._settingsValues.perimeter_mow_laps ?? 1}</span>
+        </div>
+        <div class="sp-row">
+          <label>No-go laps</label>
+          <input type="range" class="sp-input" data-field="nogo_mow_laps" data-type="int"
+            min="0" max="5" step="1" value="${this._settingsValues.nogo_mow_laps ?? 1}"
+            oninput="this.nextElementSibling.textContent=this.value"/>
+          <span class="sp-val">${this._settingsValues.nogo_mow_laps ?? 1}</span>
+        </div>
+        <button class="sp-apply" onclick="this.getRootNode().host._applySettings()">Apply settings</button>
+        <div class="sp-status"></div>
+      </div>` : "";
 
     const title = this._config.title ?? "Lymow Map";
 
@@ -410,7 +450,20 @@ class LymowMapCard extends HTMLElement {
         .btn.mow, .btn.edit { background: var(--primary-color, #03a9f4); }
         .btn.save { background: #2e7d32; }
         .btn.cancel { background: #757575; flex: 0; }
-        .btn.reset, .btn.expand { background: #455a64; flex: 0; min-width: 36px; }
+        .btn.reset, .btn.expand, .btn.settings { background: #455a64; flex: 0; min-width: 36px; }
+        .btn.settings-active { background: #ef6c00; }
+        .settings-panel { margin-top: 8px; padding: 10px 12px; background: var(--card-background-color, #1c1c1c);
+          border: 1px solid var(--divider-color, #444); border-radius: 8px; flex-shrink: 0; }
+        .settings-panel .sp-title { font-size: 0.8em; font-weight: 600; color: var(--secondary-text-color);
+          text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+        .sp-row { display: grid; grid-template-columns: 110px 1fr 42px; align-items: center; gap: 6px; margin-bottom: 6px; }
+        .sp-row label { font-size: 0.8em; color: var(--primary-text-color); }
+        .sp-row input[type=range] { width: 100%; accent-color: var(--primary-color, #03a9f4); }
+        .sp-row .sp-val { font-size: 0.8em; color: var(--secondary-text-color); text-align: right; }
+        .sp-apply { margin-top: 6px; width: 100%; padding: 7px; border: none; border-radius: 6px;
+          background: var(--primary-color, #03a9f4); color: white; font-size: 0.85em; font-weight: 600; cursor: pointer; }
+        .sp-apply:hover { filter: brightness(1.1); }
+        .sp-status { font-size: 0.75em; color: var(--secondary-text-color); margin-top: 4px; min-height: 1.2em; }
         .btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .btn:not(:disabled):hover { filter: brightness(1.1); }
         .edit-bar { font-size: 0.8em; color: var(--secondary-text-color); margin-top: 6px; flex-shrink: 0; }
@@ -442,6 +495,7 @@ class LymowMapCard extends HTMLElement {
           </svg>
         </div>
         ${toolbar}
+        ${settingsPanel}
         <div class="legend">${legendItems}</div>
       </ha-card>`;
 
@@ -721,6 +775,43 @@ class LymowMapCard extends HTMLElement {
     });
     this._selectedZones.clear();
     this._render();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Edit mode
+  // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // Settings panel
+  // ---------------------------------------------------------------------------
+
+  _toggleSettings() {
+    this._settingsOpen = !this._settingsOpen;
+    if (this._settingsOpen && !this._settingsValues) {
+      this._settingsValues = { move_speed: 0.6, path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1 };
+    }
+    this._render();
+  }
+
+  async _applySettings() {
+    if (!this._hass || !this._config.mower_entity) return;
+    const inputs = this.shadowRoot.querySelectorAll(".sp-input");
+    const payload = { entity_id: this._config.mower_entity };
+    inputs.forEach((el) => {
+      const v = el.dataset.type === "float" ? parseFloat(el.value) : parseInt(el.value, 10);
+      payload[el.dataset.field] = v;
+      if (!this._settingsValues) this._settingsValues = {};
+      this._settingsValues[el.dataset.field] = v;
+    });
+    const status = this.shadowRoot.querySelector(".sp-status");
+    if (status) status.textContent = "Sending…";
+    try {
+      await this._hass.callService("lymow", "set_task_config", payload);
+      if (status) status.textContent = "✓ Applied";
+      setTimeout(() => { if (status) status.textContent = ""; }, 3000);
+    } catch (err) {
+      if (status) status.textContent = `⚠️ ${err?.message || err}`;
+    }
   }
 
   // ---------------------------------------------------------------------------
