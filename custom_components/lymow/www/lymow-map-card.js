@@ -239,6 +239,22 @@ class LymowMapCard extends HTMLElement {
     const zf = this._zoomFactor();
     const invZf = (1 / zf).toFixed(6);
 
+    // Update cached px-per-SVG-unit from the live SVG element (if already in DOM).
+    // Fallback: assume SVG fills ~280px so 1 unit ≈ 2.8px at initial zoom.
+    {
+      const existingSvg = this.shadowRoot.querySelector("svg");
+      if (existingSvg) {
+        const r = existingSvg.getBoundingClientRect();
+        if (r.width) this._pxPerUnit = r.width / this._vw;
+      }
+      if (!this._pxPerUnit) this._pxPerUnit = 2.8;
+    }
+    // Convert desired pixel size to SVG units inside scale(invZf) marker groups.
+    // Rendered px = child_units × invZf × pxPerUnit, so:
+    // child_units = desiredPx × zf / pxPerUnit  (the zf and invZf cancel at render time)
+    const pu = this._pxPerUnit;
+    const mPx = (px) => (px * zf / pu).toFixed(4);
+
     // ── Channels ─────────────────────────────────────────────────────────────
     const channelPaths = channels.map((ch) => {
       const pts = (ch.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
@@ -333,12 +349,11 @@ class LymowMapCard extends HTMLElement {
     let csHtml = "";
     if (chargingStation) {
       const cx = sx(chargingStation.x), cy = sy(chargingStation.y);
-      // r=9 in "initial-zoom" units; scaled back by invZf = constant ~9px radius
       csHtml = `
         <g data-marker="cs" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy}) scale(${invZf})" pointer-events="none">
-          <circle r="9" fill="#1565c0" opacity="0.9"/>
-          <circle r="5" fill="white"/>
-          <text text-anchor="middle" dominant-baseline="middle" font-size="8" fill="#1565c0" font-weight="bold">⚡</text>
+          <circle r="${mPx(9)}" fill="#1565c0" opacity="0.9"/>
+          <circle r="${mPx(5)}" fill="white"/>
+          <text text-anchor="middle" dominant-baseline="middle" font-size="${mPx(8)}" fill="#1565c0" font-weight="bold">⚡</text>
         </g>`;
     }
 
@@ -347,13 +362,13 @@ class LymowMapCard extends HTMLElement {
     if (poseEastM !== undefined && poseNorthM !== undefined) {
       const rx = sx(poseEastM), ry = sy(poseNorthM);
       const theta = poseThetaRad || 0;
-      // Arrow points in heading direction; in SVG y is flipped so negate sin
-      const arrowX = (Math.cos(theta) * 22).toFixed(3);
-      const arrowY = (-Math.sin(theta) * 22).toFixed(3);
+      const headLen = mPx(16);
+      const arrowX = (Math.cos(theta) * headLen).toFixed(3);
+      const arrowY = (-Math.sin(theta) * headLen).toFixed(3);
       robotHtml = `
         <g data-marker="robot" data-cx="${rx}" data-cy="${ry}" transform="translate(${rx},${ry}) scale(${invZf})" pointer-events="none">
-          <circle r="8" fill="#e65100" stroke="white" stroke-width="2"/>
-          <line x1="0" y1="0" x2="${arrowX}" y2="${arrowY}" stroke="#e65100" stroke-width="4" stroke-linecap="round"/>
+          <circle r="${mPx(8)}" fill="#e65100" stroke="white" stroke-width="${mPx(2)}"/>
+          <line x1="0" y1="0" x2="${arrowX}" y2="${arrowY}" stroke="#e65100" stroke-width="${mPx(3)}" stroke-linecap="round"/>
         </g>`;
     }
 
@@ -364,8 +379,8 @@ class LymowMapCard extends HTMLElement {
       // Triangle: tip up, base down; centered at (0,0)
       rtkHtml = `
         <g data-marker="rtk" data-cx="${rx}" data-cy="${ry}" transform="translate(${rx},${ry}) scale(${invZf})" pointer-events="none">
-          <polygon points="0,-11 -9,7 9,7" fill="#7b1fa2" stroke="white" stroke-width="2" opacity="0.9"/>
-          <text y="18" text-anchor="middle" font-size="8" fill="#7b1fa2">RTK</text>
+          <polygon points="0,${-mPx(11)} ${-mPx(9)},${mPx(7)} ${mPx(9)},${mPx(7)}" fill="#7b1fa2" stroke="white" stroke-width="${mPx(2)}" opacity="0.9"/>
+          <text y="${mPx(18)}" text-anchor="middle" font-size="${mPx(8)}" fill="#7b1fa2">RTK</text>
         </g>`;
     }
 
@@ -879,7 +894,14 @@ class LymowMapCard extends HTMLElement {
 
   _updateMarkerScales() {
     if (!this._bounds) return;
-    const invZf = (1 / this._zoomFactor()).toFixed(6);
+    const zf = this._zoomFactor();
+    const invZf = (1 / zf).toFixed(6);
+    // Keep _pxPerUnit current so next _render() computes correct sizes
+    const svg = this.shadowRoot.querySelector("svg");
+    if (svg) {
+      const r = svg.getBoundingClientRect();
+      if (r.width) this._pxPerUnit = r.width / this._vw;
+    }
     this.shadowRoot.querySelectorAll("g[data-marker]").forEach((g) => {
       const cx = g.dataset.cx, cy = g.dataset.cy;
       g.setAttribute("transform", `translate(${cx},${cy}) scale(${invZf})`);
