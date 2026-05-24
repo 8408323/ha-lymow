@@ -276,8 +276,10 @@ ERROR_NAMES: dict[int, str] = {
 }
 
 # User-facing labels — concise plain English derived from the APK identifier
-# above. Used by LymowErrorSensor as the "description" attribute. When a code
-# doesn't have a hand-written label, the sensor falls back to the raw name.
+# above. Used by LymowErrorSensor as the "description" attribute. The sensor's
+# fallback for a missing-from-this-dict code is the literal string
+# ``"Unknown ({code})"`` (see :meth:`LymowErrorSensor.extra_state_attributes`);
+# extend this dict whenever a new ERROR_NAMES entry is added.
 ERROR_DESCRIPTIONS: dict[int, str] = {
     0: "No error",
     1: "Wheel drive malfunction",

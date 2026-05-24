@@ -68,7 +68,11 @@ def test_specific_known_warning_codes_match_apk() -> None:
 
 def test_descriptions_are_short_one_liners() -> None:
     """Sensor attribute values render in HA UI; keep them <80 chars to avoid
-    wrapping in the device card."""
-    for d in {**ERROR_DESCRIPTIONS, **WARNING_DESCRIPTIONS}.values():
+    wrapping in the device card. ERROR and WARNING tables share numeric keys
+    (0..63 overlap), so iterate each separately — a dict-merge would mask any
+    long WARNING_* description that collides with an ERROR_* key."""
+    from itertools import chain
+
+    for d in chain(ERROR_DESCRIPTIONS.values(), WARNING_DESCRIPTIONS.values()):
         assert "\n" not in d
         assert len(d) <= 80, f"description too long ({len(d)} chars): {d!r}"
