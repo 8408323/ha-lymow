@@ -771,6 +771,24 @@ def encode_set_schedules(entries: list[dict[str, Any]]) -> bytes:
     return pb
 
 
+def _encode_channel(ch: dict) -> bytes:
+    """Encode a PbChannel sub-message for inclusion in a sync_map payload."""
+    out = _field_str(1, ch.get("hashId", ""))
+    if ch.get("zone1"):
+        out += _field_str(2, ch["zone1"])
+    if ch.get("zone2"):
+        out += _field_str(3, ch["zone2"])
+    out += _field_i32(4, int(ch.get("isValid", True)))
+    if ch.get("polygon"):
+        out += _field_bytes(5, _encode_map_polygon(ch["polygon"]))
+    out += _field_i32(6, int(ch.get("isDockingChannel", False)))
+    if "cutHeight" in ch:
+        out += _field_i32(9, int(ch["cutHeight"]))
+    if "channelLift" in ch:
+        out += _field_i32(10, int(ch["channelLift"]))
+    return out
+
+
 def encode_delete_channel(hash_id: str) -> bytes:
     """Encode a delete-channel command (USER_CTRL_DELETE_CHANNEL).
 
@@ -894,6 +912,8 @@ def _encode_map_content(map_data: dict) -> bytes:
         out += _field_bytes(1, _encode_go_zone(zone))
     for nogo in map_data.get("nogoZones", []):
         out += _field_bytes(2, _encode_nogo_zone(nogo))
+    for ch in map_data.get("channels", []):
+        out += _field_bytes(3, _encode_channel(ch))
     cs = map_data.get("chargingStation")
     if cs:
         cs_bytes = (

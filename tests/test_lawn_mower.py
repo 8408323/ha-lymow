@@ -234,8 +234,9 @@ async def test_async_setup_entry_registers_services() -> None:
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
     # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
-    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled.
-    assert hass.services.async_register.call_count == 33
+    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
+    # + 1 add-nogo-zone + 1 add-channel.
+    assert hass.services.async_register.call_count == 35
 
 
 # ---------------------------------------------------------------------------

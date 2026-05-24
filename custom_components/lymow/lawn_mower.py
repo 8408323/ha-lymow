@@ -67,6 +67,8 @@ _SERVICE_START_VIDEO_SESSION = "start_video_session"
 _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
 _SERVICE_UPDATE_NOGO_POLYGON = "update_nogo_polygon"
 _SERVICE_ADD_ZONE = "add_zone"
+_SERVICE_ADD_NOGO_ZONE = "add_nogo_zone"
+_SERVICE_ADD_CHANNEL = "add_channel"
 _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
@@ -225,6 +227,22 @@ _ADD_ZONE_SCHEMA = vol.Schema(
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
         vol.Optional(_ATTR_NAME, default=""): cv.string,
+        vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+_ADD_NOGO_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
+        vol.Optional("parent_zone_hash_id", default=""): cv.string,
+    }
+)
+_ADD_CHANNEL_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=2)),
+        vol.Optional("zone1_hash_id", default=""): cv.string,
+        vol.Optional("zone2_hash_id", default=""): cv.string,
         vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
     }
 )
@@ -433,6 +451,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             new_id = await coordinator.async_add_zone(entity._thing_name, polygon, name=name, cut_height_mm=cut_height)
+            new_ids[eid] = new_id
+        return {"hash_ids": new_ids}
+
+    async def handle_add_nogo_zone(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        polygon: list[dict] = call.data[_ATTR_POLYGON]
+        parent_hash_id: str = call.data.get("parent_zone_hash_id", "")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        new_ids: dict[str, str] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            new_id = await coordinator.async_add_nogo_zone(
+                entity._thing_name, polygon, parent_zone_hash_id=parent_hash_id
+            )
+            new_ids[eid] = new_id
+        return {"hash_ids": new_ids}
+
+    async def handle_add_channel(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        polygon: list[dict] = call.data[_ATTR_POLYGON]
+        zone1: str = call.data.get("zone1_hash_id", "")
+        zone2: str = call.data.get("zone2_hash_id", "")
+        cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        new_ids: dict[str, str] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            new_id = await coordinator.async_add_channel(
+                entity._thing_name, polygon, zone1_hash_id=zone1, zone2_hash_id=zone2, cut_height_mm=cut_height
+            )
             new_ids[eid] = new_id
         return {"hash_ids": new_ids}
 
@@ -677,6 +729,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _SERVICE_ADD_ZONE,
         handle_add_zone,
         schema=_ADD_ZONE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_ADD_NOGO_ZONE,
+        handle_add_nogo_zone,
+        schema=_ADD_NOGO_ZONE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_ADD_CHANNEL,
+        handle_add_channel,
+        schema=_ADD_CHANNEL_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(

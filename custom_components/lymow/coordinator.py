@@ -593,8 +593,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
 
     async def async_sync_map(self, thing_name: str, map_data: dict) -> None:
-        """Push an edited map to the robot via SYNC_MAP command."""
+        """Push an edited map to the robot via SYNC_MAP command and update coordinator data."""
         await self._mqtt.async_publish_command(thing_name, encode_sync_map(map_data))
+        if self.data and thing_name in self.data:
+            new_device = {**self.data[thing_name], "mapData": map_data}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
 
     async def async_delete_zone(self, thing_name: str, hash_id: str) -> None:
         """Delete a go-zone by hashId using USER_CTRL_CLEAR_ZONE=8."""
@@ -846,6 +849,95 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "polygon": [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon],
         }
         updated.setdefault("goZones", []).append(new_zone)
+        existing_modified = updated.get("modifyHashs") or []
+        updated["modifyHashs"] = [*existing_modified, new_hash_id]
+        await self.async_sync_map(thing_name, updated)
+        return new_hash_id
+
+    async def async_add_nogo_zone(
+        self,
+        thing_name: str,
+        polygon: list[dict],
+        parent_zone_hash_id: str = "",
+    ) -> str:
+        """Create a new no-go zone and push the map. Returns the new hashId."""
+        import copy
+        import secrets
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            raise HomeAssistantError(
+                f"Polygon needs at least 3 vertices, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
+            )
+        for pt in polygon:
+            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
+                raise HomeAssistantError("Polygon vertices must be dicts with 'x' and 'y' keys")
+        new_hash_id = secrets.token_hex(4)
+        existing_ids = {z.get("hashId") for z in map_data.get("goZones", [])} | {
+            z.get("hashId") for z in map_data.get("nogoZones", [])
+        }
+        while new_hash_id in existing_ids:
+            new_hash_id = secrets.token_hex(4)
+        updated = copy.deepcopy(map_data)
+        new_zone: dict[str, Any] = {
+            "hashId": new_hash_id,
+            "type": 0,
+            "isEnabled": True,
+            "polygon": [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon],
+        }
+        if parent_zone_hash_id:
+            new_zone["parentZoneHashId"] = parent_zone_hash_id
+        updated.setdefault("nogoZones", []).append(new_zone)
+        existing_modified = updated.get("modifyHashs") or []
+        updated["modifyHashs"] = [*existing_modified, new_hash_id]
+        await self.async_sync_map(thing_name, updated)
+        return new_hash_id
+
+    async def async_add_channel(
+        self,
+        thing_name: str,
+        polygon: list[dict],
+        zone1_hash_id: str = "",
+        zone2_hash_id: str = "",
+        cut_height_mm: int = 40,
+    ) -> str:
+        """Create a new channel (path connector) and push the map. Returns the new hashId."""
+        import copy
+        import secrets
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        if not isinstance(polygon, list) or len(polygon) < 2:
+            raise HomeAssistantError(
+                f"Channel needs at least 2 points, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
+            )
+        for pt in polygon:
+            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
+                raise HomeAssistantError("Channel points must be dicts with 'x' and 'y' keys")
+        new_hash_id = secrets.token_hex(4)
+        existing_ids = (
+            {z.get("hashId") for z in map_data.get("goZones", [])}
+            | {z.get("hashId") for z in map_data.get("nogoZones", [])}
+            | {c.get("hashId") for c in map_data.get("channels", [])}
+        )
+        while new_hash_id in existing_ids:
+            new_hash_id = secrets.token_hex(4)
+        updated = copy.deepcopy(map_data)
+        new_channel: dict[str, Any] = {
+            "hashId": new_hash_id,
+            "isValid": True,
+            "isDockingChannel": False,
+            "cutHeight": int(cut_height_mm),
+            "polygon": [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon],
+        }
+        if zone1_hash_id:
+            new_channel["zone1"] = zone1_hash_id
+        if zone2_hash_id:
+            new_channel["zone2"] = zone2_hash_id
+        updated.setdefault("channels", []).append(new_channel)
         existing_modified = updated.get("modifyHashs") or []
         updated["modifyHashs"] = [*existing_modified, new_hash_id]
         await self.async_sync_map(thing_name, updated)
