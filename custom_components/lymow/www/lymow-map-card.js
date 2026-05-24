@@ -795,9 +795,11 @@ class LymowMapCard extends HTMLElement {
 
     if (this._editing) {
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
+        el.addEventListener("pointerdown", () => { this._panMoved = false; });
         el.addEventListener("click", () => { if (!this._panMoved) this._chooseEditZone(el.dataset.hash, "go"); });
       });
       this.shadowRoot.querySelectorAll('polygon[data-type="nogo"]').forEach((el) => {
+        el.addEventListener("pointerdown", () => { this._panMoved = false; });
         el.addEventListener("click", () => { if (!this._panMoved) this._chooseEditZone(el.dataset.hash, "nogo"); });
       });
       this.shadowRoot.querySelectorAll(".midpoint").forEach((el) => {
@@ -818,8 +820,9 @@ class LymowMapCard extends HTMLElement {
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
         // Single click: select/deselect zone
         el.addEventListener("click", (e) => { if (!this._panMoved) { e.stopPropagation(); this._toggleZone(el.dataset.hash); } });
-        // Long press: toggle zone enabled/disabled
+        // Long press: toggle zone enabled/disabled; also reset panMoved so click fires
         el.addEventListener("pointerdown", () => {
+          this._panMoved = false;
           this._longPressTimer = setTimeout(() => { this._longPressTimer = null; this._toggleZoneEnabled(el.dataset.hash); }, 700);
         });
         el.addEventListener("pointerup", () => { if (this._longPressTimer) { clearTimeout(this._longPressTimer); this._longPressTimer = null; } });
@@ -832,9 +835,11 @@ class LymowMapCard extends HTMLElement {
       svg.addEventListener("dblclick", (e) => { e.stopPropagation(); this._onPinAndGo(e); });
     }
 
-    // Pan: any pointer drag on SVG (vertex drags set _dragIdx which suppresses pan)
+    // Pan: any pointer drag on SVG background (not on zone polygons or markers)
     svg.addEventListener("pointerdown", (e) => {
       if (this._dragIdx != null) return;
+      // Don't capture pan from zone polygon clicks — let click event reach the polygon
+      if (e.target?.dataset?.hash || e.target?.dataset?.type) return;
       this._panning = true;
       this._panMoved = false;
       this._panStart = { x: e.clientX, y: e.clientY, vx: this._vx, vy: this._vy };
