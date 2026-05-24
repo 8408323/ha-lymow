@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ERROR_DESCRIPTIONS
+from .const import DOMAIN, ERROR_DESCRIPTIONS, WARNING_DESCRIPTIONS
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
@@ -332,15 +332,32 @@ class LymowErrorSensor(LymowSensor):
         data = self.coordinator.data.get(self._thing_name, {})
         code = self.native_value or 0
         attrs: dict[str, Any] = {
-            "description": ERROR_DESCRIPTIONS.get(int(code), f"Unknown ({code})"),
+            "description": _describe(ERROR_DESCRIPTIONS, code),
         }
         warning_codes = data.get("warningCodes")
         if warning_codes is not None:
             attrs["warning_codes"] = warning_codes
+            attrs["warning_descriptions"] = [_describe(WARNING_DESCRIPTIONS, w) for w in warning_codes]
         all_error_codes = data.get("errorCodes")
         if all_error_codes is not None:
             attrs["error_codes"] = all_error_codes
+            attrs["error_descriptions"] = [_describe(ERROR_DESCRIPTIONS, e) for e in all_error_codes]
         return attrs
+
+
+def _describe(table: dict[int, str], code: Any) -> str:
+    """Look up ``code`` in ``table`` and return its label, or ``"Unknown (...)"``.
+
+    Wire data is untrusted: a future firmware (or a malformed payload) may put
+    a non-numeric value in the warning/error code list. Treat any conversion
+    failure as an unknown code rather than letting the sensor's state-update
+    blow up — the user's automations would silently stop firing otherwise.
+    """
+    try:
+        key = int(code)
+    except (TypeError, ValueError):
+        return f"Unknown ({code!r})"
+    return table.get(key, f"Unknown ({key})")
 
 
 class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
