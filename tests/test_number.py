@@ -447,7 +447,7 @@ def test_recharge_threshold_metadata_and_unique_id() -> None:
     e = RechargeBatteryThresholdNumber(_make_rr_coord({"rechargeBat": 15}), DEVICE)
     assert e._attr_unique_id == f"{THING}_recharge_threshold"
     assert e._attr_name == "Recharge threshold"
-    assert e._attr_native_min_value == 1
+    assert e._attr_native_min_value == 0
     assert e._attr_native_max_value == 100
     assert e.native_value == 15.0
 
@@ -457,8 +457,8 @@ def test_recharge_threshold_unknown_when_missing_or_out_of_range() -> None:
 
     assert RechargeBatteryThresholdNumber(_make_rr_coord(None), DEVICE).native_value is None
     assert RechargeBatteryThresholdNumber(_make_rr_coord({}), DEVICE).native_value is None
-    # 0 is in-range so 0 reads back as 0.0 — bound is 0-100, but the slider
-    # min is 1 (the app never sets 0). Just verify we don't return None for 0.
+    # 0 is in-range so it reads back as 0.0 — the slider min matches the
+    # decoder's bound so HA won't flag it as invalid.
     assert RechargeBatteryThresholdNumber(_make_rr_coord({"rechargeBat": 0}), DEVICE).native_value == 0.0
     assert RechargeBatteryThresholdNumber(_make_rr_coord({"rechargeBat": 250}), DEVICE).native_value is None
     assert RechargeBatteryThresholdNumber(_make_rr_coord({"rechargeBat": "15"}), DEVICE).native_value is None

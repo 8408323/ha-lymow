@@ -225,7 +225,11 @@ class _RrBatteryThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntit
     _settings_kwarg: str = ""
     _attr_has_entity_name = True
     _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = 1
+    # min=0 to match the decoder's 0-100 bound: the app's UI doesn't expose 0,
+    # but if a (future / hostile / off-app) write ever sets the wire field to 0
+    # we'd rather surface it as 0% than make HA mark the state invalid for
+    # being out of [min, max].
+    _attr_native_min_value = 0
     _attr_native_max_value = 100
     _attr_native_step = 1
     _attr_native_unit_of_measurement = "%"

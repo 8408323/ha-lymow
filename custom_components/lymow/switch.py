@@ -354,7 +354,12 @@ class ChargingHandbrakeSwitch(_DeviceSettingsBoolSwitch):
 
 
 class RechargeResumeSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
-    """Recharge & Resume master toggle (PbRobotConfig.rrConfig.enableRr, f1).
+    """Recharge & Resume master toggle.
+
+    Wire: ``PbRobotConfig.rrConfig.enableRr`` (PbRRConfig f1, bool).
+    Decoded into coordinator state as ``rrConfig['enable']`` by
+    ``decode_rr_config`` (the wire name is renamed to drop the redundant
+    ``Rr`` prefix once it's already inside ``rrConfig``).
 
     Period start/end and the two battery thresholds are exposed separately
     (period times as ``extra_state_attributes`` for now; the thresholds as
