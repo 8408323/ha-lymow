@@ -278,6 +278,26 @@ def test_on_mqtt_state_non_robot_config_patches_unchanged() -> None:
     assert coord.data[THING] == {"battery": 65, "robotConfig": {"isOpenLed": True}}
 
 
+def test_on_mqtt_state_deep_merges_nested_rr_config_partial_patch() -> None:
+    """A partial robotConfig.rrConfig push (e.g. only ``enable`` after a
+    toggle) must not drop the sibling battery thresholds / period times."""
+    coord, _, _ = _make_coordinator()
+    full_rr = {
+        "enable": True,
+        "rechargeBat": 15,
+        "resumeBat": 75,
+        "periodStart": {"hour": 4, "minute": 0},
+        "periodEnd": {"hour": 20, "minute": 0},
+    }
+    coord.data = {THING: {"robotConfig": {"isOpenLed": True, "rrConfig": full_rr}}}
+    coord._mqtt_state[THING] = {"robotConfig": {"isOpenLed": True, "rrConfig": dict(full_rr)}}
+
+    coord.on_mqtt_state(THING, {"robotConfig": {"rrConfig": {"enable": False}}})
+    assert coord.data[THING]["robotConfig"]["isOpenLed"] is True
+    assert coord.data[THING]["robotConfig"]["rrConfig"] == {**full_rr, "enable": False}
+    assert coord._mqtt_state[THING]["robotConfig"]["rrConfig"] == {**full_rr, "enable": False}
+
+
 @pytest.mark.asyncio
 async def test_async_query_schedules_clears_stale_and_publishes() -> None:
     coord, mqtt, _ = _make_coordinator()
