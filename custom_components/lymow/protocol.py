@@ -194,6 +194,7 @@ _MAP_CONTENT_NOGO_ZONES = 2
 _MAP_CONTENT_CHANNELS = 3
 _MAP_CONTENT_CHARGING_STATION = 4
 _MAP_CONTENT_GPS_ORIGIN = 7
+_MAP_CONTENT_TASK_CONFIG = 8
 
 
 def extract_raw_map_content(pb_bytes: bytes) -> bytes | None:
@@ -403,7 +404,46 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
             "lon": _decode_f32(lon_raw) if lon_raw is not None else 0.0,
         }
 
+    # ---- Device-settings PbTaskConfig (f8) — chargingMode/zoneOrder/etc.
+    tc_raw = _first(content, _MAP_CONTENT_TASK_CONFIG)
+    if isinstance(tc_raw, bytes):
+        result["taskConfig"] = decode_task_config(tc_raw)
+
     return result
+
+
+def decode_task_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbTaskConfig sub-message (the four-field Device-Settings one).
+
+    Field layout confirmed from PbTaskConfig.decode (Hermes fn #9592):
+      f1 chargingMode (int32)       — 0 NORMAL / 1 QUICK
+      f2 zoneOrder (int32)          — 0 OPTIMIZE / 1 CUSTOM
+      f3 rainCleaning (bool)        — mow when raining
+      f4 disableChargingPark (bool) — handbrake OFF in app's UI sense
+
+    Booleans are accepted only as 0/1 — a varint of 2+ is dropped, not
+    coerced to True, so a corrupted or hostile payload surfaces as unknown
+    rather than silently flipping the switch on.
+
+    This is the *same* PbTaskConfig written by ``encode_set_device_settings``;
+    not the broader 18-field map exposed via ``_TASK_CONFIG_FIELDS`` (which is
+    really a PbZoneConfig — pre-existing mislabel, tracked separately).
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    cm = _first(f, 1)
+    if cm is not None:
+        out["chargingMode"] = cm
+    zo = _first(f, 2)
+    if zo is not None:
+        out["zoneOrder"] = zo
+    rc = _first(f, 3)
+    if rc in (0, 1):
+        out["rainCleaning"] = bool(rc)
+    dcp = _first(f, 4)
+    if dcp in (0, 1):
+        out["disableChargingPark"] = bool(dcp)
+    return out
 
 
 def decode_channel(data: bytes) -> dict[str, Any]:

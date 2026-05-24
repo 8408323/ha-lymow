@@ -23,6 +23,7 @@ from lymow.protocol import (
     decode_map_response,
     decode_pboutput,
     decode_schedule_entry,
+    decode_task_config,
     delete_zone,
     encode_ble_drive,
     encode_delete_zone,
@@ -469,6 +470,7 @@ def _build_map_response(
     charging_station: dict | None = None,
     gps_origin: dict | None = None,
     channels: list[dict] | None = None,
+    task_config: dict | None = None,
 ) -> bytes:
     """Build a minimal PbMapResponse blob for testing decode_map_response."""
     content = b""
@@ -543,6 +545,18 @@ def _build_map_response(
         if chan.get("channelLift") is not None:
             ch += _field_i32(10, chan["channelLift"])
         content += _field_bytes(3, ch)
+
+    if task_config is not None:
+        tc = b""
+        if "chargingMode" in task_config:
+            tc += _field_i32(1, task_config["chargingMode"])
+        if "zoneOrder" in task_config:
+            tc += _field_i32(2, task_config["zoneOrder"])
+        if "rainCleaning" in task_config:
+            tc += _field_i32(3, 1 if task_config["rainCleaning"] else 0)
+        if "disableChargingPark" in task_config:
+            tc += _field_i32(4, 1 if task_config["disableChargingPark"] else 0)
+        content += _field_bytes(8, tc)
 
     wrapper = _field_i32(1, 1) + _field_bytes(3, content)
     outer = _field_bytes(2, wrapper)
@@ -667,6 +681,57 @@ def test_decode_map_response_gps_origin() -> None:
     gps = result["gpsOrigin"]
     assert pytest.approx(gps["lat"], abs=1e-3) == 12.3456
     assert pytest.approx(gps["lon"], abs=1e-3) == 65.4321
+
+
+def test_decode_map_response_task_config_all_fields() -> None:
+    pb = _build_map_response(
+        task_config={
+            "chargingMode": 1,  # QUICK / Direct route
+            "zoneOrder": 1,  # CUSTOM
+            "rainCleaning": True,
+            "disableChargingPark": False,
+        }
+    )
+    result = decode_map_response(pb)
+    assert result["taskConfig"] == {
+        "chargingMode": 1,
+        "zoneOrder": 1,
+        "rainCleaning": True,
+        "disableChargingPark": False,
+    }
+
+
+def test_decode_map_response_no_task_config_when_absent() -> None:
+    """f8 missing → no taskConfig key (so entities read None and report unknown)."""
+    pb = _build_map_response(gps_origin={"lat": 1.0, "lon": 2.0})
+    result = decode_map_response(pb)
+    assert "taskConfig" not in result
+
+
+def test_decode_task_config_direct_each_field() -> None:
+    # Field 1 only
+    assert decode_task_config(_field_i32(1, 0)) == {"chargingMode": 0}
+    # Field 2 only
+    assert decode_task_config(_field_i32(2, 1)) == {"zoneOrder": 1}
+    # Field 3 only — bool decoded from varint
+    assert decode_task_config(_field_i32(3, 1)) == {"rainCleaning": True}
+    assert decode_task_config(_field_i32(3, 0)) == {"rainCleaning": False}
+    # Field 4 only — bool
+    assert decode_task_config(_field_i32(4, 1)) == {"disableChargingPark": True}
+
+
+def test_decode_task_config_empty_bytes() -> None:
+    assert decode_task_config(b"") == {}
+
+
+def test_decode_task_config_drops_non_boolean_bool_fields() -> None:
+    """Hostile / corrupted payload: varint 2+ for f3/f4 must NOT silently
+    become True. Drop the key so the entity reports unknown."""
+    assert decode_task_config(_field_i32(3, 2)) == {}
+    assert decode_task_config(_field_i32(4, 5)) == {}
+    # And a mixed message keeps the valid fields and drops the bad ones.
+    pb = _field_i32(1, 1) + _field_i32(3, 9) + _field_i32(4, 1)
+    assert decode_task_config(pb) == {"chargingMode": 1, "disableChargingPark": True}
 
 
 def test_decode_map_response_channels() -> None:

@@ -66,6 +66,7 @@ def _make_ha_stubs() -> None:
             DEVICE_TRACKER = "device_tracker"
             LAWN_MOWER = "lawn_mower"
             NUMBER = "number"
+            SELECT = "select"
             SENSOR = "sensor"
             SWITCH = "switch"
             UPDATE = "update"
