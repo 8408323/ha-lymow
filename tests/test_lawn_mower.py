@@ -48,6 +48,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_delete_backup_map = AsyncMock()
     coord.async_rename_backup_map = AsyncMock()
     coord.async_rename_device = AsyncMock()
+    coord.async_move_charging_station = AsyncMock()
     return coord
 
 
@@ -235,8 +236,8 @@ async def test_async_setup_entry_registers_services() -> None:
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
     # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
     # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
-    # + 1 add-nogo-zone + 1 add-channel.
-    assert hass.services.async_register.call_count == 35
+    # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station.
+    assert hass.services.async_register.call_count == 36
 
 
 # ---------------------------------------------------------------------------
@@ -1387,3 +1388,33 @@ async def test_handle_clear_schedules_unknown_entity_skips() -> None:
     handlers = await _setup_with_entity(coord, entry)
     await handlers["clear_schedules"](_make_call(["lawn_mower.other"], {}))
     coord.async_clear_schedules.assert_not_called()
+
+
+async def test_handle_move_charging_station_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"x": 1.5, "y": -2.3, "theta": 0.7})
+    await handlers["move_charging_station"](call)
+    coord.async_move_charging_station.assert_awaited_once_with("mower-001", 1.5, -2.3, 0.7)
+
+
+async def test_handle_move_charging_station_no_theta() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"x": 3.0, "y": 1.0})
+    await handlers["move_charging_station"](call)
+    coord.async_move_charging_station.assert_awaited_once_with("mower-001", 3.0, 1.0, None)
+
+
+async def test_handle_move_charging_station_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.other"], {"x": 1.0, "y": 2.0})
+    await handlers["move_charging_station"](call)
+    coord.async_move_charging_station.assert_not_called()

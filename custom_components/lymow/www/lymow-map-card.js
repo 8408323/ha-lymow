@@ -55,6 +55,7 @@ class LymowMapCard extends HTMLElement {
     this._editRename = false; // rename mode within edit
     this._workPoly = null;
     this._dragIdx = null;
+    this._dragStation = false;
     this._polyOverrides = {};
     this._nogoOverrides = {};
     this._nameOverrides = {}; // optimistic rename until next MQTT update
@@ -480,11 +481,13 @@ class LymowMapCard extends HTMLElement {
     let csHtml = "";
     if (chargingStation) {
       const cx = sx(chargingStation.x), cy = sy(chargingStation.y);
+      const csDrag = this._editing && !this._editHash;
       csHtml = `
-        <g data-marker="cs" data-cx="${cx}" data-cy="${cy}" transform="translate(${cx},${cy}) scale(${invZf})" pointer-events="none">
+        <g data-marker="cs" data-enu-x="${chargingStation.x}" data-enu-y="${chargingStation.y}" transform="translate(${cx},${cy}) scale(${invZf})" pointer-events="${csDrag ? "all" : "none"}" style="${csDrag ? "cursor:move" : ""}">
           <circle r="${mPx(9)}" fill="#1565c0" opacity="0.9"/>
           <circle r="${mPx(5)}" fill="white"/>
           <text text-anchor="middle" dominant-baseline="middle" font-size="${mPx(8)}" fill="#1565c0" font-weight="bold">⚡</text>
+          ${csDrag ? `<circle r="${mPx(9)}" fill="none" stroke="#90caf9" stroke-width="${mPx(2)}" stroke-dasharray="${mPx(4)} ${mPx(2)}"/>` : ""}
         </g>`;
     }
 
@@ -1043,6 +1046,43 @@ class LymowMapCard extends HTMLElement {
         svg.addEventListener("pointermove", (e) => this._onDrag(e));
         svg.addEventListener("pointerup", () => this._endDrag());
         svg.addEventListener("pointercancel", () => this._endDrag());
+      }
+      const csMarker = this.shadowRoot.querySelector('[data-marker="cs"]');
+      if (csMarker && !this._editHash) {
+        csMarker.addEventListener("pointerdown", (e) => {
+          e.stopPropagation();
+          this._panMoved = false;
+          this._dragStation = true;
+          this._panning = false;
+          try { csMarker.setPointerCapture(e.pointerId); } catch (_) {}
+        });
+        csMarker.addEventListener("pointermove", (e) => {
+          if (!this._dragStation) return;
+          e.preventDefault();
+          const enu = this._clientToEnu(e);
+          if (!enu) return;
+          this._panMoved = true;
+          csMarker.setAttribute("transform", `translate(${this._sx(enu.x)},${this._sy(enu.y)}) scale(${1 / this._zf})`);
+          csMarker.dataset.enuX = enu.x;
+          csMarker.dataset.enuY = enu.y;
+        });
+        csMarker.addEventListener("pointerup", async () => {
+          if (!this._dragStation) return;
+          this._dragStation = false;
+          const x = parseFloat(csMarker.dataset.enuX);
+          const y = parseFloat(csMarker.dataset.enuY);
+          if (this._panMoved && this._config?.mower_entity && !isNaN(x) && !isNaN(y)) {
+            try {
+              await this._hass.callService("lymow", "move_charging_station", {
+                entity_id: this._config.mower_entity, x, y,
+              });
+            } catch (err) {
+              console.error("move_charging_station failed:", err);
+            }
+          }
+          this._render();
+        });
+        csMarker.addEventListener("pointercancel", () => { this._dragStation = false; this._render(); });
       }
     } else {
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
@@ -1653,7 +1693,7 @@ class LymowMapCard extends HTMLElement {
 
   _cancelEdit() {
     this._editing = false; this._editHash = null; this._editType = null;
-    this._workPoly = null; this._editRename = false; this._dragIdx = null;
+    this._workPoly = null; this._editRename = false; this._dragIdx = null; this._dragStation = false;
     this._drawingZone = null; this._drawPoly = null;
     this._drawNameStep = false; this._pendingDrawPolygon = null; this._pendingDrawType = null;
     this._splitMode = false; this._splitPoly = null;

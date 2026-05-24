@@ -695,6 +695,53 @@ async def test_async_update_zone_polygon_raises_when_no_map_data() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_move_charging_station_updates_x_y_theta() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_DATA)}}
+    captured = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    await coord.async_move_charging_station(THING, 3.5, -1.2, theta=1.57)
+    cs = captured["map"]["chargingStation"]
+    assert cs["x"] == pytest.approx(3.5)
+    assert cs["y"] == pytest.approx(-1.2)
+    assert cs["theta"] == pytest.approx(1.57)
+
+
+@pytest.mark.asyncio
+async def test_async_move_charging_station_defaults_theta_from_existing() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    map_data = copy.deepcopy(_SAMPLE_MAP_DATA)
+    map_data["chargingStation"] = {"x": 0.0, "y": 0.0, "theta": 2.0}
+    coord.data = {THING: {"mapData": map_data}}
+    captured = {}
+
+    async def _capture(thing, md):
+        captured["map"] = md
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    await coord.async_move_charging_station(THING, 1.0, 2.0)
+    assert captured["map"]["chargingStation"]["theta"] == pytest.approx(2.0)
+
+
+@pytest.mark.asyncio
+async def test_async_move_charging_station_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_move_charging_station(THING, 0.0, 0.0)
+
+
+@pytest.mark.asyncio
 async def test_async_add_zone_appends_new_zone_with_fresh_hash() -> None:
     import copy
 

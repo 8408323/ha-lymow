@@ -812,6 +812,25 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             updated["modifyHashs"] = [*existing_modified, hash_id]
         await self.async_sync_map(thing_name, updated)
 
+    async def async_move_charging_station(
+        self, thing_name: str, x: float, y: float, theta: float | None = None
+    ) -> None:
+        """Move the charging station to new ENU coordinates and SYNC_MAP."""
+        import copy
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        updated = copy.deepcopy(map_data)
+        existing = updated.get("chargingStation") or {}
+        updated["chargingStation"] = {
+            **existing,
+            "x": float(x),
+            "y": float(y),
+            "theta": float(theta) if theta is not None else existing.get("theta", 0.0),
+        }
+        await self.async_sync_map(thing_name, updated)
+
     async def async_add_zone(
         self,
         thing_name: str,
