@@ -89,10 +89,12 @@ def test_device_data_empty_when_coordinator_data_none() -> None:
     assert e.is_on is None
 
 
-def test_name_fallback_to_sn() -> None:
+def test_device_name_fallback_to_sn() -> None:
     coord = _make_coord({"isCharging": False})
     e = ChargingBinarySensor(coord, {"deviceThingName": THING, "sn": "SN9"})
-    assert "SN9" in e._attr_name
+    assert e._attr_has_entity_name is True
+    assert e._attr_name == "Charging"
+    assert e._attr_device_info["name"] == "SN9"
 
 
 async def test_device_locked_metadata_disabled_by_default() -> None:

@@ -225,18 +225,47 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     # MQTT callbacks (called from mqtt.py via loop.call_soon_threadsafe)
     # ------------------------------------------------------------------
 
+    # Nested patch keys that must deep-merge on top of existing state rather
+    # than replace it: a pboutput carrying only one PbRobotConfig sub-field
+    # (e.g. metric_4g after a network-priority change) would otherwise blow
+    # away every other known robotConfig field.
+    _DEEP_MERGE_KEYS = ("robotConfig",)
+
     def on_mqtt_state(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Receive a state update from MQTT and push to HA."""
         # A QUERY_SCHEDULES reply carries the full schedule list in one message
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
-        if thing_name not in self._mqtt_state:
-            self._mqtt_state[thing_name] = {}
-        self._mqtt_state[thing_name].update(patch)
+        merged_patch = self._merge_nested_patch(self._mqtt_state.setdefault(thing_name, {}), patch)
+        self._mqtt_state[thing_name].update(merged_patch)
         if self.data and thing_name in self.data:
-            merged = {**self.data[thing_name], **patch}
+            existing = self.data[thing_name]
+            merged_patch_for_data = self._merge_nested_patch(existing, patch)
+            merged = {**existing, **merged_patch_for_data}
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
+
+    def _merge_nested_patch(self, existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of patch where each ``_DEEP_MERGE_KEYS`` dict is overlaid
+        on the matching dict in ``existing`` (two levels deep for robotConfig)
+        so partial replies keep keys they don't mention. A pboutput that only
+        carries ``rrConfig: {enable: True}`` after a toggle must not wipe the
+        sibling ``rechargeBat`` / ``resumeBat`` / period fields. Non-dict patch
+        values are passed through."""
+        if not any(k in patch for k in self._DEEP_MERGE_KEYS):
+            return patch
+        out = dict(patch)
+        for key in self._DEEP_MERGE_KEYS:
+            new = patch.get(key)
+            old = existing.get(key)
+            if isinstance(new, dict) and isinstance(old, dict):
+                merged = {**old, **new}
+                for sub_key, sub_new in new.items():
+                    sub_old = old.get(sub_key)
+                    if isinstance(sub_new, dict) and isinstance(sub_old, dict):
+                        merged[sub_key] = {**sub_old, **sub_new}
+                out[key] = merged
+        return out
 
     def _check_work_status_transition(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Fire HA event bus events and persistent notifications on notable work status changes."""
@@ -436,11 +465,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         Response envelope:
             {"clean_history": [
-                {"clean_area": <num>, "clean_time": <int sec>, "date": <epoch>,
+                {"clean_area": <num>, "clean_time": <int min>, "date": <epoch>,
                  "used_battery": <int>, "percent": <0..1>, ...},
                 ...],
              "total_records": <int>,
-             "clean_summary": {"total_clean_time": <int>, "total_clean_area": <num>}}
+             "clean_summary": {"total_clean_time": <int min>, "total_clean_area": <num>}}
         """
         from datetime import UTC, datetime
 
@@ -462,7 +491,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         summary = history.get("clean_summary")
         if isinstance(summary, dict):
             if (t := summary.get("total_clean_time")) is not None:
-                out["totalCleanTimeS"] = t
+                out["totalCleanTimeMin"] = t
             if (a := summary.get("total_clean_area")) is not None:
                 out["totalCleanHistoryAreaM2"] = a
 
@@ -480,7 +509,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if (area := last.get("clean_area")) is not None:
             out["lastCleanAreaM2"] = area
         if (t := last.get("clean_time")) is not None:
-            out["lastCleanDurationS"] = t
+            out["lastCleanDurationMin"] = t
         if (epoch := last.get("date")) is not None:
             try:
                 out["lastCleanAt"] = datetime.fromtimestamp(int(epoch), tz=UTC)
@@ -696,6 +725,96 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         from .protocol import encode_set_task_config
 
         await self._mqtt.async_publish_command(thing_name, encode_set_task_config(**fields))
+
+    async def async_set_recharge_resume(
+        self,
+        thing_name: str,
+        *,
+        enable: bool | None = None,
+        period_start: tuple[int, int] | None = None,
+        period_end: tuple[int, int] | None = None,
+        recharge_bat: int | None = None,
+        resume_bat: int | None = None,
+    ) -> None:
+        """Publish a Recharge & Resume (PbRobotConfig.rrConfig) write.
+
+        See :func:`protocol.encode_set_recharge_resume`. Any combination of
+        parameters can be ``None`` to leave that R&R field untouched on the
+        robot.
+        """
+        from .protocol import encode_set_recharge_resume
+
+        await self._mqtt.async_publish_command(
+            thing_name,
+            encode_set_recharge_resume(
+                enable=enable,
+                period_start=period_start,
+                period_end=period_end,
+                recharge_bat=recharge_bat,
+                resume_bat=resume_bat,
+            ),
+        )
+
+    async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
+        """Set PbRobotConfig fields on the robot — currently just network priority.
+
+        These writes don't set userCtrl — the robot dispatches by the presence
+        of the robotConfig submessage. Supported field names are listed in
+        :data:`protocol._ROBOT_CONFIG_BOOL_FIELDS` (extend it, and
+        :func:`protocol.encode_set_robot_config`, to add non-bool fields).
+        """
+        from .protocol import encode_set_robot_config
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_robot_config(**fields))
+
+    async def async_sync_timezone(self, thing_name: str, offset_seconds: int) -> None:
+        """Push a timezone offset (seconds east of UTC) to the robot.
+
+        Mirrors the app's "Sync with Phone" button (Hermes setTimezone #9036),
+        which writes ``PbRobotConfig.timezoneOffset`` (f21) over the no-userCtrl
+        robotConfig path. The app uses the phone's local timezone; HA exposes
+        its own ``hass.config.time_zone`` through the button entity, so the
+        coordinator just takes the pre-computed seconds value.
+        """
+        await self.async_set_robot_config(thing_name, timezoneOffset=int(offset_seconds))
+
+    async def async_set_device_settings(
+        self,
+        thing_name: str,
+        *,
+        charging_mode: int | None = None,
+        zone_order: int | None = None,
+        rainy_mowing: bool | None = None,
+        charging_handbrake: bool | None = None,
+    ) -> None:
+        """Publish a Device Settings (PbTaskConfig) write.
+
+        See :func:`protocol.encode_set_device_settings`. Any of the four
+        params can be ``None`` to leave that field untouched.
+        """
+        from .protocol import encode_set_device_settings
+
+        await self._mqtt.async_publish_command(
+            thing_name,
+            encode_set_device_settings(
+                charging_mode=charging_mode,
+                zone_order=zone_order,
+                rainy_mowing=rainy_mowing,
+                charging_handbrake=charging_handbrake,
+            ),
+        )
+
+    async def async_set_run_time_config(self, thing_name: str, **fields: Any) -> None:
+        """Set run-time config parameters (USER_CTRL_SET_RUN_TIME_CONFIG).
+
+        Unlike task-config (which is the next-mow default), run-time-config
+        overrides settings on the currently-running task. Only the provided
+        PbRunTimeConfig fields are sent; see :data:`protocol._RUN_TIME_CONFIG_FIELDS`
+        for the supported names.
+        """
+        from .protocol import encode_set_run_time_config
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_run_time_config(**fields))
 
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
         """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*

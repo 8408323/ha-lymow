@@ -22,6 +22,7 @@ from .const import (
     BLE_DRIVE_ANGULAR_MAX,
     BLE_DRIVE_LINEAR_MAX,
     BLE_DRIVE_MAX_DURATION_S,
+    CHARGING_MODES,
     CONF_BLE_ADDRESS,
     DOMAIN,
     SERVICE_BLE_DRIVE,
@@ -31,6 +32,7 @@ from .const import (
     WORK_STATUS_OFFLINE,
     WORK_STATUS_PAUSED_GROUP,
     WORK_STATUS_RETURNING_GROUP,
+    ZONE_ORDERS,
 )
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
@@ -62,6 +64,7 @@ _ATTR_NOGO_HASH_ID = "nogo_hash_id"
 _SERVICE_START_ZONE = "start_zone"
 _ATTR_ZONE_HASH_IDS = "zone_hash_ids"
 _SERVICE_QUERY_MAP = "query_map"
+_SERVICE_RESUME = "resume"
 _SERVICE_QUERY_SCHEDULES = "query_schedules"
 _SERVICE_START_VIDEO_SESSION = "start_video_session"
 _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
@@ -79,7 +82,40 @@ _ATTR_IS_ENABLED = "is_enabled"
 _SERVICE_CLEAR_SCHEDULES = "clear_schedules"
 _SERVICE_SET_SCHEDULES = "set_schedules"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
+_SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
+_SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
+_SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
+_SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
+_ATTR_PREFERRED = "preferred"
+_ATTR_RR_ENABLE = "enable"
+_ATTR_RR_PERIOD_START = "period_start"
+_ATTR_RR_PERIOD_END = "period_end"
+_ATTR_RR_RECHARGE_BAT = "recharge_bat"
+_ATTR_RR_RESUME_BAT = "resume_bat"
+_ATTR_DS_CHARGING_MODE = "charging_mode"
+_ATTR_DS_ZONE_ORDER = "zone_order"
+_ATTR_DS_RAINY_MOWING = "rainy_mowing"
+_ATTR_DS_CHARGING_HANDBRAKE = "charging_handbrake"
+
+
+def _service_label(name: str) -> str:
+    """Map a const-style enum name (NORMAL / QUICK / etc.) to its HA-service
+    choice label. We use the app's UI sense — "follow_perimeter" / "direct_route"
+    / "optimize" / "custom" — rather than the raw APK enum names, which include
+    quirks like the (sic) CHARING_MODE typo."""
+    return {
+        "NORMAL": "follow_perimeter",
+        "QUICK": "direct_route",
+        "OPTIMIZE": "optimize",
+        "CUSTOM": "custom",
+    }[name]
+
+
+# Service-side choice → wire int, derived from the pinned const enums so the
+# two stay in lockstep (CHARGING_MODES and ZONE_ORDERS).
+_CHARGING_MODE_CHOICES = {_service_label(name): value for value, name in CHARGING_MODES.items()}
+_ZONE_ORDER_CHOICES = {_service_label(name): value for value, name in ZONE_ORDERS.items()}
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
 # subset of PbTaskConfig; the encoder supports more. All optional ints.
@@ -102,6 +138,18 @@ _TASK_CONFIG_SERVICE_FIELDS = {
 _TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}
 # Fields that accept booleans (encoded as 0/1 in protobuf).
 _TASK_CONFIG_BOOL_FIELDS = {"path_order", "line_follow_mode", "raise_cut_height", "lower_cut_height"}
+
+# Service-field (snake_case) → PbRunTimeConfig field (camelCase) + safe numeric
+# bounds. Run-time config overrides settings on the currently-running task (vs
+# set_task_config, which is the next-mow default). cut_height is mm, move_speed
+# is m/s. Bounds match the documented UI selectors in services.yaml so non-UI
+# callers (automations, REST) can't bypass the selector ranges and push out-of-
+# range values straight to the mower.
+_RUN_TIME_CONFIG_SERVICE_FIELDS = {
+    "cut_height": ("cutHeight", "int", (20, 100)),
+    "move_speed": ("moveSpeed", "float", (0.1, 1.5)),
+    "cut_speed": ("cutSpeed", "int", (0, 1000)),
+}
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
 _SERVICE_RENAME_BACKUP_MAP = "rename_backup_map"
@@ -133,6 +181,23 @@ def _to_day_int(value: Any) -> int:
     if not 0 <= day <= 6:
         raise vol.Invalid("day_of_week must be 0-6 (Sun-Sat) or a weekday name")
     return day
+
+
+def _to_hour_minute(value: Any) -> tuple[int, int]:
+    """Accept ``"H:MM"`` or ``"HH:MM"`` (24-hour) and return a bounded (hour, minute) tuple."""
+    if not isinstance(value, str):
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM")
+    stripped = value.strip()
+    if ":" not in stripped:
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM")
+    h_s, m_s = stripped.split(":", 1)
+    try:
+        hour, minute = int(h_s), int(m_s)
+    except ValueError:
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM") from None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise vol.Invalid("hour must be 0-23 and minute 0-59")
+    return hour, minute
 
 
 # Read-only diagnostic queries: each publishes a bare userCtrl=<code> pbinput.
@@ -294,6 +359,43 @@ _SET_TASK_CONFIG_SCHEMA = vol.Schema(
         },
     }
 )
+_SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        **{
+            vol.Optional(k): vol.All(
+                vol.Coerce(float) if kind == "float" else vol.Coerce(int),
+                vol.Range(min=lo, max=hi),
+            )
+            for k, (_proto, kind, (lo, hi)) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items()
+        },
+    }
+)
+_SET_NETWORK_PRIORITY_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_PREFERRED): vol.In(("4g", "wifi")),
+    }
+)
+_SET_DEVICE_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Optional(_ATTR_DS_CHARGING_MODE): vol.In(tuple(_CHARGING_MODE_CHOICES)),
+        vol.Optional(_ATTR_DS_ZONE_ORDER): vol.In(tuple(_ZONE_ORDER_CHOICES)),
+        vol.Optional(_ATTR_DS_RAINY_MOWING): cv.boolean,
+        vol.Optional(_ATTR_DS_CHARGING_HANDBRAKE): cv.boolean,
+    }
+)
+_SET_RECHARGE_RESUME_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Optional(_ATTR_RR_ENABLE): cv.boolean,
+        vol.Optional(_ATTR_RR_PERIOD_START): _to_hour_minute,
+        vol.Optional(_ATTR_RR_PERIOD_END): _to_hour_minute,
+        vol.Optional(_ATTR_RR_RECHARGE_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+        vol.Optional(_ATTR_RR_RESUME_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+    }
+)
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
     {
         vol.Required("hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
@@ -416,6 +518,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             await coordinator.async_query_map(entity._thing_name)
+
+    async def handle_resume(call: ServiceCall) -> None:
+        # Resume a paused/returning mow without losing progress. HA's standard
+        # start_mowing sends USER_CTRL_CLEAN (a fresh task); this sends
+        # USER_CTRL_RESUME so the robot picks up where it left off.
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_resume(entity._thing_name)
 
     async def handle_query_schedules(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
@@ -656,6 +770,70 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_task_config(entity._thing_name, **fields)
 
+    async def handle_set_run_time_config(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        fields = {
+            proto: call.data[svc]
+            for svc, (proto, _kind, _range) in _RUN_TIME_CONFIG_SERVICE_FIELDS.items()
+            if svc in call.data
+        }
+        if not fields:
+            raise ServiceValidationError("set_run_time_config: provide at least one parameter to set.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_run_time_config(entity._thing_name, **fields)
+
+    async def handle_set_network_priority(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        preferred: str = call.data[_ATTR_PREFERRED]
+        metric_4g = preferred == "4g"
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_robot_config(entity._thing_name, metric_4g=metric_4g)
+
+    async def handle_set_recharge_resume(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        rr_kwargs = {
+            "enable": call.data.get(_ATTR_RR_ENABLE),
+            "period_start": call.data.get(_ATTR_RR_PERIOD_START),
+            "period_end": call.data.get(_ATTR_RR_PERIOD_END),
+            "recharge_bat": call.data.get(_ATTR_RR_RECHARGE_BAT),
+            "resume_bat": call.data.get(_ATTR_RR_RESUME_BAT),
+        }
+        if not any(v is not None for v in rr_kwargs.values()):
+            raise ServiceValidationError("set_recharge_resume: provide at least one parameter to set.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_recharge_resume(entity._thing_name, **rr_kwargs)
+
+    async def handle_set_device_settings(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        cm = call.data.get(_ATTR_DS_CHARGING_MODE)
+        zo = call.data.get(_ATTR_DS_ZONE_ORDER)
+        ds_kwargs = {
+            "charging_mode": _CHARGING_MODE_CHOICES[cm] if cm is not None else None,
+            "zone_order": _ZONE_ORDER_CHOICES[zo] if zo is not None else None,
+            "rainy_mowing": call.data.get(_ATTR_DS_RAINY_MOWING),
+            "charging_handbrake": call.data.get(_ATTR_DS_CHARGING_HANDBRAKE),
+        }
+        if not any(v is not None for v in ds_kwargs.values()):
+            raise ServiceValidationError("set_device_settings: provide at least one parameter to set.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_device_settings(entity._thing_name, **ds_kwargs)
+
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
@@ -731,6 +909,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(DOMAIN, _SERVICE_START_ZONE, handle_start_zone, schema=_START_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_MAP, handle_query_map, schema=_ENTITY_ID_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_RESUME, handle_resume, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_QUERY_SCHEDULES, handle_query_schedules, schema=_ENTITY_ID_SCHEMA)
     for service_name, method_name in _QUERY_SERVICES:
         hass.services.async_register(
@@ -810,6 +989,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_TASK_CONFIG, handle_set_task_config, schema=_SET_TASK_CONFIG_SCHEMA
     )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_RUN_TIME_CONFIG, handle_set_run_time_config, schema=_SET_RUN_TIME_CONFIG_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_NETWORK_PRIORITY, handle_set_network_priority, schema=_SET_NETWORK_PRIORITY_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_RECHARGE_RESUME, handle_set_recharge_resume, schema=_SET_RECHARGE_RESUME_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
+    )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_ZONE_ENABLED, handle_set_zone_enabled, schema=_SET_ZONE_ENABLED_SCHEMA
@@ -825,14 +1016,15 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
     _attr_supported_features = (
         LawnMowerEntityFeature.START_MOWING | LawnMowerEntityFeature.PAUSE | LawnMowerEntityFeature.DOCK
     )
+    # Primary entity for the device: has_entity_name + name=None renders as just the device name.
+    _attr_has_entity_name = True
+    _attr_name = None
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
         self._attr_unique_id = self._thing_name
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = device_label
 
     @property
     def _device_data(self) -> dict:

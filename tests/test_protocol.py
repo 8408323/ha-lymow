@@ -23,6 +23,7 @@ from lymow.protocol import (
     decode_map_response,
     decode_pboutput,
     decode_schedule_entry,
+    decode_task_config,
     delete_zone,
     encode_ble_drive,
     encode_delete_zone,
@@ -469,6 +470,7 @@ def _build_map_response(
     charging_station: dict | None = None,
     gps_origin: dict | None = None,
     channels: list[dict] | None = None,
+    task_config: dict | None = None,
 ) -> bytes:
     """Build a minimal PbMapResponse blob for testing decode_map_response."""
     content = b""
@@ -543,6 +545,18 @@ def _build_map_response(
         if chan.get("channelLift") is not None:
             ch += _field_i32(10, chan["channelLift"])
         content += _field_bytes(3, ch)
+
+    if task_config is not None:
+        tc = b""
+        if "chargingMode" in task_config:
+            tc += _field_i32(1, task_config["chargingMode"])
+        if "zoneOrder" in task_config:
+            tc += _field_i32(2, task_config["zoneOrder"])
+        if "rainCleaning" in task_config:
+            tc += _field_i32(3, 1 if task_config["rainCleaning"] else 0)
+        if "disableChargingPark" in task_config:
+            tc += _field_i32(4, 1 if task_config["disableChargingPark"] else 0)
+        content += _field_bytes(8, tc)
 
     wrapper = _field_i32(1, 1) + _field_bytes(3, content)
     outer = _field_bytes(2, wrapper)
@@ -667,6 +681,57 @@ def test_decode_map_response_gps_origin() -> None:
     gps = result["gpsOrigin"]
     assert pytest.approx(gps["lat"], abs=1e-3) == 12.3456
     assert pytest.approx(gps["lon"], abs=1e-3) == 65.4321
+
+
+def test_decode_map_response_task_config_all_fields() -> None:
+    pb = _build_map_response(
+        task_config={
+            "chargingMode": 1,  # QUICK / Direct route
+            "zoneOrder": 1,  # CUSTOM
+            "rainCleaning": True,
+            "disableChargingPark": False,
+        }
+    )
+    result = decode_map_response(pb)
+    assert result["taskConfig"] == {
+        "chargingMode": 1,
+        "zoneOrder": 1,
+        "rainCleaning": True,
+        "disableChargingPark": False,
+    }
+
+
+def test_decode_map_response_no_task_config_when_absent() -> None:
+    """f8 missing → no taskConfig key (so entities read None and report unknown)."""
+    pb = _build_map_response(gps_origin={"lat": 1.0, "lon": 2.0})
+    result = decode_map_response(pb)
+    assert "taskConfig" not in result
+
+
+def test_decode_task_config_direct_each_field() -> None:
+    # Field 1 only
+    assert decode_task_config(_field_i32(1, 0)) == {"chargingMode": 0}
+    # Field 2 only
+    assert decode_task_config(_field_i32(2, 1)) == {"zoneOrder": 1}
+    # Field 3 only — bool decoded from varint
+    assert decode_task_config(_field_i32(3, 1)) == {"rainCleaning": True}
+    assert decode_task_config(_field_i32(3, 0)) == {"rainCleaning": False}
+    # Field 4 only — bool
+    assert decode_task_config(_field_i32(4, 1)) == {"disableChargingPark": True}
+
+
+def test_decode_task_config_empty_bytes() -> None:
+    assert decode_task_config(b"") == {}
+
+
+def test_decode_task_config_drops_non_boolean_bool_fields() -> None:
+    """Hostile / corrupted payload: varint 2+ for f3/f4 must NOT silently
+    become True. Drop the key so the entity reports unknown."""
+    assert decode_task_config(_field_i32(3, 2)) == {}
+    assert decode_task_config(_field_i32(4, 5)) == {}
+    # And a mixed message keeps the valid fields and drops the bad ones.
+    pb = _field_i32(1, 1) + _field_i32(3, 9) + _field_i32(4, 1)
+    assert decode_task_config(pb) == {"chargingMode": 1, "disableChargingPark": True}
 
 
 def test_decode_map_response_channels() -> None:
@@ -1081,7 +1146,7 @@ def test_decode_pboutput_rtk_east_north() -> None:
 def test_decode_pboutput_total_area() -> None:
     pb = _build_pboutput_with_extras(total_area_m2=1234.5)
     state = decode_pboutput(pb)
-    assert abs(state["totalAreaM2"] - 1234.5) < 1.0
+    assert abs(state["totalTaskAreaM2"] - 1234.5) < 1.0
 
 
 def test_decode_pboutput_pose_enu() -> None:
@@ -1099,7 +1164,7 @@ def test_decode_pboutput_no_rtk_when_absent() -> None:
     state = decode_pboutput(pb)
     assert "rtkSatellites" not in state
     assert "rtkEastM" not in state
-    assert "totalAreaM2" not in state
+    assert "totalTaskAreaM2" not in state
     assert "poseEastM" not in state
 
 
@@ -1123,7 +1188,7 @@ def test_decode_pboutput_mow_strip_count_and_progress_together() -> None:
     pb = _build_pboutput_with_extras(total_area_m2=800.0, mow_strip_count=5, mow_progress=0.25)
     state = decode_pboutput(pb)
     assert state["mowStripCount"] == 5
-    assert abs(state["totalAreaM2"] - 800.0) < 1.0
+    assert abs(state["totalTaskAreaM2"] - 800.0) < 1.0
     assert abs(state["mowProgress"] - 25.0) < 1.0
 
 
@@ -1796,6 +1861,124 @@ def test_decode_pboutput_no_schedules_key_when_field16_absent() -> None:
     assert "schedules" not in decode_pboutput(_build_pboutput(work_status=1))
 
 
+def test_decode_robot_config_extracts_known_fields() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # f6=audioVolume int, f7=isOpenLed bool, f8=signal int, f10=cmdCellularSwitch bool, f11=metric_4g bool
+    cfg = _field_i32(6, 80) + _field_i32(7, 1) + _field_i32(8, 4) + _field_i32(10, 0) + _field_i32(11, 1)
+    out = decode_robot_config(cfg)
+    assert out == {
+        "audioVolume": 80,
+        "isOpenLed": True,
+        "signal": 4,
+        "cmdCellularSwitch": False,
+        "metric_4g": True,
+    }
+
+
+def test_decode_robot_config_absent_fields_not_in_dict() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # Only metric_4g present — the other keys must NOT appear (so the merge
+    # doesn't blow away existing state with False/0 defaults).
+    assert decode_robot_config(_field_i32(11, 0)) == {"metric_4g": False}
+    assert decode_robot_config(b"") == {}
+
+
+def test_decode_robot_config_bool_rcRaise_rcLower_fields() -> None:
+    from lymow.protocol import decode_robot_config
+
+    assert decode_robot_config(_field_i32(4, 1) + _field_i32(5, 0)) == {
+        "rcRaiseCutHeight": True,
+        "rcLowerCutHeight": False,
+    }
+
+
+def test_decode_pboutput_surfaces_robot_config_under_robotConfig_key() -> None:
+    # f17 = robotConfig sub-message; carry one bool and verify it round-trips
+    pb = _build_pboutput(work_status=2) + _field_bytes(17, _field_i32(7, 1) + _field_i32(11, 0))
+    state = decode_pboutput(pb)
+    assert state["robotConfig"] == {"isOpenLed": True, "metric_4g": False}
+
+
+def test_decode_pboutput_no_robotConfig_key_when_field17_absent() -> None:
+    assert "robotConfig" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
+# ---------------------------------------------------------------------------
+# decode_rr_config (PbRobotConfig.rrConfig — Recharge & Resume)
+# ---------------------------------------------------------------------------
+
+
+def _rr_period(hour: int, minute: int) -> bytes:
+    return _field_i32(1, hour) + _field_i32(2, minute)
+
+
+def test_decode_rr_config_all_fields_round_trip() -> None:
+    from lymow.protocol import decode_rr_config
+
+    rr = (
+        _field_i32(1, 1)
+        + _field_bytes(2, _rr_period(4, 0))
+        + _field_bytes(3, _rr_period(20, 30))
+        + _field_i32(4, 15)
+        + _field_i32(5, 75)
+    )
+    assert decode_rr_config(rr) == {
+        "enable": True,
+        "periodStart": {"hour": 4, "minute": 0},
+        "periodEnd": {"hour": 20, "minute": 30},
+        "rechargeBat": 15,
+        "resumeBat": 75,
+    }
+
+
+def test_decode_rr_config_empty_returns_empty_dict() -> None:
+    from lymow.protocol import decode_rr_config
+
+    assert decode_rr_config(b"") == {}
+
+
+def test_decode_rr_config_drops_non_boolean_enable_and_out_of_range_values() -> None:
+    """Untrusted wire data: drop bool-shaped fields that aren't 0/1, drop
+    battery % outside 0-100, and drop time-of-day outside 0-23 / 0-59."""
+    from lymow.protocol import decode_rr_config
+
+    assert decode_rr_config(_field_i32(1, 2)) == {}
+    assert decode_rr_config(_field_i32(4, 150) + _field_i32(5, -1)) == {}
+    assert decode_rr_config(_field_bytes(2, _rr_period(24, 0))) == {}
+    assert decode_rr_config(_field_bytes(3, _rr_period(0, 60))) == {}
+
+
+def test_decode_rr_config_skips_period_with_missing_minute() -> None:
+    from lymow.protocol import decode_rr_config
+
+    # Period sub-message with only hour set — minute None means we can't
+    # safely reconstruct an HH:MM, so the period must drop entirely.
+    pb = _field_bytes(2, _field_i32(1, 9))
+    assert decode_rr_config(pb) == {}
+
+
+def test_decode_robot_config_surfaces_rr_config_under_rrConfig_key() -> None:
+    from lymow.protocol import decode_robot_config
+
+    rr = _field_i32(1, 1) + _field_i32(4, 20) + _field_i32(5, 80)
+    out = decode_robot_config(_field_i32(7, 1) + _field_bytes(18, rr))
+    assert out == {
+        "isOpenLed": True,
+        "rrConfig": {"enable": True, "rechargeBat": 20, "resumeBat": 80},
+    }
+
+
+def test_decode_robot_config_drops_empty_rrConfig() -> None:
+    """If PbRobotConfig.f18 is present but the sub-message has no valid
+    fields, don't surface an empty rrConfig dict."""
+    from lymow.protocol import decode_robot_config
+
+    out = decode_robot_config(_field_bytes(18, _field_i32(1, 2)))
+    assert "rrConfig" not in out
+
+
 def test_encode_set_task_config_wraps_in_pbinput() -> None:
     from lymow.protocol import encode_set_task_config
 
@@ -1820,6 +2003,227 @@ def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     assert _first(cfg, 6) is None  # cutSpeed (field 6) skipped (None)
     with pytest.raises(ValueError, match="unknown task-config field"):
         encode_set_task_config(nonsense=1)
+
+
+def test_encode_set_robot_config_no_userctrl_just_submessage() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(metric_4g=True)
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    # robotConfig writes skip userCtrl — the robot dispatches by submessage shape
+    assert _first(f, 5) is None
+    cfg = _decode_fields(_first(f, 13))  # PbInput.robotConfig
+    assert _first(cfg, 11) == 1  # metric_4g (bool encoded as varint 1)
+
+
+def test_encode_set_robot_config_false_and_unknown_rejected() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb_false = encode_set_robot_config(metric_4g=False)
+    cfg = _decode_fields(_first(_decode_fields(pb_false), 13))
+    assert _first(cfg, 11) == 0
+
+    # None is skipped (no field 11)
+    pb_skip = encode_set_robot_config(metric_4g=None)
+    cfg_skip = _decode_fields(_first(_decode_fields(pb_skip), 13))
+    assert _first(cfg_skip, 11) is None
+
+    with pytest.raises(ValueError, match="unknown robot-config field"):
+        encode_set_robot_config(nonsense=1)
+
+
+def test_encode_set_robot_config_int_field_audio_volume() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(audioVolume=42)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 6) == 42  # field 6 = audioVolume
+
+
+def test_encode_set_robot_config_timezone_offset_writes_field_21() -> None:
+    """``setTimezone`` (#9036) writes seconds east of UTC to PbRobotConfig.f21."""
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(timezoneOffset=3600)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 21) == 3600
+
+
+def test_encode_set_robot_config_negative_timezone_round_trips_through_decoder() -> None:
+    """Americas timezones are negative UTC offsets — verify the int32 varint
+    survives the encoder + decoder round-trip without flipping sign."""
+    from lymow.protocol import _signed32, decode_robot_config, encode_set_robot_config
+
+    pb = encode_set_robot_config(timezoneOffset=-18000)  # UTC-5
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    # On the wire the varint is the two's-complement uint64; _signed32 brings
+    # it back to a signed int32 the way decode_robot_config does internally.
+    assert _signed32(_first(cfg, 21)) == -18000
+    assert decode_robot_config(_first(_decode_fields(pb), 13)) == {"timezoneOffset": -18000}
+
+
+def test_decode_robot_config_extracts_timezone_offset() -> None:
+    from lymow.protocol import decode_robot_config
+
+    assert decode_robot_config(_field_i32(21, 7200)) == {"timezoneOffset": 7200}
+    # Negative offset (e.g. Americas) round-trips as two's-complement uint64 →
+    # _signed32 brings it back to negative.
+    assert decode_robot_config(_field_i32(21, (1 << 32) - 18000)) == {"timezoneOffset": -18000}
+
+
+def test_encode_set_robot_config_mixed_int_and_bool_in_one_message() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(audioVolume=80, isOpenLed=True)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 6) == 80
+    assert _first(cfg, 7) == 1
+
+
+def test_encode_set_robot_config_rejects_unsupported_kind() -> None:
+    """Guard against silent mis-encoding if the kind map ever grows past bool/int."""
+    from lymow.protocol import _ROBOT_CONFIG_FIELDS, encode_set_robot_config
+
+    _ROBOT_CONFIG_FIELDS["__test_bogus__"] = (99, "float")
+    try:
+        with pytest.raises(ValueError, match="unsupported robot-config kind"):
+            encode_set_robot_config(__test_bogus__=1.5)
+    finally:
+        del _ROBOT_CONFIG_FIELDS["__test_bogus__"]
+
+
+def test_encode_set_device_settings_full_message() -> None:
+    """Wire: PbInput { userCtrl=36, taskConfig=PbTaskConfig{f1..f4} }."""
+    from lymow.protocol import encode_set_device_settings
+
+    pb = encode_set_device_settings(
+        charging_mode=1,  # 1 = QUICK / Direct Route
+        zone_order=0,  # 0 = OPTIMIZE
+        rainy_mowing=True,
+        charging_handbrake=True,  # UI sense ON → wire disableChargingPark=0
+    )
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
+    cfg = _decode_fields(_first(f, 26))  # PbInput.taskConfig
+    assert _first(cfg, 1) == 1  # chargingMode (Direct Route)
+    assert _first(cfg, 2) == 0  # zoneOrder (Optimize)
+    assert _first(cfg, 3) == 1  # rainCleaning true
+    assert _first(cfg, 4) == 0  # disableChargingPark=0 because handbrake ON
+
+
+def test_encode_set_device_settings_inverts_handbrake_off() -> None:
+    """charging_handbrake=False (handbrake disengaged) → disableChargingPark=1 on wire."""
+    from lymow.protocol import encode_set_device_settings
+
+    pb = encode_set_device_settings(charging_handbrake=False)
+    cfg = _decode_fields(_first(_decode_fields(pb), 26))
+    assert _first(cfg, 4) == 1
+
+
+def test_encode_set_device_settings_partial_omits_unset() -> None:
+    from lymow.protocol import encode_set_device_settings
+
+    pb = encode_set_device_settings(rainy_mowing=True)
+    cfg = _decode_fields(_first(_decode_fields(pb), 26))
+    assert _first(cfg, 3) == 1
+    for fn in (1, 2, 4):
+        assert _first(cfg, fn) is None
+
+
+def test_encode_set_recharge_resume_full_message() -> None:
+    """Wire: PbInput.robotConfig (f13) → PbRobotConfig.rrConfig (f18) → PbRRConfig."""
+    from lymow.protocol import encode_set_recharge_resume
+
+    pb = encode_set_recharge_resume(
+        enable=True,
+        period_start=(9, 30),
+        period_end=(18, 0),
+        recharge_bat=20,
+        resume_bat=80,
+    )
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    assert _first(f, 5) is None  # no userCtrl (robotConfig dispatch)
+    cfg = _decode_fields(_first(f, 13))  # PbInput.robotConfig
+    rr = _decode_fields(_first(cfg, 18))  # PbRobotConfig.rrConfig
+    assert _first(rr, 1) == 1  # enableRr
+    assert _first(rr, 4) == 20  # rechargeBat
+    assert _first(rr, 5) == 80  # resumeBat
+
+    start = _decode_fields(_first(rr, 2))  # PbTimeZone start
+    assert _first(start, 1) == 9 and _first(start, 2) == 30
+
+    end = _decode_fields(_first(rr, 3))  # PbTimeZone end
+    assert _first(end, 1) == 18 and _first(end, 2) == 0
+
+
+def test_encode_set_recharge_resume_partial_skips_unset() -> None:
+    from lymow.protocol import encode_set_recharge_resume
+
+    pb = encode_set_recharge_resume(enable=False)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    rr = _decode_fields(_first(cfg, 18))
+    assert _first(rr, 1) == 0  # enableRr false
+    # All other PbRRConfig fields absent so a partial write doesn't blow them away.
+    for fno in (2, 3, 4, 5):
+        assert _first(rr, fno) is None
+
+
+def test_encode_set_robot_config_signal_field_for_vehicle_led() -> None:
+    """Vehicle LED writes go via the signal field (one-shot), not isOpenLed."""
+    from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT, encode_set_robot_config
+
+    pb_on = encode_set_robot_config(signal=SIGNAL_TURN_ON_VEHICLE_LIGHT)
+    cfg = _decode_fields(_first(_decode_fields(pb_on), 13))
+    assert _first(cfg, 8) == SIGNAL_TURN_ON_VEHICLE_LIGHT == 10
+
+    pb_off = encode_set_robot_config(signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
+    cfg_off = _decode_fields(_first(_decode_fields(pb_off), 13))
+    assert _first(cfg_off, 8) == SIGNAL_TURN_OFF_VEHICLE_LIGHT == 11
+
+
+def test_encode_set_robot_config_dock_on_error_field_22() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(dockOnError=True)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 22) == 1
+
+
+def test_decode_robot_config_surfaces_dock_on_error() -> None:
+    from lymow.protocol import decode_robot_config
+
+    assert decode_robot_config(_field_i32(22, 1)) == {"dockOnError": True}
+    assert decode_robot_config(_field_i32(22, 0)) == {"dockOnError": False}
+
+
+def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
+    from lymow.protocol import encode_set_run_time_config
+
+    pb = encode_set_run_time_config(cutHeight=45, moveSpeed=0.6, cutSpeed=120)
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    assert _first(f, 5) == 50  # USER_CTRL_SET_RUN_TIME_CONFIG
+    # PbInput.map (field 12) → PbMap.runTimeConfig (field 13) → PbRunTimeConfig
+    pb_map = _decode_fields(_first(f, 12))
+    cfg = _decode_fields(_first(pb_map, 13))
+    assert _first(cfg, 1) == 45  # cutHeight
+    assert _first(cfg, 6) == 120  # cutSpeed
+    # moveSpeed is float32 (wire type 5)
+    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.6, rel=1e-5)
+
+
+def test_encode_set_run_time_config_skips_none_and_rejects_unknown() -> None:
+    from lymow.protocol import encode_set_run_time_config
+
+    pb = encode_set_run_time_config(cutHeight=None, cutSpeed=80)
+    cfg = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 12)), 13))
+    assert _first(cfg, 6) == 80  # cutSpeed present
+    assert _first(cfg, 1) is None  # cutHeight (None) skipped
+    with pytest.raises(ValueError, match="unknown run-time-config field"):
+        encode_set_run_time_config(nonsense=1)
 
 
 def test_encode_rename_zone_structure() -> None:

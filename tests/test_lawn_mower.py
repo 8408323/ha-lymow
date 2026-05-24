@@ -41,6 +41,10 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_query_schedules = AsyncMock()
     coord.async_ble_drive = AsyncMock()
     coord.async_set_task_config = AsyncMock()
+    coord.async_set_run_time_config = AsyncMock()
+    coord.async_set_robot_config = AsyncMock()
+    coord.async_set_recharge_resume = AsyncMock()
+    coord.async_set_device_settings = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
     coord.async_set_schedules = AsyncMock()
@@ -67,21 +71,24 @@ def test_mower_unique_id() -> None:
     assert m._attr_unique_id == THING
 
 
-def test_mower_name() -> None:
+def test_mower_is_primary_device_entity() -> None:
     m = _make_mower()
-    assert m._attr_name == "Mower 1"
+    # Primary entity: has_entity_name + name=None renders as just the device name.
+    assert m._attr_has_entity_name is True
+    assert m._attr_name is None
+    assert m._attr_device_info["name"] == "Mower 1"
 
 
-def test_mower_name_fallback_sn() -> None:
+def test_mower_device_name_fallback_sn() -> None:
     coord = _make_coord()
     m = LymowMower(coord, {"deviceThingName": THING, "sn": "SN001"})
-    assert m._attr_name == "SN001"
+    assert m._attr_device_info["name"] == "SN001"
 
 
-def test_mower_name_fallback_thing() -> None:
+def test_mower_device_name_fallback_thing() -> None:
     coord = _make_coord()
     m = LymowMower(coord, {"deviceThingName": THING})
-    assert m._attr_name == THING
+    assert m._attr_device_info["name"] == THING
 
 
 def test_mower_supported_features() -> None:
@@ -236,8 +243,9 @@ async def test_async_setup_entry_registers_services() -> None:
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
     # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
     # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
-    # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station.
-    assert hass.services.async_register.call_count == 36
+    # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station
+    # + 1 resume + 1 set-run-time-config + 1 set-network-priority + 1 set-recharge-resume + 1 set-device-settings.
+    assert hass.services.async_register.call_count == 41
 
 
 # ---------------------------------------------------------------------------
@@ -565,6 +573,55 @@ async def test_handle_query_map_calls_coordinator() -> None:
     call = _make_call(["lawn_mower.mower_1"])
     await handlers2["query_map"](call)
     coord.async_query_map.assert_called_once_with(THING)
+
+
+async def test_handle_resume_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_resume = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers2: dict = {}
+
+    def _register2(domain, service, handler, schema=None, supports_response=False):
+        handlers2[service] = handler
+
+    hass.services.async_register.side_effect = _register2
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    await handlers2["resume"](_make_call(["lawn_mower.mower_1"]))
+    coord.async_resume.assert_awaited_once_with(THING)
+
+
+async def test_handle_resume_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_resume = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers2: dict = {}
+
+    def _register2(domain, service, handler, schema=None, supports_response=False):
+        handlers2[service] = handler
+
+    hass.services.async_register.side_effect = _register2
+    await async_setup_entry(hass, entry, lambda entities: None)
+    await handlers2["resume"](_make_call(["lawn_mower.does_not_exist"]))
+    coord.async_resume.assert_not_awaited()
 
 
 async def test_handle_query_schedules_calls_coordinator() -> None:
@@ -1170,6 +1227,249 @@ async def test_handle_set_task_config_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"cut_speed": 100})
     await handlers["set_task_config"](call)
     coord.async_set_task_config.assert_not_called()
+
+
+async def test_handle_set_run_time_config_maps_and_calls() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"cut_height": 45, "move_speed": 0.6, "cut_speed": 120})
+    await handlers["set_run_time_config"](call)
+    coord.async_set_run_time_config.assert_awaited_once_with("mower-001", cutHeight=45, moveSpeed=0.6, cutSpeed=120)
+
+
+async def test_handle_set_run_time_config_no_params_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {})
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_run_time_config"](call)
+    coord.async_set_run_time_config.assert_not_awaited()
+
+
+async def test_handle_set_run_time_config_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.other"], {"cut_height": 45})
+    await handlers["set_run_time_config"](call)
+    coord.async_set_run_time_config.assert_not_awaited()
+
+
+def test_set_run_time_config_schema_enforces_ranges() -> None:
+    """Non-UI callers (automations, REST) must not bypass the documented bounds."""
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_RUN_TIME_CONFIG_SCHEMA
+
+    valid = _SET_RUN_TIME_CONFIG_SCHEMA(
+        {"entity_id": ["lawn_mower.x"], "cut_height": 40, "move_speed": 0.5, "cut_speed": 100}
+    )
+    assert valid["cut_height"] == 40 and valid["move_speed"] == 0.5 and valid["cut_speed"] == 100
+
+    # cut_height bounds (20..100 mm), move_speed (0.1..1.5 m/s), cut_speed (0..1000)
+    for bad in (
+        {"cut_height": 5},
+        {"cut_height": 500},
+        {"move_speed": 0.0},
+        {"move_speed": 9.9},
+        {"cut_speed": -1},
+        {"cut_speed": 10000},
+    ):
+        with pytest.raises(vol_.Invalid):
+            _SET_RUN_TIME_CONFIG_SCHEMA({"entity_id": ["lawn_mower.x"], **bad})
+
+
+async def test_handle_set_network_priority_4g_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_network_priority"](_make_call(["lawn_mower.mower_1"], {"preferred": "4g"}))
+    coord.async_set_robot_config.assert_awaited_once_with("mower-001", metric_4g=True)
+
+
+async def test_handle_set_network_priority_wifi_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_network_priority"](_make_call(["lawn_mower.mower_1"], {"preferred": "wifi"}))
+    coord.async_set_robot_config.assert_awaited_once_with("mower-001", metric_4g=False)
+
+
+async def test_handle_set_network_priority_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_network_priority"](_make_call(["lawn_mower.other"], {"preferred": "4g"}))
+    coord.async_set_robot_config.assert_not_awaited()
+
+
+def test_set_network_priority_schema_rejects_bad_choice() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_NETWORK_PRIORITY_SCHEMA
+
+    assert _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"], "preferred": "4g"})["preferred"] == "4g"
+    assert _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"], "preferred": "wifi"})["preferred"] == "wifi"
+    with pytest.raises(vol_.Invalid):
+        _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"], "preferred": "ethernet"})
+    with pytest.raises(vol_.Invalid):
+        _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"]})  # preferred missing
+
+
+async def test_handle_set_recharge_resume_forwards_kwargs() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"enable": True, "period_start": (9, 0), "period_end": (18, 30), "resume_bat": 75},
+    )
+    await handlers["set_recharge_resume"](call)
+    coord.async_set_recharge_resume.assert_awaited_once_with(
+        "mower-001",
+        enable=True,
+        period_start=(9, 0),
+        period_end=(18, 30),
+        recharge_bat=None,
+        resume_bat=75,
+    )
+
+
+async def test_handle_set_recharge_resume_no_params_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_recharge_resume"](_make_call(["lawn_mower.mower_1"], {}))
+    coord.async_set_recharge_resume.assert_not_awaited()
+
+
+async def test_handle_set_recharge_resume_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_recharge_resume"](_make_call(["lawn_mower.other"], {"enable": True}))
+    coord.async_set_recharge_resume.assert_not_awaited()
+
+
+def test_set_recharge_resume_schema_parses_time_strings_and_bounds() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_RECHARGE_RESUME_SCHEMA
+
+    parsed = _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "period_start": "08:30", "recharge_bat": 15})
+    assert parsed["period_start"] == (8, 30)
+    assert parsed["recharge_bat"] == 15
+
+    # Whitespace and single-digit hour both accepted, per the docstring.
+    assert _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "period_start": " 9:05 "})["period_start"] == (
+        9,
+        5,
+    )
+
+    # Bad time formats — covers all three guards (no colon, non-int, out-of-range)
+    # plus non-string input (e.g. an int) which must raise instead of silently parsing.
+    for bad_time in ("8", "abc:de", "8:60", "24:00", "not-a-time", "", 900):
+        with pytest.raises(vol_.Invalid):
+            _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "period_start": bad_time})
+
+    # Out-of-range battery
+    with pytest.raises(vol_.Invalid):
+        _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "resume_bat": 150})
+
+
+async def test_handle_set_device_settings_maps_choices_and_inverts_handbrake() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {
+            "charging_mode": "direct_route",
+            "zone_order": "optimize",
+            "rainy_mowing": True,
+            "charging_handbrake": True,
+        },
+    )
+    await handlers["set_device_settings"](call)
+    coord.async_set_device_settings.assert_awaited_once_with(
+        "mower-001",
+        charging_mode=1,  # direct_route → 1
+        zone_order=0,  # optimize → 0
+        rainy_mowing=True,
+        charging_handbrake=True,  # passed through; encode_set_device_settings does the wire-inversion
+    )
+
+
+async def test_handle_set_device_settings_no_params_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_device_settings"](_make_call(["lawn_mower.mower_1"], {}))
+    coord.async_set_device_settings.assert_not_awaited()
+
+
+async def test_handle_set_device_settings_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_device_settings"](_make_call(["lawn_mower.other"], {"rainy_mowing": True}))
+    coord.async_set_device_settings.assert_not_awaited()
+
+
+def test_set_device_settings_schema_rejects_unknown_choice() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_DEVICE_SETTINGS_SCHEMA
+
+    # Valid choices accepted, types preserved.
+    parsed = _SET_DEVICE_SETTINGS_SCHEMA(
+        {"entity_id": ["lawn_mower.x"], "charging_mode": "follow_perimeter", "zone_order": "custom"}
+    )
+    assert parsed["charging_mode"] == "follow_perimeter" and parsed["zone_order"] == "custom"
+
+    for bad in (
+        {"charging_mode": "ethernet"},
+        {"charging_mode": 0},  # raw int rejected — must use the named choice
+        {"zone_order": "alphabetical"},
+    ):
+        with pytest.raises(vol_.Invalid):
+            _SET_DEVICE_SETTINGS_SCHEMA({"entity_id": ["lawn_mower.x"], **bad})
 
 
 def _validated_schedule(**overrides) -> dict:

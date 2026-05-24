@@ -355,3 +355,152 @@ async def test_async_setup_entry_registers_rtk_threshold_per_device() -> None:
 
     threshold_entities = [e for e in added if isinstance(e, RtkPauseThresholdNumber)]
     assert len(threshold_entities) == 1
+
+
+# ---------------------------------------------------------------------------
+# MowerVolumeNumber — robotConfig.audioVolume (int 0..100, slider)
+# ---------------------------------------------------------------------------
+
+
+def _make_volume_coord(robot_config: dict | None) -> MagicMock:
+    from unittest.mock import AsyncMock
+
+    coord = MagicMock()
+    coord.data = {THING: {"robotConfig": dict(robot_config)} if robot_config is not None else {}}
+    coord.devices = [DEVICE]
+    coord.async_set_robot_config = AsyncMock()
+    coord.get_rtk_guard_threshold = MagicMock(return_value=1)
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    return coord
+
+
+def test_volume_number_native_value_reads_robot_config() -> None:
+    from lymow.number import MowerVolumeNumber
+
+    e = MowerVolumeNumber(_make_volume_coord({"audioVolume": 65}), DEVICE)
+    assert e.native_value == 65.0
+    assert e._attr_unique_id == f"{THING}_audio_volume"
+    assert "Volume" in e._attr_name
+
+
+def test_volume_number_unknown_when_missing_or_out_of_range() -> None:
+    from lymow.number import MowerVolumeNumber
+
+    assert MowerVolumeNumber(_make_volume_coord(None), DEVICE).native_value is None
+    assert MowerVolumeNumber(_make_volume_coord({}), DEVICE).native_value is None
+    # Untrusted wire data: out-of-range falls back to unknown rather than clamping
+    assert MowerVolumeNumber(_make_volume_coord({"audioVolume": -5}), DEVICE).native_value is None
+    assert MowerVolumeNumber(_make_volume_coord({"audioVolume": 250}), DEVICE).native_value is None
+
+
+async def test_volume_number_set_publishes_robot_config_int() -> None:
+    from lymow.number import MowerVolumeNumber
+
+    coord = _make_volume_coord({"audioVolume": 30})
+    await MowerVolumeNumber(coord, DEVICE).async_set_native_value(80)
+    coord.async_set_robot_config.assert_awaited_once_with(THING, audioVolume=80)
+
+
+async def test_async_setup_entry_registers_volume_per_device() -> None:
+    from lymow.const import DOMAIN
+    from lymow.number import MowerVolumeNumber
+
+    coord = _make_volume_coord({"audioVolume": 50})
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    volume_entities = [e for e in added if isinstance(e, MowerVolumeNumber)]
+    assert len(volume_entities) == 1
+    assert volume_entities[0]._thing_name == THING
+
+
+# ---------------------------------------------------------------------------
+# Recharge & Resume battery thresholds — robotConfig.rrConfig {rechargeBat,
+# resumeBat} backed by ``async_set_recharge_resume``.
+# ---------------------------------------------------------------------------
+
+
+def _make_rr_coord(rr_config: dict | None) -> MagicMock:
+    from unittest.mock import AsyncMock
+
+    coord = MagicMock()
+    state: dict = {"robotConfig": {}}
+    if rr_config is not None:
+        state["robotConfig"]["rrConfig"] = rr_config
+    coord.data = {THING: state}
+    coord.devices = [DEVICE]
+    coord.async_set_recharge_resume = AsyncMock()
+    coord.async_set_robot_config = AsyncMock()
+    coord.get_rtk_guard_threshold = MagicMock(return_value=1)
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    return coord
+
+
+def test_recharge_threshold_metadata_and_unique_id() -> None:
+    from lymow.number import RechargeBatteryThresholdNumber
+
+    e = RechargeBatteryThresholdNumber(_make_rr_coord({"rechargeBat": 15}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_recharge_threshold"
+    assert e._attr_name == "Recharge threshold"
+    assert e._attr_native_min_value == 0
+    assert e._attr_native_max_value == 100
+    assert e.native_value == 15.0
+
+
+def test_recharge_threshold_unknown_when_missing_or_out_of_range() -> None:
+    from lymow.number import RechargeBatteryThresholdNumber
+
+    assert RechargeBatteryThresholdNumber(_make_rr_coord(None), DEVICE).native_value is None
+    assert RechargeBatteryThresholdNumber(_make_rr_coord({}), DEVICE).native_value is None
+    # 0 is in-range so it reads back as 0.0 — the slider min matches the
+    # decoder's bound so HA won't flag it as invalid.
+    assert RechargeBatteryThresholdNumber(_make_rr_coord({"rechargeBat": 0}), DEVICE).native_value == 0.0
+    assert RechargeBatteryThresholdNumber(_make_rr_coord({"rechargeBat": 250}), DEVICE).native_value is None
+    assert RechargeBatteryThresholdNumber(_make_rr_coord({"rechargeBat": "15"}), DEVICE).native_value is None
+
+
+async def test_recharge_threshold_set_calls_coordinator_with_int() -> None:
+    from lymow.number import RechargeBatteryThresholdNumber
+
+    coord = _make_rr_coord({"rechargeBat": 15})
+    await RechargeBatteryThresholdNumber(coord, DEVICE).async_set_native_value(20)
+    coord.async_set_recharge_resume.assert_awaited_once_with(THING, recharge_bat=20)
+
+
+def test_resume_threshold_reads_and_metadata() -> None:
+    from lymow.number import ResumeBatteryThresholdNumber
+
+    e = ResumeBatteryThresholdNumber(_make_rr_coord({"resumeBat": 75}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_resume_threshold"
+    assert e._attr_name == "Resume threshold"
+    assert e.native_value == 75.0
+
+
+async def test_resume_threshold_set_calls_coordinator() -> None:
+    from lymow.number import ResumeBatteryThresholdNumber
+
+    coord = _make_rr_coord({"resumeBat": 75})
+    await ResumeBatteryThresholdNumber(coord, DEVICE).async_set_native_value(80)
+    coord.async_set_recharge_resume.assert_awaited_once_with(THING, resume_bat=80)
+
+
+async def test_async_setup_entry_registers_rr_thresholds_per_device() -> None:
+    from lymow.const import DOMAIN
+    from lymow.number import RechargeBatteryThresholdNumber, ResumeBatteryThresholdNumber
+
+    coord = _make_rr_coord({"rechargeBat": 15, "resumeBat": 75})
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    assert any(isinstance(e, RechargeBatteryThresholdNumber) for e in added)
+    assert any(isinstance(e, ResumeBatteryThresholdNumber) for e in added)

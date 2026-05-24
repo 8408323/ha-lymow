@@ -24,11 +24,17 @@ async def async_setup_entry(
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
     added: set[tuple[str, str]] = set()
 
-    # One geofence-radius number per device (geoFence is a feature-level field).
-    radius_entities: list[NumberEntity] = [GeofenceRadiusNumber(coordinator, device) for device in coordinator.devices]
-    radius_entities.extend(RtkPauseThresholdNumber(coordinator, device) for device in coordinator.devices)
-    if radius_entities:
-        async_add_entities(radius_entities)
+    # Per-device numbers (one of each): geofence radius (geoFence feature),
+    # RTK auto-pause threshold (coordinator-state knob), mower volume
+    # (PbRobotConfig.audioVolume) and the two Recharge & Resume battery
+    # thresholds (PbRobotConfig.rrConfig f4/f5).
+    device_numbers: list[NumberEntity] = [GeofenceRadiusNumber(coordinator, device) for device in coordinator.devices]
+    device_numbers.extend(RtkPauseThresholdNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(MowerVolumeNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(RechargeBatteryThresholdNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(ResumeBatteryThresholdNumber(coordinator, device) for device in coordinator.devices)
+    if device_numbers:
+        async_add_entities(device_numbers)
 
     @callback
     def _add_new_zones() -> None:
@@ -56,6 +62,7 @@ class GeofenceRadiusNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
     how to mutate the radius, not set the initial coords.
     """
 
+    _attr_has_entity_name = True
     _attr_device_class = NumberDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.METERS
     _attr_mode = NumberMode.BOX
@@ -67,10 +74,9 @@ class GeofenceRadiusNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name: str = device["deviceThingName"]
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_geofence_radius"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} Geofence radius"
+        self._attr_name = "Geofence radius"
 
     @property
     def _geofence(self) -> dict[str, Any] | None:
@@ -98,6 +104,7 @@ class GeofenceRadiusNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
 class ZoneCutHeightNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
     """Cut-height (mm) for a single go-zone. Backed by SYNC_MAP on change."""
 
+    _attr_has_entity_name = True
     _attr_device_class = NumberDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
     _attr_mode = NumberMode.BOX
@@ -112,8 +119,7 @@ class ZoneCutHeightNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
         self._hash_id = hash_id
         self._attr_unique_id = f"{self._thing_name}_{hash_id}_cut_height"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} Zone {hash_id[:4]} Cut Height"
+        self._attr_name = f"Zone {hash_id[:4]} Cut Height"
 
     @property
     def _zone(self) -> dict[str, Any] | None:
@@ -145,6 +151,7 @@ class RtkPauseThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity)
     rtkStatus codes ``LymowRtkSensor`` decodes (0=Not ready … 3=RTK fixed).
     """
 
+    _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX
     _attr_native_min_value = 0
     _attr_native_max_value = 3
@@ -155,10 +162,9 @@ class RtkPauseThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity)
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_rtk_pause_threshold"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} RTK pause threshold"
+        self._attr_name = "RTK pause threshold"
 
     @property
     def native_value(self) -> float:
@@ -167,3 +173,110 @@ class RtkPauseThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity)
     async def async_set_native_value(self, value: float) -> None:
         self.coordinator.set_rtk_guard_threshold(self._thing_name, int(value))
         self.async_write_ha_state()
+
+
+class MowerVolumeNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
+    """Mower beep/voice volume (the app's Device Settings volume slider).
+
+    Backed by PbRobotConfig.audioVolume (field 6, int). Range mirrors the
+    app's UI (0-100 %). State comes from the decoded robotConfig submessage of
+    the next pboutput; before the first sighting native_value is None.
+    """
+
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "%"
+    _attr_icon = "mdi:volume-high"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_audio_volume"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Volume"
+
+    @property
+    def native_value(self) -> float | None:
+        config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
+        v = config.get("audioVolume")
+        # Untrusted wire data: out-of-range → unknown (don't silently clamp,
+        # since that would hide a misbehaving robot/payload).
+        if v is None or not 0 <= v <= 100:
+            return None
+        return float(v)
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_robot_config(self._thing_name, audioVolume=int(value))
+
+
+class _RrBatteryThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
+    """Base class for the two Recharge & Resume battery-threshold sliders.
+
+    Read: PbRobotConfig.rrConfig.<wire_key> (decoded by ``decode_rr_config``).
+    Write: ``coordinator.async_set_recharge_resume`` carries the change
+    over the no-userCtrl PbInput.robotConfig path the app uses (Hermes
+    setRrConfig fn pathway).
+    """
+
+    _wire_key: str = ""
+    _settings_kwarg: str = ""
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    # min=0 to match the decoder's 0-100 bound: the app's UI doesn't expose 0,
+    # but if a (future / hostile / off-app) write ever sets the wire field to 0
+    # we'd rather surface it as 0% than make HA mark the state invalid for
+    # being out of [min, max].
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "%"
+    _attr_device_class = NumberDeviceClass.BATTERY
+
+    def __init__(
+        self,
+        coordinator: LymowCoordinator,
+        device: dict,
+        name: str,
+        icon: str,
+        unique_suffix: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_{unique_suffix}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = name
+        self._attr_icon = icon
+
+    @property
+    def native_value(self) -> float | None:
+        rr = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("rrConfig") or {}
+        v = rr.get(self._wire_key)
+        if not isinstance(v, int) or not 0 <= v <= 100:
+            return None
+        return float(v)
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_recharge_resume(self._thing_name, **{self._settings_kwarg: int(value)})
+
+
+class RechargeBatteryThresholdNumber(_RrBatteryThresholdNumber):
+    """Battery % at which the mower returns to the dock to recharge."""
+
+    _wire_key = "rechargeBat"
+    _settings_kwarg = "recharge_bat"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Recharge threshold", "mdi:battery-charging-low", "recharge_threshold")
+
+
+class ResumeBatteryThresholdNumber(_RrBatteryThresholdNumber):
+    """Battery % at which the mower resumes mowing after recharging."""
+
+    _wire_key = "resumeBat"
+    _settings_kwarg = "resume_bat"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Resume threshold", "mdi:battery-charging-high", "resume_threshold")
