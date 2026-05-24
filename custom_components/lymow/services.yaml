@@ -256,12 +256,13 @@ set_task_config:
 set_device_settings:
   name: Set Device Settings
   description: >
-    Write the four "Device Settings" toggles the app exposes (PbTaskConfig
-    submessage). Only the parameters you provide are sent. Mirrors the
-    app's Settings → Device Settings page (Return-to-Dock route, Zone
-    order, Rainy Mowing, Charging Handbrake). Each toggle/select is a
-    persistent device setting — distinct from the per-zone cut height /
-    path spacing parameters exposed by the existing lymow.set_task_config.
+    Write the four "Device Settings" options the app exposes (PbTaskConfig
+    submessage) — two selects (Return-to-Dock route, Zone order) and two
+    toggles (Rainy Mowing, Charging Handbrake). Only the parameters you
+    provide are sent. Mirrors the app's Settings → Device Settings page.
+    Each option is a persistent device setting — distinct from the
+    per-zone cut height / path spacing parameters exposed by the
+    existing lymow.set_task_config.
   target:
     entity:
       integration: lymow

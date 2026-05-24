@@ -22,6 +22,7 @@ from .const import (
     BLE_DRIVE_ANGULAR_MAX,
     BLE_DRIVE_LINEAR_MAX,
     BLE_DRIVE_MAX_DURATION_S,
+    CHARGING_MODES,
     CONF_BLE_ADDRESS,
     DOMAIN,
     SERVICE_BLE_DRIVE,
@@ -31,6 +32,7 @@ from .const import (
     WORK_STATUS_OFFLINE,
     WORK_STATUS_PAUSED_GROUP,
     WORK_STATUS_RETURNING_GROUP,
+    ZONE_ORDERS,
 )
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
@@ -90,12 +92,24 @@ _ATTR_DS_ZONE_ORDER = "zone_order"
 _ATTR_DS_RAINY_MOWING = "rainy_mowing"
 _ATTR_DS_CHARGING_HANDBRAKE = "charging_handbrake"
 
-# Charging mode (return-to-dock route): app exposes two options.
-# Wire values from APK CHARING_MODE enum (sic): 0 NORMAL = Follow Perimeter,
-# 1 QUICK = Direct Route.
-_CHARGING_MODE_CHOICES = {"follow_perimeter": 0, "direct_route": 1}
-# Zone order on the multi-zone Mow page. Wire from APK ZONE_ORDER enum.
-_ZONE_ORDER_CHOICES = {"optimize": 0, "custom": 1}
+
+def _service_label(name: str) -> str:
+    """Map a const-style enum name (NORMAL / QUICK / etc.) to its HA-service
+    choice label. We use the app's UI sense — "follow_perimeter" / "direct_route"
+    / "optimize" / "custom" — rather than the raw APK enum names, which include
+    quirks like the (sic) CHARING_MODE typo."""
+    return {
+        "NORMAL": "follow_perimeter",
+        "QUICK": "direct_route",
+        "OPTIMIZE": "optimize",
+        "CUSTOM": "custom",
+    }[name]
+
+
+# Service-side choice → wire int, derived from the pinned const enums so the
+# two stay in lockstep (CHARGING_MODES and ZONE_ORDERS).
+_CHARGING_MODE_CHOICES = {_service_label(name): value for value, name in CHARGING_MODES.items()}
+_ZONE_ORDER_CHOICES = {_service_label(name): value for value, name in ZONE_ORDERS.items()}
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
 # subset of PbTaskConfig; the encoder supports more. All optional ints.
