@@ -288,7 +288,7 @@ class LymowMapCard extends HTMLElement {
     const goLabels = goZones.map((z) => {
       if (!z.polygon || z.polygon.length < 3) return "";
       const {x: cx, y: cy} = this._polyLabelPoint(z.polygon);
-      const label = z.area != null ? `${z.area} m²` : z.hashId.slice(0, 6);
+      const label = z.name || (z.area != null ? `${z.area} m²` : z.hashId.slice(0, 6));
       return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle"
         font-size="${fontSz}" fill="#1b5e20" pointer-events="none" font-weight="bold"
         clip-path="url(#lbl-clip-${z.hashId})">${label}</text>`;

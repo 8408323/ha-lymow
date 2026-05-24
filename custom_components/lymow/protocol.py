@@ -302,8 +302,11 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
         if isinstance(bi_raw, bytes):
             bi = _decode_fields(bi_raw)
             hash_raw = _first(bi, 3)
+            name_raw = _first(bi, 2)
             poly_raw = _first(bi, 5)
             zone["hashId"] = hash_raw.decode("utf-8", errors="replace") if isinstance(hash_raw, bytes) else ""
+            if isinstance(name_raw, bytes) and name_raw:
+                zone["name"] = name_raw.decode("utf-8", errors="replace")
             zone["type"] = _first(bi, 1, 0)
             zone["isEnabled"] = bool(_first(bi, 4, 1))
             zone["polygon"] = _decode_map_polygon(poly_raw) if isinstance(poly_raw, bytes) else []
