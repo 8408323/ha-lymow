@@ -8,6 +8,7 @@ from lymow.switch import (
     FindRobotSwitch,
     TheftDetectionSwitch,
     TheftLockSwitch,
+    VehicleLedSwitch,
     ZoneEnabledSwitch,
     async_setup_entry,
 )
@@ -53,14 +54,15 @@ def test_unique_id() -> None:
 
 def test_name() -> None:
     e = _make_entity()
+    assert e._attr_has_entity_name is True
     assert HASH_ID[:4] in e._attr_name
-    assert "Mower 1" in e._attr_name
+    assert e._attr_device_info["name"] == "Mower 1"
 
 
-def test_name_fallback_sn() -> None:
+def test_device_name_fallback_sn() -> None:
     coord = _make_coord({"mapData": {"goZones": [_ZONE_ON]}})
     e = ZoneEnabledSwitch(coord, {"deviceThingName": THING, "sn": "SN1"}, HASH_ID)
-    assert "SN1" in e._attr_name
+    assert e._attr_device_info["name"] == "SN1"
 
 
 # ---------------------------------------------------------------------------
@@ -356,6 +358,108 @@ async def test_async_setup_entry_creates_feature_switches() -> None:
     assert "TheftLockSwitch" in feature_types
     assert "FindRobotSwitch" in feature_types
     assert "MobileNotificationSwitch" in feature_types
+    assert "AlertsOnlySwitch" in feature_types
+    assert "VehicleLedSwitch" in feature_types
+    assert "Prefer4gSwitch" in feature_types
+    assert "DockOnErrorSwitch" in feature_types
+
+
+# ---------------------------------------------------------------------------
+# VehicleLedSwitch — robotConfig.isOpenLed (bool)
+# ---------------------------------------------------------------------------
+
+
+def _make_robot_config_coord(robot_config: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    coord.data = {THING: {"robotConfig": dict(robot_config)} if robot_config is not None else {}}
+    coord.devices = [DEVICE]
+    coord.async_set_robot_config = AsyncMock()
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    return coord
+
+
+def test_vehicle_led_switch_metadata_and_unknown_when_missing() -> None:
+    coord = _make_robot_config_coord(None)
+    e = VehicleLedSwitch(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_isOpenLed"
+    assert "Vehicle LED" in e._attr_name
+    # No robotConfig yet → unknown, not silently False
+    assert e.is_on is None
+
+
+def test_vehicle_led_switch_reads_state_from_robot_config() -> None:
+    on = VehicleLedSwitch(_make_robot_config_coord({"isOpenLed": True}), DEVICE)
+    off = VehicleLedSwitch(_make_robot_config_coord({"isOpenLed": False}), DEVICE)
+    assert on.is_on is True
+    assert off.is_on is False
+
+
+async def test_vehicle_led_switch_writes_via_signal_not_isOpenLed() -> None:
+    """Match the app's switchVehicleLed: write signal=10 (on) / 11 (off), not isOpenLed."""
+    from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT
+
+    coord_on = _make_robot_config_coord({"isOpenLed": False})
+    await VehicleLedSwitch(coord_on, DEVICE).async_turn_on()
+    coord_on.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_ON_VEHICLE_LIGHT)
+
+    coord_off = _make_robot_config_coord({"isOpenLed": True})
+    await VehicleLedSwitch(coord_off, DEVICE).async_turn_off()
+    coord_off.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
+
+
+# ---------------------------------------------------------------------------
+# Prefer4gSwitch — robotConfig.metric_4g (bool, on=4G/off=Wi-Fi)
+# ---------------------------------------------------------------------------
+
+
+def test_prefer_4g_switch_metadata_and_reads_state() -> None:
+    from lymow.switch import Prefer4gSwitch
+
+    e = Prefer4gSwitch(_make_robot_config_coord({"metric_4g": True}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_metric_4g"
+    assert "4G" in e._attr_name
+    assert e.is_on is True
+    assert Prefer4gSwitch(_make_robot_config_coord({"metric_4g": False}), DEVICE).is_on is False
+    assert Prefer4gSwitch(_make_robot_config_coord(None), DEVICE).is_on is None
+
+
+async def test_prefer_4g_switch_turn_on_off_publishes_robot_config() -> None:
+    from lymow.switch import Prefer4gSwitch
+
+    coord_on = _make_robot_config_coord({"metric_4g": False})
+    await Prefer4gSwitch(coord_on, DEVICE).async_turn_on()
+    coord_on.async_set_robot_config.assert_awaited_once_with(THING, metric_4g=True)
+
+    coord_off = _make_robot_config_coord({"metric_4g": True})
+    await Prefer4gSwitch(coord_off, DEVICE).async_turn_off()
+    coord_off.async_set_robot_config.assert_awaited_once_with(THING, metric_4g=False)
+
+
+# ---------------------------------------------------------------------------
+# DockOnErrorSwitch — robotConfig.dockOnError (bool)
+# ---------------------------------------------------------------------------
+
+
+def test_dock_on_error_switch_reads_state_and_unique_id() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    on = DockOnErrorSwitch(_make_robot_config_coord({"dockOnError": True}), DEVICE)
+    assert on._attr_unique_id == f"{THING}_dockOnError"
+    assert on.is_on is True
+    assert DockOnErrorSwitch(_make_robot_config_coord({"dockOnError": False}), DEVICE).is_on is False
+    assert DockOnErrorSwitch(_make_robot_config_coord(None), DEVICE).is_on is None
+
+
+async def test_dock_on_error_switch_writes_robot_config() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    coord_on = _make_robot_config_coord({"dockOnError": False})
+    await DockOnErrorSwitch(coord_on, DEVICE).async_turn_on()
+    coord_on.async_set_robot_config.assert_awaited_once_with(THING, dockOnError=True)
+
+    coord_off = _make_robot_config_coord({"dockOnError": True})
+    await DockOnErrorSwitch(coord_off, DEVICE).async_turn_off()
+    coord_off.async_set_robot_config.assert_awaited_once_with(THING, dockOnError=False)
 
 
 # ---------------------------------------------------------------------------
@@ -388,14 +492,13 @@ def test_mobile_notification_switch_is_off_when_value_is_zero() -> None:
     assert e.is_on is False
 
 
-def test_mobile_notification_switch_is_off_when_value_is_unknown_int() -> None:
-    """Anything that isn't the observed ON value (2) is treated as off, since
-    we haven't seen any other state on the wire."""
+def test_mobile_notification_switch_is_on_when_alerts_only() -> None:
+    """Value 1 = "alerts only" (app's sub-mode) still counts as on."""
     from lymow.switch import MobileNotificationSwitch
 
     coord = _make_feature_coord({"mobileNotificationSwitch": 1})
     e = MobileNotificationSwitch(coord, DEVICE)
-    assert e.is_on is False
+    assert e.is_on is True
 
 
 def test_mobile_notification_switch_is_none_when_missing() -> None:
@@ -423,6 +526,86 @@ async def test_mobile_notification_switch_turn_off_sends_int_zero() -> None:
     e = MobileNotificationSwitch(coord, DEVICE)
     await e.async_turn_off()
     coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=0)
+
+
+# ---------------------------------------------------------------------------
+# AlertsOnlySwitch — the app's "Alerts only" sub-toggle (mobileNotificationSwitch 1/2)
+# ---------------------------------------------------------------------------
+
+
+def test_alerts_only_unique_id_distinct_from_master() -> None:
+    """Both back the same mobileNotificationSwitch field; their unique_ids must
+    differ or HA would drop one entity on a registry collision."""
+    from lymow.switch import AlertsOnlySwitch, MobileNotificationSwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 2})
+    master = MobileNotificationSwitch(coord, DEVICE)
+    alerts = AlertsOnlySwitch(coord, DEVICE)
+    assert alerts._attr_unique_id == f"{THING}_alerts_only"
+    assert alerts._attr_unique_id != master._attr_unique_id
+
+
+def test_mobile_notification_unknown_value_is_none() -> None:
+    """Untrusted wire data: an unexpected int reports unknown, not off."""
+    from lymow.switch import MobileNotificationSwitch
+
+    e = MobileNotificationSwitch(_make_feature_coord({"mobileNotificationSwitch": 9}), DEVICE)
+    assert e.is_on is None
+
+
+def test_alerts_only_available_when_value_missing() -> None:
+    """Before the first poll (value None) the sub-toggle stays available, not flickering out."""
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({}), DEVICE)
+    assert e.available is True
+
+
+def test_alerts_only_on_when_value_is_one() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({"mobileNotificationSwitch": 1}), DEVICE)
+    assert e.is_on is True
+    assert e.available is True
+
+
+def test_alerts_only_off_when_value_is_two() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({"mobileNotificationSwitch": 2}), DEVICE)
+    assert e.is_on is False
+    assert e.available is True
+
+
+def test_alerts_only_unavailable_when_notifications_off() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({"mobileNotificationSwitch": 0}), DEVICE)
+    assert e.available is False
+    assert e.is_on is False
+
+
+def test_alerts_only_is_none_when_missing() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    e = AlertsOnlySwitch(_make_feature_coord({}), DEVICE)
+    assert e.is_on is None
+
+
+async def test_alerts_only_turn_on_sends_one() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 2})
+    await AlertsOnlySwitch(coord, DEVICE).async_turn_on()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=1)
+
+
+async def test_alerts_only_turn_off_sends_two() -> None:
+    from lymow.switch import AlertsOnlySwitch
+
+    coord = _make_feature_coord({"mobileNotificationSwitch": 1})
+    await AlertsOnlySwitch(coord, DEVICE).async_turn_off()
+    coord.async_set_device_feature.assert_awaited_once_with(THING, mobileNotificationSwitch=2)
 
 
 # ---------------------------------------------------------------------------
@@ -471,3 +654,156 @@ async def test_rtk_auto_pause_switch_turn_off_toggles_coordinator() -> None:
     e.async_write_ha_state = MagicMock()
     await e.async_turn_off()
     coord.set_rtk_guard_enabled.assert_called_once_with(THING, False)
+
+
+# ---------------------------------------------------------------------------
+# Device Settings boolean switches (PbTaskConfig f3/f4 — rainCleaning + the
+# inverted disableChargingPark).
+# ---------------------------------------------------------------------------
+
+
+def _make_task_config_coord(task_config: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    state: dict = {"mapData": {}}
+    if task_config is not None:
+        state["mapData"]["taskConfig"] = task_config
+    coord.data = {THING: state}
+    coord.devices = [DEVICE]
+    coord.async_set_device_settings = AsyncMock()
+    return coord
+
+
+def test_rain_cleaning_switch_metadata_and_reads_state() -> None:
+    from lymow.switch import RainCleaningSwitch
+
+    e = RainCleaningSwitch(_make_task_config_coord({"rainCleaning": True}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_rainy_mowing"
+    assert e._attr_name == "Rainy mowing"
+    assert e.is_on is True
+
+    e_off = RainCleaningSwitch(_make_task_config_coord({"rainCleaning": False}), DEVICE)
+    assert e_off.is_on is False
+
+
+def test_rain_cleaning_unknown_when_missing_or_non_bool() -> None:
+    from lymow.switch import RainCleaningSwitch
+
+    assert RainCleaningSwitch(_make_task_config_coord(), DEVICE).is_on is None
+    assert RainCleaningSwitch(_make_task_config_coord({}), DEVICE).is_on is None
+    # int 1 from a hostile decode must not be treated as bool — surfaces unknown.
+    assert RainCleaningSwitch(_make_task_config_coord({"rainCleaning": 1}), DEVICE).is_on is None
+
+
+async def test_rain_cleaning_turn_on_off_calls_coordinator() -> None:
+    from lymow.switch import RainCleaningSwitch
+
+    coord = _make_task_config_coord({"rainCleaning": False})
+    await RainCleaningSwitch(coord, DEVICE).async_turn_on()
+    coord.async_set_device_settings.assert_awaited_once_with(THING, rainy_mowing=True)
+
+    coord2 = _make_task_config_coord({"rainCleaning": True})
+    await RainCleaningSwitch(coord2, DEVICE).async_turn_off()
+    coord2.async_set_device_settings.assert_awaited_once_with(THING, rainy_mowing=False)
+
+
+def test_charging_handbrake_switch_inverts_wire_for_ui_sense() -> None:
+    """UI ON = handbrake engaged = wire ``disableChargingPark`` False."""
+    from lymow.switch import ChargingHandbrakeSwitch
+
+    on = ChargingHandbrakeSwitch(_make_task_config_coord({"disableChargingPark": False}), DEVICE)
+    assert on.is_on is True
+    off = ChargingHandbrakeSwitch(_make_task_config_coord({"disableChargingPark": True}), DEVICE)
+    assert off.is_on is False
+
+
+def test_charging_handbrake_metadata_and_unknown_when_missing() -> None:
+    from lymow.switch import ChargingHandbrakeSwitch
+
+    e = ChargingHandbrakeSwitch(_make_task_config_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_charging_handbrake"
+    assert e._attr_name == "Charging handbrake"
+    assert e.is_on is None
+
+
+async def test_charging_handbrake_turn_on_off_passes_ui_bool_through() -> None:
+    """The coordinator (encoder) is responsible for inversion — the entity
+    forwards the UI sense unchanged."""
+    from lymow.switch import ChargingHandbrakeSwitch
+
+    coord = _make_task_config_coord({"disableChargingPark": True})
+    await ChargingHandbrakeSwitch(coord, DEVICE).async_turn_on()
+    coord.async_set_device_settings.assert_awaited_once_with(THING, charging_handbrake=True)
+
+    coord2 = _make_task_config_coord({"disableChargingPark": False})
+    await ChargingHandbrakeSwitch(coord2, DEVICE).async_turn_off()
+    coord2.async_set_device_settings.assert_awaited_once_with(THING, charging_handbrake=False)
+
+
+# ---------------------------------------------------------------------------
+# RechargeResumeSwitch — PbRobotConfig.rrConfig.enable (f1)
+# ---------------------------------------------------------------------------
+
+
+def _make_rr_coord(rr_config: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    state: dict = {"robotConfig": {}}
+    if rr_config is not None:
+        state["robotConfig"]["rrConfig"] = rr_config
+    coord.data = {THING: state}
+    coord.devices = [DEVICE]
+    coord.async_set_recharge_resume = AsyncMock()
+    return coord
+
+
+def test_recharge_resume_switch_metadata_and_unknown_when_missing() -> None:
+    from lymow.switch import RechargeResumeSwitch
+
+    e = RechargeResumeSwitch(_make_rr_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_recharge_resume"
+    assert e._attr_name == "Recharge & resume"
+    assert e.is_on is None
+
+
+def test_recharge_resume_switch_reads_state_and_period_attrs() -> None:
+    from lymow.switch import RechargeResumeSwitch
+
+    e = RechargeResumeSwitch(
+        _make_rr_coord(
+            {
+                "enable": True,
+                "periodStart": {"hour": 4, "minute": 0},
+                "periodEnd": {"hour": 20, "minute": 30},
+            }
+        ),
+        DEVICE,
+    )
+    assert e.is_on is True
+    assert e.extra_state_attributes == {"period_start": "04:00", "period_end": "20:30"}
+
+
+def test_recharge_resume_switch_no_attrs_when_periods_missing() -> None:
+    from lymow.switch import RechargeResumeSwitch
+
+    e = RechargeResumeSwitch(_make_rr_coord({"enable": False}), DEVICE)
+    assert e.is_on is False
+    assert e.extra_state_attributes is None
+
+
+def test_recharge_resume_switch_unknown_when_enable_not_bool() -> None:
+    """``decode_rr_config`` already drops non-0/1 enable values, but guard the
+    entity too in case rrConfig is built from a different source someday."""
+    from lymow.switch import RechargeResumeSwitch
+
+    assert RechargeResumeSwitch(_make_rr_coord({"enable": 1}), DEVICE).is_on is None
+
+
+async def test_recharge_resume_switch_turn_on_off_calls_coordinator() -> None:
+    from lymow.switch import RechargeResumeSwitch
+
+    coord = _make_rr_coord({"enable": False})
+    await RechargeResumeSwitch(coord, DEVICE).async_turn_on()
+    coord.async_set_recharge_resume.assert_awaited_once_with(THING, enable=True)
+
+    coord2 = _make_rr_coord({"enable": True})
+    await RechargeResumeSwitch(coord2, DEVICE).async_turn_off()
+    coord2.async_set_recharge_resume.assert_awaited_once_with(THING, enable=False)

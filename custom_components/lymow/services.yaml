@@ -253,6 +253,157 @@ set_task_config:
       selector:
         number: { min: 0, max: 1000, step: 1, mode: box }
 
+set_device_settings:
+  name: Set Device Settings
+  description: >
+    Write the four "Device Settings" options the app exposes (PbTaskConfig
+    submessage) — two selects (Return-to-Dock route, Zone order) and two
+    toggles (Rainy Mowing, Charging Handbrake). Only the parameters you
+    provide are sent. Mirrors the app's Settings → Device Settings page.
+    Each option is a persistent device setting — distinct from the
+    per-zone cut height / path spacing parameters exposed by the
+    existing lymow.set_task_config.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    charging_mode:
+      name: Return to Dock route
+      description: >
+        follow_perimeter = mower returns to dock along the recorded perimeter
+        (safer, slower); direct_route = straight line back (faster).
+      example: "follow_perimeter"
+      selector:
+        select:
+          options:
+            - "follow_perimeter"
+            - "direct_route"
+    zone_order:
+      name: Zone order
+      description: >
+        optimize = app picks the best zone sequence; custom = use the order
+        you defined in the app.
+      example: "optimize"
+      selector:
+        select:
+          options:
+            - "optimize"
+            - "custom"
+    rainy_mowing:
+      name: Rainy Mowing
+      description: Continue mowing if the rain sensor triggers (instead of returning to dock).
+      example: false
+      selector:
+        boolean:
+    charging_handbrake:
+      name: Charging Handbrake
+      description: >
+        Recommended for uneven ground — prevents the mower from sliding off
+        the dock. UI sense (on = handbrake engaged); the wire field
+        (disableChargingPark) is inverted under the hood.
+      example: true
+      selector:
+        boolean:
+
+set_recharge_resume:
+  name: Set Recharge & Resume
+  description: >
+    Configure the mower's Recharge & Resume schedule and battery thresholds
+    (PbRobotConfig.rrConfig). Mirrors the app's Device Settings → Recharge &
+    Resume page. Only the parameters you provide are sent; the others stay
+    untouched on the robot. enable=true with a period_start/period_end window
+    means the mower can resume mowing during that window after a recharge.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    enable:
+      name: Enable
+      description: Master on/off for Recharge & Resume.
+      example: true
+      selector:
+        boolean:
+    period_start:
+      name: Resume window start (HH:MM)
+      description: Earliest time of day the mower may resume mowing after a recharge.
+      example: "09:00"
+      selector:
+        text:
+    period_end:
+      name: Resume window end (HH:MM)
+      description: Latest time of day the mower may resume mowing.
+      example: "18:00"
+      selector:
+        text:
+    recharge_bat:
+      name: Recharge battery threshold (%)
+      description: Battery level at which the mower returns to the dock to recharge.
+      example: 20
+      selector:
+        number: { min: 0, max: 100, step: 1, unit_of_measurement: "%", mode: box }
+    resume_bat:
+      name: Resume battery threshold (%)
+      description: Battery level at which the mower resumes mowing after charging.
+      example: 80
+      selector:
+        number: { min: 0, max: 100, step: 1, unit_of_measurement: "%", mode: box }
+
+set_network_priority:
+  name: Set network priority
+  description: >
+    Choose whether the mower should prefer cellular (4G) or Wi-Fi when both
+    are available. Maps to PbRobotConfig.metric_4g (true = 4G preferred,
+    false = Wi-Fi preferred) — the same option as the app's
+    Network Settings → Network Priority screen.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    preferred:
+      name: Preferred network
+      description: "4g = always use cellular when available; wifi = prefer Wi-Fi, fall back to 4G if it drops."
+      required: true
+      example: "wifi"
+      selector:
+        select:
+          options:
+            - "4g"
+            - "wifi"
+
+set_run_time_config:
+  name: Set run-time config
+  description: >
+    Override run-time mow parameters on the currently-running task
+    (USER_CTRL_SET_RUN_TIME_CONFIG). Unlike set_task_config (which is the
+    next-mow default), this changes settings live. Only the parameters you
+    provide are sent. Wire layout derived from the app.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    cut_height:
+      name: Cut height (mm)
+      description: Blade height in millimetres.
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+    move_speed:
+      name: Move speed (m/s)
+      description: Forward movement speed in metres per second.
+      example: 0.6
+      selector:
+        number: { min: 0.1, max: 1.5, step: 0.05, unit_of_measurement: "m/s", mode: box }
+    cut_speed:
+      name: Cut speed
+      description: Blade speed (robot units).
+      example: 100
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+
 rename_zone:
   name: Rename zone
   description: >
@@ -311,3 +462,193 @@ set_schedules:
           zones: ["wsmjco1T"]
       selector:
         object:
+
+update_zone_polygon:
+  name: Update zone polygon
+  description: >
+    Replace a go-zone's outline with a new polygon (USER_CTRL_SYNC_MAP). Points
+    are in the robot's local ENU frame (metres). Used by the map card's editor.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone to reshape.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    polygon:
+      name: Polygon
+      description: >
+        Ordered list of at least 3 vertices, each an {x, y} point in metres
+        (local ENU frame).
+      required: true
+      example: [{ x: 0.0, y: 0.0 }, { x: 5.0, y: 0.0 }, { x: 5.0, y: 4.0 }]
+      selector:
+        object:
+
+add_zone:
+  name: Add zone
+  description: >
+    Create a new go-zone from a polygon and push it to the robot's map
+    (USER_CTRL_SYNC_MAP). Points are in the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    polygon:
+      name: Polygon
+      description: Ordered list of at least 3 {x, y} vertices in metres (local ENU frame).
+      required: true
+      example: [{ x: 0.0, y: 0.0 }, { x: 5.0, y: 0.0 }, { x: 5.0, y: 4.0 }]
+      selector:
+        object:
+    name:
+      name: Name
+      description: Optional display name for the new zone.
+      required: false
+      example: "Side strip"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height
+      description: Cutting height for the zone, in millimetres.
+      required: false
+      default: 40
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+
+merge_zones:
+  name: Merge zones
+  description: >
+    Merge two or more adjacent go-zones into one (USER_CTRL_MERGE_ZONE).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_ids:
+      name: Zone hash IDs
+      description: List of at least two go-zone hash IDs to merge.
+      required: true
+      example: ["wsmjco1T", "KX1kGyat"]
+      selector:
+        object:
+    name:
+      name: Name
+      description: Optional display name for the merged zone.
+      required: false
+      example: "Whole lawn"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height
+      description: Optional cutting height for the merged zone, in millimetres.
+      required: false
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+
+split_zone:
+  name: Split zone
+  description: >
+    Split a go-zone into two along the line between two points
+    (USER_CTRL_CUT_ZONE). Points are in the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The hash ID of the go-zone to split.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    cut_p1:
+      name: Cut line point 1
+      description: First endpoint of the split line, as {x, y} in metres.
+      required: true
+      example: { x: 2.5, y: 0.0 }
+      selector:
+        object:
+    cut_p2:
+      name: Cut line point 2
+      description: Second endpoint of the split line, as {x, y} in metres.
+      required: true
+      example: { x: 2.5, y: 4.0 }
+      selector:
+        object:
+    names:
+      name: Names
+      description: Optional two display names for the resulting zones.
+      required: false
+      example: ["Left", "Right"]
+      selector:
+        object:
+
+pin_and_go:
+  name: Pin and go
+  description: >
+    Drop a temporary spot-mow zone of the given radius around a map point and
+    start mowing it. Coordinates are in the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    x:
+      name: X
+      description: X coordinate of the point in metres (local ENU frame).
+      required: true
+      example: 3.5
+      selector:
+        number: { min: -1000, max: 1000, step: 0.1, mode: box }
+    y:
+      name: Y
+      description: Y coordinate of the point in metres (local ENU frame).
+      required: true
+      example: -2.0
+      selector:
+        number: { min: -1000, max: 1000, step: 0.1, mode: box }
+    radius_m:
+      name: Radius
+      description: Radius of the spot-mow circle, in metres.
+      required: false
+      default: 1.0
+      example: 1.0
+      selector:
+        number: { min: 0.1, max: 20.0, step: 0.1, unit_of_measurement: m, mode: box }
+    cut_height_mm:
+      name: Cut height
+      description: Cutting height for the spot zone, in millimetres.
+      required: false
+      default: 40
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+    name:
+      name: Name
+      description: Optional display name for the spot zone.
+      required: false
+      example: "Spot"
+      selector:
+        text:
+
+resume:
+  name: Resume mowing
+  description: >
+    Resume a paused or in-flight mow without restarting it. HA's standard
+    "start mowing" service starts a fresh task (USER_CTRL_CLEAN); this sends
+    USER_CTRL_RESUME so the robot picks up from where it was — useful after a
+    pause or after telling it to dock mid-mow.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower

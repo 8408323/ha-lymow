@@ -250,6 +250,54 @@ def test_on_mqtt_state_publishes_full_schedule_list() -> None:
     assert coord.data[THING]["schedules"] == schedules
 
 
+def test_on_mqtt_state_deep_merges_robot_config_partial_patch() -> None:
+    """A partial robotConfig push must not drop other known robotConfig keys."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"robotConfig": {"isOpenLed": True, "metric_4g": False}}}
+    coord._mqtt_state[THING] = {"robotConfig": {"isOpenLed": True, "metric_4g": False}}
+
+    # Robot pushes only metric_4g — isOpenLed must stick around.
+    coord.on_mqtt_state(THING, {"robotConfig": {"metric_4g": True}})
+    assert coord.data[THING]["robotConfig"] == {"isOpenLed": True, "metric_4g": True}
+    assert coord._mqtt_state[THING]["robotConfig"] == {"isOpenLed": True, "metric_4g": True}
+
+
+def test_on_mqtt_state_no_deep_merge_when_existing_lacks_key() -> None:
+    """First robotConfig sighting is stored verbatim — nothing to merge with."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"battery": 70}}
+    coord.on_mqtt_state(THING, {"robotConfig": {"metric_4g": True}})
+    assert coord.data[THING]["robotConfig"] == {"metric_4g": True}
+
+
+def test_on_mqtt_state_non_robot_config_patches_unchanged() -> None:
+    """Patches without robotConfig take the fast path (no extra dict copy)."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"battery": 70, "robotConfig": {"isOpenLed": True}}}
+    coord.on_mqtt_state(THING, {"battery": 65})
+    assert coord.data[THING] == {"battery": 65, "robotConfig": {"isOpenLed": True}}
+
+
+def test_on_mqtt_state_deep_merges_nested_rr_config_partial_patch() -> None:
+    """A partial robotConfig.rrConfig push (e.g. only ``enable`` after a
+    toggle) must not drop the sibling battery thresholds / period times."""
+    coord, _, _ = _make_coordinator()
+    full_rr = {
+        "enable": True,
+        "rechargeBat": 15,
+        "resumeBat": 75,
+        "periodStart": {"hour": 4, "minute": 0},
+        "periodEnd": {"hour": 20, "minute": 0},
+    }
+    coord.data = {THING: {"robotConfig": {"isOpenLed": True, "rrConfig": full_rr}}}
+    coord._mqtt_state[THING] = {"robotConfig": {"isOpenLed": True, "rrConfig": dict(full_rr)}}
+
+    coord.on_mqtt_state(THING, {"robotConfig": {"rrConfig": {"enable": False}}})
+    assert coord.data[THING]["robotConfig"]["isOpenLed"] is True
+    assert coord.data[THING]["robotConfig"]["rrConfig"] == {**full_rr, "enable": False}
+    assert coord._mqtt_state[THING]["robotConfig"]["rrConfig"] == {**full_rr, "enable": False}
+
+
 @pytest.mark.asyncio
 async def test_async_query_schedules_clears_stale_and_publishes() -> None:
     coord, mqtt, _ = _make_coordinator()
@@ -291,6 +339,87 @@ async def test_async_set_task_config_publishes_encoded_command() -> None:
     assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
     cfg = _decode_fields(_first(f, 26))
     assert _first(cfg, 9) == 250  # pathSpacing
+
+
+@pytest.mark.asyncio
+async def test_async_set_run_time_config_publishes_encoded_command() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_run_time_config(THING, cutHeight=55)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 50  # USER_CTRL_SET_RUN_TIME_CONFIG
+    pb_map = _decode_fields(_first(f, 12))
+    cfg = _decode_fields(_first(pb_map, 13))
+    assert _first(cfg, 1) == 55  # cutHeight
+
+
+@pytest.mark.asyncio
+async def test_async_set_device_settings_round_trip() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_device_settings(THING, charging_mode=1, rainy_mowing=False)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
+    cfg = _decode_fields(_first(f, 26))
+    assert _first(cfg, 1) == 1  # chargingMode
+    assert _first(cfg, 3) == 0  # rainy_mowing False
+
+
+@pytest.mark.asyncio
+async def test_async_set_recharge_resume_round_trip() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_recharge_resume(THING, enable=True, period_start=(8, 0), resume_bat=75)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    rr = _decode_fields(_first(cfg, 18))
+    assert _first(rr, 1) == 1  # enableRr
+    start = _decode_fields(_first(rr, 2))
+    assert _first(start, 1) == 8
+    assert _first(rr, 5) == 75  # resumeBat
+
+
+@pytest.mark.asyncio
+async def test_async_set_robot_config_publishes_metric_4g_without_userctrl() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_robot_config(THING, metric_4g=True)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) is None  # no userCtrl on robotConfig writes
+    cfg = _decode_fields(_first(f, 13))  # PbInput.robotConfig
+    assert _first(cfg, 11) == 1  # metric_4g
+
+
+@pytest.mark.asyncio
+async def test_async_sync_timezone_publishes_offset_on_field_21() -> None:
+    """Mirrors what the app's setTimezone (#9036) writes — seconds east of UTC
+    on PbRobotConfig.f21, via the no-userCtrl robotConfig path."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_sync_timezone(THING, 9 * 3600)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) is None  # no userCtrl
+    cfg = _decode_fields(_first(f, 13))
+    assert _first(cfg, 21) == 9 * 3600
 
 
 # ---------------------------------------------------------------------------
@@ -932,12 +1061,12 @@ async def test_fetch_last_clean_merges_real_shape() -> None:
     }
     result = await coord._async_update_data()
     assert result[THING]["lastCleanAreaM2"] == 345
-    assert result[THING]["lastCleanDurationS"] == 60
+    assert result[THING]["lastCleanDurationMin"] == 60
     assert result[THING]["lastCleanAt"] == datetime.fromtimestamp(1779184292, tz=UTC)
     assert result[THING]["lastCleanPercent"] == 100.0
     assert result[THING]["lastCleanBatteryUsed"] == 49
     assert result[THING]["cleanHistoryCount"] == 14  # cumulative, from total_records
-    assert result[THING]["totalCleanTimeS"] == 829
+    assert result[THING]["totalCleanTimeMin"] == 829
     assert result[THING]["totalCleanHistoryAreaM2"] == 4243
 
 
@@ -1078,7 +1207,7 @@ async def test_fetch_last_clean_handles_non_dict_entry() -> None:
     result = await coord._async_update_data()
     # Aggregates still surface
     assert result[THING]["cleanHistoryCount"] == 7
-    assert result[THING]["totalCleanTimeS"] == 100
+    assert result[THING]["totalCleanTimeMin"] == 100
     assert result[THING]["totalCleanHistoryAreaM2"] == 50
     # No per-entry fields extracted because entries[0] isn't a dict
     assert "lastCleanAreaM2" not in result[THING]

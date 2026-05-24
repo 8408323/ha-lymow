@@ -39,12 +39,12 @@ class _LymowBinarySensor(CoordinatorEntity[LymowCoordinator], BinarySensorEntity
     """Shared base — pulls a single boolean field from coordinator data."""
 
     _field: str = ""
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, suffix: str) -> None:
         super().__init__(coordinator)
         self._thing_name: str = device["deviceThingName"]
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} {name}"
+        self._attr_name = name
         self._attr_unique_id = f"{self._thing_name}_{suffix}"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
 

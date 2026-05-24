@@ -194,6 +194,7 @@ _MAP_CONTENT_NOGO_ZONES = 2
 _MAP_CONTENT_CHANNELS = 3
 _MAP_CONTENT_CHARGING_STATION = 4
 _MAP_CONTENT_GPS_ORIGIN = 7
+_MAP_CONTENT_TASK_CONFIG = 8
 
 
 def extract_raw_map_content(pb_bytes: bytes) -> bytes | None:
@@ -406,7 +407,46 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
             "lon": _decode_f32(lon_raw) if lon_raw is not None else 0.0,
         }
 
+    # ---- Device-settings PbTaskConfig (f8) — chargingMode/zoneOrder/etc.
+    tc_raw = _first(content, _MAP_CONTENT_TASK_CONFIG)
+    if isinstance(tc_raw, bytes):
+        result["taskConfig"] = decode_task_config(tc_raw)
+
     return result
+
+
+def decode_task_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbTaskConfig sub-message (the four-field Device-Settings one).
+
+    Field layout confirmed from PbTaskConfig.decode (Hermes fn #9592):
+      f1 chargingMode (int32)       — 0 NORMAL / 1 QUICK
+      f2 zoneOrder (int32)          — 0 OPTIMIZE / 1 CUSTOM
+      f3 rainCleaning (bool)        — mow when raining
+      f4 disableChargingPark (bool) — handbrake OFF in app's UI sense
+
+    Booleans are accepted only as 0/1 — a varint of 2+ is dropped, not
+    coerced to True, so a corrupted or hostile payload surfaces as unknown
+    rather than silently flipping the switch on.
+
+    This is the *same* PbTaskConfig written by ``encode_set_device_settings``;
+    not the broader 18-field map exposed via ``_TASK_CONFIG_FIELDS`` (which is
+    really a PbZoneConfig — pre-existing mislabel, tracked separately).
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    cm = _first(f, 1)
+    if cm is not None:
+        out["chargingMode"] = cm
+    zo = _first(f, 2)
+    if zo is not None:
+        out["zoneOrder"] = zo
+    rc = _first(f, 3)
+    if rc in (0, 1):
+        out["rainCleaning"] = bool(rc)
+    dcp = _first(f, 4)
+    if dcp in (0, 1):
+        out["disableChargingPark"] = bool(dcp)
+    return out
 
 
 def decode_channel(data: bytes) -> dict[str, Any]:
@@ -517,13 +557,14 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             state["rtkStatus"] = _signed32(rtk_status)
 
     # Area / progress info (field 12):
-    #   f1=mowStripCount(int), f2=totalAreaM2(float32), f5=mowProgress(float32 0–1)
+    #   f1=mowStripCount(int), f2=totalTaskArea(float32, the current task's
+    #   total area — denominator for mowProgress), f5=mowProgress(float32 0–1)
     area_raw = _first(fields, 12)
     if isinstance(area_raw, bytes):
         area_fields = _decode_fields(area_raw)
         total_area = _first(area_fields, 2)
         if total_area is not None:
-            state["totalAreaM2"] = _decode_f32(total_area)
+            state["totalTaskAreaM2"] = _decode_f32(total_area)
         strip_count = _first(area_fields, 1)
         if strip_count is not None:
             state["mowStripCount"] = _signed32(strip_count)
@@ -564,7 +605,94 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         tasks = _all(_decode_fields(schedules_raw), 1)
         state["schedules"] = [decode_schedule_entry(t) for t in tasks if isinstance(t, bytes)]
 
+    # Robot config (PbOutput field 17 = PbRobotConfig — from PbOutput.encode tag
+    # 138 = (17<<3)|2). Carries the device-settings the app shows on its
+    # Settings/Network screens. Each field is optional in the reply; we surface
+    # only what's present so a partial response doesn't blow away existing state.
+    robot_config_raw = _first(fields, 17)
+    if isinstance(robot_config_raw, bytes):
+        state["robotConfig"] = decode_robot_config(robot_config_raw)
+
     return state
+
+
+def decode_robot_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbRobotConfig sub-message into a flat dict.
+
+    Field map from PbRobotConfig.encode (Hermes fn #9506 at offset 0x004a7ce8):
+    f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
+    f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
+    f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
+    f10 cmdCellularSwitch bool, f11 metric_4g bool, f18 rrConfig PbRRConfig,
+    f21 timezoneOffset int (seconds east of UTC, what setTimezone #9036 writes),
+    f22 dockOnError bool.
+
+    Untrusted wire data: only fields we read are decoded; unknown values are
+    left absent rather than coerced.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    for field_no, name in (
+        (6, "audioVolume"),
+        (8, "signal"),
+        (21, "timezoneOffset"),
+    ):
+        v = _first(f, field_no)
+        if v is not None:
+            out[name] = _signed32(v)
+    for field_no, name in (
+        (4, "rcRaiseCutHeight"),
+        (5, "rcLowerCutHeight"),
+        (7, "isOpenLed"),
+        (10, "cmdCellularSwitch"),
+        (11, "metric_4g"),
+        (22, "dockOnError"),
+    ):
+        v = _first(f, field_no)
+        if v is not None:
+            out[name] = bool(v)
+    rr_raw = _first(f, 18)
+    if isinstance(rr_raw, bytes):
+        rr = decode_rr_config(rr_raw)
+        if rr:
+            out["rrConfig"] = rr
+    return out
+
+
+def decode_rr_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbRRConfig (Recharge & Resume) sub-message.
+
+    Field layout from PbRRConfig.encode (Hermes fn #9494 at offset 0x004a6f9b);
+    mirrors :func:`encode_set_recharge_resume`:
+      f1 enableRr (bool) — only 0/1 accepted to avoid hostile non-zero ints
+                           silently flipping the switch on.
+      f2 resumePeriodStart PbTimeZone {f1 hour, f2 minute}
+      f3 resumePeriodEnd   PbTimeZone {f1 hour, f2 minute}
+      f4 rechargeBat int32 — battery % at which the mower returns to dock
+      f5 resumeBat   int32 — battery % at which the mower resumes after charging
+
+    Battery percentages are bounded to 0-100 and hour/minute to 0-23 / 0-59;
+    anything outside the wire's documented range is dropped rather than
+    surfaced as garbage HA state.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    enable = _first(f, 1)
+    if enable in (0, 1):
+        out["enable"] = bool(enable)
+    for field_no, name in ((2, "periodStart"), (3, "periodEnd")):
+        raw = _first(f, field_no)
+        if isinstance(raw, bytes):
+            sub = _decode_fields(raw)
+            hour = _first(sub, 1)
+            minute = _first(sub, 2)
+            if isinstance(hour, int) and isinstance(minute, int) and 0 <= hour <= 23 and 0 <= minute <= 59:
+                out[name] = {"hour": hour, "minute": minute}
+    for field_no, name in ((4, "rechargeBat"), (5, "resumeBat")):
+        v = _first(f, field_no)
+        if isinstance(v, int) and 0 <= v <= 100:
+            out[name] = v
+    return out
 
 
 def decode_schedule_entry(data: bytes) -> dict[str, Any]:
@@ -667,6 +795,187 @@ def encode_set_task_config(**fields: Any) -> bytes:
     pb = _field_i32(2, PB_VERSION)
     pb += _field_i32(5, USER_CTRL_SET_TASK_CONFIG)
     pb += _field_bytes(26, cfg)
+    return pb
+
+
+# PbRobotConfig field map — (proto field number, wire kind) — derived from APK
+# (Hermes) analysis of PbRobotConfig.encode (fn #9506 at offset 0x004a7ce8).
+# Carried in PbInput.robotConfig (field 13) for device-config writes; the app
+# omits userCtrl on these — the robot dispatches based on the submessage shape
+# (see setNetworkType fn #8970). Extend when adding new fields (only the ones
+# we surface as HA entities/services need to be in the writer map).
+_ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "isOpenLed": (
+        7,
+        "bool",
+    ),  # vehicle (mower) status LED — settings-page write fallback (the app's runtime toggle uses signal=10/11 instead, see SIGNAL_TURN_*_VEHICLE_LIGHT)
+    "audioVolume": (6, "int"),  # mower beep/voice volume 0-100
+    "signal": (8, "int"),  # one-shot action signals (e.g. SIGNAL_TURN_ON_VEHICLE_LIGHT=10, _OFF=11)
+    "metric_4g": (11, "bool"),  # true = 4G preferred, false = WiFi preferred
+    "timezoneOffset": (21, "int"),  # seconds east of UTC; matches what the app's setTimezone (#9036) writes
+    "dockOnError": (22, "bool"),  # auto-dock when the mower errors out
+}
+
+# Selected signal-values published via PbRobotConfig.signal (field 8) — they
+# fire a one-shot device action rather than persisting a config field. Numeric
+# values come from the SocSignal enum in the APK (Hermes string-id 40889).
+SIGNAL_TURN_ON_VEHICLE_LIGHT = 10
+SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11
+
+
+def _encode_pb_timezone(hour: int, minute: int) -> bytes:
+    """Encode a PbTimeZone {f1 hour:int, f2 minute:int} sub-message.
+
+    Bounds are checked at the public API layer; here we just emit the wire form.
+    """
+    return _field_i32(1, int(hour)) + _field_i32(2, int(minute))
+
+
+def encode_set_recharge_resume(
+    *,
+    enable: bool | None = None,
+    period_start: tuple[int, int] | None = None,
+    period_end: tuple[int, int] | None = None,
+    recharge_bat: int | None = None,
+    resume_bat: int | None = None,
+) -> bytes:
+    """Encode a PbRobotConfig.rrConfig (Recharge & Resume) write.
+
+    Field layout from PbRRConfig.encode (Hermes fn #9494 at offset 0x004a6f9b):
+      f1 enableRr bool, f2 resumePeriodStart PbTimeZone, f3 resumePeriodEnd
+      PbTimeZone, f4 rechargeBat int32, f5 resumeBat int32.
+
+    rrConfig sits at PbRobotConfig field 18 (tag 146; from PbRobotConfig.encode
+    line 413258). Only set parameters are encoded so partial writes preserve
+    the other R&R fields on the robot side.
+    """
+    rr = b""
+    if enable is not None:
+        rr += _field_i32(1, 1 if enable else 0)
+    if period_start is not None:
+        rr += _field_bytes(2, _encode_pb_timezone(*period_start))
+    if period_end is not None:
+        rr += _field_bytes(3, _encode_pb_timezone(*period_end))
+    if recharge_bat is not None:
+        rr += _field_i32(4, int(recharge_bat))
+    if resume_bat is not None:
+        rr += _field_i32(5, int(resume_bat))
+    cfg = _field_bytes(18, rr)  # PbRobotConfig.rrConfig
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
+def encode_set_robot_config(**fields: Any) -> bytes:
+    """Encode a PbInput carrying only a PbRobotConfig sub-message.
+
+    Unlike SET_TASK_CONFIG / SET_RUN_TIME_CONFIG, robotConfig writes don't set
+    userCtrl — the robot routes on the submessage shape itself. Only the named
+    PbRobotConfig fields are sent; ``None`` is skipped. Unknown names raise.
+    """
+    cfg = b""
+    for name, value in fields.items():
+        if value is None:
+            continue
+        if name not in _ROBOT_CONFIG_FIELDS:
+            raise ValueError(f"unknown robot-config field: {name}")
+        field_no, kind = _ROBOT_CONFIG_FIELDS[name]
+        if kind == "bool":
+            cfg += _field_i32(field_no, 1 if value else 0)
+        elif kind == "int":
+            cfg += _field_i32(field_no, int(value))
+        else:
+            # Guard against silent mis-encoding if a new kind ever lands in the map.
+            raise ValueError(f"unsupported robot-config kind: {kind!r}")
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
+# PbRunTimeConfig field map — (proto field number, wire kind) — derived from APK
+# (Hermes) analysis of the app's ts-proto encoder (PbRunTimeConfig.encode). The
+# message is carried at PbInput.map.runTimeConfig (PbInput field 12 → PbMap
+# field 13) under USER_CTRL_SET_RUN_TIME_CONFIG. ``channelConfig`` (PbChannelConfig,
+# field 7) is intentionally omitted — per-channel overrides aren't exposed here.
+_RUN_TIME_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "cutHeight": (1, "int"),
+    "moveSpeed": (4, "float"),
+    "cutSpeed": (6, "int"),
+}
+
+
+def encode_set_run_time_config(**fields: Any) -> bytes:
+    """Encode a USER_CTRL_SET_RUN_TIME_CONFIG command setting only the given fields.
+
+    Field names match PbRunTimeConfig (see ``_RUN_TIME_CONFIG_FIELDS``); ``None``
+    values are skipped so only explicitly-set parameters are sent. Unknown
+    field names raise ValueError.
+    """
+    cfg = b""
+    for name, value in fields.items():
+        if value is None:
+            continue
+        if name not in _RUN_TIME_CONFIG_FIELDS:
+            raise ValueError(f"unknown run-time-config field: {name}")
+        field_no, kind = _RUN_TIME_CONFIG_FIELDS[name]
+        if kind == "float":
+            cfg += _field_f32(field_no, float(value))
+        else:
+            cfg += _field_i32(field_no, int(value))
+    from .const import USER_CTRL_SET_RUN_TIME_CONFIG
+
+    pb_map = _field_bytes(13, cfg)  # PbMap.runTimeConfig
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_SET_RUN_TIME_CONFIG)
+    pb += _field_bytes(12, pb_map)  # PbInput.map
+    return pb
+
+
+def encode_set_device_settings(
+    *,
+    charging_mode: int | None = None,
+    zone_order: int | None = None,
+    rainy_mowing: bool | None = None,
+    charging_handbrake: bool | None = None,
+) -> bytes:
+    """Encode a USER_CTRL_SET_TASK_CONFIG write of the Device Settings page.
+
+    PbTaskConfig (the real one, app-side fn #9588 / encoder #9590 at
+    0x004aed0b) has FOUR fields, written into PbInput.taskConfig (f26)
+    alongside userCtrl=USER_CTRL_SET_TASK_CONFIG=36:
+
+      f1 chargingMode int      — "Return to Dock" route (0 NORMAL / 1 QUICK)
+      f2 zoneOrder int         — 0 OPTIMIZE / 1 CUSTOM
+      f3 rainCleaning bool     — "Rainy Mowing" toggle
+      f4 disableChargingPark bool — *inverted* "Charging Handbrake" (true =
+                                    handbrake disabled). The HA-facing
+                                    ``charging_handbrake`` param follows the
+                                    app's UI sense (on = handbrake engaged);
+                                    we invert here.
+
+    Note: this is a *different* PbTaskConfig from the broader 18-field map
+    in ``_TASK_CONFIG_FIELDS`` (which is actually a PbZoneConfig per APK fn
+    #9432 — pre-existing labelling bug, tracked separately).
+
+    Only the provided parameters are sent; ``None`` is skipped so partial
+    writes preserve the other fields on the robot side.
+    """
+    from .const import USER_CTRL_SET_TASK_CONFIG
+
+    cfg = b""
+    if charging_mode is not None:
+        cfg += _field_i32(1, int(charging_mode))
+    if zone_order is not None:
+        cfg += _field_i32(2, int(zone_order))
+    if rainy_mowing is not None:
+        cfg += _field_i32(3, 1 if rainy_mowing else 0)
+    if charging_handbrake is not None:
+        # UI sense → wire sense: handbrake engaged means disableChargingPark=false.
+        cfg += _field_i32(4, 0 if charging_handbrake else 1)
+
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_SET_TASK_CONFIG)
+    pb += _field_bytes(26, cfg)  # PbInput.taskConfig
     return pb
 
 

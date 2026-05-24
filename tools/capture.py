@@ -73,47 +73,65 @@ def _pretty_body(content: bytes, content_type: str) -> str:
     return f"  binary ({len(content)}B): {content[:64].hex()}..."
 
 
-def _decode_mqtt_publish(buf: bytes) -> tuple[str, bytes] | None:
-    """Best-effort MQTT 3.1.1 PUBLISH parser. Returns (topic, app_payload) or None.
+def _parse_mqtt_packets(buf: bytes) -> tuple[list[tuple[int, int, bytes, int]], int]:
+    """Parse complete MQTT packets from the front of a byte stream.
 
-    Bounds the returned payload by the parsed Remaining Length, so a
-    WebSocket binary frame that contains multiple coalesced MQTT control
-    packets only yields the *first* packet's payload — not bytes from
-    subsequent packets that happen to share the frame.
+    MQTT-over-WebSocket chunks the MQTT byte stream across WS messages
+    arbitrarily, so a single packet (e.g. a large command PUBLISH + config) can
+    span message boundaries while several small packets share one message. This
+    parses every *complete* packet from the front and reports how many bytes were
+    consumed, so the caller can carry the unparsed remainder into the next message.
+
+    Returns ``(packets, consumed)`` where each packet is
+    ``(ctrl_type, qos, variable, packet_len)``.
     """
-    if len(buf) < 2 or buf[0] >> 4 != 3:  # PUBLISH = type 3
-        return None
-    pos = 1
-    multiplier = 1
-    rem_len = 0
-    for _ in range(4):
-        if pos >= len(buf):
-            return None
-        b = buf[pos]
-        pos += 1
-        rem_len += (b & 0x7F) * multiplier
-        if not (b & 0x80):
+    packets: list[tuple[int, int, bytes, int]] = []
+    pos, n = 0, len(buf)
+    while pos + 2 <= n:
+        ctrl = buf[pos] >> 4
+        qos = (buf[pos] >> 1) & 0x03
+        p = pos + 1
+        multiplier = 1
+        rem_len = 0
+        complete = False
+        for _ in range(4):
+            if p >= n:
+                break  # length field itself is incomplete — wait for more bytes
+            b = buf[p]
+            p += 1
+            rem_len += (b & 0x7F) * multiplier
+            if not (b & 0x80):
+                complete = True
+                break
+            multiplier *= 128
+        if not complete:
+            if p - pos > 4:
+                # Continuation bit still set after the 4th Remaining Length byte:
+                # the field is malformed per MQTT spec — skip past it and resync.
+                pos = p
             break
-        multiplier *= 128
-    # End of *this* PUBLISH packet (anything beyond is a separate packet).
-    packet_end = pos + rem_len
-    if packet_end > len(buf):
-        # Truncated frame — refuse to guess where the packet ends.
+        packet_end = p + rem_len
+        if packet_end > n:
+            break  # packet continues in a later WS message — keep remainder
+        packets.append((ctrl, qos, buf[p:packet_end], packet_end - pos))
+        pos = packet_end
+    return packets, pos
+
+
+def _decode_publish(qos: int, var: bytes) -> tuple[str, bytes] | None:
+    """Parse topic + application payload from a single PUBLISH packet's variable header."""
+    if len(var) < 2:
         return None
-    if pos + 2 > packet_end:
+    topic_len = (var[0] << 8) | var[1]
+    pos = 2 + topic_len
+    if pos > len(var):
         return None
-    topic_len = (buf[pos] << 8) | buf[pos + 1]
-    pos += 2
-    if pos + topic_len > packet_end:
-        return None
-    topic = buf[pos : pos + topic_len].decode("utf-8", errors="replace")
-    pos += topic_len
-    qos = (buf[0] >> 1) & 0x03
+    topic = var[2 : 2 + topic_len].decode("utf-8", errors="replace")
     if qos > 0:
-        if pos + 2 > packet_end:
-            return None
         pos += 2  # packet identifier
-    return topic, buf[pos:packet_end]
+        if pos > len(var):
+            return None
+    return topic, var[pos:]
 
 
 def _pretty_mqtt_payload(body: bytes) -> str:
@@ -135,7 +153,24 @@ def _pretty_mqtt_payload(body: bytes) -> str:
         return f"  raw ({len(body)}B): {body.hex()[:512]}"
 
 
+_CTRL_NAMES = {1: "CONNECT", 2: "CONNACK", 4: "PUBACK", 8: "SUB", 9: "SUBACK", 12: "PINGREQ", 13: "PINGRESP"}
+
+# Cap on per-direction MQTT reassembly tail. A real PUBLISH carrying map data is
+# only ~tens of KB, so anything past this is a corrupt/hostile Remaining Length
+# stalling the parser — drop the tail and resync rather than buffer forever.
+_WS_BUF_MAX = 1 << 20  # 1 MiB
+
+
 class LymowCapture:
+    def __init__(self) -> None:
+        # Per-flow count of WS messages already logged, so we process every new
+        # message (mitmproxy may deliver several between handler invocations)
+        # instead of only the latest.
+        self._ws_seen: dict[str, int] = {}
+        # Per (flow, direction) MQTT byte-stream remainder: an MQTT packet can
+        # span multiple WS messages, so we carry the unparsed tail forward.
+        self._ws_buf: dict[tuple[str, bool], bytearray] = {}
+
     def request(self, flow: http.HTTPFlow) -> None:
         if not _is_lymow(flow):
             return
@@ -170,36 +205,52 @@ class LymowCapture:
         _write("\n".join(lines))
 
     def websocket_message(self, flow: http.HTTPFlow) -> None:
-        """Log MQTT-over-WS frames (iot.*) and KVS WebRTC signaling (kinesisvideo)."""
-        host = flow.request.pretty_host
-        if "kinesisvideo" in host:
-            # KVS signaling: text JSON frames carrying SDP offer/answer + ICE.
-            if not flow.websocket or not flow.websocket.messages:
-                return
-            msg = flow.websocket.messages[-1]
-            arrow = "→" if msg.from_client else "←"
-            body = msg.text if msg.is_text else (msg.content.decode("utf-8", "replace") if msg.content else "")
-            _write(f"\n[{_ts()}] KVS-WSS {arrow} ({len(body)}B)\n  {body[:1400]}")
-            return
-        if "iot." not in host:
-            return
+        """Log MQTT-over-WS frames (iot.*) and KVS WebRTC signaling (kinesisvideo).
+
+        Processes every message that arrived since the last call (not just the
+        latest) and every MQTT packet coalesced within each binary frame, so
+        outbound command PUBLISHes sharing a frame with other packets aren't lost.
+        """
         if not flow.websocket or not flow.websocket.messages:
             return
-        msg = flow.websocket.messages[-1]
-        if not msg.is_text and isinstance(msg.content, bytes):
-            parsed = _decode_mqtt_publish(msg.content)
-            if parsed:
-                topic, body = parsed
-                arrow = "→" if msg.from_client else "←"
-                _write(f"\n[{_ts()}] MQTT {arrow} {topic} ({len(body)}B)\n{_pretty_mqtt_payload(body)}")
-                return
-            ctrl = msg.content[0] >> 4 if msg.content else 0
-            ctrl_name = {1: "CONNECT", 2: "CONNACK", 8: "SUB", 9: "SUBACK", 12: "PINGREQ", 13: "PINGRESP"}.get(
-                ctrl, f"type{ctrl}"
-            )
-            if ctrl_name not in ("PINGREQ", "PINGRESP"):
-                arrow = "→" if msg.from_client else "←"
-                _write(f"[{_ts()}] MQTT {arrow} {ctrl_name} ({len(msg.content)}B)")
+        host = flow.request.pretty_host
+        seen = self._ws_seen.get(flow.id, 0)
+        messages = flow.websocket.messages
+        for msg in messages[seen:]:
+            arrow = "→" if msg.from_client else "←"
+            if "kinesisvideo" in host:
+                body = msg.text if msg.is_text else (msg.content.decode("utf-8", "replace") if msg.content else "")
+                _write(f"\n[{_ts()}] KVS-WSS {arrow} ({len(body)}B)\n  {body[:1400]}")
+                continue
+            if "iot." not in host or msg.is_text or not isinstance(msg.content, bytes):
+                continue
+            # Append to the per-direction byte stream, parse complete packets,
+            # and keep any partial packet for the next message.
+            key = (flow.id, msg.from_client)
+            buf = self._ws_buf.setdefault(key, bytearray())
+            buf += msg.content
+            packets, consumed = _parse_mqtt_packets(bytes(buf))
+            del buf[:consumed]
+            if len(buf) > _WS_BUF_MAX:
+                _write(f"[{_ts()}] MQTT {arrow} (dropped {len(buf)}B unparsed tail — resyncing)")
+                buf.clear()
+            for ctrl, qos, var, packet_len in packets:
+                if ctrl == 3:  # PUBLISH
+                    parsed = _decode_publish(qos, var)
+                    if parsed:
+                        topic, body = parsed
+                        _write(f"\n[{_ts()}] MQTT {arrow} {topic} ({len(body)}B)\n{_pretty_mqtt_payload(body)}")
+                    continue
+                name = _CTRL_NAMES.get(ctrl, f"type{ctrl}")
+                if name not in ("PINGREQ", "PINGRESP"):
+                    _write(f"[{_ts()}] MQTT {arrow} {name} ({packet_len}B)")
+        self._ws_seen[flow.id] = len(messages)
+
+    def websocket_end(self, flow: http.HTTPFlow) -> None:
+        """Drop the per-flow cursors/buffers so they don't grow unbounded."""
+        self._ws_seen.pop(flow.id, None)
+        self._ws_buf.pop((flow.id, True), None)
+        self._ws_buf.pop((flow.id, False), None)
 
 
 addons = [LymowCapture()]

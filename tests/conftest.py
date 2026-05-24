@@ -40,6 +40,7 @@ try:
     import homeassistant.components.device_tracker  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
+    import homeassistant.components.select  # noqa: F401
     import homeassistant.components.sensor  # noqa: F401
     import homeassistant.components.switch  # noqa: F401
     import homeassistant.components.update  # noqa: F401
@@ -57,6 +58,7 @@ try:
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
     _load_lymow_module("number")
+    _load_lymow_module("select")
     _load_lymow_module("switch")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
@@ -157,6 +159,30 @@ except ImportError:
     _ha_helpers = types.ModuleType("homeassistant.helpers")
     sys.modules.setdefault("homeassistant.helpers", _ha_helpers)
 
+    # ── homeassistant.util (namespace) + dt subset ───────────────────────────
+    import datetime as _dt
+    import zoneinfo as _zi
+
+    _ha_util = types.ModuleType("homeassistant.util")
+    sys.modules.setdefault("homeassistant.util", _ha_util)
+
+    _ha_util_dt = types.ModuleType("homeassistant.util.dt")
+    _ha_util_dt.UTC = _dt.timezone.utc  # type: ignore[attr-defined]
+
+    def _get_time_zone(name):  # mimic homeassistant.util.dt.get_time_zone
+        try:
+            return _zi.ZoneInfo(name)
+        except _zi.ZoneInfoNotFoundError:
+            return None
+
+    async def _async_get_time_zone(name):  # mimic homeassistant.util.dt.async_get_time_zone
+        return _get_time_zone(name)
+
+    _ha_util_dt.get_time_zone = _get_time_zone  # type: ignore[attr-defined]
+    _ha_util_dt.async_get_time_zone = _async_get_time_zone  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.util.dt", _ha_util_dt)
+    _ha_util.dt = _ha_util_dt  # type: ignore[attr-defined]
+
     # ── homeassistant.helpers.update_coordinator ─────────────────────────────
     _ha_uc = types.ModuleType("homeassistant.helpers.update_coordinator")
 
@@ -203,6 +229,21 @@ except ImportError:
     _ha_dr = types.ModuleType("homeassistant.helpers.device_registry")
     _ha_dr.DeviceInfo = dict  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.device_registry", _ha_dr)
+
+    # ── homeassistant.helpers.entity_registry ───────────────────────────────
+    _ha_er = types.ModuleType("homeassistant.helpers.entity_registry")
+
+    def _er_async_get(hass):  # type: ignore[return]
+        # Tests inject hass._entity_registry; default to an empty registry stub.
+        return getattr(hass, "_entity_registry", None)
+
+    _ha_er.async_get = _er_async_get  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.entity_registry", _ha_er)
+
+    # ── homeassistant.helpers.typing ─────────────────────────────────────────
+    _ha_typing = types.ModuleType("homeassistant.helpers.typing")
+    _ha_typing.ConfigType = dict  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.typing", _ha_typing)
 
     # ── homeassistant.helpers.aiohttp_client ─────────────────────────────────
     _ha_ac = types.ModuleType("homeassistant.helpers.aiohttp_client")
@@ -314,6 +355,7 @@ except ImportError:
 
     class _NumberDeviceClass(str, enum.Enum):
         DISTANCE = "distance"
+        BATTERY = "battery"
 
     class _NumberMode(str, enum.Enum):
         BOX = "box"
@@ -335,6 +377,15 @@ except ImportError:
 
     _ha_switch.SwitchEntity = _SwitchEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.switch", _ha_switch)
+
+    # ── homeassistant.components.select ───────────────────────────────────────
+    _ha_select = types.ModuleType("homeassistant.components.select")
+
+    class _SelectEntity:
+        pass
+
+    _ha_select.SelectEntity = _SelectEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.select", _ha_select)
 
     # ── homeassistant.components.device_tracker ───────────────────────────────
     _ha_dt = types.ModuleType("homeassistant.components.device_tracker")

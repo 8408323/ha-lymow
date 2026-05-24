@@ -32,6 +32,13 @@ async def async_setup_entry(
                 TheftLockSwitch(coordinator, device),
                 FindRobotSwitch(coordinator, device),
                 MobileNotificationSwitch(coordinator, device),
+                AlertsOnlySwitch(coordinator, device),
+                VehicleLedSwitch(coordinator, device),
+                Prefer4gSwitch(coordinator, device),
+                DockOnErrorSwitch(coordinator, device),
+                RainCleaningSwitch(coordinator, device),
+                ChargingHandbrakeSwitch(coordinator, device),
+                RechargeResumeSwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
             ]
         )
@@ -60,12 +67,12 @@ class _DeviceFeatureSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     """Base class for boolean device-feature switches backed by /update-device-feature."""
 
     _feature_key: str = ""
+    _attr_has_entity_name = True
 
     def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, icon: str) -> None:
         super().__init__(coordinator)
         self._thing_name: str = device["deviceThingName"]
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} {name}"
+        self._attr_name = name
         self._attr_unique_id = f"{self._thing_name}_{self._feature_key}"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_icon = icon
@@ -111,11 +118,14 @@ class FindRobotSwitch(_DeviceFeatureSwitch):
 
 
 class MobileNotificationSwitch(_DeviceFeatureSwitch):
-    """Push notification toggle. Wire value is integer ``0`` (off) / ``2`` (on)
-    — not a Python bool — so the on/off methods PATCH the matching int."""
+    """Push-notification master toggle. The wire value is a tristate int (matches
+    the app's Notifications page): 0 = off, 1 = alerts only, 2 = all. On/off here
+    map to 0 and 2; "alerts only" (1) is exposed as ``AlertsOnlySwitch`` and still
+    counts as on."""
 
     _feature_key = "mobileNotificationSwitch"
     _OFF_VALUE = 0
+    _ALERTS_ONLY_VALUE = 1
     _ON_VALUE = 2
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
@@ -125,9 +135,11 @@ class MobileNotificationSwitch(_DeviceFeatureSwitch):
     def is_on(self) -> bool | None:
         data = (self.coordinator.data or {}).get(self._thing_name) or {}
         value = data.get(self._feature_key)
-        if value is None:
+        # Untrusted wire data: only 0/1/2 are known. Report unknown for anything
+        # else rather than silently claiming "off".
+        if value not in (self._OFF_VALUE, self._ALERTS_ONLY_VALUE, self._ON_VALUE):
             return None
-        return value == self._ON_VALUE
+        return value in (self._ALERTS_ONLY_VALUE, self._ON_VALUE)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: self._ON_VALUE})
@@ -136,9 +148,267 @@ class MobileNotificationSwitch(_DeviceFeatureSwitch):
         await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: self._OFF_VALUE})
 
 
+class AlertsOnlySwitch(_DeviceFeatureSwitch):
+    """Mirrors the app's "Alerts only" sub-toggle, backed by the same
+    ``mobileNotificationSwitch`` tristate: on = 1 (alerts only), off = 2 (all).
+    Unavailable only when the master toggle is explicitly off (0), like the app
+    hides the row then."""
+
+    _feature_key = "mobileNotificationSwitch"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Alerts only", "mdi:bell-alert-outline")
+        # Shares the mobileNotificationSwitch field with MobileNotificationSwitch,
+        # so override the feature-key-derived unique_id to avoid a collision.
+        self._attr_unique_id = f"{self._thing_name}_alerts_only"
+
+    @property
+    def available(self) -> bool:
+        data = (self.coordinator.data or {}).get(self._thing_name) or {}
+        # Available unless notifications are explicitly off; unknown (None, e.g.
+        # before the first poll) stays available rather than flickering out.
+        return data.get(self._feature_key) != MobileNotificationSwitch._OFF_VALUE
+
+    @property
+    def is_on(self) -> bool | None:
+        data = (self.coordinator.data or {}).get(self._thing_name) or {}
+        value = data.get(self._feature_key)
+        if value not in (
+            MobileNotificationSwitch._OFF_VALUE,
+            MobileNotificationSwitch._ALERTS_ONLY_VALUE,
+            MobileNotificationSwitch._ON_VALUE,
+        ):
+            return None
+        return value == MobileNotificationSwitch._ALERTS_ONLY_VALUE
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_feature(
+            self._thing_name, **{self._feature_key: MobileNotificationSwitch._ALERTS_ONLY_VALUE}
+        )
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_feature(
+            self._thing_name, **{self._feature_key: MobileNotificationSwitch._ON_VALUE}
+        )
+
+
+class _RobotConfigBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
+    """Base class for bool switches backed by PbInput.robotConfig writes.
+
+    Unlike device-feature switches (REST /update-device-feature), these go over
+    MQTT as a PbInput with only the robotConfig submessage set — the robot
+    dispatches by submessage shape, no userCtrl. State comes from the
+    PbOutput.robotConfig (decoded into coordinator.data[thing]["robotConfig"]).
+    """
+
+    _config_key: str = ""
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, icon: str) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = name
+        self._attr_unique_id = f"{self._thing_name}_{self._config_key}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_icon = icon
+
+    @property
+    def is_on(self) -> bool | None:
+        config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
+        value = config.get(self._config_key)
+        return bool(value) if value is not None else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_robot_config(self._thing_name, **{self._config_key: True})
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_robot_config(self._thing_name, **{self._config_key: False})
+
+
+class VehicleLedSwitch(_RobotConfigBoolSwitch):
+    """Mower's status LED (the app's Device Settings → Vehicle LED toggle).
+
+    Read: PbRobotConfig.isOpenLed (field 7, bool — the persistent state).
+    Write: PbRobotConfig.signal (field 8, int) carrying
+    ``SIGNAL_TURN_ON_VEHICLE_LIGHT=10`` / ``SIGNAL_TURN_OFF_VEHICLE_LIGHT=11``
+    — same one-shot action the app's switchVehicleLed function publishes
+    (Hermes fn #9021). The robot reflects the action back into ``isOpenLed``
+    on the next pboutput, so the read key matches the write outcome.
+    """
+
+    _config_key = "isOpenLed"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Vehicle LED", "mdi:led-on")
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        from .protocol import SIGNAL_TURN_ON_VEHICLE_LIGHT
+
+        await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_ON_VEHICLE_LIGHT)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        from .protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT
+
+        await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
+
+
+class Prefer4gSwitch(_RobotConfigBoolSwitch):
+    """Network priority: 4G preferred (on) vs Wi-Fi preferred (off).
+
+    Wire: PbRobotConfig.metric_4g (field 11, bool). True = always prefer
+    cellular (may incur data charges), false = prefer Wi-Fi, fall back to 4G
+    if it drops — same options the app's Network Settings → Network Priority
+    page exposes. The lymow.set_network_priority service is kept alongside
+    (semantically equivalent) for automations that prefer the explicit "4g"/
+    "wifi" enum.
+    """
+
+    _config_key = "metric_4g"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Prefer 4G", "mdi:signal-4g")
+
+
+class DockOnErrorSwitch(_RobotConfigBoolSwitch):
+    """Auto-dock when the mower errors out (app's Device Settings toggle).
+
+    Wire: PbRobotConfig.dockOnError (field 22, bool). When on, after an error
+    the mower attempts to return to the dock instead of stopping in place.
+    """
+
+    _config_key = "dockOnError"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Auto-dock on error", "mdi:home-alert")
+
+
+class _DeviceSettingsBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
+    """Base class for the Device Settings boolean toggles (PbTaskConfig f3/f4).
+
+    Read from coordinator state at ``mapData.taskConfig.<wire_key>`` (decoded
+    from PbMap.f8 by ``decode_task_config``). Write via the existing
+    ``async_set_device_settings`` — keeps the encoder and the f4 inversion
+    (UI ``charging_handbrake`` vs wire ``disableChargingPark``) in one place.
+    """
+
+    _wire_key: str = ""
+    _settings_kwarg: str = ""
+    _invert_for_ui: bool = False
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: LymowCoordinator,
+        device: dict,
+        name: str,
+        icon: str,
+        unique_suffix: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = name
+        self._attr_unique_id = f"{self._thing_name}_{unique_suffix}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_icon = icon
+
+    def _ui_from_wire(self, wire_value: bool) -> bool:
+        return not wire_value if self._invert_for_ui else wire_value
+
+    @property
+    def is_on(self) -> bool | None:
+        tc = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData", {}).get("taskConfig") or {}
+        value = tc.get(self._wire_key)
+        if not isinstance(value, bool):
+            return None
+        return self._ui_from_wire(value)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_settings(self._thing_name, **{self._settings_kwarg: True})
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_settings(self._thing_name, **{self._settings_kwarg: False})
+
+
+class RainCleaningSwitch(_DeviceSettingsBoolSwitch):
+    """Device Settings → Rainy mowing. PbTaskConfig.rainCleaning (f3, bool)."""
+
+    _wire_key = "rainCleaning"
+    _settings_kwarg = "rainy_mowing"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Rainy mowing", "mdi:weather-rainy", "rainy_mowing")
+
+
+class ChargingHandbrakeSwitch(_DeviceSettingsBoolSwitch):
+    """Device Settings → Charging handbrake. PbTaskConfig.disableChargingPark
+    (f4, bool) — inverted so the HA toggle reads in the UI's positive sense:
+    ON means "engage the handbrake while charging" = wire ``False``.
+    """
+
+    _wire_key = "disableChargingPark"
+    _settings_kwarg = "charging_handbrake"
+    _invert_for_ui = True
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Charging handbrake", "mdi:car-brake-parking", "charging_handbrake")
+
+
+class RechargeResumeSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
+    """Recharge & Resume master toggle.
+
+    Wire: ``PbRobotConfig.rrConfig.enableRr`` (PbRRConfig f1, bool).
+    Decoded into coordinator state as ``rrConfig['enable']`` by
+    ``decode_rr_config`` (the wire name is renamed to drop the redundant
+    ``Rr`` prefix once it's already inside ``rrConfig``).
+
+    Period start/end and the two battery thresholds are exposed separately
+    (period times as ``extra_state_attributes`` for now; the thresholds as
+    Number entities). Writes go via the no-userCtrl PbInput.robotConfig
+    path the app uses for setRrConfig.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:battery-sync"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Recharge & resume"
+        self._attr_unique_id = f"{self._thing_name}_recharge_resume"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    @property
+    def _rr_config(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("rrConfig") or {}
+
+    @property
+    def is_on(self) -> bool | None:
+        value = self._rr_config.get("enable")
+        if not isinstance(value, bool):
+            return None
+        return value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        rr = self._rr_config
+        attrs: dict[str, Any] = {}
+        for key, label in (("periodStart", "period_start"), ("periodEnd", "period_end")):
+            t = rr.get(key)
+            if isinstance(t, dict) and "hour" in t and "minute" in t:
+                attrs[label] = f"{t['hour']:02d}:{t['minute']:02d}"
+        return attrs or None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_recharge_resume(self._thing_name, enable=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_recharge_resume(self._thing_name, enable=False)
+
+
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     """Enable / disable a single go-zone. Backed by SYNC_MAP on toggle."""
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:map-marker-radius"
 
     def __init__(self, coordinator: LymowCoordinator, device: dict, hash_id: str) -> None:
@@ -147,8 +417,7 @@ class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         self._hash_id = hash_id
         self._attr_unique_id = f"{self._thing_name}_{hash_id}_enabled"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        device_label: str = device.get("deviceName") or device.get("sn") or self._thing_name
-        self._attr_name = f"{device_label} Zone {hash_id[:4]}"
+        self._attr_name = f"Zone {hash_id[:4]}"
 
     @property
     def _zone(self) -> dict[str, Any] | None:
@@ -179,16 +448,16 @@ class RtkAutoPauseSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     if RTK status drops to or below the configured threshold, and auto-resumes
     once it recovers — protects against the mower wandering on a degraded fix."""
 
+    _attr_has_entity_name = True
     _attr_icon = "mdi:satellite-variant"
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        device_label = device.get("deviceName") or device.get("sn") or self._thing_name
         self._attr_unique_id = f"{self._thing_name}_rtk_auto_pause"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        self._attr_name = f"{device_label} RTK auto-pause"
+        self._attr_name = "RTK auto-pause"
 
     @property
     def is_on(self) -> bool:

@@ -29,14 +29,16 @@ def _make_entity(device_data: dict[str, Any] | None = None) -> LymowFirmwareUpda
 def test_unique_id_and_name() -> None:
     entity = _make_entity()
     assert entity._attr_unique_id == f"{THING}_firmware_update"
-    assert entity._attr_name == "Test Mower Firmware"
+    assert entity._attr_has_entity_name is True
+    assert entity._attr_name == "Firmware"
+    assert entity._attr_device_info["name"] == "Test Mower"
 
 
-def test_name_falls_back_to_serial_then_thing() -> None:
+def test_device_name_falls_back_to_serial_then_thing() -> None:
     entity = LymowFirmwareUpdate(MagicMock(data={THING: {}}), {"deviceThingName": THING, "sn": "SN-99"})
-    assert entity._attr_name == "SN-99 Firmware"
+    assert entity._attr_device_info["name"] == "SN-99"
     bare = LymowFirmwareUpdate(MagicMock(data={THING: {}}), {"deviceThingName": THING})
-    assert bare._attr_name == f"{THING} Firmware"
+    assert bare._attr_device_info["name"] == THING
 
 
 def test_installed_version_from_coordinator() -> None:
@@ -70,6 +72,21 @@ def test_release_summary_renders_escaped_newlines() -> None:
 def test_release_summary_handles_missing_or_non_string() -> None:
     assert _make_entity({}).release_summary is None
     assert _make_entity({"otaReleaseNote": 42}).release_summary is None
+
+
+async def test_async_release_notes_returns_full_formatted_text() -> None:
+    """We advertise UpdateEntityFeature.RELEASE_NOTES; without overriding
+    async_release_notes the HA frontend shows 'Unknown error' when the
+    user opens the entity card. Return the same formatted text so the
+    notes modal renders the full release info."""
+    entity = _make_entity({"otaReleaseNote": "Fix one.\\nFix two."})
+    assert await entity.async_release_notes() == "Fix one.\nFix two."
+
+
+async def test_async_release_notes_returns_none_when_missing() -> None:
+    assert await _make_entity({}).async_release_notes() is None
+    assert await _make_entity({"otaReleaseNote": None}).async_release_notes() is None
+    assert await _make_entity({"otaReleaseNote": 42}).async_release_notes() is None
 
 
 def test_device_data_handles_empty_coordinator() -> None:

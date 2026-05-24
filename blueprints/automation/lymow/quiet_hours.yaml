@@ -1,0 +1,81 @@
+blueprint:
+  name: Lymow — Quiet hours
+  description: >
+    Keep the Lymow mower docked during a quiet window (e.g. overnight or while
+    you're in the garden). It docks at the start time and, if enabled, resumes
+    mowing at the end time.
+  domain: automation
+  author: ha-lymow
+  input:
+    mower:
+      name: Mower
+      description: The Lymow lawn mower to control.
+      selector:
+        entity:
+          filter:
+            domain: lawn_mower
+            integration: lymow
+    quiet_start:
+      name: Quiet start
+      description: Time to dock the mower.
+      selector:
+        time:
+    quiet_end:
+      name: Quiet end
+      description: Time the quiet window ends.
+      selector:
+        time:
+    resume_after:
+      name: Resume after quiet hours
+      description: Start mowing again at the end of the quiet window.
+      default: false
+      selector:
+        boolean:
+
+mode: single
+
+# Blueprint inputs aren't available to Jinja unless mapped into variables first.
+variables:
+  resume_after: !input resume_after
+
+trigger:
+  - platform: time
+    at: !input quiet_start
+    id: quiet_started
+  - platform: time
+    at: !input quiet_end
+    id: quiet_ended
+  # Re-assert the dock if HA restarts while already inside the quiet window —
+  # otherwise the start-time trigger is missed and the mower stays out.
+  - platform: homeassistant
+    event: start
+    id: ha_start
+
+action:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: quiet_started
+        sequence:
+          - service: lawn_mower.dock
+            target:
+              entity_id: !input mower
+      - conditions:
+          - condition: trigger
+            id: ha_start
+          - condition: time
+            after: !input quiet_start
+            before: !input quiet_end
+        sequence:
+          - service: lawn_mower.dock
+            target:
+              entity_id: !input mower
+      - conditions:
+          - condition: trigger
+            id: quiet_ended
+          - condition: template
+            value_template: "{{ resume_after }}"
+        sequence:
+          - service: lawn_mower.start_mowing
+            target:
+              entity_id: !input mower
