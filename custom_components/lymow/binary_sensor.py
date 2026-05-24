@@ -134,14 +134,18 @@ class LteWorkingBinarySensor(_LymowBinarySensor):
 
 
 class TheftLockBinarySensor(_LymowBinarySensor):
-    """Robot's own anti-theft lock signal from PbOutput.theftLock (f27, bool).
+    """Live anti-theft lock state from PbOutput.f27 — whether the lock is
+    currently engaged on the robot.
 
-    Distinct from ``DeviceLockedBinarySensor`` (account-level lock from
-    /device-list-query) and ``StolenBinarySensor`` (the stolen-alert flag).
-    True while the robot has its motion-disable theft-lock engaged.
+    Distinct from the REST ``theftLock`` feature flag (read/written by
+    ``TheftLockSwitch``), which is whether the *feature is enabled*. The
+    decoder writes this under ``theftLockEngaged`` to keep the two values
+    from clobbering each other when MQTT updates land between REST polls.
+    Also distinct from ``DeviceLockedBinarySensor`` (account-level lock)
+    and ``StolenBinarySensor`` (the stolen-alert flag).
     """
 
-    _field = "theftLock"
+    _field = "theftLockEngaged"
     _attr_device_class = BinarySensorDeviceClass.LOCK
     _attr_entity_registry_enabled_default = False
 
