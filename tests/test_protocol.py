@@ -989,6 +989,41 @@ def test_sync_map_after_delete_roundtrip() -> None:
     assert "gozone01" in modify_ids
 
 
+def test_encode_sync_map_preserves_task_config() -> None:
+    """taskConfig decoded from the robot must survive encode_sync_map round-trip.
+
+    Without this, every SYNC_MAP wipes PbMap field 8 (taskConfig) from the
+    robot's stored map, losing Device Settings (chargingMode/zoneOrder/etc.).
+    """
+    pb = _build_map_response(
+        go_zones=[{"hashId": "z1", "type": 1, "polygon": [{"x": 0.0, "y": 0.0}]}],
+        nogo_zones=[],
+        charging_station={"x": 0.0, "y": 0.0, "theta": 0.0},
+        gps_origin={"lat": 0.0, "lon": 0.0},
+        task_config={"chargingMode": 1, "zoneOrder": 0, "rainCleaning": True, "disableChargingPark": False},
+    )
+    map_data = decode_map_response(pb)
+    assert map_data.get("taskConfig") == {
+        "chargingMode": 1,
+        "zoneOrder": 0,
+        "rainCleaning": True,
+        "disableChargingPark": False,
+    }
+
+    raw = encode_sync_map(map_data)
+    top = _decode_fields(raw)
+    content_raw = _first(top, 23)
+    assert isinstance(content_raw, bytes)
+    content = _decode_fields(content_raw)
+    tc_raw = _first(content, 8)
+    assert isinstance(tc_raw, bytes), "field 8 (taskConfig) must be present in encoded sync_map"
+    tc = decode_task_config(tc_raw)
+    assert tc["chargingMode"] == 1
+    assert tc["zoneOrder"] == 0
+    assert tc["rainCleaning"] is True
+    assert tc["disableChargingPark"] is False
+
+
 # ---------------------------------------------------------------------------
 # encode_delete_zone tests
 # ---------------------------------------------------------------------------
