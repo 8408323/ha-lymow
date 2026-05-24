@@ -74,6 +74,21 @@ def test_release_summary_handles_missing_or_non_string() -> None:
     assert _make_entity({"otaReleaseNote": 42}).release_summary is None
 
 
+async def test_async_release_notes_returns_full_formatted_text() -> None:
+    """We advertise UpdateEntityFeature.RELEASE_NOTES; without overriding
+    async_release_notes the HA frontend shows 'Unknown error' when the
+    user opens the entity card. Return the same formatted text so the
+    notes modal renders the full release info."""
+    entity = _make_entity({"otaReleaseNote": "Fix one.\\nFix two."})
+    assert await entity.async_release_notes() == "Fix one.\nFix two."
+
+
+async def test_async_release_notes_returns_none_when_missing() -> None:
+    assert await _make_entity({}).async_release_notes() is None
+    assert await _make_entity({"otaReleaseNote": None}).async_release_notes() is None
+    assert await _make_entity({"otaReleaseNote": 42}).async_release_notes() is None
+
+
 def test_device_data_handles_empty_coordinator() -> None:
     """The entity must not raise when coordinator.data is None."""
     entity = _make_entity()
