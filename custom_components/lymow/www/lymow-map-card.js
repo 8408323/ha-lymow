@@ -371,10 +371,23 @@ class LymowMapCard extends HTMLElement {
       const m = this._goLabelMode;
       const namePart = z.name || z.hashId.slice(0, 6);
       const areaPart = z.area != null ? `${z.area} m²` : "";
-      const label = m === 0 ? namePart : m === 1 ? (areaPart || namePart) : m === 2 ? (areaPart ? `${namePart} · ${areaPart}` : namePart) : namePart;
-      return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${fontSz}" fill="white" pointer-events="none" font-weight="bold"
-        clip-path="url(#lbl-clip-${z.hashId})">${label}</text>`;
+      // Scale font to fit the zone: use shortest bbox dimension * 15%, capped at global fontSz.
+      const xs = z.polygon.map(p => p.x), ys = z.polygon.map(p => p.y);
+      const bboxW = (Math.max(...xs) - Math.min(...xs)) * sc;
+      const bboxH = (Math.max(...ys) - Math.min(...ys)) * sc;
+      const zoneFontSz = Math.max(0.8, Math.min(parseFloat(fontSz), Math.min(bboxW, bboxH) * 0.15)).toFixed(2);
+      const clip = `clip-path="url(#lbl-clip-${z.hashId})"`;
+      const textAttrs = `x="${sx(cx)}" text-anchor="middle" font-weight="bold" fill="white" pointer-events="none" font-size="${zoneFontSz}" ${clip}`;
+      // Mode 2 (both): two stacked lines; modes 0/1 single line.
+      if (m === 2 && areaPart) {
+        const lineH = (parseFloat(zoneFontSz) * 1.2).toFixed(2);
+        return `<text ${textAttrs} dominant-baseline="auto" y="${sy(cy)}">` +
+          `<tspan x="${sx(cx)}" dy="-${lineH}">${namePart}</tspan>` +
+          `<tspan x="${sx(cx)}" dy="${(parseFloat(lineH) * 2).toFixed(2)}">${areaPart}</tspan>` +
+          `</text>`;
+      }
+      const label = m === 0 ? namePart : m === 1 ? (areaPart || namePart) : namePart;
+      return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">${label}</text>`;
     }).join("\n");
 
     // ── No-go zones (on top of go-zones) ─────────────────────────────────────
