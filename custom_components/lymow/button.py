@@ -17,6 +17,7 @@ from .const import (
     USER_CTRL_CHARGING_STATION_RESET,
     USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
     USER_CTRL_COMPLETE_ZONE_PARTITION,
+    USER_CTRL_DOCK,
     USER_CTRL_EXIT_REMOTE,
     USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_FORCE_REINIT,
@@ -41,6 +42,7 @@ async def async_setup_entry(
         entities.extend(
             [
                 LockRobotButton(coordinator, device),
+                CancelTaskButton(coordinator, device),
                 SelfCheckButton(coordinator, device),
                 ForceReinitButton(coordinator, device),
                 ChargingStationResetButton(coordinator, device),
@@ -133,6 +135,21 @@ class SelfCheckButton(_UserCtrlButton):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Self-check", "mdi:tools")
+
+
+class CancelTaskButton(_UserCtrlButton):
+    """Cancel the current mowing task and return to dock — the app's
+    Settings → Cancel Task action. Distinct from the lawn-mower entity's
+    DOCK service (RECHARGE_DOCK=33, which preserves task progress); this
+    one (USER_CTRL_DOCK=2) ends the task before docking.
+    """
+
+    _user_ctrl = USER_CTRL_DOCK
+    _key = "cancel_task"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Cancel task", "mdi:cancel")
 
 
 class ForceReinitButton(_UserCtrlButton):

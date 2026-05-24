@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from lymow.button import (
     AbortOtaButton,
     BackupMapButton,
+    CancelTaskButton,
     ChargingStationResetButton,
     ClearAllZonesAndChannelsButton,
     CompleteZonePartitionButton,
@@ -25,6 +26,7 @@ from lymow.const import (
     USER_CTRL_CHARGING_STATION_RESET,
     USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
     USER_CTRL_COMPLETE_ZONE_PARTITION,
+    USER_CTRL_DOCK,
     USER_CTRL_EXIT_REMOTE,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
@@ -91,6 +93,25 @@ async def test_self_check_press_sends_user_ctrl_self_checking() -> None:
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_SELF_CHECKING)
 
 
+def test_cancel_task_button_disabled_by_default() -> None:
+    """Cancel Task ends the current mow — disabled by default to avoid
+    accidental presses, mirroring the app's confirmation prompt."""
+    coord = _make_coord()
+    e = CancelTaskButton(coord, DEVICE)
+    assert e._attr_entity_registry_enabled_default is False
+    assert e._attr_unique_id == f"{THING}_cancel_task"
+    assert "Cancel task" in e._attr_name
+
+
+async def test_cancel_task_press_sends_user_ctrl_dock_2() -> None:
+    """USER_CTRL_DOCK=2 is the destructive 'end task and dock' variant,
+    distinct from the lawn-mower entity's progress-preserving RECHARGE_DOCK=33."""
+    coord = _make_coord()
+    e = CancelTaskButton(coord, DEVICE)
+    await e.async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_DOCK)
+
+
 async def test_force_reinit_press_sends_user_ctrl_force_reinit() -> None:
     coord = _make_coord()
     e = ForceReinitButton(coord, DEVICE)
@@ -138,6 +159,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
     types = {type(e).__name__ for e in added}
     assert types == {
         "LockRobotButton",
+        "CancelTaskButton",
         "SelfCheckButton",
         "ForceReinitButton",
         "ChargingStationResetButton",
