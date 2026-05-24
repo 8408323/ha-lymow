@@ -661,14 +661,16 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if report:
             state["cleanReport"] = report
 
-    # Anti-theft lock signal (PbOutput field 27 = bool — from PbOutput.encode
-    # tag 216 = (27<<3)|0 writing writer.bool). Distinct from /device-list-query
-    # ``deviceLocked`` (account-level lock) and from ``stolenStatus`` (the
-    # alert flag): theftLock is the robot's own theft-lock condition reported
-    # over pboutput.
+    # Anti-theft lock live state (PbOutput field 27 = bool — from PbOutput.encode
+    # tag 216 = (27<<3)|0 writing writer.bool). Surfaced under a distinct key
+    # from the REST ``theftLock`` (which is the user-set feature toggle written
+    # by ``TheftLockSwitch`` via /update-device-feature). PbOutput.f27 is the
+    # robot's report of whether the lock is *currently engaged*; the REST flag
+    # is whether the feature is *enabled* — both must coexist without one
+    # overwriting the other when MQTT updates land between REST polls.
     theft_lock = _first(fields, 27)
     if isinstance(theft_lock, int):
-        state["theftLock"] = bool(theft_lock)
+        state["theftLockEngaged"] = bool(theft_lock)
 
     return state
 

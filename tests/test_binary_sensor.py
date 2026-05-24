@@ -167,11 +167,23 @@ async def test_async_setup_entry_seven_per_device_with_two_devices() -> None:
 
 def test_theft_lock_inverts_for_lock_device_class() -> None:
     """LOCK device class: is_on=True means *unlocked* — wire True (lock
-    engaged) renders as 'off' in the UI (the lock is engaged → not unlocked)."""
+    engaged) renders as 'off' in the UI (the lock is engaged → not unlocked).
+    Reads the PbOutput-derived ``theftLockEngaged`` key, NOT the REST
+    ``theftLock`` (which is the feature toggle owned by TheftLockSwitch)."""
     from lymow.binary_sensor import TheftLockBinarySensor
 
-    assert TheftLockBinarySensor(_make_coord({"theftLock": True}), DEVICE).is_on is False
-    assert TheftLockBinarySensor(_make_coord({"theftLock": False}), DEVICE).is_on is True
+    assert TheftLockBinarySensor(_make_coord({"theftLockEngaged": True}), DEVICE).is_on is False
+    assert TheftLockBinarySensor(_make_coord({"theftLockEngaged": False}), DEVICE).is_on is True
+
+
+def test_theft_lock_ignores_rest_feature_flag() -> None:
+    """The REST ``theftLock`` key (TheftLockSwitch territory) must NOT leak
+    into this sensor's reading — they're different concepts (engaged vs
+    feature-enabled). Without ``theftLockEngaged``, the sensor reports None
+    even if the REST feature flag is present."""
+    from lymow.binary_sensor import TheftLockBinarySensor
+
+    assert TheftLockBinarySensor(_make_coord({"theftLock": True}), DEVICE).is_on is None
 
 
 def test_theft_lock_none_when_missing() -> None:
