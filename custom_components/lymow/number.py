@@ -33,6 +33,9 @@ async def async_setup_entry(
     device_numbers.extend(MowerVolumeNumber(coordinator, device) for device in coordinator.devices)
     device_numbers.extend(RechargeBatteryThresholdNumber(coordinator, device) for device in coordinator.devices)
     device_numbers.extend(ResumeBatteryThresholdNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(LiveCutHeightNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(LiveMoveSpeedNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(LiveCutSpeedNumber(coordinator, device) for device in coordinator.devices)
     if device_numbers:
         async_add_entities(device_numbers)
 
@@ -280,3 +283,99 @@ class ResumeBatteryThresholdNumber(_RrBatteryThresholdNumber):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Resume threshold", "mdi:battery-charging-high", "resume_threshold")
+
+
+class _RunTimeConfigNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
+    """Live mowing override backed by a PbRunTimeConfig field (USER_CTRL_SET_RUN_TIME_CONFIG).
+
+    Distinct from the per-zone task-config Numbers: these are the *live*
+    overrides that take effect on the currently-running task (cut height,
+    move speed, cut speed). The integration doesn't yet decode the
+    QUERY_RUN_TIME_CONFIG reply, so state is optimistic — the coordinator
+    mirrors every successful write into ``self.data[thing]["runTimeConfig"]``
+    so the entity tracks the user's last value immediately. ``native_value``
+    is ``None`` until the first write.
+    """
+
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.BOX
+    _proto_field: str = ""
+    # snake_case key for the unique-id suffix, kept in lockstep with the
+    # camelCase _proto_field. Matches the rest of the integration's IDs
+    # (e.g. _geofence_radius, _rtk_pause_threshold, _audio_volume).
+    _unique_id_key: str = ""
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, icon: str) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_live_{self._unique_id_key}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = name
+        self._attr_icon = icon
+
+    @property
+    def native_value(self) -> float | None:
+        # Coordinator state may be missing or malformed (untrusted MQTT payload
+        # round-tripped through decode): only accept a dict and a numeric value,
+        # otherwise surface `None` so a bad cache doesn't break the entity.
+        cfg = (self.coordinator.data or {}).get(self._thing_name, {}).get("runTimeConfig")
+        if not isinstance(cfg, dict):
+            return None
+        val = cfg.get(self._proto_field)
+        if not isinstance(val, (int, float)) or isinstance(val, bool):
+            return None
+        return float(val)
+
+
+class LiveCutHeightNumber(_RunTimeConfigNumber):
+    """Live cut-height override (mm) for the currently-running mow."""
+
+    _proto_field = "cutHeight"
+    _unique_id_key = "cut_height"
+    _attr_device_class = NumberDeviceClass.DISTANCE
+    _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
+    _attr_native_min_value = 20
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Live cut height", "mdi:ruler")
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_run_time_config(self._thing_name, cutHeight=int(value))
+
+
+class LiveMoveSpeedNumber(_RunTimeConfigNumber):
+    """Live move-speed override (m/s) for the currently-running mow."""
+
+    _proto_field = "moveSpeed"
+    _unique_id_key = "move_speed"
+    _attr_native_unit_of_measurement = "m/s"
+    _attr_native_min_value = 0.1
+    _attr_native_max_value = 1.5
+    _attr_native_step = 0.1
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Live move speed", "mdi:speedometer")
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_run_time_config(self._thing_name, moveSpeed=float(value))
+
+
+class LiveCutSpeedNumber(_RunTimeConfigNumber):
+    """Live cut-speed override (blade speed, robot units) for the currently-running mow."""
+
+    _proto_field = "cutSpeed"
+    _unique_id_key = "cut_speed"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 1000
+    _attr_native_step = 1
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Live cut speed", "mdi:fan")
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_run_time_config(self._thing_name, cutSpeed=int(value))

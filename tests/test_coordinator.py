@@ -391,6 +391,40 @@ async def test_async_set_recharge_resume_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_run_time_config_mirrors_write_into_runtime_config_dict() -> None:
+    """Optimistic state for the Live cut-height/move-speed/cut-speed Numbers:
+    a successful write lands in self.data[thing]["runTimeConfig"] so those
+    entities reflect the value the user just set."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"runTimeConfig": {"cutHeight": 30}}}
+    await coord.async_set_run_time_config(THING, moveSpeed=0.4, cutSpeed=200)
+    assert coord.data[THING]["runTimeConfig"] == {
+        "cutHeight": 30,  # preserved
+        "moveSpeed": 0.4,
+        "cutSpeed": 200,
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_set_run_time_config_skips_mirror_when_thing_not_in_data() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {}
+    await coord.async_set_run_time_config(THING, cutHeight=55)
+    assert THING not in coord.data
+
+
+@pytest.mark.asyncio
+async def test_async_set_run_time_config_coerces_non_dict_cache_to_baseline() -> None:
+    """Untrusted cache: if a future decode path puts a non-dict at
+    ``runTimeConfig``, the optimistic merge must not TypeError on the
+    dict-union — coerce to an empty baseline so the publish still mirrors."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"runTimeConfig": "not a dict"}}
+    await coord.async_set_run_time_config(THING, cutHeight=55)
+    assert coord.data[THING]["runTimeConfig"] == {"cutHeight": 55}
+
+
+@pytest.mark.asyncio
 async def test_async_set_robot_config_publishes_metric_4g_without_userctrl() -> None:
     from lymow.protocol import _decode_fields, _first
 
@@ -2176,11 +2210,11 @@ async def test_maybe_poll_ota_progress_skips_when_no_job_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_ota_patch_noop_when_data_missing() -> None:
+async def test_publish_device_patch_noop_when_data_missing() -> None:
     """The publish helper is safe to call before the first coordinator tick."""
     coord, _, _ = _make_coordinator()
     coord.data = None
-    coord._publish_ota_patch(THING, {"otaJobId": "JOB-42"})
+    coord._publish_device_patch(THING, {"otaJobId": "JOB-42"})
     assert coord.data is None
 
 
