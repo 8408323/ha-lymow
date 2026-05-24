@@ -608,6 +608,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         from .protocol import encode_rename_zone
 
         await self._mqtt.async_publish_command(thing_name, encode_rename_zone(hash_id, name))
+        if self.data and thing_name in self.data:
+            map_data = self.data[thing_name].get("mapData", {})
+            new_zones = [{**z, "name": name} if z.get("hashId") == hash_id else z for z in map_data.get("goZones", [])]
+            new_map = {**map_data, "goZones": new_zones}
+            new_device = {**self.data[thing_name], "mapData": new_map}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
 
     async def async_delete_channel(self, thing_name: str, hash_id: str) -> None:
         """Delete a channel by hashId (USER_CTRL_DELETE_CHANNEL), then refresh the map."""
