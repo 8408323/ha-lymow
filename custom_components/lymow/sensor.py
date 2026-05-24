@@ -737,4 +737,18 @@ class LymowLastCleanSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             # summing it themselves.
             attrs["status_times_sec"] = status_times
             attrs["total_active_sec"] = sum(status_times)
+        error_list = report.get("errorList")
+        if isinstance(error_list, list) and error_list:
+            # Each entry from PbCleanReport.f4 has {code: int, percent: float?}.
+            # Surface the raw list plus a human-readable label per code so the
+            # card can render "ERR 64 (Robot inside no-go zone) at 73.0%"
+            # without re-implementing the lookup.
+            attrs["error_list"] = [
+                {
+                    **e,
+                    "description": ERROR_DESCRIPTIONS.get(e["code"], f"Unknown ({e['code']})"),
+                }
+                for e in error_list
+                if isinstance(e, dict) and isinstance(e.get("code"), int)
+            ]
         return attrs

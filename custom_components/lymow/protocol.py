@@ -763,7 +763,9 @@ def decode_clean_report(data: bytes) -> dict[str, Any]:
       f1 cleanStartTime (varint, unix seconds — Long on the wire),
       f2 cleanInfo PbCleanInfo (skipped here — already decoded for live session),
       f3 mowEndType enum (0=MOW_END_NONE, 1=MOW_END_100, 2=MOW_END_USER_CANCEL),
-      f4 errorList repeated PbErrorList (skipped — needs PbErrorList sub-decode),
+      f4 errorList repeated PbErrorList — each entry has {code: int (f1),
+                  percent: float32 (f2)}: which errors fired and at what
+                  session progress (verified from PbErrorList.encode #9782),
       f5 statusTimes packed repeated int32 — seconds spent in each workStatus,
                      indexed by the enum value (array[i] = seconds at status i),
       f6 usedBattery (varint int32, percent).
@@ -782,6 +784,12 @@ def decode_clean_report(data: bytes) -> dict[str, Any]:
     end_type = _first(f, 3)
     if isinstance(end_type, int) and 0 <= end_type <= 2:
         out["mowEndType"] = end_type
+    # PbErrorList entries (f4): non-packed repeated sub-messages — every
+    # occurrence is its own length-delimited segment.
+    errors = [_decode_error_list_entry(seg) for seg in _all(f, 4) if isinstance(seg, bytes)]
+    errors = [e for e in errors if e]
+    if errors:
+        out["errorList"] = errors
     # Concatenate every f5 segment before unpacking — protobuf permits a
     # packed-repeated field to be split across multiple key/value occurrences,
     # which decoders must rejoin (using ``_first`` would drop later segments).
@@ -796,6 +804,28 @@ def decode_clean_report(data: bytes) -> dict[str, Any]:
     used = _first(f, 6)
     if isinstance(used, int) and 0 <= used <= 100:
         out["usedBattery"] = used
+    return out
+
+
+def _decode_error_list_entry(data: bytes) -> dict[str, Any]:
+    """Decode a PbErrorList sub-message — wire from PbErrorList.encode #9782.
+
+    Fields: f1 code (varint int32), f2 percent (float32 — session progress
+    at which the error fired). Both are optional; an entry with neither
+    surfaces as ``{}`` which the caller drops.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    code = _first(f, 1)
+    if isinstance(code, int):
+        out["code"] = _signed32(code)
+    pct_raw = _first(f, 2)
+    if pct_raw is not None:
+        pct = _decode_f32(pct_raw)
+        # Wire is fraction 0..1 mirroring PbCleanInfo.mowProgress; bound it
+        # so a misaligned float can't surface a -inf / NaN attribute.
+        if 0.0 <= pct <= 1.0:
+            out["percent"] = round(pct * 100, 1)
     return out
 
 
