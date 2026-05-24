@@ -338,6 +338,22 @@ async def test_async_set_run_time_config_publishes_encoded_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_device_settings_round_trip() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_device_settings(THING, charging_mode=1, rainy_mowing=False)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
+    cfg = _decode_fields(_first(f, 26))
+    assert _first(cfg, 1) == 1  # chargingMode
+    assert _first(cfg, 3) == 0  # rainy_mowing False
+
+
+@pytest.mark.asyncio
 async def test_async_set_recharge_resume_round_trip() -> None:
     from lymow.protocol import _decode_fields, _first
 

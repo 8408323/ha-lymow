@@ -253,6 +253,59 @@ set_task_config:
       selector:
         number: { min: 0, max: 1000, step: 1, mode: box }
 
+set_device_settings:
+  name: Set Device Settings
+  description: >
+    Write the four "Device Settings" options the app exposes (PbTaskConfig
+    submessage) — two selects (Return-to-Dock route, Zone order) and two
+    toggles (Rainy Mowing, Charging Handbrake). Only the parameters you
+    provide are sent. Mirrors the app's Settings → Device Settings page.
+    Each option is a persistent device setting — distinct from the
+    per-zone cut height / path spacing parameters exposed by the
+    existing lymow.set_task_config.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    charging_mode:
+      name: Return to Dock route
+      description: >
+        follow_perimeter = mower returns to dock along the recorded perimeter
+        (safer, slower); direct_route = straight line back (faster).
+      example: "follow_perimeter"
+      selector:
+        select:
+          options:
+            - "follow_perimeter"
+            - "direct_route"
+    zone_order:
+      name: Zone order
+      description: >
+        optimize = app picks the best zone sequence; custom = use the order
+        you defined in the app.
+      example: "optimize"
+      selector:
+        select:
+          options:
+            - "optimize"
+            - "custom"
+    rainy_mowing:
+      name: Rainy Mowing
+      description: Continue mowing if the rain sensor triggers (instead of returning to dock).
+      example: false
+      selector:
+        boolean:
+    charging_handbrake:
+      name: Charging Handbrake
+      description: >
+        Recommended for uneven ground — prevents the mower from sliding off
+        the dock. UI sense (on = handbrake engaged); the wire field
+        (disableChargingPark) is inverted under the hood.
+      example: true
+      selector:
+        boolean:
+
 set_recharge_resume:
   name: Set Recharge & Resume
   description: >

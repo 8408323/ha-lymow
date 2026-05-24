@@ -1923,6 +1923,45 @@ def test_encode_set_robot_config_rejects_unsupported_kind() -> None:
         del _ROBOT_CONFIG_FIELDS["__test_bogus__"]
 
 
+def test_encode_set_device_settings_full_message() -> None:
+    """Wire: PbInput { userCtrl=36, taskConfig=PbTaskConfig{f1..f4} }."""
+    from lymow.protocol import encode_set_device_settings
+
+    pb = encode_set_device_settings(
+        charging_mode=1,  # 1 = QUICK / Direct Route
+        zone_order=0,  # 0 = OPTIMIZE
+        rainy_mowing=True,
+        charging_handbrake=True,  # UI sense ON → wire disableChargingPark=0
+    )
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
+    cfg = _decode_fields(_first(f, 26))  # PbInput.taskConfig
+    assert _first(cfg, 1) == 1  # chargingMode (Direct Route)
+    assert _first(cfg, 2) == 0  # zoneOrder (Optimize)
+    assert _first(cfg, 3) == 1  # rainCleaning true
+    assert _first(cfg, 4) == 0  # disableChargingPark=0 because handbrake ON
+
+
+def test_encode_set_device_settings_inverts_handbrake_off() -> None:
+    """charging_handbrake=False (handbrake disengaged) → disableChargingPark=1 on wire."""
+    from lymow.protocol import encode_set_device_settings
+
+    pb = encode_set_device_settings(charging_handbrake=False)
+    cfg = _decode_fields(_first(_decode_fields(pb), 26))
+    assert _first(cfg, 4) == 1
+
+
+def test_encode_set_device_settings_partial_omits_unset() -> None:
+    from lymow.protocol import encode_set_device_settings
+
+    pb = encode_set_device_settings(rainy_mowing=True)
+    cfg = _decode_fields(_first(_decode_fields(pb), 26))
+    assert _first(cfg, 3) == 1
+    for fn in (1, 2, 4):
+        assert _first(cfg, fn) is None
+
+
 def test_encode_set_recharge_resume_full_message() -> None:
     """Wire: PbInput.robotConfig (f13) → PbRobotConfig.rrConfig (f18) → PbRRConfig."""
     from lymow.protocol import encode_set_recharge_resume

@@ -44,6 +44,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_set_run_time_config = AsyncMock()
     coord.async_set_robot_config = AsyncMock()
     coord.async_set_recharge_resume = AsyncMock()
+    coord.async_set_device_settings = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
     coord.async_set_schedules = AsyncMock()
@@ -240,9 +241,9 @@ async def test_async_setup_entry_registers_services() -> None:
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 set-device-name
     # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 set-network-priority
-    # + 1 set-recharge-resume + 1 rename-zone + 1 clear-schedules + 1 set-schedules + 1 delete-channel
-    # + 1 delete-nogo-zone + 1 resume.
-    assert hass.services.async_register.call_count == 35
+    # + 1 set-recharge-resume + 1 set-device-settings + 1 rename-zone + 1 clear-schedules
+    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
+    assert hass.services.async_register.call_count == 36
 
 
 # ---------------------------------------------------------------------------
@@ -1399,6 +1400,74 @@ def test_set_recharge_resume_schema_parses_time_strings_and_bounds() -> None:
     # Out-of-range battery
     with pytest.raises(vol_.Invalid):
         _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "resume_bat": 150})
+
+
+async def test_handle_set_device_settings_maps_choices_and_inverts_handbrake() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {
+            "charging_mode": "direct_route",
+            "zone_order": "optimize",
+            "rainy_mowing": True,
+            "charging_handbrake": True,
+        },
+    )
+    await handlers["set_device_settings"](call)
+    coord.async_set_device_settings.assert_awaited_once_with(
+        "mower-001",
+        charging_mode=1,  # direct_route → 1
+        zone_order=0,  # optimize → 0
+        rainy_mowing=True,
+        charging_handbrake=True,  # passed through; encode_set_device_settings does the wire-inversion
+    )
+
+
+async def test_handle_set_device_settings_no_params_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_device_settings"](_make_call(["lawn_mower.mower_1"], {}))
+    coord.async_set_device_settings.assert_not_awaited()
+
+
+async def test_handle_set_device_settings_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_device_settings"](_make_call(["lawn_mower.other"], {"rainy_mowing": True}))
+    coord.async_set_device_settings.assert_not_awaited()
+
+
+def test_set_device_settings_schema_rejects_unknown_choice() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_DEVICE_SETTINGS_SCHEMA
+
+    # Valid choices accepted, types preserved.
+    parsed = _SET_DEVICE_SETTINGS_SCHEMA(
+        {"entity_id": ["lawn_mower.x"], "charging_mode": "follow_perimeter", "zone_order": "custom"}
+    )
+    assert parsed["charging_mode"] == "follow_perimeter" and parsed["zone_order"] == "custom"
+
+    for bad in (
+        {"charging_mode": "ethernet"},
+        {"charging_mode": 0},  # raw int rejected — must use the named choice
+        {"zone_order": "alphabetical"},
+    ):
+        with pytest.raises(vol_.Invalid):
+            _SET_DEVICE_SETTINGS_SCHEMA({"entity_id": ["lawn_mower.x"], **bad})
 
 
 def _validated_schedule(**overrides) -> dict:
