@@ -87,9 +87,14 @@ _TASK_CONFIG_SERVICE_FIELDS = {
     "cut_speed": "cutSpeed",
     "brush_speed": "brushSpeed",
     "obs_dec_mode": "obsDecMode",
+    "clean_mode": "cleanMode",
+    "path_order": "pathOrder",
+    "line_follow_mode": "lineFollowMode",
 }
 # Fields that accept floats rather than ints.
 _TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}
+# Fields that accept booleans (encoded as 0/1 in protobuf).
+_TASK_CONFIG_BOOL_FIELDS = {"path_order", "line_follow_mode"}
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
 _SERVICE_RENAME_BACKUP_MAP = "rename_backup_map"
@@ -240,7 +245,13 @@ _SET_TASK_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         **{
-            vol.Optional(k): vol.Coerce(float) if k in _TASK_CONFIG_FLOAT_FIELDS else vol.Coerce(int)
+            vol.Optional(k): (
+                vol.Coerce(float)
+                if k in _TASK_CONFIG_FLOAT_FIELDS
+                else cv.boolean
+                if k in _TASK_CONFIG_BOOL_FIELDS
+                else vol.Coerce(int)
+            )
             for k in _TASK_CONFIG_SERVICE_FIELDS
         },
     }
