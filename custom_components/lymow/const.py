@@ -680,11 +680,13 @@ OUTPUT_CTRLS = {
 SIGNAL_POWER_OFF = 1
 SIGNAL_BRAKE = 2
 SIGNAL_STOP = 3
-SIGNAL_TURN_ON_CAMERA_LIGHT = 6
-SIGNAL_TURN_OFF_CAMERA_LIGHT = 7
+SIGNAL_TURN_ON_CAMERA_LIGHT = 6  # camera headlight, full brightness
+SIGNAL_TURN_OFF_CAMERA_LIGHT = 7  # camera headlight off (also: setNightMode disable)
 SIGNAL_ONE_CLICK_LIFT = 8
 SIGNAL_ONE_CLICK_LOWER = 9
 # (SIGNAL_TURN_ON/OFF_VEHICLE_LIGHT live in protocol.py since the codec uses them.)
 SIGNAL_TURN_ON_BT_BROADCAST = 12
+SIGNAL_TURN_ON_CAMERA_LIGHT_MIDDLE = 15  # camera headlight, mid brightness
+SIGNAL_TURN_ON_CAMERA_LIGHT_LOW = 16  # camera headlight, low brightness
 SIGNAL_RELEASE_BRAKE = 25
 SIGNAL_ROBOT_SHUTDOWN = 28

@@ -115,8 +115,10 @@ def test_zone_order_option_values_match_const_table() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_async_setup_entry_adds_two_selects_per_device() -> None:
+async def test_async_setup_entry_adds_all_selects_per_device() -> None:
+
     coord = _make_coord({"chargingMode": 0, "zoneOrder": 0})
+    coord.async_set_robot_config = AsyncMock()
     hass = MagicMock()
     hass.data = {DOMAIN: {"entry-1": coord}}
     entry = MagicMock()
@@ -125,9 +127,8 @@ async def test_async_setup_entry_adds_two_selects_per_device() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 2
-    assert any(isinstance(e, ChargingModeSelect) for e in added)
-    assert any(isinstance(e, ZoneOrderSelect) for e in added)
+    types = {type(e).__name__ for e in added}
+    assert types == {"ChargingModeSelect", "ZoneOrderSelect", "CameraLightSelect"}
 
 
 async def test_async_setup_entry_skips_when_no_devices() -> None:
@@ -146,3 +147,52 @@ async def test_async_setup_entry_skips_when_no_devices() -> None:
 
     await async_setup_entry(hass, entry, _add)
     assert called is False
+
+
+# ---------------------------------------------------------------------------
+# CameraLightSelect — write-optimistic, no decoded read-back available
+# ---------------------------------------------------------------------------
+
+
+def _make_camera_coord() -> MagicMock:
+    coord = MagicMock()
+    coord.data = {THING: {}}
+    coord.devices = [DEVICE]
+    coord.async_set_robot_config = AsyncMock()
+    return coord
+
+
+def test_camera_light_select_metadata_and_unknown_initially() -> None:
+    from lymow.select import CameraLightSelect
+
+    e = CameraLightSelect(_make_camera_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_camera_light"
+    assert e._attr_name == "Camera light"
+    assert e._attr_options == ["Off", "Low", "Medium", "High"]
+    assert e._attr_entity_registry_enabled_default is False
+    # Write-optimistic: no decoded brightness in pboutput → unknown until first press.
+    assert e.current_option is None
+
+
+async def test_camera_light_select_each_option_publishes_matching_signal() -> None:
+    from lymow.const import (
+        SIGNAL_TURN_OFF_CAMERA_LIGHT,
+        SIGNAL_TURN_ON_CAMERA_LIGHT,
+        SIGNAL_TURN_ON_CAMERA_LIGHT_LOW,
+        SIGNAL_TURN_ON_CAMERA_LIGHT_MIDDLE,
+    )
+    from lymow.select import CameraLightSelect
+
+    cases = [
+        ("Off", SIGNAL_TURN_OFF_CAMERA_LIGHT),
+        ("Low", SIGNAL_TURN_ON_CAMERA_LIGHT_LOW),
+        ("Medium", SIGNAL_TURN_ON_CAMERA_LIGHT_MIDDLE),
+        ("High", SIGNAL_TURN_ON_CAMERA_LIGHT),
+    ]
+    for label, signal in cases:
+        coord = _make_camera_coord()
+        e = CameraLightSelect(coord, DEVICE)
+        e.async_write_ha_state = MagicMock()
+        await e.async_select_option(label)
+        coord.async_set_robot_config.assert_awaited_once_with(THING, signal=signal)
+        assert e.current_option == label  # last choice sticks

@@ -919,9 +919,10 @@ _ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "dockOnError": (22, "bool"),  # auto-dock when the mower errors out
 }
 
-# Selected signal-values published via PbRobotConfig.signal (field 8) — they
-# fire a one-shot device action rather than persisting a config field. Numeric
-# values come from the SocSignal enum in the APK (Hermes string-id 40889).
+# SocSignal codes used by the codec itself. The broader SocSignal enum lives
+# in const.py (Hermes value table at offset 0x00488eb0) — only the two below
+# stay here because they're referenced directly from this module's encoder
+# / by the matching VehicleLedSwitch in switch.py.
 SIGNAL_TURN_ON_VEHICLE_LIGHT = 10
 SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11
 

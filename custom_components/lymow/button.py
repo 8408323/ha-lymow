@@ -55,6 +55,7 @@ async def async_setup_entry(
                 ToggleLteAirplaneButton(coordinator, device),
                 BackupMapButton(coordinator, device),
                 SyncTimezoneButton(coordinator, device, hass),
+                BtBroadcastButton(coordinator, device),
             ]
         )
     if entities:
@@ -99,6 +100,33 @@ class SyncTimezoneButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
 
     async def async_press(self) -> None:
         await self.coordinator.async_sync_timezone(self._thing_name, await self._current_offset_seconds())
+
+
+class BtBroadcastButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
+    """Manually trigger the mower to start advertising BLE so HA/the app can
+    reconnect without a power cycle.
+
+    Wire: ``PbRobotConfig.signal = SocSignal.SIGNAL_TURN_ON_BT_BROADCAST (12)``
+    over the no-userCtrl robotConfig path (Hermes #9506 PbRobotConfig encoder).
+    Disabled by default — most installs don't need it, and a stray press can
+    interfere with an in-flight pairing on the phone app.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:bluetooth-connect"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Re-advertise Bluetooth"
+        self._attr_unique_id = f"{self._thing_name}_bt_broadcast"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    async def async_press(self) -> None:
+        from .const import SIGNAL_TURN_ON_BT_BROADCAST
+
+        await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_ON_BT_BROADCAST)
 
 
 class _UserCtrlButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):

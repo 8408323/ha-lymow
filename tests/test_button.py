@@ -172,6 +172,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "ToggleLteAirplaneButton",
         "BackupMapButton",
         "SyncTimezoneButton",
+        "BtBroadcastButton",
     }
 
 
@@ -332,3 +333,29 @@ async def test_sync_timezone_button_press_publishes_offset() -> None:
     coord.async_sync_timezone = AsyncMock()
     await SyncTimezoneButton(coord, DEVICE, _make_tz_hass("Asia/Tokyo")).async_press()
     coord.async_sync_timezone.assert_awaited_once_with(THING, 9 * 3600)
+
+
+# ---------------------------------------------------------------------------
+# BtBroadcastButton — PbRobotConfig.signal one-shot (SIGNAL_TURN_ON_BT_BROADCAST=12)
+# ---------------------------------------------------------------------------
+
+
+def test_bt_broadcast_button_metadata_and_disabled_default() -> None:
+    from lymow.button import BtBroadcastButton
+
+    coord = _make_coord()
+    e = BtBroadcastButton(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_bt_broadcast"
+    assert e._attr_name == "Re-advertise Bluetooth"
+    # Disabled by default so a stray press doesn't interfere with app pairing.
+    assert e._attr_entity_registry_enabled_default is False
+
+
+async def test_bt_broadcast_button_press_publishes_signal_code() -> None:
+    from lymow.button import BtBroadcastButton
+    from lymow.const import SIGNAL_TURN_ON_BT_BROADCAST
+
+    coord = _make_coord()
+    coord.async_set_robot_config = AsyncMock()
+    await BtBroadcastButton(coord, DEVICE).async_press()
+    coord.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_ON_BT_BROADCAST)
