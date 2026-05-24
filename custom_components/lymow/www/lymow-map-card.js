@@ -335,8 +335,8 @@ class LymowMapCard extends HTMLElement {
       const selected = this._selectedZones.has(z.hashId);
       const beingEdited = this._editing && this._editHash === z.hashId;
       const enabled = z.isEnabled !== false;
-      const fill = beingEdited ? "#fff3e0" : selected ? "#2e7d32" : enabled ? "#a8d8a8" : "#e0e0e0";
-      const stroke = beingEdited ? "#ef6c00" : selected ? "#81c784" : enabled ? "#388e3c" : "#9e9e9e";
+      const fill = beingEdited ? "#fff3e0" : selected ? "#1b5e20" : enabled ? "#43a047" : "#e0e0e0";
+      const stroke = beingEdited ? "#ef6c00" : selected ? "#a5d6a7" : enabled ? "#2e7d32" : "#9e9e9e";
       const dash = enabled ? "" : `stroke-dasharray="2,1"`;
       return `<polygon data-hash="${z.hashId}" data-type="go" points="${pts}"
         fill="${fill}" stroke="${stroke}" stroke-width="0.4" opacity="${enabled ? 1 : 0.6}" ${dash}
@@ -355,7 +355,7 @@ class LymowMapCard extends HTMLElement {
       const {x: cx, y: cy} = this._polyLabelPoint(z.polygon);
       const label = z.name || (z.area != null ? `${z.area} m²` : z.hashId.slice(0, 6));
       return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${fontSz}" fill="#1b5e20" pointer-events="none" font-weight="bold"
+        font-size="${fontSz}" fill="white" pointer-events="none" font-weight="bold"
         clip-path="url(#lbl-clip-${z.hashId})">${label}</text>`;
     }).join("\n");
 
@@ -465,7 +465,7 @@ class LymowMapCard extends HTMLElement {
           for (let j = 0; j + 1 < xs.length; j += 2) {
             const x1 = Math.max(xs[j], minX), x2 = Math.min(xs[j + 1], maxX);
             if (x2 > x1)
-              lines.push(`<line x1="${sx(x1)}" y1="${sy(y)}" x2="${sx(x2)}" y2="${sy(y)}" stroke="#388e3c" stroke-width="0.1" opacity="0.35" pointer-events="none"/>`);
+              lines.push(`<line x1="${sx(x1)}" y1="${sy(y)}" x2="${sx(x2)}" y2="${sy(y)}" stroke="white" stroke-width="0.1" opacity="0.35" pointer-events="none"/>`);
           }
         }
         return lines;
@@ -615,7 +615,7 @@ class LymowMapCard extends HTMLElement {
     const _li = (svgInner, vb, label) =>
       `<div class="legend-item"><span class="lsym"><svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">${svgInner}</svg></span>${label}</div>`;
     const legendItems = [
-      _li(`<rect x="1" y="1" width="14" height="10" fill="#a8d8a8" stroke="#388e3c" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
+      _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
       nogoZones.length ? _li(`<rect x="1" y="1" width="14" height="10" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="1.5" rx="1" stroke-dasharray="3,2"/>`, "0 0 16 12", "No-go") : "",
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
       poseEastM !== undefined ? _li(`<circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/>`, "0 0 18 14", "Robot") : "",
