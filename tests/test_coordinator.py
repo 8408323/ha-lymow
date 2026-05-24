@@ -414,6 +414,17 @@ async def test_async_set_run_time_config_skips_mirror_when_thing_not_in_data() -
 
 
 @pytest.mark.asyncio
+async def test_async_set_run_time_config_coerces_non_dict_cache_to_baseline() -> None:
+    """Untrusted cache: if a future decode path puts a non-dict at
+    ``runTimeConfig``, the optimistic merge must not TypeError on the
+    dict-union — coerce to an empty baseline so the publish still mirrors."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"runTimeConfig": "not a dict"}}
+    await coord.async_set_run_time_config(THING, cutHeight=55)
+    assert coord.data[THING]["runTimeConfig"] == {"cutHeight": 55}
+
+
+@pytest.mark.asyncio
 async def test_async_set_robot_config_publishes_metric_4g_without_userctrl() -> None:
     from lymow.protocol import _decode_fields, _first
 

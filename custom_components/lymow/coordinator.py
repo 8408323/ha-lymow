@@ -818,7 +818,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_set_run_time_config(**fields))
         patch = {name: value for name, value in fields.items() if value is not None}
         if patch and self.data and thing_name in self.data:
-            existing = (self.data[thing_name].get("runTimeConfig") or {}) | patch
+            # Cached runTimeConfig comes from a wire decode path that may not
+            # exist yet (we don't decode QUERY_RUN_TIME_CONFIG replies) — if a
+            # future malformed payload puts a non-dict here, the dict-union
+            # below would TypeError and turn a successful publish into a
+            # failed service call. Coerce non-dict cache to an empty baseline.
+            cached = self.data[thing_name].get("runTimeConfig")
+            existing = (cached if isinstance(cached, dict) else {}) | patch
             self._publish_device_patch(thing_name, {"runTimeConfig": existing})
 
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
