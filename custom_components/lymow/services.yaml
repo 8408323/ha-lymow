@@ -253,6 +253,50 @@ set_task_config:
       selector:
         number: { min: 0, max: 1000, step: 1, mode: box }
 
+set_recharge_resume:
+  name: Set Recharge & Resume
+  description: >
+    Configure the mower's Recharge & Resume schedule and battery thresholds
+    (PbRobotConfig.rrConfig). Mirrors the app's Device Settings → Recharge &
+    Resume page. Only the parameters you provide are sent; the others stay
+    untouched on the robot. enable=true with a period_start/period_end window
+    means the mower can resume mowing during that window after a recharge.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    enable:
+      name: Enable
+      description: Master on/off for Recharge & Resume.
+      example: true
+      selector:
+        boolean:
+    period_start:
+      name: Resume window start (HH:MM)
+      description: Earliest time of day the mower may resume mowing after a recharge.
+      example: "09:00"
+      selector:
+        text:
+    period_end:
+      name: Resume window end (HH:MM)
+      description: Latest time of day the mower may resume mowing.
+      example: "18:00"
+      selector:
+        text:
+    recharge_bat:
+      name: Recharge battery threshold (%)
+      description: Battery level at which the mower returns to the dock to recharge.
+      example: 20
+      selector:
+        number: { min: 0, max: 100, step: 1, unit_of_measurement: "%", mode: box }
+    resume_bat:
+      name: Resume battery threshold (%)
+      description: Battery level at which the mower resumes mowing after charging.
+      example: 80
+      selector:
+        number: { min: 0, max: 100, step: 1, unit_of_measurement: "%", mode: box }
+
 set_network_priority:
   name: Set network priority
   description: >

@@ -709,6 +709,35 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_set_task_config(**fields))
 
+    async def async_set_recharge_resume(
+        self,
+        thing_name: str,
+        *,
+        enable: bool | None = None,
+        period_start: tuple[int, int] | None = None,
+        period_end: tuple[int, int] | None = None,
+        recharge_bat: int | None = None,
+        resume_bat: int | None = None,
+    ) -> None:
+        """Publish a Recharge & Resume (PbRobotConfig.rrConfig) write.
+
+        See :func:`protocol.encode_set_recharge_resume`. Any combination of
+        parameters can be ``None`` to leave that R&R field untouched on the
+        robot.
+        """
+        from .protocol import encode_set_recharge_resume
+
+        await self._mqtt.async_publish_command(
+            thing_name,
+            encode_set_recharge_resume(
+                enable=enable,
+                period_start=period_start,
+                period_end=period_end,
+                recharge_bat=recharge_bat,
+                resume_bat=resume_bat,
+            ),
+        )
+
     async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
         """Set PbRobotConfig fields on the robot — currently just network priority.
 

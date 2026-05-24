@@ -76,8 +76,14 @@ _SERVICE_SET_SCHEDULES = "set_schedules"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
+_SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
+_ATTR_RR_ENABLE = "enable"
+_ATTR_RR_PERIOD_START = "period_start"
+_ATTR_RR_PERIOD_END = "period_end"
+_ATTR_RR_RECHARGE_BAT = "recharge_bat"
+_ATTR_RR_RESUME_BAT = "resume_bat"
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
 # subset of PbTaskConfig; the encoder supports more. All optional ints.
@@ -132,6 +138,23 @@ def _to_day_int(value: Any) -> int:
     if not 0 <= day <= 6:
         raise vol.Invalid("day_of_week must be 0-6 (Sun-Sat) or a weekday name")
     return day
+
+
+def _to_hour_minute(value: Any) -> tuple[int, int]:
+    """Accept ``"H:MM"`` or ``"HH:MM"`` (24-hour) and return a bounded (hour, minute) tuple."""
+    if not isinstance(value, str):
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM")
+    stripped = value.strip()
+    if ":" not in stripped:
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM")
+    h_s, m_s = stripped.split(":", 1)
+    try:
+        hour, minute = int(h_s), int(m_s)
+    except ValueError:
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM") from None
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise vol.Invalid("hour must be 0-23 and minute 0-59")
+    return hour, minute
 
 
 # Read-only diagnostic queries: each publishes a bare userCtrl=<code> pbinput.
@@ -262,6 +285,16 @@ _SET_NETWORK_PRIORITY_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_PREFERRED): vol.In(("4g", "wifi")),
+    }
+)
+_SET_RECHARGE_RESUME_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Optional(_ATTR_RR_ENABLE): cv.boolean,
+        vol.Optional(_ATTR_RR_PERIOD_START): _to_hour_minute,
+        vol.Optional(_ATTR_RR_PERIOD_END): _to_hour_minute,
+        vol.Optional(_ATTR_RR_RECHARGE_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+        vol.Optional(_ATTR_RR_RESUME_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -597,6 +630,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_robot_config(entity._thing_name, metric_4g=metric_4g)
 
+    async def handle_set_recharge_resume(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        rr_kwargs = {
+            "enable": call.data.get(_ATTR_RR_ENABLE),
+            "period_start": call.data.get(_ATTR_RR_PERIOD_START),
+            "period_end": call.data.get(_ATTR_RR_PERIOD_END),
+            "recharge_bat": call.data.get(_ATTR_RR_RECHARGE_BAT),
+            "resume_bat": call.data.get(_ATTR_RR_RESUME_BAT),
+        }
+        if not any(v is not None for v in rr_kwargs.values()):
+            raise ServiceValidationError("set_recharge_resume: provide at least one parameter to set.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_recharge_resume(entity._thing_name, **rr_kwargs)
+
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
@@ -740,6 +791,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_NETWORK_PRIORITY, handle_set_network_priority, schema=_SET_NETWORK_PRIORITY_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_RECHARGE_RESUME, handle_set_recharge_resume, schema=_SET_RECHARGE_RESUME_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)

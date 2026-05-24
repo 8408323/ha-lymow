@@ -43,6 +43,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_set_task_config = AsyncMock()
     coord.async_set_run_time_config = AsyncMock()
     coord.async_set_robot_config = AsyncMock()
+    coord.async_set_recharge_resume = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
     coord.async_set_schedules = AsyncMock()
@@ -239,8 +240,9 @@ async def test_async_setup_entry_registers_services() -> None:
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 set-device-name
     # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 set-network-priority
-    # + 1 rename-zone + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
-    assert hass.services.async_register.call_count == 34
+    # + 1 set-recharge-resume + 1 rename-zone + 1 clear-schedules + 1 set-schedules + 1 delete-channel
+    # + 1 delete-nogo-zone + 1 resume.
+    assert hass.services.async_register.call_count == 35
 
 
 # ---------------------------------------------------------------------------
@@ -1327,6 +1329,76 @@ def test_set_network_priority_schema_rejects_bad_choice() -> None:
         _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"], "preferred": "ethernet"})
     with pytest.raises(vol_.Invalid):
         _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"]})  # preferred missing
+
+
+async def test_handle_set_recharge_resume_forwards_kwargs() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"enable": True, "period_start": (9, 0), "period_end": (18, 30), "resume_bat": 75},
+    )
+    await handlers["set_recharge_resume"](call)
+    coord.async_set_recharge_resume.assert_awaited_once_with(
+        "mower-001",
+        enable=True,
+        period_start=(9, 0),
+        period_end=(18, 30),
+        recharge_bat=None,
+        resume_bat=75,
+    )
+
+
+async def test_handle_set_recharge_resume_no_params_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_recharge_resume"](_make_call(["lawn_mower.mower_1"], {}))
+    coord.async_set_recharge_resume.assert_not_awaited()
+
+
+async def test_handle_set_recharge_resume_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_recharge_resume"](_make_call(["lawn_mower.other"], {"enable": True}))
+    coord.async_set_recharge_resume.assert_not_awaited()
+
+
+def test_set_recharge_resume_schema_parses_time_strings_and_bounds() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_RECHARGE_RESUME_SCHEMA
+
+    parsed = _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "period_start": "08:30", "recharge_bat": 15})
+    assert parsed["period_start"] == (8, 30)
+    assert parsed["recharge_bat"] == 15
+
+    # Whitespace and single-digit hour both accepted, per the docstring.
+    assert _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "period_start": " 9:05 "})["period_start"] == (
+        9,
+        5,
+    )
+
+    # Bad time formats — covers all three guards (no colon, non-int, out-of-range)
+    # plus non-string input (e.g. an int) which must raise instead of silently parsing.
+    for bad_time in ("8", "abc:de", "8:60", "24:00", "not-a-time", "", 900):
+        with pytest.raises(vol_.Invalid):
+            _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "period_start": bad_time})
+
+    # Out-of-range battery
+    with pytest.raises(vol_.Invalid):
+        _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "resume_bat": 150})
 
 
 def _validated_schedule(**overrides) -> dict:
