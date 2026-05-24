@@ -685,11 +685,12 @@ class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
 
 class LymowLastCleanSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
-    """Last completed mowing session — PbCleanReport from QUERY_CLEANING_SUMMARY.
+    """Last mowing session — PbCleanReport from QUERY_CLEANING_SUMMARY.
 
-    Native value is the session start timestamp; end-type and battery-used
-    are surfaced as attributes so a Lovelace card can render a single
-    'Last mow' tile with both 'when' and 'how it ended'.
+    Native value is the session start timestamp; end-type (completed,
+    user-cancelled, or none) and battery-used are surfaced as attributes
+    so a Lovelace card can render a single 'Last mow' tile with both
+    'when' and 'how it ended'.
     """
 
     _attr_has_entity_name = True
@@ -710,6 +711,9 @@ class LymowLastCleanSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> datetime | None:
+        # decode_clean_report already bounds cleanStartTime to a sane POSIX
+        # epoch range, so fromtimestamp can't raise here. We still re-check
+        # the type/positivity in case a future code path skips the decoder.
         start = self._report.get("cleanStartTime")
         if not isinstance(start, int) or start <= 0:
             return None
@@ -720,8 +724,8 @@ class LymowLastCleanSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         report = self._report
         attrs: dict[str, Any] = {}
         end_type = report.get("mowEndType")
-        if isinstance(end_type, int):
-            attrs["end_type"] = MOW_END_TYPES.get(end_type, f"UNKNOWN_{end_type}")
+        if isinstance(end_type, int) and end_type in MOW_END_TYPES:
+            attrs["end_type"] = MOW_END_TYPES[end_type]
         used = report.get("usedBattery")
         if isinstance(used, int):
             attrs["used_battery_pct"] = used

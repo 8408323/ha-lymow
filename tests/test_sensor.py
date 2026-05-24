@@ -954,13 +954,14 @@ def test_last_clean_sensor_attrs_resolve_end_type_and_battery() -> None:
     assert e.extra_state_attributes == {"end_type": "COMPLETED", "used_battery_pct": 30}
 
 
-def test_last_clean_sensor_attrs_label_unknown_end_type() -> None:
-    """Should the wire ever carry a mowEndType outside the APK enum (0-2),
-    label it so it's visible in HA rather than silently dropping."""
+def test_last_clean_sensor_drops_out_of_range_end_type() -> None:
+    """The decoder filters mowEndType to 0-2; if anything else ever reaches
+    the sensor (skipped decoder, future test fixture), drop it silently
+    rather than rendering a fake 'UNKNOWN_*' label."""
     from lymow.sensor import LymowLastCleanSensor
 
     coord = _make_coord({"cleanReport": {"mowEndType": 7}})
-    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {"end_type": "UNKNOWN_7"}
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
 
 
 def test_last_clean_sensor_attrs_empty_when_no_report() -> None:

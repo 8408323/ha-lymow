@@ -759,7 +759,11 @@ def decode_clean_report(data: bytes) -> dict[str, Any]:
     f = _decode_fields(data)
     out: dict[str, Any] = {}
     start = _first(f, 1)
-    if isinstance(start, int) and start > 0:
+    # cleanStartTime is a Long on the wire — a malformed (or sign-extended)
+    # huge varint could overflow ``datetime.fromtimestamp`` downstream, so
+    # cap at the POSIX-portable int32 epoch ceiling (year 2038). Anything
+    # beyond it is almost certainly garbage from a misaligned decode.
+    if isinstance(start, int) and 0 < start <= 2_147_483_647:
         out["cleanStartTime"] = start
     end_type = _first(f, 3)
     if isinstance(end_type, int) and 0 <= end_type <= 2:

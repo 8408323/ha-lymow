@@ -2046,12 +2046,18 @@ def test_decode_clean_report_all_scalar_fields() -> None:
 
 def test_decode_clean_report_drops_out_of_range_values() -> None:
     """Untrusted wire: bound mowEndType to the APK enum (0-2) and usedBattery
-    to a percentage; drop a non-positive start time so HA doesn't surface 1970."""
+    to a percentage; drop a non-positive start time so HA doesn't surface 1970,
+    and drop a huge start time so ``datetime.fromtimestamp`` can't OverflowError
+    downstream — cap at the POSIX-portable int32 ceiling (year 2038)."""
     from lymow.protocol import decode_clean_report
 
     assert decode_clean_report(_field_i32(1, 0)) == {}
     assert decode_clean_report(_field_i32(3, 99)) == {}
     assert decode_clean_report(_field_i32(6, 150)) == {}
+    # Boundary: max accepted is 2^31-1 (year 2038)
+    assert decode_clean_report(_field_i32(1, 2_147_483_647)) == {"cleanStartTime": 2_147_483_647}
+    # Boundary: one past the cap is rejected
+    assert decode_clean_report(_field_i32(1, 2_147_483_648)) == {}
 
 
 def test_decode_clean_report_empty_returns_empty_dict() -> None:
