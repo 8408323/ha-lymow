@@ -80,6 +80,7 @@ _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
 _SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
+_SERVICE_SET_NIGHT_MODE = "set_night_mode"
 _SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
@@ -88,6 +89,9 @@ _ATTR_RR_PERIOD_START = "period_start"
 _ATTR_RR_PERIOD_END = "period_end"
 _ATTR_RR_RECHARGE_BAT = "recharge_bat"
 _ATTR_RR_RESUME_BAT = "resume_bat"
+_ATTR_NM_OPEN_TIME = "open_time"
+_ATTR_NM_CLOSE_TIME = "close_time"
+_ATTR_NM_ENABLE = "enable"
 _ATTR_DS_CHARGING_MODE = "charging_mode"
 _ATTR_DS_ZONE_ORDER = "zone_order"
 _ATTR_DS_RAINY_MOWING = "rainy_mowing"
@@ -357,6 +361,19 @@ _SET_RECHARGE_RESUME_SCHEMA = vol.Schema(
         vol.Optional(_ATTR_RR_PERIOD_END): _to_hour_minute,
         vol.Optional(_ATTR_RR_RECHARGE_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
         vol.Optional(_ATTR_RR_RESUME_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+    }
+)
+# Night mode (Settings → Headlight) — the app's setNightMode call. All three
+# params are required: the app rewrites the full window on each press, and
+# ``enable`` controls whether SIGNAL_TURN_OFF_CAMERA_LIGHT is co-published to
+# kill the light immediately (true=schedule on, false=schedule on + light off
+# now).
+_SET_NIGHT_MODE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_NM_OPEN_TIME): _to_hour_minute,
+        vol.Required(_ATTR_NM_CLOSE_TIME): _to_hour_minute,
+        vol.Required(_ATTR_NM_ENABLE): cv.boolean,
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -719,6 +736,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_recharge_resume(entity._thing_name, **rr_kwargs)
 
+    async def handle_set_night_mode(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        nm_kwargs = {
+            "open_time": call.data[_ATTR_NM_OPEN_TIME],
+            "close_time": call.data[_ATTR_NM_CLOSE_TIME],
+            "enable": call.data[_ATTR_NM_ENABLE],
+        }
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_night_mode(entity._thing_name, **nm_kwargs)
+
     async def handle_set_device_settings(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         cm = call.data.get(_ATTR_DS_CHARGING_MODE)
@@ -886,6 +917,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_RECHARGE_RESUME, handle_set_recharge_resume, schema=_SET_RECHARGE_RESUME_SCHEMA
     )
+    hass.services.async_register(DOMAIN, _SERVICE_SET_NIGHT_MODE, handle_set_night_mode, schema=_SET_NIGHT_MODE_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
     )

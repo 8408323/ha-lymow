@@ -751,6 +751,30 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             ),
         )
 
+    async def async_set_night_mode(
+        self,
+        thing_name: str,
+        *,
+        open_time: tuple[int, int],
+        close_time: tuple[int, int],
+        enable: bool,
+    ) -> None:
+        """Publish a Headlight Mode (a.k.a. Night Mode) schedule write.
+
+        See :func:`protocol.encode_set_night_mode`. Mirrors what the app's
+        setNightMode (Hermes #9019) writes: openLedTime / closeLedTime on
+        PbRobotConfig, plus SIGNAL_TURN_OFF_CAMERA_LIGHT in the same message
+        when disabling. ``open_time`` and ``close_time`` are (hour, minute)
+        tuples and are required even when disabling — the app rewrites the
+        full schedule each press.
+        """
+        from .protocol import encode_set_night_mode
+
+        await self._mqtt.async_publish_command(
+            thing_name,
+            encode_set_night_mode(open_time=open_time, close_time=close_time, enable=enable),
+        )
+
     async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
         """Set PbRobotConfig fields on the robot — currently just network priority.
 

@@ -671,9 +671,10 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
     f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
     f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
     f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
-    f10 cmdCellularSwitch bool, f11 metric_4g bool, f18 rrConfig PbRRConfig,
-    f21 timezoneOffset int (seconds east of UTC, what setTimezone #9036 writes),
-    f22 dockOnError bool.
+    f10 cmdCellularSwitch bool, f11 metric_4g bool, f14 openLedTime PbTimeZone,
+    f15 closeLedTime PbTimeZone, f18 rrConfig PbRRConfig, f21 timezoneOffset
+    int (seconds east of UTC, what setTimezone #9036 writes), f22 dockOnError
+    bool.
 
     Untrusted wire data: only fields we read are decoded; unknown values are
     left absent rather than coerced.
@@ -699,6 +700,18 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         v = _first(f, field_no)
         if v is not None:
             out[name] = bool(v)
+    # f14/f15 — Headlight schedule start/end (PbTimeZone). The app's "Night
+    # Mode" / Settings → Headlight page writes these via setNightMode (#9019)
+    # and the robot echoes them back here so users can see the current window
+    # without polling a separate config message.
+    for field_no, name in ((14, "openLedTime"), (15, "closeLedTime")):
+        raw = _first(f, field_no)
+        if isinstance(raw, bytes):
+            sub = _decode_fields(raw)
+            hour = _first(sub, 1)
+            minute = _first(sub, 2)
+            if isinstance(hour, int) and isinstance(minute, int) and 0 <= hour <= 23 and 0 <= minute <= 59:
+                out[name] = {"hour": hour, "minute": minute}
     rr_raw = _first(f, 18)
     if isinstance(rr_raw, bytes):
         rr = decode_rr_config(rr_raw)
@@ -965,6 +978,52 @@ def encode_set_recharge_resume(
     if resume_bat is not None:
         rr += _field_i32(5, int(resume_bat))
     cfg = _field_bytes(18, rr)  # PbRobotConfig.rrConfig
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
+def encode_set_night_mode(
+    *,
+    open_time: tuple[int, int],
+    close_time: tuple[int, int],
+    enable: bool,
+) -> bytes:
+    """Encode a Headlight Mode (a.k.a. Night Mode) schedule write.
+
+    Wire format from Hermes setNightMode (#9019 @ 0x004875e8):
+
+      PbInput {
+        version,
+        robotConfig: PbRobotConfig {
+          openLedTime: PbTimeZone(open_time),
+          closeLedTime: PbTimeZone(close_time),
+          signal?: SIGNAL_TURN_OFF_CAMERA_LIGHT  // only when disable=true
+        }
+      }
+
+    The app writes the time window unconditionally and tacks on
+    ``signal=SIGNAL_TURN_OFF_CAMERA_LIGHT`` (7) when the user disables the
+    schedule — that one-shot signal forces the camera light off right now,
+    independent of the schedule window. So ``enable=True`` is "set the
+    schedule and let it run", ``enable=False`` is "set the schedule but turn
+    the light off now too". Both branches still record the schedule, which
+    matches what the app does in either branch.
+
+    open_time / close_time are (hour, minute) tuples; bound checks here keep
+    a malformed user input from publishing garbage to the robot.
+    """
+    from .const import SIGNAL_TURN_OFF_CAMERA_LIGHT
+
+    for label, hm in (("open_time", open_time), ("close_time", close_time)):
+        h, m = hm
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError(f"{label} out of range: {hm!r}")
+
+    cfg = _field_bytes(14, _encode_pb_timezone(*open_time))
+    cfg += _field_bytes(15, _encode_pb_timezone(*close_time))
+    if not enable:
+        cfg += _field_i32(8, SIGNAL_TURN_OFF_CAMERA_LIGHT)
     pb = _field_i32(2, PB_VERSION)
     pb += _field_bytes(13, cfg)  # PbInput.robotConfig
     return pb
