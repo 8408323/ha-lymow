@@ -1,6 +1,4 @@
-"""Pin the PbRobotConfig / PbTaskConfig / etc. enum maps to the values the
-APK actually uses, so a future "fix" doesn't silently shift one off-by-one
-and start labelling robot states wrong."""
+"""Pin protobuf enum maps to the values the APK uses."""
 
 from __future__ import annotations
 
@@ -21,7 +19,7 @@ from lymow.const import (
 
 
 def test_work_status_aging_test_present() -> None:
-    """Robot can be in factory aging-test state (=16); we surface it for completeness."""
+    """Robot can report factory aging-test state (=16)."""
     assert WORK_STATUS_AGING_TEST == 16
 
 
@@ -109,8 +107,7 @@ def test_output_ctrls_known_values() -> None:
 
 
 def test_signal_constants_match_protocol_module() -> None:
-    """The Vehicle-LED signal constants live in protocol.py because the codec
-    uses them; const.py mirrors the rest of the SocSignal enum for reference."""
+    """Vehicle-LED signal constants live in `protocol.py`; const mirrors the rest."""
     from lymow.const import SIGNAL_ROBOT_SHUTDOWN, SIGNAL_TURN_OFF_CAMERA_LIGHT, SIGNAL_TURN_ON_CAMERA_LIGHT
     from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT
 
