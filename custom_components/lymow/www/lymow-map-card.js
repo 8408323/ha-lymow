@@ -527,31 +527,34 @@ class LymowMapCard extends HTMLElement {
           </select>
           <span class="sp-val"></span>
         </div>
-        <div class="sp-row">
-          <label>Mowing pattern</label>
-          <select class="sp-input sp-select" data-field="clean_mode" data-type="int">
-            <option value="0" ${(sv.clean_mode ?? 0) === 0 ? "selected" : ""}>Parallel</option>
-            <option value="1" ${(sv.clean_mode ?? 0) === 1 ? "selected" : ""}>Spiral</option>
-            <option value="2" ${(sv.clean_mode ?? 0) === 2 ? "selected" : ""}>Random</option>
-          </select>
-          <span class="sp-val"></span>
-        </div>
-        <div class="sp-row">
-          <label>Path order</label>
-          <select class="sp-input sp-select" data-field="path_order" data-type="int">
-            <option value="0" ${!(sv.path_order) ? "selected" : ""}>Normal</option>
-            <option value="1" ${sv.path_order ? "selected" : ""}>Reverse</option>
-          </select>
-          <span class="sp-val"></span>
-        </div>
-        <div class="sp-row">
-          <label>Line follow</label>
-          <select class="sp-input sp-select" data-field="line_follow_mode" data-type="int">
-            <option value="0" ${!(sv.line_follow_mode) ? "selected" : ""}>Off</option>
-            <option value="1" ${sv.line_follow_mode ? "selected" : ""}>On</option>
-          </select>
-          <span class="sp-val"></span>
-        </div>
+        <details class="sp-advanced">
+          <summary>Advanced</summary>
+          <div class="sp-row">
+            <label>Mowing pattern</label>
+            <select class="sp-input sp-select" data-field="clean_mode" data-type="int">
+              <option value="0" ${(sv.clean_mode ?? 0) === 0 ? "selected" : ""}>Parallel</option>
+              <option value="1" ${(sv.clean_mode ?? 0) === 1 ? "selected" : ""}>Spiral</option>
+              <option value="2" ${(sv.clean_mode ?? 0) === 2 ? "selected" : ""}>Random</option>
+            </select>
+            <span class="sp-val"></span>
+          </div>
+          <div class="sp-row">
+            <label>Path order</label>
+            <select class="sp-input sp-select" data-field="path_order" data-type="int">
+              <option value="0" ${!(sv.path_order) ? "selected" : ""}>Normal</option>
+              <option value="1" ${sv.path_order ? "selected" : ""}>Reverse</option>
+            </select>
+            <span class="sp-val"></span>
+          </div>
+          <div class="sp-row">
+            <label>Line follow</label>
+            <select class="sp-input sp-select" data-field="line_follow_mode" data-type="int">
+              <option value="0" ${!(sv.line_follow_mode) ? "selected" : ""}>Off</option>
+              <option value="1" ${sv.line_follow_mode ? "selected" : ""}>On</option>
+            </select>
+            <span class="sp-val"></span>
+          </div>
+        </details>
         <button class="sp-apply" data-action="apply-settings">Apply settings</button>
         <div class="sp-status"></div>
       </div>` : "";
@@ -625,6 +628,10 @@ class LymowMapCard extends HTMLElement {
           background: var(--primary-color, #03a9f4); color: white; font-size: 0.85em; font-weight: 600; cursor: pointer; }
         .sp-apply:hover { filter: brightness(1.1); }
         .sp-status { font-size: 0.75em; color: var(--secondary-text-color); margin-top: 4px; min-height: 1.2em; }
+        .sp-advanced { margin-top: 8px; border-top: 1px solid var(--divider-color, #444); padding-top: 6px; }
+        .sp-advanced summary { font-size: 0.78em; font-weight: 600; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; user-select: none; margin-bottom: 6px; list-style: none; }
+        .sp-advanced summary::before { content: "▶ "; font-size: 0.7em; }
+        .sp-advanced[open] summary::before { content: "▼ "; }
         .btn:disabled { opacity: 0.45; cursor: not-allowed; }
         .btn:not(:disabled):hover { filter: brightness(1.1); }
         .edit-bar { font-size: 0.8em; color: var(--secondary-text-color); margin-top: 6px; flex-shrink: 0; }
