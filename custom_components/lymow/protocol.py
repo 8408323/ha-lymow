@@ -739,8 +739,11 @@ def encode_set_robot_config(**fields: Any) -> bytes:
         field_no, kind = _ROBOT_CONFIG_FIELDS[name]
         if kind == "bool":
             cfg += _field_i32(field_no, 1 if value else 0)
-        else:
+        elif kind == "int":
             cfg += _field_i32(field_no, int(value))
+        else:
+            # Guard against silent mis-encoding if a new kind ever lands in the map.
+            raise ValueError(f"unsupported robot-config kind: {kind!r}")
     pb = _field_i32(2, PB_VERSION)
     pb += _field_bytes(13, cfg)  # PbInput.robotConfig
     return pb

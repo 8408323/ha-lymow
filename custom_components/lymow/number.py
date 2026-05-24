@@ -24,12 +24,14 @@ async def async_setup_entry(
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
     added: set[tuple[str, str]] = set()
 
-    # One geofence-radius number per device (geoFence is a feature-level field).
-    radius_entities: list[NumberEntity] = [GeofenceRadiusNumber(coordinator, device) for device in coordinator.devices]
-    radius_entities.extend(RtkPauseThresholdNumber(coordinator, device) for device in coordinator.devices)
-    radius_entities.extend(MowerVolumeNumber(coordinator, device) for device in coordinator.devices)
-    if radius_entities:
-        async_add_entities(radius_entities)
+    # Per-device numbers (one of each): geofence radius (geoFence feature),
+    # RTK auto-pause threshold (coordinator-state knob), and mower volume
+    # (PbRobotConfig.audioVolume).
+    device_numbers: list[NumberEntity] = [GeofenceRadiusNumber(coordinator, device) for device in coordinator.devices]
+    device_numbers.extend(RtkPauseThresholdNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(MowerVolumeNumber(coordinator, device) for device in coordinator.devices)
+    if device_numbers:
+        async_add_entities(device_numbers)
 
     @callback
     def _add_new_zones() -> None:
@@ -197,7 +199,8 @@ class MowerVolumeNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
     def native_value(self) -> float | None:
         config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
         v = config.get("audioVolume")
-        # Untrusted wire data: clamp to the declared range; out-of-range → unknown.
+        # Untrusted wire data: out-of-range → unknown (don't silently clamp,
+        # since that would hide a misbehaving robot/payload).
         if v is None or not 0 <= v <= 100:
             return None
         return float(v)
