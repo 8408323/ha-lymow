@@ -90,11 +90,13 @@ _TASK_CONFIG_SERVICE_FIELDS = {
     "clean_mode": "cleanMode",
     "path_order": "pathOrder",
     "line_follow_mode": "lineFollowMode",
+    "raise_cut_height": "raiseCutHeight",
+    "lower_cut_height": "lowerCutHeight",
 }
 # Fields that accept floats rather than ints.
 _TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}
 # Fields that accept booleans (encoded as 0/1 in protobuf).
-_TASK_CONFIG_BOOL_FIELDS = {"path_order", "line_follow_mode"}
+_TASK_CONFIG_BOOL_FIELDS = {"path_order", "line_follow_mode", "raise_cut_height", "lower_cut_height"}
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
 _SERVICE_RENAME_BACKUP_MAP = "rename_backup_map"

@@ -555,6 +555,14 @@ class LymowMapCard extends HTMLElement {
             <span class="sp-val"></span>
           </div>
         </details>
+        <div class="sp-row" style="margin-top:4px">
+          <label>Cut height</label>
+          <div style="display:flex;gap:6px">
+            <button class="sp-cut-btn" data-action="cut-height-raise">▲ Raise</button>
+            <button class="sp-cut-btn" data-action="cut-height-lower">▼ Lower</button>
+          </div>
+          <span class="sp-val"></span>
+        </div>
         <button class="sp-apply" data-action="apply-settings">Apply settings</button>
         <div class="sp-status"></div>
       </div>` : "";
@@ -628,6 +636,8 @@ class LymowMapCard extends HTMLElement {
           background: var(--primary-color, #03a9f4); color: white; font-size: 0.85em; font-weight: 600; cursor: pointer; }
         .sp-apply:hover { filter: brightness(1.1); }
         .sp-status { font-size: 0.75em; color: var(--secondary-text-color); margin-top: 4px; min-height: 1.2em; }
+        .sp-cut-btn { flex: 1; padding: 4px 8px; border: 1px solid var(--divider-color,#444); border-radius: 4px; background: var(--secondary-background-color,#2a2a2a); color: var(--primary-text-color); font-size: 0.8em; cursor: pointer; }
+        .sp-cut-btn:hover { background: var(--primary-color,#03a9f4); color: white; }
         .sp-advanced { margin-top: 8px; border-top: 1px solid var(--divider-color, #444); padding-top: 6px; }
         .sp-advanced summary { font-size: 0.78em; font-weight: 600; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.05em; cursor: pointer; user-select: none; margin-bottom: 6px; list-style: none; }
         .sp-advanced summary::before { content: "▶ "; font-size: 0.7em; }
@@ -815,7 +825,9 @@ class LymowMapCard extends HTMLElement {
           case "enter-rename":   this._enterRename(); break;
           case "save-rename":    this._saveRename(); break;
           case "cancel-rename":  this._cancelRename(); break;
-          case "apply-settings": this._applySettings(); break;
+          case "apply-settings":    this._applySettings(); break;
+          case "cut-height-raise":  this._adjustCutHeight(true); break;
+          case "cut-height-lower":  this._adjustCutHeight(false); break;
         }
       });
     });
@@ -1107,6 +1119,22 @@ class LymowMapCard extends HTMLElement {
     try {
       await this._hass.callService("lymow", "set_task_config", payload);
       if (status) status.textContent = "✓ Applied";
+      setTimeout(() => { if (status) status.textContent = ""; }, 3000);
+    } catch (err) {
+      if (status) status.textContent = `⚠️ ${err?.message || err}`;
+    }
+  }
+
+  async _adjustCutHeight(raise) {
+    if (!this._hass || !this._config.mower_entity) return;
+    const status = this.shadowRoot.querySelector(".sp-status");
+    if (status) status.textContent = "Sending…";
+    try {
+      await this._hass.callService("lymow", "set_task_config", {
+        entity_id: this._config.mower_entity,
+        ...(raise ? { raise_cut_height: true } : { lower_cut_height: true }),
+      });
+      if (status) status.textContent = `✓ Cut height ${raise ? "raised" : "lowered"}`;
       setTimeout(() => { if (status) status.textContent = ""; }, 3000);
     } catch (err) {
       if (status) status.textContent = `⚠️ ${err?.message || err}`;
