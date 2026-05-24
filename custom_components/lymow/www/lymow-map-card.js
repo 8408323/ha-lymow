@@ -58,6 +58,10 @@ class LymowMapCard extends HTMLElement {
     this._polyOverrides = {};
     this._nogoOverrides = {};
     this._nameOverrides = {}; // optimistic rename until next MQTT update
+
+    // Draw new zone state
+    this._drawingZone = null; // "go" | "nogo" | null
+    this._drawPoly = null;    // array of {x,y} ENU points being drawn
     this._longPressTimer = null; // for zone enable/disable long-press
     this._pinAndGoMode = false; // double-click sends robot to point
 
@@ -331,6 +335,25 @@ class LymowMapCard extends HTMLElement {
     }).join("\n");
 
     // ── Edit handles ──────────────────────────────────────────────────────────
+    // ── Draw-new-zone overlay ─────────────────────────────────────────────────
+    let drawOverlay = "";
+    if (this._drawingZone && this._drawPoly && this._drawPoly.length > 0) {
+      const dp = this._drawPoly;
+      const pts = dp.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      const drawColor = this._drawingZone === "nogo" ? "#ff5252" : "#66bb6a";
+      const polyEl = dp.length >= 3
+        ? `<polygon points="${pts}" fill="${drawColor}33" stroke="${drawColor}" stroke-width="0.5" stroke-dasharray="2,1" pointer-events="none"/>`
+        : `<polyline points="${pts}" fill="none" stroke="${drawColor}" stroke-width="0.5" stroke-dasharray="2,1" pointer-events="none"/>`;
+      // Vertex dots
+      const dots = dp.map((p, i) => {
+        const r = i === 0 ? (parseFloat(nodeR) * 1.4).toFixed(2) : nodeR;
+        const fill = i === 0 ? drawColor : "white";
+        const stroke = drawColor;
+        return `<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="0.4" pointer-events="none"/>`;
+      }).join("");
+      drawOverlay = polyEl + dots;
+    }
+
     let editOverlay = "";
     if (this._editing && this._workPoly && this._workPoly.length >= 3) {
       const poly = this._workPoly;
@@ -434,15 +457,25 @@ class LymowMapCard extends HTMLElement {
           <button class="btn save" data-action="save-rename">✓ OK</button>
           <button class="btn cancel" data-action="cancel-rename">✕</button>`;
       } else {
-        const msg = this._editHash
-          ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · + insert · ✕ delete`
-          : `Tap a go-zone or no-go zone to start editing its shape.`;
-        editMsg = msg;
-        editActions = `
-          ${this._editHash ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
-          ${this._editHash && this._editType === "go" ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
-          ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete this zone permanently">🗑 Delete</button>` : ""}
-          <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
+        if (this._drawingZone) {
+          const drawPts = this._drawPoly?.length ?? 0;
+          editMsg = `Drawing ${this._drawingZone} zone — click to add points (${drawPts} so far). Click first point to close.`;
+          editActions = `
+            ${drawPts >= 3 ? `<button class="btn save" data-action="save-draw">💾 Save zone</button>` : ""}
+            <button class="btn cancel" data-action="cancel-draw">✕ Cancel</button>`;
+        } else {
+          const msg = this._editHash
+            ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · + insert · ✕ delete`
+            : `Tap a zone to edit shape · or draw a new zone below`;
+          editMsg = msg;
+          editActions = `
+            ${this._editHash ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
+            ${this._editHash && this._editType === "go" ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
+            ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete this zone permanently">🗑 Delete</button>` : ""}
+            ${!this._editHash ? `<button class="btn pin" data-action="draw-go" title="Click points on map to draw a new go-zone">＋ Go-zone</button>` : ""}
+            ${!this._editHash ? `<button class="btn cancel" data-action="draw-nogo" title="Click points on map to draw a new no-go zone">＋ No-go</button>` : ""}
+            <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
+        }
       }
       toolbar = `
         <div class="edit-bar">${editMsg}</div>
@@ -693,6 +726,7 @@ class LymowMapCard extends HTMLElement {
             ${robotHtml}
             ${rtkHtml}
             ${editOverlay}
+            ${drawOverlay}
             </g>
           </svg>
           <div class="map-overlay" id="map-overlay">
@@ -854,6 +888,10 @@ class LymowMapCard extends HTMLElement {
           case "cut-height-lower":  this._adjustCutHeight(false); break;
           case "rotate-north":      this._resetRotation(); break;
           case "delete-zone":       this._deleteEditZone(); break;
+          case "draw-go":           this._startDraw("go"); break;
+          case "draw-nogo":         this._startDraw("nogo"); break;
+          case "save-draw":         this._saveDraw(); break;
+          case "cancel-draw":       this._cancelDraw(); break;
         }
       });
     });
@@ -905,6 +943,29 @@ class LymowMapCard extends HTMLElement {
       svg.addEventListener("dblclick", (e) => { e.stopPropagation(); this._onPinAndGo(e); });
     }
 
+    // Draw mode: left-click adds points; click first point closes polygon
+    if (this._drawingZone) {
+      svg.style.cursor = "crosshair";
+      svg.addEventListener("click", (e) => {
+        if (this._panMoved) return;
+        const enu = this._clientToEnu(e);
+        if (!enu) return;
+        // Check if clicking close to the first point to close polygon
+        if (this._drawPoly && this._drawPoly.length >= 3) {
+          const first = this._drawPoly[0];
+          const dx = parseFloat(this._sx(enu.x)) - parseFloat(this._sx(first.x));
+          const dy = parseFloat(this._sy(enu.y)) - parseFloat(this._sy(first.y));
+          if (Math.sqrt(dx*dx + dy*dy) < 3) {
+            this._saveDraw();
+            return;
+          }
+        }
+        if (!this._drawPoly) this._drawPoly = [];
+        this._drawPoly.push(enu);
+        this._render();
+      });
+    }
+
     // Pan: any pointer drag on SVG background (not on zone polygons or markers)
     // Right-click drag = rotate map
     svg.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -920,6 +981,7 @@ class LymowMapCard extends HTMLElement {
         svg.classList.add("rotating");
         return;
       }
+      if (this._drawingZone) return; // clicks handled by the draw click listener
       this._panning = true;
       this._panMoved = false;
       this._panStart = { x: e.clientX, y: e.clientY, vx: this._vx, vy: this._vy };
@@ -1256,6 +1318,45 @@ class LymowMapCard extends HTMLElement {
   }
 
   // ---------------------------------------------------------------------------
+  // Draw new zone
+  // ---------------------------------------------------------------------------
+
+  _startDraw(type) {
+    this._drawingZone = type;
+    this._drawPoly = [];
+    this._editHash = null;
+    this._workPoly = null;
+    this._render();
+  }
+
+  _cancelDraw() {
+    this._drawingZone = null;
+    this._drawPoly = null;
+    this._render();
+  }
+
+  async _saveDraw() {
+    if (!this._hass || !this._config.mower_entity || !this._drawPoly || this._drawPoly.length < 3) return;
+    const polygon = this._drawPoly.map((p) => ({ x: +p.x.toFixed(4), y: +p.y.toFixed(4) }));
+    const type = this._drawingZone;
+    this._cancelDraw();
+    const bar = this.shadowRoot.querySelector(".edit-bar");
+    if (bar) bar.textContent = "Saving…";
+    try {
+      await this._hass.callService("lymow", "add_zone", {
+        entity_id: this._config.mower_entity,
+        polygon,
+        cut_height_mm: 40,
+        // type field carries go/nogo intent once backend supports it
+        ...(type === "nogo" ? { name: "No-go zone" } : {}),
+      });
+    } catch (err) {
+      console.error("lymow-map-card: add zone failed", err);
+      if (bar) bar.textContent = `⚠️ ${err?.message || err}`;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Pin-and-go (double-click map → send robot to ENU coordinate)
   // ---------------------------------------------------------------------------
 
@@ -1325,7 +1426,9 @@ class LymowMapCard extends HTMLElement {
 
   _cancelEdit() {
     this._editing = false; this._editHash = null; this._editType = null;
-    this._workPoly = null; this._editRename = false; this._dragIdx = null; this._render();
+    this._workPoly = null; this._editRename = false; this._dragIdx = null;
+    this._drawingZone = null; this._drawPoly = null;
+    this._render();
   }
 
   _chooseEditZone(hashId, type) {
