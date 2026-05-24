@@ -2560,3 +2560,146 @@ async def test_async_delete_nogo_zone_sends_command_then_queries_map() -> None:
     assert _first(f, 5) == USER_CTRL_CLEAR_ZONE
     zone = _decode_fields(_first(_decode_fields(_first(f, 12)), 2))  # nogoZones (f2) -> PbZone
     assert _first(_decode_fields(_first(zone, 1)), 3) == b"ng1"  # basicInfo.hashId
+
+
+# ---------------------------------------------------------------------------
+# Defensive-branch coverage — partial branches the happy-path tests don't reach
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_summary_without_totals_skips_them() -> None:
+    """clean_summary may be missing total_clean_time / total_clean_area — both
+    branches must skip without setting state keys (cov: 493→495, 495→498)."""
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        "clean_history": [],
+        "clean_summary": {"something_else": 1},  # no total_clean_time / total_clean_area
+        "total_records": 0,
+    }
+    result = await coord._async_update_data()
+    assert "totalCleanTimeMin" not in result[THING]
+    assert "totalCleanHistoryAreaM2" not in result[THING]
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_clean_last_entry_without_optional_fields() -> None:
+    """A clean_history entry may omit clean_area / clean_time / date — each
+    branch must skip silently (cov: 509→511, 511→513, 513→518)."""
+    coord, _, api = _make_coordinator()
+    api.get_clean_history.return_value = {
+        # entry has neither clean_area, clean_time nor date — only percent/used_battery
+        "clean_history": [{"percent": 0.5, "used_battery": 20}],
+        "total_records": 1,
+    }
+    result = await coord._async_update_data()
+    assert "lastCleanAreaM2" not in result[THING]
+    assert "lastCleanDurationMin" not in result[THING]
+    assert "lastCleanAt" not in result[THING]
+    # Fields that ARE present still surface.
+    assert result[THING]["lastCleanPercent"] == 50.0
+    assert result[THING]["lastCleanBatteryUsed"] == 20
+
+
+@pytest.mark.asyncio
+async def test_fetch_backup_map_entry_without_any_known_file_key_emits_none() -> None:
+    """If a backup entry carries none of the legacy file-key aliases, the
+    fallback loop exits without finding one and `file` stays None
+    (cov: 569→573, the break-less path)."""
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list.return_value = [
+        {"name": "no-file-here", "backup_time": 12345}  # no map_file / key / etc.
+    ]
+    # Force the cache TTL to be expired so the call actually goes out.
+    coord._backup_map_cache.pop(THING, None)
+    result = await coord._async_update_data()
+    backups = result[THING].get("backupMapList", [])
+    assert backups and backups[0]["file"] is None
+    assert result[THING]["backupMapCount"] == 1
+
+
+@pytest.mark.asyncio
+async def test_update_zone_cut_height_unknown_hash_does_not_mutate_any_zone() -> None:
+    """An unknown hash_id must walk the goZones list without break (cov: 842→846,
+    843→842). The map is still published, but cutHeight on every zone is unchanged."""
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": 5, "mapData": copy.deepcopy(_SAMPLE_MAP_DATA)}}
+    sent: list[dict] = []
+
+    async def _capture_sync(thing_name: str, map_data: dict) -> None:  # type: ignore[override]
+        sent.append(map_data)
+
+    coord.async_sync_map = _capture_sync  # type: ignore[method-assign]
+    await coord.async_update_zone_cut_height(THING, "no-such-zone", 99)
+    assert sent and sent[0]["goZones"][0]["cutHeight"] == 40  # unchanged
+    assert sent[0]["goZones"][1]["cutHeight"] == 50  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_update_zone_polygon_does_not_duplicate_existing_modify_hash() -> None:
+    """If hash_id is already in modifyHashs the list must NOT grow on a second
+    polygon edit (cov: 882→884, the False branch of `if hash_id not in ...`)."""
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    pre_modified = copy.deepcopy(_SAMPLE_MAP_DATA)
+    pre_modified["modifyHashs"] = ["zone0001"]  # already marked dirty
+    coord.data = {THING: {"workStatus": 5, "mapData": pre_modified}}
+
+    sent: list[dict] = []
+
+    async def _capture_sync(thing_name: str, map_data: dict) -> None:  # type: ignore[override]
+        sent.append(map_data)
+
+    coord.async_sync_map = _capture_sync  # type: ignore[method-assign]
+    await coord.async_update_zone_polygon(
+        THING, "zone0001", [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 0.0, "y": 1.0}]
+    )
+    # The list must still contain "zone0001" exactly once.
+    assert sent[0]["modifyHashs"].count("zone0001") == 1
+
+
+@pytest.mark.asyncio
+async def test_start_video_session_endpoints_without_https_skips_ice() -> None:
+    """A WebRTC session whose signalingEndpoints lacks the HTTPS URL must not
+    attempt to fetch ICE servers (cov: 1128→1134, the False guard)."""
+    coord, _, api = _make_coordinator()
+    creds = {"accessKeyId": "AK", "secretAccessKey": "SK", "sessionToken": "ST"}
+    api.start_video_session = AsyncMock(
+        return_value={"channelARN": "arn:test", "region": "eu-west-1", "credentials": creds}
+    )
+    # Endpoint payload missing HTTPS (e.g. region with WSS-only).
+    api.get_signaling_channel_endpoint = AsyncMock(return_value={"WSS": "wss://only"})
+    api.get_ice_server_config = AsyncMock()
+    result = await coord.async_start_video_session(THING)
+    api.get_ice_server_config.assert_not_awaited()
+    assert "iceServers" not in result
+    assert result["signalingEndpoints"] == {"WSS": "wss://only"}
+
+
+@pytest.mark.asyncio
+async def test_update_zone_enabled_unknown_hash_does_not_mutate_zones() -> None:
+    """Unknown hash → both go-zone and nogo-zone passes must walk the lists
+    without break and without mutating (cov: 1334→1338, 1335→1334)."""
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    nogo_map = {
+        "goZones": [{"hashId": "zone0001", "isEnabled": True, "polygon": []}],
+        "nogoZones": [
+            {"hashId": "nogo0001", "parentZoneHashId": "zone0001", "isEnabled": True, "polygon": []},
+        ],
+    }
+    coord.data = {THING: {"workStatus": 5, "mapData": copy.deepcopy(nogo_map)}}
+    sent: list[dict] = []
+
+    async def _capture_sync(thing_name: str, map_data: dict) -> None:  # type: ignore[override]
+        sent.append(map_data)
+
+    coord.async_sync_map = _capture_sync  # type: ignore[method-assign]
+    await coord.async_update_zone_enabled(THING, "no-such-zone", False)
+    # Nothing flipped to False — both go-zone and (unmatched) nogo-zone keep their original state.
+    assert sent[0]["goZones"][0]["isEnabled"] is True
+    assert sent[0]["nogoZones"][0]["isEnabled"] is True

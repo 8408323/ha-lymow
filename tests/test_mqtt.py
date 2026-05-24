@@ -385,6 +385,21 @@ def test_dispatch_routes_notify(monkeypatch):
     assert online_events == {"m1": True}
 
 
+def test_dispatch_silently_drops_known_thing_unknown_suffix():
+    """A topic that matches a known thing but ends in neither /pboutput nor
+    /notify-app must be ignored without raising (e.g. /shadow/update or any
+    future AWS IoT topic the integration doesn't yet handle). Covers the
+    fall-through after the elif (mqtt.py: 252 → exit)."""
+    state_events: list = []
+    online_events: list = []
+    client = LymowMqttClient("h", "eu-west-1", lambda *a: state_events.append(a), lambda *a: online_events.append(a))
+    client._things = ["m1"]
+    # Topic contains /device/m1/ so the thing matches, but suffix is neither known one.
+    client._dispatch(_FakeMessage("/device/m1/shadow/update", b"{}"))
+    assert state_events == []
+    assert online_events == []
+
+
 def test_dispatch_handles_exception_in_handler(caplog, monkeypatch):
     import sys
 
