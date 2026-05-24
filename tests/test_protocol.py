@@ -1077,6 +1077,8 @@ def _build_pboutput_with_extras(
     total_area_m2: float | None = None,
     mow_strip_count: int | None = None,
     mow_progress: float | None = None,
+    remain_clean_time_sec: int | None = None,
+    map_area_m2: float | None = None,
     pose_east_m: float | None = None,
     pose_north_m: float | None = None,
     pose_theta_rad: float | None = None,
@@ -1099,15 +1101,20 @@ def _build_pboutput_with_extras(
             rtk += _field_i32(4, rtk_status)
         out += _field_bytes(6, rtk)
 
-    # Area info (field 12): f1=mowStripCount, f2=totalAreaM2, f5=mowProgress
-    if any(v is not None for v in (total_area_m2, mow_strip_count, mow_progress)):
+    # PbCleanInfo (field 12): f1=cleanTime/mowStripCount, f2=cleanArea/totalArea,
+    # f4=remainCleanTime, f5=cleanPercent/mowProgress, f6=mapArea.
+    if any(v is not None for v in (total_area_m2, mow_strip_count, mow_progress, remain_clean_time_sec, map_area_m2)):
         area = b""
         if mow_strip_count is not None:
             area += _field_i32(1, mow_strip_count)
         if total_area_m2 is not None:
             area += _field_f32(2, total_area_m2)
+        if remain_clean_time_sec is not None:
+            area += _field_i32(4, remain_clean_time_sec)
         if mow_progress is not None:
             area += _field_f32(5, mow_progress)
+        if map_area_m2 is not None:
+            area += _field_f32(6, map_area_m2)
         out += _field_bytes(12, area)
 
     # Robot pose ENU (field 14)
@@ -1198,6 +1205,46 @@ def test_decode_pboutput_mow_fields_absent_when_not_set() -> None:
     state = decode_pboutput(pb)
     assert "mowStripCount" not in state
     assert "mowProgress" not in state
+
+
+def test_decode_pboutput_remain_clean_time_decoded() -> None:
+    """f12.f4 → remainCleanTimeSec — used by the new ETA sensor."""
+    pb = _build_pboutput_with_extras(remain_clean_time_sec=1830)
+    state = decode_pboutput(pb)
+    assert state["remainCleanTimeSec"] == 1830
+
+
+def test_decode_pboutput_map_area_decoded() -> None:
+    """f12.f6 → mapAreaM2 — the total map area (much larger than per-task)."""
+    pb = _build_pboutput_with_extras(map_area_m2=4250.0)
+    state = decode_pboutput(pb)
+    assert abs(state["mapAreaM2"] - 4250.0) < 1.0
+
+
+def test_decode_pboutput_clean_info_all_fields_together() -> None:
+    """All five PbCleanInfo fields coexist in one PbOutput.f12 sub-message."""
+    pb = _build_pboutput_with_extras(
+        mow_strip_count=120,
+        total_area_m2=350.0,
+        remain_clean_time_sec=900,
+        mow_progress=0.45,
+        map_area_m2=1500.0,
+    )
+    state = decode_pboutput(pb)
+    assert state["mowStripCount"] == 120
+    assert abs(state["totalTaskAreaM2"] - 350.0) < 1.0
+    assert state["remainCleanTimeSec"] == 900
+    assert abs(state["mowProgress"] - 45.0) < 1.0
+    assert abs(state["mapAreaM2"] - 1500.0) < 1.0
+
+
+def test_decode_pboutput_remain_and_map_area_absent_when_not_set() -> None:
+    """New PbCleanInfo fields stay out of state when the wire doesn't carry them
+    — partial frames must not introduce zero values."""
+    pb = _build_pboutput_with_extras(mow_strip_count=5)
+    state = decode_pboutput(pb)
+    assert "remainCleanTimeSec" not in state
+    assert "mapAreaM2" not in state
 
 
 # ---------------------------------------------------------------------------

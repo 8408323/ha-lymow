@@ -132,6 +132,26 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:counter",
         entity_registry_enabled_default=False,
     ),
+    # PbCleanInfo (PbOutput field 12) additional fields surfaced from APK RE.
+    LymowSensorDescription(
+        key="remain_clean_time",
+        name="Mow time remaining",
+        value_key="remainCleanTimeSec",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:clock-end",
+    ),
+    LymowSensorDescription(
+        key="map_area",
+        name="Total map area",
+        value_key="mapAreaM2",
+        native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        icon="mdi:texture-box",
+        entity_registry_enabled_default=False,
+    ),
     # Robot pose in local ENU frame (pboutput field 14), disabled by default —
     # mostly useful for debugging and advanced visualisations.
     LymowSensorDescription(
