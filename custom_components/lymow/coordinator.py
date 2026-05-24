@@ -807,10 +807,19 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         overrides settings on the currently-running task. Only the provided
         PbRunTimeConfig fields are sent; see :data:`protocol._RUN_TIME_CONFIG_FIELDS`
         for the supported names.
+
+        Successful writes are mirrored into
+        ``self.data[thing_name]["runTimeConfig"]`` so the Live cut-height /
+        move-speed / cut-speed Number entities reflect what the user just set
+        — the integration doesn't yet decode QUERY_RUN_TIME_CONFIG replies.
         """
         from .protocol import encode_set_run_time_config
 
         await self._mqtt.async_publish_command(thing_name, encode_set_run_time_config(**fields))
+        patch = {name: value for name, value in fields.items() if value is not None}
+        if patch and self.data and thing_name in self.data:
+            existing = (self.data[thing_name].get("runTimeConfig") or {}) | patch
+            self._publish_ota_patch(thing_name, {"runTimeConfig": existing})
 
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
         """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*
