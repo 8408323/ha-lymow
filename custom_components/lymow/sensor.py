@@ -729,4 +729,12 @@ class LymowLastCleanSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         used = report.get("usedBattery")
         if isinstance(used, int):
             attrs["used_battery_pct"] = used
+        status_times = report.get("statusTimes")
+        if isinstance(status_times, list) and status_times:
+            # Packed repeated int32 from PbCleanReport.f5: array[i] = seconds
+            # spent at workStatus i during the session. Card can render the
+            # raw breakdown directly; an additional total saves the user from
+            # summing it themselves.
+            attrs["status_times_sec"] = status_times
+            attrs["total_active_sec"] = sum(status_times)
         return attrs

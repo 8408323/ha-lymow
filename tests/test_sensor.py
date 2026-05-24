@@ -964,6 +964,25 @@ def test_last_clean_sensor_drops_out_of_range_end_type() -> None:
     assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
 
 
+def test_last_clean_sensor_attrs_include_status_times_breakdown() -> None:
+    """statusTimes packed-int32 array surfaces as both the raw per-status
+    breakdown (so a card can render each bucket) and a total."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"statusTimes": [120, 0, 60, 30]}})
+    attrs = LymowLastCleanSensor(coord, DEVICE).extra_state_attributes
+    assert attrs == {"status_times_sec": [120, 0, 60, 30], "total_active_sec": 210}
+
+
+def test_last_clean_sensor_attrs_omit_empty_status_times() -> None:
+    """An empty statusTimes list shouldn't render as a zero-total attribute —
+    suppress so the card can fall back to 'no data'."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"statusTimes": []}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
+
+
 def test_last_clean_sensor_attrs_empty_when_no_report() -> None:
     from lymow.sensor import LymowLastCleanSensor
 
