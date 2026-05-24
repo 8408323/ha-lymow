@@ -62,6 +62,14 @@ class LymowMapCard extends HTMLElement {
     // Draw new zone/channel state
     this._drawingZone = null; // "go" | "nogo" | "channel" | null
     this._drawPoly = null;    // array of {x,y} ENU points being drawn
+    this._drawNameStep = false; // waiting for user to confirm name before saving
+    this._pendingDrawPolygon = null; // polygon captured at save-draw click, held during name step
+    this._pendingDrawType = null;
+
+    // Split zone state
+    this._splitMode = false;  // drawing a 2-point cut line across a go-zone
+    this._splitPoly = null;   // [{x,y}, {x,y}] cut line points
+
     this._longPressTimer = null; // for zone enable/disable long-press
     this._pinAndGoMode = false; // double-click sends robot to point
 
@@ -355,6 +363,15 @@ class LymowMapCard extends HTMLElement {
       drawOverlay = polyEl + dots;
     }
 
+    // Split-line overlay: show placed point(s) during split mode
+    let splitOverlay = "";
+    if (this._splitMode && this._splitPoly && this._splitPoly.length > 0) {
+      const [p1, p2] = this._splitPoly;
+      splitOverlay = `<circle cx="${sx(p1.x)}" cy="${sy(p1.y)}" r="${nodeR}" fill="#7b1fa2" stroke="white" stroke-width="0.4" pointer-events="none"/>`;
+      if (p2) splitOverlay += `<line x1="${sx(p1.x)}" y1="${sy(p1.y)}" x2="${sx(p2.x)}" y2="${sy(p2.y)}" stroke="#7b1fa2" stroke-width="0.6" stroke-dasharray="2,1" pointer-events="none"/>
+        <circle cx="${sx(p2.x)}" cy="${sy(p2.y)}" r="${nodeR}" fill="#7b1fa2" stroke="white" stroke-width="0.4" pointer-events="none"/>`;
+    }
+
     let editOverlay = "";
     if (this._editing && this._workPoly && this._workPoly.length >= 3) {
       const poly = this._workPoly;
@@ -493,32 +510,42 @@ class LymowMapCard extends HTMLElement {
           <input class="rename-input" id="rename-input" type="text" value="${currentName}" placeholder="Zone name" maxlength="40"/>
           <button class="btn save" data-action="save-rename">✓ OK</button>
           <button class="btn cancel" data-action="cancel-rename">✕</button>`;
+      } else if (this._drawNameStep) {
+        const typeLabel = this._pendingDrawType === "nogo" ? "no-go zone" : this._pendingDrawType === "channel" ? "channel" : "go-zone";
+        editMsg = `Name your new ${typeLabel} (optional):`;
+        editActions = `
+          <input class="rename-input" id="draw-name-input" type="text" placeholder="e.g. Front lawn" maxlength="40" autofocus/>
+          <button class="btn save" data-action="confirm-draw">✓ Save</button>
+          <button class="btn cancel" data-action="cancel-draw">✕</button>`;
+      } else if (this._splitMode) {
+        const pts = this._splitPoly?.length ?? 0;
+        editMsg = pts < 1 ? "Split: click first cut point on the map" : "Split: click second cut point to cut the zone";
+        editActions = `<button class="btn cancel" data-action="cancel-split">✕ Cancel</button>`;
+      } else if (this._drawingZone) {
+        const drawPts = this._drawPoly?.length ?? 0;
+        const isChannel = this._drawingZone === "channel";
+        const minPts = isChannel ? 2 : 3;
+        const hint = isChannel
+          ? `Drawing channel — click to add points (${drawPts} so far). Press Save when done.`
+          : `Drawing ${this._drawingZone} zone — click to add points (${drawPts} so far). Click first point to close.`;
+        editMsg = hint;
+        editActions = `
+          ${drawPts >= minPts ? `<button class="btn save" data-action="save-draw">💾 Save</button>` : ""}
+          <button class="btn cancel" data-action="cancel-draw">✕ Cancel</button>`;
       } else {
-        if (this._drawingZone) {
-          const drawPts = this._drawPoly?.length ?? 0;
-          const isChannel = this._drawingZone === "channel";
-          const minPts = isChannel ? 2 : 3;
-          const hint = isChannel
-            ? `Drawing channel — click to add points (${drawPts} so far). Press Save when done.`
-            : `Drawing ${this._drawingZone} zone — click to add points (${drawPts} so far). Click first point to close.`;
-          editMsg = hint;
-          editActions = `
-            ${drawPts >= minPts ? `<button class="btn save" data-action="save-draw">💾 Save</button>` : ""}
-            <button class="btn cancel" data-action="cancel-draw">✕ Cancel</button>`;
-        } else {
-          const msg = this._editHash
-            ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · + insert · ✕ delete`
-            : `Tap a zone to edit shape · or draw a new zone below`;
-          editMsg = msg;
-          editActions = `
-            ${this._editHash ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
-            ${this._editHash && this._editType === "go" ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
-            ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete this zone permanently">🗑 Delete</button>` : ""}
-            ${!this._editHash ? `<button class="btn pin" data-action="draw-go" title="Draw a new go-zone">＋ Go-zone</button>` : ""}
-            ${!this._editHash ? `<button class="btn cancel" data-action="draw-nogo" title="Draw a new no-go zone">＋ No-go</button>` : ""}
-            ${!this._editHash ? `<button class="btn pin" style="background:#1565c0" data-action="draw-channel" title="Draw a new channel between zones">＋ Channel</button>` : ""}
-            <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
-        }
+        const msg = this._editHash
+          ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · + insert · ✕ delete`
+          : `Tap a zone to edit shape · or draw a new zone below`;
+        editMsg = msg;
+        editActions = `
+          ${this._editHash ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
+          ${this._editHash ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
+          ${this._editHash && this._editType === "go" ? `<button class="btn pin" style="background:#6a1b9a" data-action="start-split" title="Split this zone with a cut line">✂ Split</button>` : ""}
+          ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete this zone permanently">🗑 Delete</button>` : ""}
+          ${!this._editHash ? `<button class="btn pin" data-action="draw-go" title="Draw a new go-zone">＋ Go-zone</button>` : ""}
+          ${!this._editHash ? `<button class="btn cancel" data-action="draw-nogo" title="Draw a new no-go zone">＋ No-go</button>` : ""}
+          ${!this._editHash ? `<button class="btn pin" style="background:#1565c0" data-action="draw-channel" title="Draw a new channel between zones">＋ Channel</button>` : ""}
+          <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
       }
       toolbar = `
         <div class="edit-bar">${editMsg}</div>
@@ -526,8 +553,12 @@ class LymowMapCard extends HTMLElement {
     } else {
       const hasSel = this._selectedZones.size > 0;
       const canMow = hasSel && !!this._config.mower_entity;
+      const canMerge = this._selectedZones.size >= 2 && !!this._config.mower_entity;
       const mowBtn = hasSel
         ? `<button class="btn mow" ${canMow ? "" : "disabled"} data-action="mow">🌿 Mow (${this._selectedZones.size})</button>`
+        : "";
+      const mergeBtn = canMerge
+        ? `<button class="btn pin" style="background:#6a1b9a" data-action="merge" title="Merge selected zones into one">⊕ Merge</button>`
         : "";
       const editBtn = this._config.mower_entity
         ? `<button class="btn edit" data-action="edit">✏️ Edit</button>` : "";
@@ -539,7 +570,7 @@ class LymowMapCard extends HTMLElement {
         ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" data-action="settings" title="Mowing settings">⚙</button>` : "";
       const expandBtn = `<button class="btn expand" data-action="expand" title="${this._expanded ? "Collapse" : "Expand"}">${this._expanded ? "⊠" : "⊞"}</button>`;
       const resetBtn = `<button class="btn reset" data-action="reset" title="Reset zoom">⊡</button>`;
-      toolbar = `<div class="btn-row">${mowBtn}${editBtn}${pinBtn}${schedBtn}${settingsBtn}${expandBtn}${resetBtn}</div>`;
+      toolbar = `<div class="btn-row">${mowBtn}${mergeBtn}${editBtn}${pinBtn}${schedBtn}${settingsBtn}${expandBtn}${resetBtn}</div>`;
     }
 
     // ── Legend with matching SVG symbols ─────────────────────────────────────
@@ -770,6 +801,7 @@ class LymowMapCard extends HTMLElement {
             ${robotHtml}
             ${rtkHtml}
             ${editOverlay}
+            ${splitOverlay}
             ${drawOverlay}
             </g>
           </svg>
@@ -936,7 +968,11 @@ class LymowMapCard extends HTMLElement {
           case "draw-nogo":         this._startDraw("nogo"); break;
           case "draw-channel":      this._startDraw("channel"); break;
           case "save-draw":         this._saveDraw(); break;
+          case "confirm-draw":      this._confirmDraw(); break;
           case "cancel-draw":       this._cancelDraw(); break;
+          case "start-split":       this._startSplit(); break;
+          case "cancel-split":      this._cancelSplit(); break;
+          case "merge":             this._mergeSelected(); break;
         }
       });
     });
@@ -986,6 +1022,23 @@ class LymowMapCard extends HTMLElement {
     // Double-click on map for pin-and-go
     if (this._pinAndGoMode) {
       svg.addEventListener("dblclick", (e) => { e.stopPropagation(); this._onPinAndGo(e); });
+    }
+
+    // Split mode: 2 clicks define the cut line, then auto-submit
+    if (this._splitMode) {
+      svg.style.cursor = "crosshair";
+      svg.addEventListener("click", (e) => {
+        if (this._panMoved) return;
+        const enu = this._clientToEnu(e);
+        if (!enu) return;
+        if (!this._splitPoly) this._splitPoly = [];
+        this._splitPoly.push(enu);
+        if (this._splitPoly.length >= 2) {
+          this._executeSplit();
+        } else {
+          this._render();
+        }
+      });
     }
 
     // Draw mode: left-click adds points; click first point closes polygon (not for channels)
@@ -1377,15 +1430,34 @@ class LymowMapCard extends HTMLElement {
   _cancelDraw() {
     this._drawingZone = null;
     this._drawPoly = null;
+    this._drawNameStep = false;
+    this._pendingDrawPolygon = null;
+    this._pendingDrawType = null;
     this._render();
   }
 
-  async _saveDraw() {
+  _saveDraw() {
     const minPts = this._drawingZone === "channel" ? 2 : 3;
-    if (!this._hass || !this._config.mower_entity || !this._drawPoly || this._drawPoly.length < minPts) return;
-    const polygon = this._drawPoly.map((p) => ({ x: +p.x.toFixed(4), y: +p.y.toFixed(4) }));
-    const type = this._drawingZone;
-    this._cancelDraw();
+    if (!this._drawPoly || this._drawPoly.length < minPts) return;
+    // Capture polygon and switch to the name-confirmation step
+    this._pendingDrawPolygon = this._drawPoly.map((p) => ({ x: +p.x.toFixed(4), y: +p.y.toFixed(4) }));
+    this._pendingDrawType = this._drawingZone;
+    this._drawingZone = null;
+    this._drawPoly = null;
+    this._drawNameStep = true;
+    this._render();
+    setTimeout(() => { this.shadowRoot.querySelector('#draw-name-input')?.focus(); }, 50);
+  }
+
+  async _confirmDraw() {
+    if (!this._hass || !this._config.mower_entity || !this._pendingDrawPolygon) return;
+    const polygon = this._pendingDrawPolygon;
+    const type = this._pendingDrawType;
+    const nameInput = this.shadowRoot.querySelector('#draw-name-input');
+    const name = nameInput?.value?.trim() || "";
+    this._drawNameStep = false;
+    this._pendingDrawPolygon = null;
+    this._pendingDrawType = null;
     const bar = this.shadowRoot.querySelector(".edit-bar");
     if (bar) bar.textContent = "Saving…";
     try {
@@ -1405,11 +1477,70 @@ class LymowMapCard extends HTMLElement {
           entity_id: this._config.mower_entity,
           polygon,
           cut_height_mm: 40,
+          ...(name ? { name } : {}),
         });
       }
     } catch (err) {
       console.error("lymow-map-card: add zone/channel failed", err);
-      if (bar) bar.textContent = `⚠️ ${err?.message || err}`;
+      this._render();
+      const b = this.shadowRoot.querySelector(".edit-bar");
+      if (b) b.textContent = `⚠️ ${err?.message || err}`;
+    }
+  }
+
+  _startSplit() {
+    if (!this._editHash || this._editType !== "go") return;
+    this._splitMode = true;
+    this._splitPoly = [];
+    this._render();
+  }
+
+  _cancelSplit() {
+    this._splitMode = false;
+    this._splitPoly = null;
+    this._render();
+  }
+
+  async _executeSplit() {
+    if (!this._hass || !this._config.mower_entity || !this._editHash || !this._splitPoly || this._splitPoly.length < 2) return;
+    const hashId = this._editHash;
+    const [p1, p2] = this._splitPoly;
+    this._splitMode = false;
+    this._splitPoly = null;
+    this._cancelEdit();
+    const bar = this.shadowRoot.querySelector(".edit-bar");
+    if (bar) bar.textContent = "Splitting…";
+    try {
+      await this._hass.callService("lymow", "split_zone", {
+        entity_id: this._config.mower_entity,
+        zone_hash_id: hashId,
+        cut_p1: { x: +p1.x.toFixed(4), y: +p1.y.toFixed(4) },
+        cut_p2: { x: +p2.x.toFixed(4), y: +p2.y.toFixed(4) },
+        names: ["", ""],
+      });
+    } catch (err) {
+      console.error("lymow-map-card: split zone failed", err);
+      this._render();
+      const b = this.shadowRoot.querySelector(".edit-bar");
+      if (b) b.textContent = `⚠️ Split failed: ${err?.message || err}`;
+    }
+  }
+
+  async _mergeSelected() {
+    if (!this._hass || !this._config.mower_entity || this._selectedZones.size < 2) return;
+    const hashIds = [...this._selectedZones];
+    this._selectedZones.clear();
+    this._render();
+    try {
+      await this._hass.callService("lymow", "merge_zones", {
+        entity_id: this._config.mower_entity,
+        zone_hash_ids: hashIds,
+      });
+    } catch (err) {
+      console.error("lymow-map-card: merge zones failed", err);
+      this._render();
+      const b = this.shadowRoot.querySelector(".edit-bar");
+      if (b) b.textContent = `⚠️ Merge failed: ${err?.message || err}`;
     }
   }
 
@@ -1485,6 +1616,8 @@ class LymowMapCard extends HTMLElement {
     this._editing = false; this._editHash = null; this._editType = null;
     this._workPoly = null; this._editRename = false; this._dragIdx = null;
     this._drawingZone = null; this._drawPoly = null;
+    this._drawNameStep = false; this._pendingDrawPolygon = null; this._pendingDrawType = null;
+    this._splitMode = false; this._splitPoly = null;
     this._render();
   }
 
