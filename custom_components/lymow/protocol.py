@@ -976,10 +976,10 @@ def encode_set_device_settings(
                                     we invert here.
 
     Note: this is a *different* PbTaskConfig from the broader 18-field map
-    in ``_ZONE_CONFIG_FIELDS`` — those fields are PbZoneConfig (APK fn #9432)
-    and are published over this same userCtrl=36 / PbInput.taskConfig wire
-    path by ``encode_set_task_config``; #157 tracks the rewire to the proper
-    PbMap.goZones[i].zoneConfig path.
+    in ``_ZONE_CONFIG_FIELDS`` — those fields are PbZoneConfig (constructor
+    Hermes #9432, encoder #9434) and are published over this same userCtrl=36
+    / PbInput.taskConfig wire path by ``encode_set_task_config``; #157 tracks
+    the rewire to the proper PbMap.goZones[i].zoneConfig path.
 
     Only the provided parameters are sent; ``None`` is skipped so partial
     writes preserve the other fields on the robot side.
