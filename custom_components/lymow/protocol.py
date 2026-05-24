@@ -554,9 +554,16 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if rtk_status is not None:
             state["rtkStatus"] = _signed32(rtk_status)
 
-    # Area / progress info (field 12):
-    #   f1=mowStripCount(int), f2=totalTaskArea(float32, the current task's
-    #   total area — denominator for mowProgress), f5=mowProgress(float32 0–1)
+    # Area / progress info (field 12 = PbCleanInfo per PbCleanInfo.encode in
+    # the APK):
+    #   f1=cleanTime(int seconds, surfaced as mowStripCount for backward compat),
+    #   f2=cleanArea(float, m² mowed this session — surfaced as totalTaskAreaM2),
+    #   f4=remainCleanTime(int seconds — ETA for the current task),
+    #   f5=cleanPercent(float 0-1, surfaced as mowProgress *100),
+    #   f6=mapArea(float, m² — total area of the current map, much larger
+    #   than the per-task cleanArea).
+    # The pre-PbCleanInfo names (mowStripCount/totalTaskAreaM2) are kept as
+    # aliases so existing automations and the lovelace card keep working.
     area_raw = _first(fields, 12)
     if isinstance(area_raw, bytes):
         area_fields = _decode_fields(area_raw)
@@ -569,6 +576,12 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         progress_raw = _first(area_fields, 5)
         if progress_raw is not None:
             state["mowProgress"] = round(_decode_f32(progress_raw) * 100, 1)
+        remain_raw = _first(area_fields, 4)
+        if remain_raw is not None:
+            state["remainCleanTimeSec"] = _signed32(remain_raw)
+        map_area_raw = _first(area_fields, 6)
+        if map_area_raw is not None:
+            state["mapAreaM2"] = _decode_f32(map_area_raw)
 
     # Wi-Fi sub-message (field 22): f6=rssiDbm (UTF-8 string like "-77")
     wifi22_raw = _first(fields, 22)
