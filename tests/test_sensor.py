@@ -983,6 +983,59 @@ def test_last_clean_sensor_attrs_omit_empty_status_times() -> None:
     assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
 
 
+def test_last_clean_sensor_attrs_include_error_list_with_descriptions() -> None:
+    """errorList entries surface with their ERROR_DESCRIPTIONS label so the
+    card can render the human-readable cause without re-implementing the
+    lookup itself."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": [{"code": 64, "percent": 73.0}, {"code": 55}]}})
+    attrs = LymowLastCleanSensor(coord, DEVICE).extra_state_attributes
+    assert attrs["error_list"] == [
+        {"code": 64, "percent": 73.0, "description": "Robot inside no-go zone"},
+        {"code": 55, "description": "Charging station not found"},
+    ]
+
+
+def test_last_clean_sensor_attrs_label_unknown_error_code() -> None:
+    """An error code outside ERROR_DESCRIPTIONS surfaces with an Unknown(NN)
+    label so the card still has *something* to render."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": [{"code": 9999}]}})
+    attrs = LymowLastCleanSensor(coord, DEVICE).extra_state_attributes
+    assert attrs["error_list"] == [{"code": 9999, "description": "Unknown (9999)"}]
+
+
+def test_last_clean_sensor_attrs_skip_malformed_error_entries() -> None:
+    """A future malformed decode that puts a non-dict or no-code entry into
+    errorList must not blow up attr rendering — silently skip the bad one."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": [{"code": 31}, "not a dict", {"percent": 50.0}]}})
+    attrs = LymowLastCleanSensor(coord, DEVICE).extra_state_attributes
+    assert attrs["error_list"] == [{"code": 31, "description": "Low battery"}]
+
+
+def test_last_clean_sensor_attrs_omit_empty_error_list() -> None:
+    """An empty errorList shouldn't render — let the card render the no-errors
+    case the same way it handles no-cleanReport-at-all."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": []}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
+
+
+def test_last_clean_sensor_attrs_omit_error_list_when_filter_drops_all_entries() -> None:
+    """If every entry in the raw errorList is malformed (no int code), the
+    filter empties the list — drop the attribute entirely rather than render
+    an empty-array placeholder."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": ["junk", {"percent": 50.0}]}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
+
+
 def test_last_clean_sensor_attrs_empty_when_no_report() -> None:
     from lymow.sensor import LymowLastCleanSensor
 

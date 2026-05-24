@@ -2108,6 +2108,63 @@ def test_decode_clean_report_status_times_absent_when_empty_bytes() -> None:
     assert "statusTimes" not in decode_clean_report(_field_bytes(5, b""))
 
 
+def test_decode_clean_report_error_list_single_entry() -> None:
+    """PbErrorList sub-message: f1 code (varint int32), f2 percent (float32
+    fraction 0..1, converted to a 0..100 attribute matching mowProgress)."""
+    from lymow.protocol import _field_bytes, _field_f32, decode_clean_report
+
+    entry = _field_i32(1, 64) + _field_f32(2, 0.73)
+    out = decode_clean_report(_field_bytes(4, entry))
+    assert out["errorList"] == [{"code": 64, "percent": 73.0}]
+
+
+def test_decode_clean_report_error_list_multiple_entries_preserve_order() -> None:
+    """Repeated non-packed sub-messages: each PbErrorList is its own f4
+    occurrence — every appearance must surface, in wire order."""
+    from lymow.protocol import _field_bytes, _field_f32, decode_clean_report
+
+    e1 = _field_bytes(4, _field_i32(1, 31) + _field_f32(2, 0.10))
+    e2 = _field_bytes(4, _field_i32(1, 55) + _field_f32(2, 0.50))
+    assert decode_clean_report(e1 + e2)["errorList"] == [
+        {"code": 31, "percent": 10.0},
+        {"code": 55, "percent": 50.0},
+    ]
+
+
+def test_decode_clean_report_error_list_drops_out_of_range_percent() -> None:
+    """A misaligned f2 float that decodes outside [0, 1] (NaN, -inf, 1.5…)
+    surfaces with code only — better to lose the percent than to render NaN."""
+    from lymow.protocol import _field_bytes, _field_f32, decode_clean_report
+
+    entry = _field_i32(1, 31) + _field_f32(2, 5.0)
+    assert decode_clean_report(_field_bytes(4, entry))["errorList"] == [{"code": 31}]
+
+
+def test_decode_clean_report_error_list_absent_when_no_f4() -> None:
+    from lymow.protocol import decode_clean_report
+
+    assert "errorList" not in decode_clean_report(_field_i32(1, 1_700_000_000))
+
+
+def test_decode_clean_report_error_list_skips_empty_entries() -> None:
+    """A PbErrorList with neither code nor percent decodes to {} — drop it
+    rather than surface a placeholder entry."""
+    from lymow.protocol import _field_bytes, decode_clean_report
+
+    assert "errorList" not in decode_clean_report(_field_bytes(4, b""))
+
+
+def test_decode_clean_report_error_list_skips_wire_type_drift_for_percent() -> None:
+    """f2 is wire-type 5 (fixed32) per the encoder, but the wire is
+    untrusted — if a malformed payload sends f2 as length-delimited bytes,
+    ``_decode_f32`` would otherwise raise. The decoder must surface the
+    code (and drop the percent) rather than blow up the whole report."""
+    from lymow.protocol import _field_bytes, decode_clean_report
+
+    entry = _field_i32(1, 31) + _field_bytes(2, b"x")
+    assert decode_clean_report(_field_bytes(4, entry))["errorList"] == [{"code": 31}]
+
+
 def test_decode_pboutput_surfaces_clean_report_under_cleanReport_key() -> None:
     pb = _build_pboutput(work_status=2) + _field_bytes(28, _field_i32(1, 1_700_000_000) + _field_i32(3, 2))
     assert decode_pboutput(pb)["cleanReport"] == {"cleanStartTime": 1_700_000_000, "mowEndType": 2}
