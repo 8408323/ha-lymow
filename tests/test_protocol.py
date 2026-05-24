@@ -724,6 +724,16 @@ def test_decode_task_config_empty_bytes() -> None:
     assert decode_task_config(b"") == {}
 
 
+def test_decode_task_config_drops_non_boolean_bool_fields() -> None:
+    """Hostile / corrupted payload: varint 2+ for f3/f4 must NOT silently
+    become True. Drop the key so the entity reports unknown."""
+    assert decode_task_config(_field_i32(3, 2)) == {}
+    assert decode_task_config(_field_i32(4, 5)) == {}
+    # And a mixed message keeps the valid fields and drops the bad ones.
+    pb = _field_i32(1, 1) + _field_i32(3, 9) + _field_i32(4, 1)
+    assert decode_task_config(pb) == {"chargingMode": 1, "disableChargingPark": True}
+
+
 def test_decode_map_response_channels() -> None:
     pb = _build_map_response(
         channels=[

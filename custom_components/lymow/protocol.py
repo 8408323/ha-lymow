@@ -421,6 +421,10 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
       f3 rainCleaning (bool)        — mow when raining
       f4 disableChargingPark (bool) — handbrake OFF in app's UI sense
 
+    Booleans are accepted only as 0/1 — a varint of 2+ is dropped, not
+    coerced to True, so a corrupted or hostile payload surfaces as unknown
+    rather than silently flipping the switch on.
+
     This is the *same* PbTaskConfig written by ``encode_set_device_settings``;
     not the broader 18-field map exposed via ``_TASK_CONFIG_FIELDS`` (which is
     really a PbZoneConfig — pre-existing mislabel, tracked separately).
@@ -434,10 +438,10 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
     if zo is not None:
         out["zoneOrder"] = zo
     rc = _first(f, 3)
-    if rc is not None:
+    if rc in (0, 1):
         out["rainCleaning"] = bool(rc)
     dcp = _first(f, 4)
-    if dcp is not None:
+    if dcp in (0, 1):
         out["disableChargingPark"] = bool(dcp)
     return out
 
