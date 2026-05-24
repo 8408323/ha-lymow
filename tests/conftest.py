@@ -159,6 +159,26 @@ except ImportError:
     _ha_helpers = types.ModuleType("homeassistant.helpers")
     sys.modules.setdefault("homeassistant.helpers", _ha_helpers)
 
+    # ── homeassistant.util (namespace) + dt subset ───────────────────────────
+    import datetime as _dt
+    import zoneinfo as _zi
+
+    _ha_util = types.ModuleType("homeassistant.util")
+    sys.modules.setdefault("homeassistant.util", _ha_util)
+
+    _ha_util_dt = types.ModuleType("homeassistant.util.dt")
+    _ha_util_dt.UTC = _dt.timezone.utc  # type: ignore[attr-defined]
+
+    def _get_time_zone(name):  # mimic homeassistant.util.dt.get_time_zone
+        try:
+            return _zi.ZoneInfo(name)
+        except _zi.ZoneInfoNotFoundError:
+            return None
+
+    _ha_util_dt.get_time_zone = _get_time_zone  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.util.dt", _ha_util_dt)
+    _ha_util.dt = _ha_util_dt  # type: ignore[attr-defined]
+
     # ── homeassistant.helpers.update_coordinator ─────────────────────────────
     _ha_uc = types.ModuleType("homeassistant.helpers.update_coordinator")
 

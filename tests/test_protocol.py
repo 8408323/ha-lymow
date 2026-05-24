@@ -2041,6 +2041,24 @@ def test_encode_set_robot_config_int_field_audio_volume() -> None:
     assert _first(cfg, 6) == 42  # field 6 = audioVolume
 
 
+def test_encode_set_robot_config_timezone_offset_writes_field_21() -> None:
+    """``setTimezone`` (#9036) writes seconds east of UTC to PbRobotConfig.f21."""
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(timezoneOffset=3600)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 21) == 3600
+
+
+def test_decode_robot_config_extracts_timezone_offset() -> None:
+    from lymow.protocol import decode_robot_config
+
+    assert decode_robot_config(_field_i32(21, 7200)) == {"timezoneOffset": 7200}
+    # Negative offset (e.g. Americas) round-trips as two's-complement uint64 →
+    # _signed32 brings it back to negative.
+    assert decode_robot_config(_field_i32(21, (1 << 32) - 18000)) == {"timezoneOffset": -18000}
+
+
 def test_encode_set_robot_config_mixed_int_and_bool_in_one_message() -> None:
     from lymow.protocol import encode_set_robot_config
 
