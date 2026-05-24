@@ -2182,6 +2182,19 @@ def test_decode_pboutput_no_cleanReport_key_when_field28_empty() -> None:
     assert "cleanReport" not in decode_pboutput(pb)
 
 
+def test_decode_pboutput_surfaces_theft_lock_bool_for_field_27() -> None:
+    """PbOutput.f27 is a bool (writer.bool tag 216 = (27<<3)|0) — surface as
+    Python bool for the AntiTheftLock binary sensor."""
+    assert decode_pboutput(_build_pboutput(work_status=2) + _field_i32(27, 1))["theftLock"] is True
+    assert decode_pboutput(_build_pboutput(work_status=2) + _field_i32(27, 0))["theftLock"] is False
+
+
+def test_decode_pboutput_no_theft_lock_key_when_field27_absent() -> None:
+    """When the robot doesn't report f27, the sensor must stay ``None`` —
+    surfacing False would imply we know the lock is disengaged."""
+    assert "theftLock" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
 # ---------------------------------------------------------------------------
 # decode_rr_config (PbRobotConfig.rrConfig — Recharge & Resume)
 # ---------------------------------------------------------------------------
