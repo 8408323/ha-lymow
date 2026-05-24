@@ -1233,6 +1233,19 @@ def _encode_map_content(map_data: dict) -> bytes:
     if gps:
         gps_bytes = _field_f32(1, gps.get("lat", 0.0)) + _field_f32(2, gps.get("lon", 0.0))
         out += _field_bytes(7, gps_bytes)
+    tc = map_data.get("taskConfig")
+    if isinstance(tc, dict) and tc:
+        tc_bytes = b""
+        if tc.get("chargingMode") is not None:
+            tc_bytes += _field_i32(1, int(tc["chargingMode"]))
+        if tc.get("zoneOrder") is not None:
+            tc_bytes += _field_i32(2, int(tc["zoneOrder"]))
+        if tc.get("rainCleaning") is not None:
+            tc_bytes += _field_i32(3, 1 if tc["rainCleaning"] else 0)
+        if tc.get("disableChargingPark") is not None:
+            tc_bytes += _field_i32(4, 1 if tc["disableChargingPark"] else 0)
+        if tc_bytes:
+            out += _field_bytes(8, tc_bytes)
     for hash_id in map_data.get("modifyHashs", []):
         out += _field_str(9, hash_id)
     return out
