@@ -96,6 +96,44 @@ class LymowMapCard extends HTMLElement {
     this._scale = 1;
   }
 
+  connectedCallback() {
+    this._boundKeyDown = (e) => this._onKeyDown(e);
+    window.addEventListener('keydown', this._boundKeyDown);
+  }
+
+  disconnectedCallback() {
+    if (this._boundKeyDown) window.removeEventListener('keydown', this._boundKeyDown);
+  }
+
+  _onKeyDown(e) {
+    // Don't steal keys when an input is focused
+    const tag = document.activeElement?.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || document.activeElement?.isContentEditable) return;
+    switch (e.key) {
+      case 'Escape':
+        if (this._expanded) { this._toggleExpand(); break; }
+        if (this._splitMode) { this._cancelSplit(); break; }
+        if (this._drawingZone || this._drawNameStep) { this._cancelDraw(); break; }
+        if (this._editing) { this._cancelEdit(); break; }
+        if (this._pinAndGoMode) { this._togglePinAndGo(); break; }
+        if (this._settingsOpen || this._scheduleOpen) {
+          this._settingsOpen = false; this._scheduleOpen = false; this._render();
+        }
+        break;
+      case 'f': case 'F':
+        if (!e.ctrlKey && !e.metaKey) { this._toggleExpand(); e.preventDefault(); }
+        break;
+      case 'e': case 'E':
+        if (!e.ctrlKey && !e.metaKey && !this._editing && this._config?.mower_entity) {
+          this._enterEdit(); e.preventDefault();
+        }
+        break;
+      case 'r': case 'R':
+        if (!e.ctrlKey && !e.metaKey) { this._resetView(); e.preventDefault(); }
+        break;
+    }
+  }
+
   setConfig(config) {
     if (!config.entity) throw new Error("lymow-map-card: 'entity' is required");
     this._config = config;
