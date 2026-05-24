@@ -187,6 +187,18 @@ def test_error_sensor_unknown_warning_code_falls_back_to_unknown_label() -> None
     assert "Unknown (9999)" in attrs["warning_descriptions"]
 
 
+def test_error_sensor_non_numeric_code_does_not_crash_sensor() -> None:
+    """A malformed cloud payload (non-numeric entry in warningCodes /
+    errorCodes) must not raise during attribute rendering — the sensor
+    should fall back to an "Unknown" label so state updates keep flowing."""
+    coord = _make_coord({"errorCode": 0, "warningCodes": ["junk"], "errorCodes": [None]})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert attrs["warning_descriptions"] == ["Unknown ('junk')"]
+    assert attrs["error_descriptions"] == ["Unknown (None)"]
+
+
 def test_error_sensor_native_value_none_treated_as_zero() -> None:
     coord = _make_coord({})  # no errorCode key → native_value is None
     desc = next(d for d in SENSORS if d.key == "error_code")
