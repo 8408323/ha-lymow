@@ -786,8 +786,12 @@ class LymowRobotTimezoneSensor(CoordinatorEntity[LymowCoordinator], SensorEntity
     def _offset_seconds(self) -> int | None:
         offset = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("timezoneOffset")
         # The robot can plausibly land anywhere from UTC-12 to UTC+14 — bound
-        # the wire data so a corrupted pboutput can't surface a 200-hour offset.
-        if not isinstance(offset, int) or not -12 * 3600 <= offset <= 14 * 3600:
+        # the wire data so a corrupted pboutput can't surface a 200-hour
+        # offset. Also reject sub-minute resolution: real-world timezones are
+        # always whole minutes (no zone has a sub-minute offset), and the
+        # ±HH:MM format below would silently truncate stray seconds, so a
+        # corrupted payload like 5*3600+33 must report unknown instead.
+        if not isinstance(offset, int) or not -12 * 3600 <= offset <= 14 * 3600 or offset % 60 != 0:
             return None
         return offset
 

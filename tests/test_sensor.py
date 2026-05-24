@@ -1123,11 +1123,20 @@ def test_robot_timezone_sensor_unknown_when_offset_missing_or_out_of_bounds() ->
     e_missing = LymowRobotTimezoneSensor(_make_tz_coord(None), DEVICE)
     assert e_missing.native_value is None
     assert e_missing.extra_state_attributes is None
-    # Non-int → unknown.
-    assert LymowRobotTimezoneSensor(_make_tz_coord(), DEVICE).native_value is None
+    # Non-int wire payload (e.g. a string the robot shouldn't send but might
+    # if firmware ever changes types) → unknown rather than crashing the
+    # bound check or stringifying garbage. Build the state dict directly so
+    # we can put a non-int in the slot _make_tz_coord otherwise restricts.
+    coord_str = MagicMock()
+    coord_str.data = {THING: {"robotConfig": {"timezoneOffset": "+09:00"}}}
+    assert LymowRobotTimezoneSensor(coord_str, DEVICE).native_value is None
     # Outside the [-12h, +14h] real-world range — drop as hostile.
     assert LymowRobotTimezoneSensor(_make_tz_coord(15 * 3600), DEVICE).native_value is None
     assert LymowRobotTimezoneSensor(_make_tz_coord(-13 * 3600), DEVICE).native_value is None
+    # Sub-minute offset — no real timezone has one; rejecting prevents the
+    # ±HH:MM formatter from silently truncating stray seconds (e.g. 5h0m33s
+    # would render as "+05:00" and lie about the actual configured value).
+    assert LymowRobotTimezoneSensor(_make_tz_coord(5 * 3600 + 33), DEVICE).native_value is None
 
 
 async def test_async_setup_entry_registers_robot_timezone_sensor() -> None:
