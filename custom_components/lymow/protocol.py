@@ -562,7 +562,49 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         tasks = _all(_decode_fields(schedules_raw), 1)
         state["schedules"] = [decode_schedule_entry(t) for t in tasks if isinstance(t, bytes)]
 
+    # Robot config (PbOutput field 17 = PbRobotConfig — from PbOutput.encode tag
+    # 138 = (17<<3)|2). Carries the device-settings the app shows on its
+    # Settings/Network screens. Each field is optional in the reply; we surface
+    # only what's present so a partial response doesn't blow away existing state.
+    robot_config_raw = _first(fields, 17)
+    if isinstance(robot_config_raw, bytes):
+        state["robotConfig"] = decode_robot_config(robot_config_raw)
+
     return state
+
+
+def decode_robot_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbRobotConfig sub-message into a flat dict.
+
+    Field map from PbRobotConfig.encode (Hermes fn #9506 at offset 0x004a7ce8):
+    f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
+    f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
+    f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
+    f10 cmdCellularSwitch bool, f11 metric_4g bool.
+
+    Untrusted wire data: only fields we read are decoded; unknown values are
+    left absent rather than coerced.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    for field_no, name in (
+        (6, "audioVolume"),
+        (8, "signal"),
+    ):
+        v = _first(f, field_no)
+        if v is not None:
+            out[name] = _signed32(v)
+    for field_no, name in (
+        (4, "rcRaiseCutHeight"),
+        (5, "rcLowerCutHeight"),
+        (7, "isOpenLed"),
+        (10, "cmdCellularSwitch"),
+        (11, "metric_4g"),
+    ):
+        v = _first(f, field_no)
+        if v is not None:
+            out[name] = bool(v)
+    return out
 
 
 def decode_schedule_entry(data: bytes) -> dict[str, Any]:
@@ -676,6 +718,7 @@ def encode_set_task_config(**fields: Any) -> bytes:
 # here; broaden the codec when adding non-bool fields (audioVolume int,
 # rcCutHeight int, etc.).
 _ROBOT_CONFIG_BOOL_FIELDS: dict[str, int] = {
+    "isOpenLed": 7,  # vehicle (mower) status LED on/off
     "metric_4g": 11,  # true = 4G preferred, false = WiFi preferred
 }
 

@@ -1796,6 +1796,50 @@ def test_decode_pboutput_no_schedules_key_when_field16_absent() -> None:
     assert "schedules" not in decode_pboutput(_build_pboutput(work_status=1))
 
 
+def test_decode_robot_config_extracts_known_fields() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # f6=audioVolume int, f7=isOpenLed bool, f8=signal int, f10=cmdCellularSwitch bool, f11=metric_4g bool
+    cfg = _field_i32(6, 80) + _field_i32(7, 1) + _field_i32(8, 4) + _field_i32(10, 0) + _field_i32(11, 1)
+    out = decode_robot_config(cfg)
+    assert out == {
+        "audioVolume": 80,
+        "isOpenLed": True,
+        "signal": 4,
+        "cmdCellularSwitch": False,
+        "metric_4g": True,
+    }
+
+
+def test_decode_robot_config_absent_fields_not_in_dict() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # Only metric_4g present — the other keys must NOT appear (so the merge
+    # doesn't blow away existing state with False/0 defaults).
+    assert decode_robot_config(_field_i32(11, 0)) == {"metric_4g": False}
+    assert decode_robot_config(b"") == {}
+
+
+def test_decode_robot_config_bool_rcRaise_rcLower_fields() -> None:
+    from lymow.protocol import decode_robot_config
+
+    assert decode_robot_config(_field_i32(4, 1) + _field_i32(5, 0)) == {
+        "rcRaiseCutHeight": True,
+        "rcLowerCutHeight": False,
+    }
+
+
+def test_decode_pboutput_surfaces_robot_config_under_robotConfig_key() -> None:
+    # f17 = robotConfig sub-message; carry one bool and verify it round-trips
+    pb = _build_pboutput(work_status=2) + _field_bytes(17, _field_i32(7, 1) + _field_i32(11, 0))
+    state = decode_pboutput(pb)
+    assert state["robotConfig"] == {"isOpenLed": True, "metric_4g": False}
+
+
+def test_decode_pboutput_no_robotConfig_key_when_field17_absent() -> None:
+    assert "robotConfig" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
 def test_encode_set_task_config_wraps_in_pbinput() -> None:
     from lymow.protocol import encode_set_task_config
 

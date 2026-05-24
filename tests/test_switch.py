@@ -8,6 +8,7 @@ from lymow.switch import (
     FindRobotSwitch,
     TheftDetectionSwitch,
     TheftLockSwitch,
+    VehicleLedSwitch,
     ZoneEnabledSwitch,
     async_setup_entry,
 )
@@ -358,6 +359,47 @@ async def test_async_setup_entry_creates_feature_switches() -> None:
     assert "FindRobotSwitch" in feature_types
     assert "MobileNotificationSwitch" in feature_types
     assert "AlertsOnlySwitch" in feature_types
+    assert "VehicleLedSwitch" in feature_types
+
+
+# ---------------------------------------------------------------------------
+# VehicleLedSwitch — robotConfig.isOpenLed (bool)
+# ---------------------------------------------------------------------------
+
+
+def _make_robot_config_coord(robot_config: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    coord.data = {THING: {"robotConfig": dict(robot_config)} if robot_config is not None else {}}
+    coord.devices = [DEVICE]
+    coord.async_set_robot_config = AsyncMock()
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    return coord
+
+
+def test_vehicle_led_switch_metadata_and_unknown_when_missing() -> None:
+    coord = _make_robot_config_coord(None)
+    e = VehicleLedSwitch(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_isOpenLed"
+    assert "Vehicle LED" in e._attr_name
+    # No robotConfig yet → unknown, not silently False
+    assert e.is_on is None
+
+
+def test_vehicle_led_switch_reads_state_from_robot_config() -> None:
+    on = VehicleLedSwitch(_make_robot_config_coord({"isOpenLed": True}), DEVICE)
+    off = VehicleLedSwitch(_make_robot_config_coord({"isOpenLed": False}), DEVICE)
+    assert on.is_on is True
+    assert off.is_on is False
+
+
+async def test_vehicle_led_switch_turn_on_off_publishes_robot_config() -> None:
+    coord_on = _make_robot_config_coord({"isOpenLed": False})
+    await VehicleLedSwitch(coord_on, DEVICE).async_turn_on()
+    coord_on.async_set_robot_config.assert_awaited_once_with(THING, isOpenLed=True)
+
+    coord_off = _make_robot_config_coord({"isOpenLed": True})
+    await VehicleLedSwitch(coord_off, DEVICE).async_turn_off()
+    coord_off.async_set_robot_config.assert_awaited_once_with(THING, isOpenLed=False)
 
 
 # ---------------------------------------------------------------------------
