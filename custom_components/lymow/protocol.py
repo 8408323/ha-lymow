@@ -621,6 +621,7 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
     f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
     f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
     f10 cmdCellularSwitch bool, f11 metric_4g bool, f18 rrConfig PbRRConfig,
+    f21 timezoneOffset int (seconds east of UTC, what setTimezone #9036 writes),
     f22 dockOnError bool.
 
     Untrusted wire data: only fields we read are decoded; unknown values are
@@ -631,6 +632,7 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
     for field_no, name in (
         (6, "audioVolume"),
         (8, "signal"),
+        (21, "timezoneOffset"),
     ):
         v = _first(f, field_no)
         if v is not None:
@@ -807,6 +809,7 @@ _ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "audioVolume": (6, "int"),  # mower beep/voice volume 0-100
     "signal": (8, "int"),  # one-shot action signals (e.g. SIGNAL_TURN_ON_VEHICLE_LIGHT=10, _OFF=11)
     "metric_4g": (11, "bool"),  # true = 4G preferred, false = WiFi preferred
+    "timezoneOffset": (21, "int"),  # seconds east of UTC; matches what the app's setTimezone (#9036) writes
     "dockOnError": (22, "bool"),  # auto-dock when the mower errors out
 }
 

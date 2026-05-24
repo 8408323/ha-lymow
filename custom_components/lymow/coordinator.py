@@ -758,6 +758,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_set_robot_config(**fields))
 
+    async def async_sync_timezone(self, thing_name: str, offset_seconds: int) -> None:
+        """Push a timezone offset (seconds east of UTC) to the robot.
+
+        Mirrors the app's "Sync with Phone" button (Hermes setTimezone #9036),
+        which writes ``PbRobotConfig.timezoneOffset`` (f21) over the no-userCtrl
+        robotConfig path. The app uses the phone's local timezone; HA exposes
+        its own ``hass.config.time_zone`` through the button entity, so the
+        coordinator just takes the pre-computed seconds value.
+        """
+        await self.async_set_robot_config(thing_name, timezoneOffset=int(offset_seconds))
+
     async def async_set_device_settings(
         self,
         thing_name: str,
