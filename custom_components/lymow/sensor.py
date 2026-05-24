@@ -408,6 +408,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowSchedulesSensor(coordinator, device))
         entities.append(LymowLastCleanSensor(coordinator, device))
         entities.append(LymowRobotTimezoneSensor(coordinator, device))
+        entities.append(LymowHeadlightWindowSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -853,3 +854,59 @@ class LymowRobotTimezoneSensor(CoordinatorEntity[LymowCoordinator], SensorEntity
         if seconds is None:
             return None
         return {"offset_seconds": seconds, "offset_hours": round(seconds / 3600, 2)}
+
+
+class LymowHeadlightWindowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Camera-headlight schedule window — the read-side companion to the
+    ``lymow.set_night_mode`` service.
+
+    Surfaces ``openLedTime`` + ``closeLedTime`` (decoded from PbRobotConfig
+    f14/f15) as a single human-friendly state string like ``"21:00–06:00"``,
+    with each end also exposed as an attribute for automations that need
+    the raw HH:MM strings. The wire has no explicit "schedule enabled"
+    bit (``setNightMode`` rewrites the full window each press and uses
+    a co-published ``SIGNAL_TURN_OFF_CAMERA_LIGHT`` to disable the light
+    immediately — see encode_set_night_mode), so this sensor is purely
+    descriptive: it shows *what window is configured*, not *whether the
+    light is currently on*. The Camera light Select handles the latter."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:car-light-high"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_headlight_window"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Headlight schedule"
+
+    @property
+    def _times(self) -> tuple[str | None, str | None]:
+        cfg = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
+        return self._format(cfg.get("openLedTime")), self._format(cfg.get("closeLedTime"))
+
+    @staticmethod
+    def _format(tz: Any) -> str | None:
+        # decode_robot_config already validates 0-23 / 0-59 before surfacing
+        # the dict, so we can format unconditionally — the type check is just
+        # to short-circuit when the field was absent and the dict was never
+        # populated.
+        if not isinstance(tz, dict):
+            return None
+        return f"{tz['hour']:02d}:{tz['minute']:02d}"
+
+    @property
+    def native_value(self) -> str | None:
+        open_s, close_s = self._times
+        if open_s is None or close_s is None:
+            return None
+        # En-dash (not hyphen) to match the app's UI rendering.
+        return f"{open_s}–{close_s}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        open_s, close_s = self._times
+        if open_s is None and close_s is None:
+            return None
+        return {"open_time": open_s, "close_time": close_s}
