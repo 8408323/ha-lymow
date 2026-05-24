@@ -1270,7 +1270,7 @@ async def test_handle_set_task_config_unknown_entity_skips() -> None:
 async def test_handle_set_task_config_supports_float_and_bool_fields() -> None:
     """move_speed is a float (m/s); raise/lower_cut_height + path_order +
     line_follow_mode are bools — schema must coerce them correctly and pass
-    them through to the encoder with their PbZoneConfig camelCase names."""
+    them through to the encoder with their PbTaskConfig camelCase names."""
     coord = _make_coord()
     entry = MagicMock()
     entry.entry_id = "entry-1"

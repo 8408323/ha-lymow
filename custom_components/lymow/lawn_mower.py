@@ -115,8 +115,8 @@ _ZONE_ORDER_CHOICES = {_service_label(name): value for value, name in ZONE_ORDER
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
 # subset of PbTaskConfig; the encoder supports more. ``move_speed`` is a float
 # (m/s); the rest are ints. ``raise_cut_height``/``lower_cut_height`` and the
-# bool toggles (``path_order``/``line_follow_mode``) are passed through the
-# bool branch of the encoder via _TASK_CONFIG_FLOAT_FIELDS / cv.boolean below.
+# bool toggles (``path_order``/``line_follow_mode``) are coerced via cv.boolean
+# (see _TASK_CONFIG_BOOL_FIELDS below) and emitted as varints by the encoder.
 _TASK_CONFIG_SERVICE_FIELDS = {
     "move_speed": "moveSpeed",
     "path_spacing": "pathSpacing",
