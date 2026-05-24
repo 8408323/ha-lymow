@@ -49,6 +49,10 @@ class LymowMapCard extends HTMLElement {
     this._settingsOpen = false;
     this._scheduleOpen = false;
     this._settingsValues = null;
+    // 0=name, 1=area, 2=both, 3=none
+    this._goLabelMode = 0;
+    this._nogoLabelMode = 3;
+    this._chLabelMode = 3;
     this._editing = false;
     this._editHash = null;
     this._editType = null; // "go" or "nogo"
@@ -331,6 +335,14 @@ class LymowMapCard extends HTMLElement {
       return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="0.4" stroke-dasharray="${dash}" opacity="0.7"/>`;
     }).join("\n");
 
+    const channelLabels = this._chLabelMode === 3 ? "" : channels.map((ch) => {
+      if (!ch.polygon || ch.polygon.length < 2) return "";
+      const mid = ch.polygon[Math.floor(ch.polygon.length / 2)];
+      const name = ch.name || (ch.isDockingChannel ? "Docking" : "Channel");
+      return `<text x="${sx(mid.x)}" y="${sy(mid.y)}" text-anchor="middle" dominant-baseline="middle"
+        font-size="${(parseFloat(fontSz) * 0.8).toFixed(2)}" fill="#6a1b9a" pointer-events="none">${name}</text>`;
+    }).join("\n");
+
     // ── Go-zones ──────────────────────────────────────────────────────────────
     const goPaths = goZones.map((z) => {
       const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
@@ -352,10 +364,13 @@ class LymowMapCard extends HTMLElement {
       return `<clipPath id="lbl-clip-${z.hashId}"><polygon points="${pts}"/></clipPath>`;
     }).join("\n");
 
-    const goLabels = goZones.map((z) => {
+    const goLabels = this._goLabelMode === 3 ? "" : goZones.map((z) => {
       if (!z.polygon || z.polygon.length < 3) return "";
       const {x: cx, y: cy} = this._polyLabelPoint(z.polygon);
-      const label = z.name || (z.area != null ? `${z.area} m²` : z.hashId.slice(0, 6));
+      const m = this._goLabelMode;
+      const namePart = z.name || z.hashId.slice(0, 6);
+      const areaPart = z.area != null ? `${z.area} m²` : "";
+      const label = m === 0 ? namePart : m === 1 ? (areaPart || namePart) : m === 2 ? (areaPart ? `${namePart} · ${areaPart}` : namePart) : namePart;
       return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle"
         font-size="${fontSz}" fill="white" pointer-events="none" font-weight="bold"
         clip-path="url(#lbl-clip-${z.hashId})">${label}</text>`;
@@ -378,8 +393,12 @@ class LymowMapCard extends HTMLElement {
       if (!z.polygon || z.polygon.length < 3) return "";
       const cx = z.polygon.reduce((s, p) => s + p.x, 0) / z.polygon.length;
       const cy = z.polygon.reduce((s, p) => s + p.y, 0) / z.polygon.length;
+      const nm = this._nogoLabelMode;
+      const namePart = z.name || "⛔";
+      const areaPart = z.area != null ? `${z.area} m²` : "";
+      const label = nm === 3 ? "⛔" : nm === 0 ? namePart : nm === 1 ? (areaPart || namePart) : (areaPart ? `${namePart} · ${areaPart}` : namePart);
       return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${(parseFloat(fontSz) * 0.9).toFixed(2)}" fill="#c62828" pointer-events="none">⛔</text>`;
+        font-size="${(parseFloat(fontSz) * 0.9).toFixed(2)}" fill="#c62828" pointer-events="none">${label}</text>`;
     }).join("\n");
 
     // ── Edit handles ──────────────────────────────────────────────────────────
@@ -437,42 +456,6 @@ class LymowMapCard extends HTMLElement {
             fill="#ef6c00" stroke="white" stroke-width="0.35" style="cursor:grab"/>${delBadge}`;
       }).join("\n");
       editOverlay = workOutline + midpoints + verts;
-    }
-
-    // ── Mow strip overlay ─────────────────────────────────────────────────────
-    // Generates parallel strip lines inside each go-zone using the zone's path
-    // spacing (default 0.18 m = 18 cm). Only shown when not editing.
-    let mowStripOverlay = "";
-    if (!this._editing) {
-      const stripLines = goZones.flatMap((z) => {
-        if (!z.polygon || z.polygon.length < 3 || z.isEnabled === false) return [];
-        const poly = z.polygon;
-        const spacing = z.pathSpacing || 0.18;
-        const minX = Math.min(...poly.map(p => p.x));
-        const maxX = Math.max(...poly.map(p => p.x));
-        const minY = Math.min(...poly.map(p => p.y));
-        const maxY = Math.max(...poly.map(p => p.y));
-        const lines = [];
-        // Walk parallel horizontal strips from minY to maxY
-        for (let y = minY + spacing / 2; y <= maxY; y += spacing) {
-          // Clip each horizontal scanline to the polygon using ray-intersect
-          const xs = [];
-          for (let i = 0; i < poly.length; i++) {
-            const a = poly[i], b = poly[(i + 1) % poly.length];
-            if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) {
-              xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
-            }
-          }
-          xs.sort((a, b) => a - b);
-          for (let j = 0; j + 1 < xs.length; j += 2) {
-            const x1 = Math.max(xs[j], minX), x2 = Math.min(xs[j + 1], maxX);
-            if (x2 > x1)
-              lines.push(`<line x1="${sx(x1)}" y1="${sy(y)}" x2="${sx(x2)}" y2="${sy(y)}" stroke="white" stroke-width="0.1" opacity="0.35" pointer-events="none"/>`);
-          }
-        }
-        return lines;
-      });
-      mowStripOverlay = stripLines.join("\n");
     }
 
     // ── Charging station (fixed pixel size via inverse-zoom scale) ────────────
@@ -603,15 +586,15 @@ class LymowMapCard extends HTMLElement {
         ? `<button class="btn pin" style="background:#6a1b9a" data-action="merge" title="Merge selected zones into one">⊕ Merge</button>`
         : "";
       const editBtn = this._config.mower_entity
-        ? `<button class="btn edit" data-action="edit">✏️ Edit</button>` : "";
+        ? `<button class="btn edit" data-action="edit" title="Edit zones [E]">✏️ Edit</button>` : "";
       const pinBtn = this._config.mower_entity
         ? `<button class="btn pin${this._pinAndGoMode ? " settings-active" : ""}" data-action="pin" title="Pin-and-go: double-tap map to send robot to point">📍</button>` : "";
       const schedBtn = this._config.schedule_entity
         ? `<button class="btn sched${this._scheduleOpen ? " settings-active" : ""}" data-action="sched" title="Mowing schedules">📅</button>` : "";
       const settingsBtn = this._config.mower_entity
         ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" data-action="settings" title="Mowing settings">⚙</button>` : "";
-      const expandBtn = `<button class="btn expand" data-action="expand" title="${this._expanded ? "Collapse" : "Expand"}">${this._expanded ? "⊠" : "⊞"}</button>`;
-      const resetBtn = `<button class="btn reset" data-action="reset" title="Reset zoom">⊡</button>`;
+      const expandBtn = `<button class="btn expand" data-action="expand" title="${this._expanded ? "Collapse [F]" : "Expand [F]"}">${this._expanded ? "⊠" : "⊞"}</button>`;
+      const resetBtn = `<button class="btn reset" data-action="reset" title="Reset zoom [R]">⊡</button>`;
       toolbar = `<div class="btn-row">${mowBtn}${mergeBtn}${editBtn}${pinBtn}${schedBtn}${settingsBtn}${expandBtn}${resetBtn}</div>`;
     }
 
@@ -719,6 +702,34 @@ class LymowMapCard extends HTMLElement {
             </select>
             <span class="sp-val"></span>
           </div>
+          <div class="sp-row" style="margin-top:6px;border-top:1px solid var(--divider-color,#444);padding-top:6px">
+            <label>Go-zone labels</label>
+            <select class="sp-input sp-select" data-field="go_label_mode" data-type="int">
+              <option value="0" ${this._goLabelMode === 0 ? "selected" : ""}>Name</option>
+              <option value="1" ${this._goLabelMode === 1 ? "selected" : ""}>Area</option>
+              <option value="2" ${this._goLabelMode === 2 ? "selected" : ""}>Both</option>
+              <option value="3" ${this._goLabelMode === 3 ? "selected" : ""}>None</option>
+            </select>
+            <span class="sp-val"></span>
+          </div>
+          <div class="sp-row">
+            <label>No-go labels</label>
+            <select class="sp-input sp-select" data-field="nogo_label_mode" data-type="int">
+              <option value="0" ${this._nogoLabelMode === 0 ? "selected" : ""}>Name</option>
+              <option value="1" ${this._nogoLabelMode === 1 ? "selected" : ""}>Area</option>
+              <option value="2" ${this._nogoLabelMode === 2 ? "selected" : ""}>Both</option>
+              <option value="3" ${this._nogoLabelMode === 3 ? "selected" : ""}>None</option>
+            </select>
+            <span class="sp-val"></span>
+          </div>
+          <div class="sp-row">
+            <label>Channel labels</label>
+            <select class="sp-input sp-select" data-field="ch_label_mode" data-type="int">
+              <option value="0" ${this._chLabelMode === 0 ? "selected" : ""}>Name</option>
+              <option value="3" ${this._chLabelMode === 3 ? "selected" : ""}>None</option>
+            </select>
+            <span class="sp-val"></span>
+          </div>
         </details>
         <div class="sp-row" style="margin-top:4px">
           <label>Cut height</label>
@@ -779,9 +790,9 @@ class LymowMapCard extends HTMLElement {
         .scale-bar-label { font-size: 10px; color: #333; background: rgba(255,255,255,0.7); padding: 0 2px; border-radius: 2px; white-space: nowrap; }
         .status-bar { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; flex-shrink: 0; }
         .status-chip { padding: 3px 7px; border-radius: 12px; font-size: 0.75em; font-weight: 600; color: white; white-space: nowrap; }
-        .btn-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; flex-shrink: 0; }
-        .btn { flex: 1; min-width: 70px; padding: 8px 6px; border: none; border-radius: 6px;
-               font-size: 0.83em; font-weight: 600; cursor: pointer; color: white; }
+        .btn-row { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; flex-shrink: 0; }
+        .btn { flex: 1; min-width: 0; padding: 6px 8px; border: none; border-radius: 6px;
+               font-size: clamp(0.65em, 2vw, 0.83em); font-weight: 600; cursor: pointer; color: white; white-space: nowrap; }
         .btn.mow, .btn.edit { background: var(--primary-color, #03a9f4); }
         .btn.save { background: #2e7d32; }
         .btn.rename { background: #6a1b9a; flex: 0; }
@@ -834,8 +845,8 @@ class LymowMapCard extends HTMLElement {
             <defs>${goLabelDefs}</defs>
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
+            ${channelLabels}
             ${goPaths}
-            ${mowStripOverlay}
             ${goLabels}
             ${nogoPaths}
             ${nogoLabels}
@@ -1426,12 +1437,17 @@ class LymowMapCard extends HTMLElement {
     if (!this._hass || !this._config.mower_entity) return;
     const inputs = this.shadowRoot.querySelectorAll(".sp-input");
     const payload = { entity_id: this._config.mower_entity };
+    const localFields = new Set(["go_label_mode", "nogo_label_mode", "ch_label_mode"]);
     inputs.forEach((el) => {
       const v = el.dataset.type === "float" ? parseFloat(el.value) : parseInt(el.value, 10);
-      payload[el.dataset.field] = v;
       if (!this._settingsValues) this._settingsValues = {};
       this._settingsValues[el.dataset.field] = v;
+      if (localFields.has(el.dataset.field)) return;
+      payload[el.dataset.field] = v;
     });
+    this._goLabelMode = this._settingsValues.go_label_mode ?? this._goLabelMode;
+    this._nogoLabelMode = this._settingsValues.nogo_label_mode ?? this._nogoLabelMode;
+    this._chLabelMode = this._settingsValues.ch_label_mode ?? this._chLabelMode;
     const status = this.shadowRoot.querySelector(".sp-status");
     if (status) status.textContent = "Sending…";
     try {
