@@ -576,20 +576,29 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
 def decode_robot_config(data: bytes) -> dict[str, Any]:
     """Decode a PbRobotConfig sub-message into a flat dict.
 
-    Field map from PbRobotConfig.encode (Hermes fn #9506 at offset 0x004a7ce8):
-    f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
-    f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
-    f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
-    f10 cmdCellularSwitch bool, f11 metric_4g bool.
+    Field map from PbRobotConfig.encode (Hermes fn #9506 at offset 0x004a7ce8).
+    Embedded sub-messages (f9 lcdPinCode — PIN, sensitive; f14 openLedTime,
+    f15 closeLedTime, f17 rtkBinding, f18 rrConfig) are omitted from this
+    decoder. ``f19 scheduleId`` / ``f20 schedulePathOffset`` are read but the
+    integration doesn't surface them as entities yet.
 
-    Untrusted wire data: only fields we read are decoded; unknown values are
-    left absent rather than coerced.
+    Untrusted wire data: only fields we read are decoded; missing fields are
+    left absent rather than coerced — so a partial response (e.g. just
+    metric_4g) doesn't clobber previously-decoded keys with False/0.
     """
     f = _decode_fields(data)
     out: dict[str, Any] = {}
     for field_no, name in (
+        (2, "rcCutSpeed"),
+        (3, "rcCutHeight"),
         (6, "audioVolume"),
         (8, "signal"),
+        (12, "camLedStatus"),
+        (13, "vehLedStatus"),
+        (16, "resumeBat"),
+        (19, "scheduleId"),
+        (20, "schedulePathOffset"),
+        (21, "timezoneOffset"),
     ):
         v = _first(f, field_no)
         if v is not None:
@@ -600,6 +609,7 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         (7, "isOpenLed"),
         (10, "cmdCellularSwitch"),
         (11, "metric_4g"),
+        (22, "dockOnError"),
     ):
         v = _first(f, field_no)
         if v is not None:

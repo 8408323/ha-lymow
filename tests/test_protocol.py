@@ -1829,6 +1829,40 @@ def test_decode_robot_config_bool_rcRaise_rcLower_fields() -> None:
     }
 
 
+def test_decode_robot_config_extended_int_fields_round_trip() -> None:
+    """Fields beyond the first slice (LEDs, timezone, schedule, rcCut*) must
+    also surface — they back the device-settings Number/Select entities."""
+    from lymow.protocol import decode_robot_config
+
+    cfg = (
+        _field_i32(2, 220)  # rcCutSpeed
+        + _field_i32(3, 50)  # rcCutHeight
+        + _field_i32(12, 2)  # camLedStatus (tri-state, auto)
+        + _field_i32(13, 1)  # vehLedStatus (tri-state, on)
+        + _field_i32(16, 35)  # resumeBat
+        + _field_i32(19, 7)  # scheduleId
+        + _field_i32(20, 0)  # schedulePathOffset
+        + _field_i32(21, 2)  # timezoneOffset (UTC+2)
+    )
+    assert decode_robot_config(cfg) == {
+        "rcCutSpeed": 220,
+        "rcCutHeight": 50,
+        "camLedStatus": 2,
+        "vehLedStatus": 1,
+        "resumeBat": 35,
+        "scheduleId": 7,
+        "schedulePathOffset": 0,
+        "timezoneOffset": 2,
+    }
+
+
+def test_decode_robot_config_dock_on_error_bool() -> None:
+    from lymow.protocol import decode_robot_config
+
+    assert decode_robot_config(_field_i32(22, 1)) == {"dockOnError": True}
+    assert decode_robot_config(_field_i32(22, 0)) == {"dockOnError": False}
+
+
 def test_decode_pboutput_surfaces_robot_config_under_robotConfig_key() -> None:
     # f17 = robotConfig sub-message; carry one bool and verify it round-trips
     pb = _build_pboutput(work_status=2) + _field_bytes(17, _field_i32(7, 1) + _field_i32(11, 0))
