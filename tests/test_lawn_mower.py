@@ -1267,6 +1267,60 @@ async def test_handle_set_task_config_unknown_entity_skips() -> None:
     coord.async_set_task_config.assert_not_called()
 
 
+async def test_handle_set_task_config_supports_float_and_bool_fields() -> None:
+    """move_speed is a float (m/s); raise/lower_cut_height + path_order +
+    line_follow_mode are bools — schema must coerce them correctly and pass
+    them through to the encoder with their PbTaskConfig camelCase names."""
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {
+            "move_speed": 0.4,
+            "raise_cut_height": True,
+            "lower_cut_height": False,
+            "path_order": True,
+            "line_follow_mode": True,
+            "clean_mode": 1,
+            "obs_dec_mode": 2,
+        },
+    )
+    await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_awaited_once_with(
+        "mower-001",
+        moveSpeed=0.4,
+        raiseCutHeight=True,
+        lowerCutHeight=False,
+        pathOrder=True,
+        lineFollowMode=True,
+        cleanMode=1,
+        obsDecMode=2,
+    )
+
+
+def test_set_task_config_schema_rejects_non_numeric_int_field() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_TASK_CONFIG_SCHEMA
+
+    with pytest.raises(vol_.Invalid):
+        _SET_TASK_CONFIG_SCHEMA({"entity_id": ["lawn_mower.x"], "cut_speed": "fast"})
+
+
+def test_set_task_config_schema_coerces_string_bool_to_python_bool() -> None:
+    """YAML-style "true"/"false" must reach the encoder as Python booleans —
+    the encoder writes a varint regardless, but cv.boolean is the canonical
+    input shape for downstream automations."""
+    from lymow.lawn_mower import _SET_TASK_CONFIG_SCHEMA
+
+    out = _SET_TASK_CONFIG_SCHEMA({"entity_id": ["lawn_mower.x"], "raise_cut_height": "true", "path_order": "false"})
+    assert out["raise_cut_height"] is True
+    assert out["path_order"] is False
+
+
 async def test_handle_set_run_time_config_maps_and_calls() -> None:
     coord = _make_coord()
     entry = MagicMock()

@@ -113,15 +113,30 @@ _CHARGING_MODE_CHOICES = {_service_label(name): value for value, name in CHARGIN
 _ZONE_ORDER_CHOICES = {_service_label(name): value for value, name in ZONE_ORDERS.items()}
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
-# subset of PbTaskConfig; the encoder supports more. All optional ints.
+# subset of PbTaskConfig; the encoder supports more. ``move_speed`` is a float
+# (m/s); the rest are ints. ``raise_cut_height``/``lower_cut_height`` and the
+# bool toggles (``path_order``/``line_follow_mode``) are coerced via cv.boolean
+# (see _TASK_CONFIG_BOOL_FIELDS below) and emitted as varints by the encoder.
 _TASK_CONFIG_SERVICE_FIELDS = {
+    "move_speed": "moveSpeed",
     "path_spacing": "pathSpacing",
     "perimeter_mow_laps": "perimeterMowLaps",
     "perimeter_mow_dir": "perimeterMowDir",
     "nogo_mow_laps": "noGoMowLaps",
     "cut_speed": "cutSpeed",
     "brush_speed": "brushSpeed",
+    "obs_dec_mode": "obsDecMode",
+    "clean_mode": "cleanMode",
+    "path_order": "pathOrder",
+    "line_follow_mode": "lineFollowMode",
+    "raise_cut_height": "raiseCutHeight",
+    "lower_cut_height": "lowerCutHeight",
 }
+# Service fields the encoder wants as floats rather than ints.
+_TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}
+# Bool-shaped service fields (the encoder still emits a varint, but the value
+# is conceptually true/false — coerce so YAML "true"/"false" works).
+_TASK_CONFIG_BOOL_FIELDS = {"path_order", "line_follow_mode", "raise_cut_height", "lower_cut_height"}
 
 # Service-field (snake_case) → PbRunTimeConfig field (camelCase) + safe numeric
 # bounds. Run-time config overrides settings on the currently-running task (vs
@@ -290,10 +305,21 @@ _RENAME_ZONE_SCHEMA = vol.Schema(
         vol.Required(_ATTR_NAME): cv.string,
     }
 )
+
+
+def _task_config_validator(field: str):
+    """Per-field schema validator: float / bool / int based on its semantic kind."""
+    if field in _TASK_CONFIG_FLOAT_FIELDS:
+        return vol.Coerce(float)
+    if field in _TASK_CONFIG_BOOL_FIELDS:
+        return cv.boolean
+    return vol.Coerce(int)
+
+
 _SET_TASK_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
-        **{vol.Optional(k): vol.Coerce(int) for k in _TASK_CONFIG_SERVICE_FIELDS},
+        **{vol.Optional(k): _task_config_validator(k) for k in _TASK_CONFIG_SERVICE_FIELDS},
     }
 )
 _SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
