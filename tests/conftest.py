@@ -24,6 +24,7 @@ def _load_lymow_module(name: str) -> None:
 
 # Pre-load modules that tests need so `from lymow.auth import ...` works.
 _load_lymow_module("const")
+_load_lymow_module("enums")
 _load_lymow_module("auth")
 _load_lymow_module("api")
 _load_lymow_module("mqtt")

@@ -230,10 +230,17 @@ set_task_config:
         number: { min: 0, max: 5, step: 1, mode: box }
     perimeter_mow_dir:
       name: Perimeter direction
-      description: Perimeter mowing direction code.
+      description: >
+        Direction the perimeter laps are mowed in. Values come from the app's
+        MOW_DIR enum (extracted from PbZoneConfig.fromObject): 0 = Clockwise,
+        1 = Counter-clockwise, 2 = Shuffle.
       example: 0
       selector:
-        number: { min: 0, max: 3, step: 1, mode: box }
+        select:
+          options:
+            - { value: "0", label: "Clockwise" }
+            - { value: "1", label: "Counter-clockwise" }
+            - { value: "2", label: "Shuffle" }
     nogo_mow_laps:
       name: No-go laps
       description: Number of laps around no-go zones.
