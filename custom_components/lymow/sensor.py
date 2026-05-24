@@ -366,6 +366,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowBackupMapsSensor(coordinator, device))
         entities.append(LymowSchedulesSensor(coordinator, device))
         entities.append(LymowLastCleanSensor(coordinator, device))
+        entities.append(LymowRobotTimezoneSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -757,3 +758,57 @@ class LymowLastCleanSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             if decorated:
                 attrs["error_list"] = decorated
         return attrs
+
+
+class LymowRobotTimezoneSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """The robot's configured timezone offset from UTC.
+
+    Reads ``PbRobotConfig.timezoneOffset`` (f21, signed int32 seconds east of
+    UTC — what the app's setTimezone (Hermes #9036) writes). Surfaces it as an
+    ``±HH:MM`` string and exposes ``offset_seconds`` / ``offset_hours`` for
+    automations that prefer numerics. Disabled by default because most users
+    only need the Sync Timezone button — this is for spotting drift between
+    the robot and HA.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:earth"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_robot_timezone"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Robot timezone"
+
+    @property
+    def _offset_seconds(self) -> int | None:
+        offset = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("timezoneOffset")
+        # The robot can plausibly land anywhere from UTC-12 to UTC+14 — bound
+        # the wire data so a corrupted pboutput can't surface a 200-hour
+        # offset. Also reject sub-minute resolution: real-world timezones are
+        # always whole minutes (no zone has a sub-minute offset), and the
+        # ±HH:MM format below would silently truncate stray seconds, so a
+        # corrupted payload like 5*3600+33 must report unknown instead.
+        if not isinstance(offset, int) or not -12 * 3600 <= offset <= 14 * 3600 or offset % 60 != 0:
+            return None
+        return offset
+
+    @property
+    def native_value(self) -> str | None:
+        seconds = self._offset_seconds
+        if seconds is None:
+            return None
+        sign = "-" if seconds < 0 else "+"
+        magnitude = abs(seconds)
+        hours, remainder = divmod(magnitude, 3600)
+        minutes = remainder // 60
+        return f"{sign}{hours:02d}:{minutes:02d}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        seconds = self._offset_seconds
+        if seconds is None:
+            return None
+        return {"offset_seconds": seconds, "offset_hours": round(seconds / 3600, 2)}
