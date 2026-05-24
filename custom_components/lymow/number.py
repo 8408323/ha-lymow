@@ -27,6 +27,8 @@ async def async_setup_entry(
     # One geofence-radius number per device (geoFence is a feature-level field).
     radius_entities: list[NumberEntity] = [GeofenceRadiusNumber(coordinator, device) for device in coordinator.devices]
     radius_entities.extend(RtkPauseThresholdNumber(coordinator, device) for device in coordinator.devices)
+    radius_entities.extend(AudioVolumeNumber(coordinator, device) for device in coordinator.devices)
+    radius_entities.extend(TimezoneOffsetNumber(coordinator, device) for device in coordinator.devices)
     if radius_entities:
         async_add_entities(radius_entities)
 
@@ -134,6 +136,69 @@ class ZoneCutHeightNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_update_zone_cut_height(self._thing_name, self._hash_id, int(value))
+
+
+class _RobotConfigNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
+    """Numeric device-settings entity backed by a PbRobotConfig int field.
+
+    State comes from PbOutput.robotConfig (decoded into
+    coordinator.data[thing]["robotConfig"]). For fields the decoder doesn't
+    yet surface, every successful write is also mirrored into that dict so
+    the entity shows the value the user just set — ``unavailable`` only
+    until the first write or PbOutput round-trip carrying the field.
+    """
+
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.BOX
+    _robot_config_key: str = ""
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, icon: str) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_{self._robot_config_key}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = name
+        self._attr_icon = icon
+
+    @property
+    def available(self) -> bool:
+        config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
+        return self._robot_config_key in config
+
+    @property
+    def native_value(self) -> float | None:
+        config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
+        val = config.get(self._robot_config_key)
+        return float(val) if val is not None else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_robot_config(self._thing_name, **{self._robot_config_key: int(value)})
+
+
+class AudioVolumeNumber(_RobotConfigNumber):
+    """Robot speaker volume (0–100)."""
+
+    _robot_config_key = "audioVolume"
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Volume", "mdi:volume-high")
+
+
+class TimezoneOffsetNumber(_RobotConfigNumber):
+    """Robot timezone offset in whole hours from UTC (-12 to 14)."""
+
+    _robot_config_key = "timezoneOffset"
+    _attr_native_min_value = -12
+    _attr_native_max_value = 14
+    _attr_native_step = 1
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Timezone offset", "mdi:timezone")
 
 
 class RtkPauseThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):

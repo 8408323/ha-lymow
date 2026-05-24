@@ -35,6 +35,8 @@ async def async_setup_entry(
                 AlertsOnlySwitch(coordinator, device),
                 VehicleLedSwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
+                DockOnErrorSwitch(coordinator, device),
+                CellularRadioSwitch(coordinator, device),
             ]
         )
     if feature_entities:
@@ -268,6 +270,28 @@ class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         await self.coordinator.async_update_zone_enabled(self._thing_name, self._hash_id, False)
+
+
+class DockOnErrorSwitch(_RobotConfigBoolSwitch):
+    """Return to dock automatically when the robot reports an error."""
+
+    _config_key = "dockOnError"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Dock on error", "mdi:alert-circle-check-outline")
+
+
+class CellularRadioSwitch(_RobotConfigBoolSwitch):
+    """Master cellular radio toggle. The LTE airplane-mode button toggles the
+    same hardware but via a different userCtrl — this switch is for setting an
+    explicit on/off state (e.g. in an automation), not pulsing it."""
+
+    _config_key = "cmdCellularSwitch"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Cellular radio", "mdi:signal-cellular-3")
 
 
 class RtkAutoPauseSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):

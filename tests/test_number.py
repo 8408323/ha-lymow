@@ -355,3 +355,88 @@ async def test_async_setup_entry_registers_rtk_threshold_per_device() -> None:
 
     threshold_entities = [e for e in added if isinstance(e, RtkPauseThresholdNumber)]
     assert len(threshold_entities) == 1
+
+
+# ---------------------------------------------------------------------------
+# AudioVolumeNumber / TimezoneOffsetNumber — PbRobotConfig optimistic state
+# ---------------------------------------------------------------------------
+
+
+def _make_robot_config_coord(robot_config: dict | None = None) -> MagicMock:
+    """Decoder lands robot-config state under data[thing]["robotConfig"]."""
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {"robotConfig": dict(robot_config)} if robot_config is not None else {}}
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    coord.async_set_robot_config = AsyncMock()
+    coord.async_set_geofence_radius = AsyncMock()
+    coord.get_rtk_guard_threshold = MagicMock(return_value=2)
+    return coord
+
+
+def test_audio_volume_unavailable_until_first_write() -> None:
+    from lymow.number import AudioVolumeNumber
+
+    coord = _make_robot_config_coord({})
+    e = AudioVolumeNumber(coord, DEVICE)
+    assert e.available is False
+    assert e.native_value is None
+    assert e._attr_unique_id == f"{THING}_audioVolume"
+
+
+def test_audio_volume_reflects_cached_state() -> None:
+    from lymow.number import AudioVolumeNumber
+
+    coord = _make_robot_config_coord({"audioVolume": 70})
+    e = AudioVolumeNumber(coord, DEVICE)
+    assert e.available is True
+    assert e.native_value == 70.0
+
+
+async def test_audio_volume_set_writes_robot_config() -> None:
+    from lymow.number import AudioVolumeNumber
+
+    coord = _make_robot_config_coord({})
+    e = AudioVolumeNumber(coord, DEVICE)
+    await e.async_set_native_value(85)
+    coord.async_set_robot_config.assert_awaited_once_with(THING, audioVolume=85)
+
+
+def test_timezone_offset_reflects_cached_state() -> None:
+    from lymow.number import TimezoneOffsetNumber
+
+    coord = _make_robot_config_coord({"timezoneOffset": 2})
+    e = TimezoneOffsetNumber(coord, DEVICE)
+    assert e.available is True
+    assert e.native_value == 2.0
+    assert e._attr_unique_id == f"{THING}_timezoneOffset"
+
+
+async def test_timezone_offset_set_writes_robot_config() -> None:
+    from lymow.number import TimezoneOffsetNumber
+
+    coord = _make_robot_config_coord({})
+    e = TimezoneOffsetNumber(coord, DEVICE)
+    await e.async_set_native_value(-3)
+    coord.async_set_robot_config.assert_awaited_once_with(THING, timezoneOffset=-3)
+
+
+async def test_async_setup_entry_registers_robot_config_numbers() -> None:
+    from lymow.const import DOMAIN
+    from lymow.number import AudioVolumeNumber, TimezoneOffsetNumber
+
+    coord = _make_robot_config_coord({})
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    types = {type(e).__name__ for e in added}
+    assert "AudioVolumeNumber" in types
+    assert "TimezoneOffsetNumber" in types
+    # Sanity-check there's exactly one of each per device
+    assert sum(isinstance(e, AudioVolumeNumber) for e in added) == 1
+    assert sum(isinstance(e, TimezoneOffsetNumber) for e in added) == 1

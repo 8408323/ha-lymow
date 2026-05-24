@@ -352,6 +352,32 @@ async def test_async_set_robot_config_publishes_metric_4g_without_userctrl() -> 
     assert _first(cfg, 11) == 1  # metric_4g
 
 
+@pytest.mark.asyncio
+async def test_async_set_robot_config_mirrors_write_into_robot_config_dict() -> None:
+    """Optimistic state: a successful write also lands in
+    self.data[thing]["robotConfig"] so entities don't have to wait for the
+    PbOutput.robotConfig decoder to surface the field they care about."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"robotConfig": {"isOpenLed": True}}}
+    await coord.async_set_robot_config(THING, audioVolume=80, dockOnError=True)
+    # Existing decoder-sourced keys (isOpenLed) are preserved, new keys added
+    assert coord.data[THING]["robotConfig"] == {
+        "isOpenLed": True,
+        "audioVolume": 80,
+        "dockOnError": True,
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_set_robot_config_skips_mirror_when_thing_not_in_data() -> None:
+    """No-op on the optimistic merge if the coordinator hasn't seen the device
+    yet — the write still goes out, but self.data isn't seeded prematurely."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {}
+    await coord.async_set_robot_config(THING, audioVolume=80)
+    assert THING not in coord.data
+
+
 # ---------------------------------------------------------------------------
 # MQTT online callback
 # ---------------------------------------------------------------------------

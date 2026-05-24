@@ -594,3 +594,92 @@ async def test_rtk_auto_pause_switch_turn_off_toggles_coordinator() -> None:
     e.async_write_ha_state = MagicMock()
     await e.async_turn_off()
     coord.set_rtk_guard_enabled.assert_called_once_with(THING, False)
+
+
+# ---------------------------------------------------------------------------
+# DockOnErrorSwitch / CellularRadioSwitch — PbRobotConfig optimistic state
+# ---------------------------------------------------------------------------
+
+
+def _make_robot_config_switch_coord(robot_config: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {"robotConfig": dict(robot_config)} if robot_config is not None else {}}
+    coord.async_set_device_feature = AsyncMock()
+    coord.async_set_robot_config = AsyncMock()
+    coord.async_update_zone_enabled = AsyncMock()
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    coord.is_rtk_guard_enabled = MagicMock(return_value=False)
+    return coord
+
+
+def test_dock_on_error_switch_unknown_until_first_state() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    coord = _make_robot_config_switch_coord(None)
+    e = DockOnErrorSwitch(coord, DEVICE)
+    # Matches the upstream _RobotConfigBoolSwitch pattern: no `available`
+    # override, just an `is_on` that returns None when state is missing.
+    assert e.is_on is None
+    assert e._attr_unique_id == f"{THING}_dockOnError"
+
+
+def test_dock_on_error_switch_reflects_cached_state() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    coord = _make_robot_config_switch_coord({"dockOnError": True})
+    e = DockOnErrorSwitch(coord, DEVICE)
+    assert e.is_on is True
+
+
+def test_dock_on_error_switch_off_when_cached_false() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    coord = _make_robot_config_switch_coord({"dockOnError": False})
+    e = DockOnErrorSwitch(coord, DEVICE)
+    assert e.is_on is False
+
+
+async def test_dock_on_error_switch_turn_on_writes_robot_config() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    coord = _make_robot_config_switch_coord(None)
+    e = DockOnErrorSwitch(coord, DEVICE)
+    await e.async_turn_on()
+    coord.async_set_robot_config.assert_awaited_once_with(THING, dockOnError=True)
+
+
+async def test_dock_on_error_switch_turn_off_writes_robot_config() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    coord = _make_robot_config_switch_coord({"dockOnError": True})
+    e = DockOnErrorSwitch(coord, DEVICE)
+    await e.async_turn_off()
+    coord.async_set_robot_config.assert_awaited_once_with(THING, dockOnError=False)
+
+
+async def test_cellular_radio_switch_turn_on_writes_robot_config() -> None:
+    from lymow.switch import CellularRadioSwitch
+
+    coord = _make_robot_config_switch_coord(None)
+    e = CellularRadioSwitch(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_cmdCellularSwitch"
+    await e.async_turn_on()
+    coord.async_set_robot_config.assert_awaited_once_with(THING, cmdCellularSwitch=True)
+
+
+async def test_async_setup_entry_creates_robot_config_switches() -> None:
+    from lymow.const import DOMAIN
+
+    coord = _make_robot_config_switch_coord({})
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    types = {type(e).__name__ for e in added}
+    assert "DockOnErrorSwitch" in types
+    assert "CellularRadioSwitch" in types
