@@ -1905,6 +1905,80 @@ def test_decode_pboutput_no_robotConfig_key_when_field17_absent() -> None:
     assert "robotConfig" not in decode_pboutput(_build_pboutput(work_status=1))
 
 
+# ---------------------------------------------------------------------------
+# decode_rr_config (PbRobotConfig.rrConfig — Recharge & Resume)
+# ---------------------------------------------------------------------------
+
+
+def _rr_period(hour: int, minute: int) -> bytes:
+    return _field_i32(1, hour) + _field_i32(2, minute)
+
+
+def test_decode_rr_config_all_fields_round_trip() -> None:
+    from lymow.protocol import decode_rr_config
+
+    rr = (
+        _field_i32(1, 1)
+        + _field_bytes(2, _rr_period(4, 0))
+        + _field_bytes(3, _rr_period(20, 30))
+        + _field_i32(4, 15)
+        + _field_i32(5, 75)
+    )
+    assert decode_rr_config(rr) == {
+        "enable": True,
+        "periodStart": {"hour": 4, "minute": 0},
+        "periodEnd": {"hour": 20, "minute": 30},
+        "rechargeBat": 15,
+        "resumeBat": 75,
+    }
+
+
+def test_decode_rr_config_empty_returns_empty_dict() -> None:
+    from lymow.protocol import decode_rr_config
+
+    assert decode_rr_config(b"") == {}
+
+
+def test_decode_rr_config_drops_non_boolean_enable_and_out_of_range_values() -> None:
+    """Untrusted wire data: drop bool-shaped fields that aren't 0/1, drop
+    battery % outside 0-100, and drop time-of-day outside 0-23 / 0-59."""
+    from lymow.protocol import decode_rr_config
+
+    assert decode_rr_config(_field_i32(1, 2)) == {}
+    assert decode_rr_config(_field_i32(4, 150) + _field_i32(5, -1)) == {}
+    assert decode_rr_config(_field_bytes(2, _rr_period(24, 0))) == {}
+    assert decode_rr_config(_field_bytes(3, _rr_period(0, 60))) == {}
+
+
+def test_decode_rr_config_skips_period_with_missing_minute() -> None:
+    from lymow.protocol import decode_rr_config
+
+    # Period sub-message with only hour set — minute None means we can't
+    # safely reconstruct an HH:MM, so the period must drop entirely.
+    pb = _field_bytes(2, _field_i32(1, 9))
+    assert decode_rr_config(pb) == {}
+
+
+def test_decode_robot_config_surfaces_rr_config_under_rrConfig_key() -> None:
+    from lymow.protocol import decode_robot_config
+
+    rr = _field_i32(1, 1) + _field_i32(4, 20) + _field_i32(5, 80)
+    out = decode_robot_config(_field_i32(7, 1) + _field_bytes(18, rr))
+    assert out == {
+        "isOpenLed": True,
+        "rrConfig": {"enable": True, "rechargeBat": 20, "resumeBat": 80},
+    }
+
+
+def test_decode_robot_config_drops_empty_rrConfig() -> None:
+    """If PbRobotConfig.f18 is present but the sub-message has no valid
+    fields, don't surface an empty rrConfig dict."""
+    from lymow.protocol import decode_robot_config
+
+    out = decode_robot_config(_field_bytes(18, _field_i32(1, 2)))
+    assert "rrConfig" not in out
+
+
 def test_encode_set_task_config_wraps_in_pbinput() -> None:
     from lymow.protocol import encode_set_task_config
 

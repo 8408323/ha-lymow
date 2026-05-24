@@ -331,6 +331,7 @@ except ImportError:
 
     class _NumberDeviceClass(str, enum.Enum):
         DISTANCE = "distance"
+        BATTERY = "battery"
 
     class _NumberMode(str, enum.Enum):
         BOX = "box"
