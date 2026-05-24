@@ -763,8 +763,9 @@ def decode_clean_report(data: bytes) -> dict[str, Any]:
       f1 cleanStartTime (varint, unix seconds — Long on the wire),
       f2 cleanInfo PbCleanInfo (skipped here — already decoded for live session),
       f3 mowEndType enum (0=MOW_END_NONE, 1=MOW_END_100, 2=MOW_END_USER_CANCEL),
-      f4 errorList repeated (skipped — needs PbErrorList sub-decode),
-      f5 statusTimes repeated (skipped — needs PbStatusTime sub-decode),
+      f4 errorList repeated PbErrorList (skipped — needs PbErrorList sub-decode),
+      f5 statusTimes packed repeated int32 — seconds spent in each workStatus,
+                     indexed by the enum value (array[i] = seconds at status i),
       f6 usedBattery (varint int32, percent).
 
     Only present-fields surface so a partial payload doesn't clobber state.
@@ -781,6 +782,13 @@ def decode_clean_report(data: bytes) -> dict[str, Any]:
     end_type = _first(f, 3)
     if isinstance(end_type, int) and 0 <= end_type <= 2:
         out["mowEndType"] = end_type
+    status_times_raw = _first(f, 5)
+    if isinstance(status_times_raw, bytes) and status_times_raw:
+        # Bound: cap individual durations at one year of seconds so a
+        # misaligned varint can't surface a wildly negative or absurdly
+        # large value into the sensor attributes.
+        decoded = _decode_packed_int32s(status_times_raw)
+        out["statusTimes"] = [s for s in decoded if 0 <= s <= 31_536_000]
     used = _first(f, 6)
     if isinstance(used, int) and 0 <= used <= 100:
         out["usedBattery"] = used

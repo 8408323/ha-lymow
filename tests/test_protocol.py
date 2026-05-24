@@ -2066,6 +2066,32 @@ def test_decode_clean_report_empty_returns_empty_dict() -> None:
     assert decode_clean_report(b"") == {}
 
 
+def test_decode_clean_report_status_times_packed_int32() -> None:
+    """PbCleanReport.f5 is a packed repeated int32 — seconds per workStatus
+    indexed by enum value. Verified against the encoder's int32+ldelim pattern."""
+    from lymow.protocol import _encode_varint, _field_bytes, decode_clean_report
+
+    # Three statuses: 120s, 0s, 60s
+    packed = _encode_varint(120) + _encode_varint(0) + _encode_varint(60)
+    assert decode_clean_report(_field_bytes(5, packed))["statusTimes"] == [120, 0, 60]
+
+
+def test_decode_clean_report_status_times_drops_out_of_range() -> None:
+    """Bound each duration at one year of seconds so a misaligned varint
+    can't surface a wildly large 64-bit value as a sensor attribute."""
+    from lymow.protocol import _encode_varint, _field_bytes, decode_clean_report
+
+    packed = _encode_varint(100) + _encode_varint(31_536_001) + _encode_varint(200)
+    assert decode_clean_report(_field_bytes(5, packed))["statusTimes"] == [100, 200]
+
+
+def test_decode_clean_report_status_times_absent_when_empty_bytes() -> None:
+    """A zero-length f5 has no entries — don't surface an empty list."""
+    from lymow.protocol import _field_bytes, decode_clean_report
+
+    assert "statusTimes" not in decode_clean_report(_field_bytes(5, b""))
+
+
 def test_decode_pboutput_surfaces_clean_report_under_cleanReport_key() -> None:
     pb = _build_pboutput(work_status=2) + _field_bytes(28, _field_i32(1, 1_700_000_000) + _field_i32(3, 2))
     assert decode_pboutput(pb)["cleanReport"] == {"cleanStartTime": 1_700_000_000, "mowEndType": 2}
