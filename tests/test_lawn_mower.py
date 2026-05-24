@@ -766,6 +766,21 @@ _QUERY_SERVICE_METHODS = [
 ]
 
 
+def test_every_registered_query_service_is_documented_in_services_yaml() -> None:
+    """Drift guard: every entry in _QUERY_SERVICES must appear in services.yaml
+    so the HA UI's service picker renders a label and description rather than
+    a bare service ID with no metadata."""
+    import re
+    from pathlib import Path
+
+    yaml_path = Path(__file__).parent.parent / "custom_components" / "lymow" / "services.yaml"
+    # Top-level keys in the YAML are column-0 identifiers ending with a colon;
+    # no full YAML parser needed (HA's services.yaml is flat at the top level).
+    documented = set(re.findall(r"^([a-z_][a-z0-9_]*):", yaml_path.read_text(), re.MULTILINE))
+    missing = {svc for svc, _ in _QUERY_SERVICE_METHODS} - documented
+    assert not missing, f"services.yaml missing documentation for: {sorted(missing)}"
+
+
 @pytest.mark.parametrize(("service_name", "method_name"), _QUERY_SERVICE_METHODS)
 async def test_query_service_calls_matching_coordinator_method(service_name: str, method_name: str) -> None:
     from lymow.const import DOMAIN

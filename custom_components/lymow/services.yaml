@@ -747,3 +747,107 @@ resume:
     entity:
       integration: lymow
       domain: lawn_mower
+
+query_cleaning_info:
+  name: Query current cleaning info
+  description: >
+    Request the robot's per-session cleaning info (USER_CTRL_QUERY_CLEANING_INFO=24).
+    The reply populates the live PbCleanInfo sensors (Mow time remaining, Total
+    map area, etc.). Fire-and-forget — values arrive via the next pboutput.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_cleaning_summary:
+  name: Query last cleaning summary
+  description: >
+    Request the last session's summary (USER_CTRL_QUERY_CLEANING_SUMMARY=34).
+    Populates sensor.last_mow_session (start time, end-type, battery used,
+    per-status time breakdown).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_robot_config:
+  name: Query robot configuration
+  description: >
+    Request a full PbRobotConfig readback (USER_CTRL_QUERY_ROBOT_CONFIG=35).
+    Refreshes the cached robotConfig dict (audio volume, LED state,
+    Recharge & Resume thresholds, etc.).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_path:
+  name: Query historical path
+  description: >
+    Request the robot's historical mowing path (USER_CTRL_QUERY_PATH=23).
+    Decode not yet implemented — payload is logged for future analysis.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_channels:
+  name: Query channels
+  description: >
+    Request the channel (corridor between zones) list (USER_CTRL_QUERY_CHANNELS=39).
+    Refreshes mapData.channels with the current channel polygons.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_run_time_config:
+  name: Query live runtime config
+  description: >
+    Request the live PbRunTimeConfig (USER_CTRL_QUERY_RUN_TIME_CONFIG=51) —
+    the in-flight cut height / move speed / cut speed overrides. Reply decode
+    is not yet implemented; this is a fire-and-forget probe.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_wifi_4g:
+  name: Query Wi-Fi / 4G status
+  description: >
+    Request the Wi-Fi / 4G status (USER_CTRL_QUERY_WIFI_4G=52). Reply decode
+    is not yet implemented (SSID / SIM data needs PII redaction first).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_net_detail:
+  name: Query network details
+  description: >
+    Request detailed network info (USER_CTRL_QUERY_NET_DETAIL=53). Reply decode
+    is not yet implemented; see query_wifi_4g notes.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_rtk_diagnostic_l1:
+  name: Query RTK diagnostic L1
+  description: >
+    Request RTK level-1 diagnostic (USER_CTRL_QUERY_RTK_DIAGNOSTIC_L1=57).
+    Reply decode is not yet implemented; raw bytes are logged.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
+query_rtk_diagnostic_l2:
+  name: Query RTK diagnostic L2
+  description: >
+    Request RTK level-2 diagnostic (USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2=58).
+    Reply decode is not yet implemented; raw bytes are logged.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
