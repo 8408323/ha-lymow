@@ -59,8 +59,8 @@ class LymowMapCard extends HTMLElement {
     this._nogoOverrides = {};
     this._nameOverrides = {}; // optimistic rename until next MQTT update
 
-    // Draw new zone state
-    this._drawingZone = null; // "go" | "nogo" | null
+    // Draw new zone/channel state
+    this._drawingZone = null; // "go" | "nogo" | "channel" | null
     this._drawPoly = null;    // array of {x,y} ENU points being drawn
     this._longPressTimer = null; // for zone enable/disable long-press
     this._pinAndGoMode = false; // double-click sends robot to point
@@ -251,7 +251,7 @@ class LymowMapCard extends HTMLElement {
     const TOTAL_W = (b.maxX - b.minX) * sc;
     const TOTAL_H = (b.maxY - b.minY) * sc;
     const fontSz = Math.max(1.2, Math.min(3, TOTAL_W / 25)).toFixed(2);
-    const nodeR = Math.max(0.8, TOTAL_W / 70).toFixed(2);
+    const nodeR = Math.max(1.2, TOTAL_W / 50).toFixed(2); // larger for touch friendliness
 
     // Zoom factor: >1 means zoomed in, <1 means zoomed out.
     // We use 1/zf as SVG scale for fixed-pixel markers so they appear constant size.
@@ -340,16 +340,17 @@ class LymowMapCard extends HTMLElement {
     if (this._drawingZone && this._drawPoly && this._drawPoly.length > 0) {
       const dp = this._drawPoly;
       const pts = dp.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
-      const drawColor = this._drawingZone === "nogo" ? "#ff5252" : "#66bb6a";
-      const polyEl = dp.length >= 3
-        ? `<polygon points="${pts}" fill="${drawColor}33" stroke="${drawColor}" stroke-width="0.5" stroke-dasharray="2,1" pointer-events="none"/>`
-        : `<polyline points="${pts}" fill="none" stroke="${drawColor}" stroke-width="0.5" stroke-dasharray="2,1" pointer-events="none"/>`;
-      // Vertex dots
+      const isChannel = this._drawingZone === "channel";
+      const drawColor = this._drawingZone === "nogo" ? "#ff5252" : isChannel ? "#1565c0" : "#66bb6a";
+      const polyEl = isChannel
+        ? `<polyline points="${pts}" fill="none" stroke="${drawColor}" stroke-width="0.5" stroke-dasharray="3,1.5" pointer-events="none"/>`
+        : dp.length >= 3
+          ? `<polygon points="${pts}" fill="${drawColor}33" stroke="${drawColor}" stroke-width="0.5" stroke-dasharray="2,1" pointer-events="none"/>`
+          : `<polyline points="${pts}" fill="none" stroke="${drawColor}" stroke-width="0.5" stroke-dasharray="2,1" pointer-events="none"/>`;
       const dots = dp.map((p, i) => {
-        const r = i === 0 ? (parseFloat(nodeR) * 1.4).toFixed(2) : nodeR;
-        const fill = i === 0 ? drawColor : "white";
-        const stroke = drawColor;
-        return `<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="0.4" pointer-events="none"/>`;
+        const r = i === 0 && !isChannel ? (parseFloat(nodeR) * 1.4).toFixed(2) : nodeR;
+        const fill = i === 0 && !isChannel ? drawColor : "white";
+        return `<circle cx="${sx(p.x)}" cy="${sy(p.y)}" r="${r}" fill="${fill}" stroke="${drawColor}" stroke-width="0.4" pointer-events="none"/>`;
       }).join("");
       drawOverlay = polyEl + dots;
     }
@@ -379,6 +380,42 @@ class LymowMapCard extends HTMLElement {
             fill="#ef6c00" stroke="white" stroke-width="0.35" style="cursor:grab"/>${delBadge}`;
       }).join("\n");
       editOverlay = workOutline + midpoints + verts;
+    }
+
+    // ── Mow strip overlay ─────────────────────────────────────────────────────
+    // Generates parallel strip lines inside each go-zone using the zone's path
+    // spacing (default 0.18 m = 18 cm). Only shown when not editing.
+    let mowStripOverlay = "";
+    if (!this._editing) {
+      const stripLines = goZones.flatMap((z) => {
+        if (!z.polygon || z.polygon.length < 3 || z.isEnabled === false) return [];
+        const poly = z.polygon;
+        const spacing = z.pathSpacing || 0.18;
+        const minX = Math.min(...poly.map(p => p.x));
+        const maxX = Math.max(...poly.map(p => p.x));
+        const minY = Math.min(...poly.map(p => p.y));
+        const maxY = Math.max(...poly.map(p => p.y));
+        const lines = [];
+        // Walk parallel horizontal strips from minY to maxY
+        for (let y = minY + spacing / 2; y <= maxY; y += spacing) {
+          // Clip each horizontal scanline to the polygon using ray-intersect
+          const xs = [];
+          for (let i = 0; i < poly.length; i++) {
+            const a = poly[i], b = poly[(i + 1) % poly.length];
+            if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) {
+              xs.push(a.x + (y - a.y) / (b.y - a.y) * (b.x - a.x));
+            }
+          }
+          xs.sort((a, b) => a - b);
+          for (let j = 0; j + 1 < xs.length; j += 2) {
+            const x1 = Math.max(xs[j], minX), x2 = Math.min(xs[j + 1], maxX);
+            if (x2 > x1)
+              lines.push(`<line x1="${sx(x1)}" y1="${sy(y)}" x2="${sx(x2)}" y2="${sy(y)}" stroke="#388e3c" stroke-width="0.1" opacity="0.35" pointer-events="none"/>`);
+          }
+        }
+        return lines;
+      });
+      mowStripOverlay = stripLines.join("\n");
     }
 
     // ── Charging station (fixed pixel size via inverse-zoom scale) ────────────
@@ -459,9 +496,14 @@ class LymowMapCard extends HTMLElement {
       } else {
         if (this._drawingZone) {
           const drawPts = this._drawPoly?.length ?? 0;
-          editMsg = `Drawing ${this._drawingZone} zone — click to add points (${drawPts} so far). Click first point to close.`;
+          const isChannel = this._drawingZone === "channel";
+          const minPts = isChannel ? 2 : 3;
+          const hint = isChannel
+            ? `Drawing channel — click to add points (${drawPts} so far). Press Save when done.`
+            : `Drawing ${this._drawingZone} zone — click to add points (${drawPts} so far). Click first point to close.`;
+          editMsg = hint;
           editActions = `
-            ${drawPts >= 3 ? `<button class="btn save" data-action="save-draw">💾 Save zone</button>` : ""}
+            ${drawPts >= minPts ? `<button class="btn save" data-action="save-draw">💾 Save</button>` : ""}
             <button class="btn cancel" data-action="cancel-draw">✕ Cancel</button>`;
         } else {
           const msg = this._editHash
@@ -472,8 +514,9 @@ class LymowMapCard extends HTMLElement {
             ${this._editHash ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
             ${this._editHash && this._editType === "go" ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
             ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete this zone permanently">🗑 Delete</button>` : ""}
-            ${!this._editHash ? `<button class="btn pin" data-action="draw-go" title="Click points on map to draw a new go-zone">＋ Go-zone</button>` : ""}
-            ${!this._editHash ? `<button class="btn cancel" data-action="draw-nogo" title="Click points on map to draw a new no-go zone">＋ No-go</button>` : ""}
+            ${!this._editHash ? `<button class="btn pin" data-action="draw-go" title="Draw a new go-zone">＋ Go-zone</button>` : ""}
+            ${!this._editHash ? `<button class="btn cancel" data-action="draw-nogo" title="Draw a new no-go zone">＋ No-go</button>` : ""}
+            ${!this._editHash ? `<button class="btn pin" style="background:#1565c0" data-action="draw-channel" title="Draw a new channel between zones">＋ Channel</button>` : ""}
             <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
         }
       }
@@ -719,6 +762,7 @@ class LymowMapCard extends HTMLElement {
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
             ${goPaths}
+            ${mowStripOverlay}
             ${goLabels}
             ${nogoPaths}
             ${nogoLabels}
@@ -890,6 +934,7 @@ class LymowMapCard extends HTMLElement {
           case "delete-zone":       this._deleteEditZone(); break;
           case "draw-go":           this._startDraw("go"); break;
           case "draw-nogo":         this._startDraw("nogo"); break;
+          case "draw-channel":      this._startDraw("channel"); break;
           case "save-draw":         this._saveDraw(); break;
           case "cancel-draw":       this._cancelDraw(); break;
         }
@@ -943,15 +988,15 @@ class LymowMapCard extends HTMLElement {
       svg.addEventListener("dblclick", (e) => { e.stopPropagation(); this._onPinAndGo(e); });
     }
 
-    // Draw mode: left-click adds points; click first point closes polygon
+    // Draw mode: left-click adds points; click first point closes polygon (not for channels)
     if (this._drawingZone) {
       svg.style.cursor = "crosshair";
       svg.addEventListener("click", (e) => {
         if (this._panMoved) return;
         const enu = this._clientToEnu(e);
         if (!enu) return;
-        // Check if clicking close to the first point to close polygon
-        if (this._drawPoly && this._drawPoly.length >= 3) {
+        // For zones: clicking near first point closes and saves
+        if (this._drawingZone !== "channel" && this._drawPoly && this._drawPoly.length >= 3) {
           const first = this._drawPoly[0];
           const dx = parseFloat(this._sx(enu.x)) - parseFloat(this._sx(first.x));
           const dy = parseFloat(this._sy(enu.y)) - parseFloat(this._sy(first.y));
@@ -1336,22 +1381,34 @@ class LymowMapCard extends HTMLElement {
   }
 
   async _saveDraw() {
-    if (!this._hass || !this._config.mower_entity || !this._drawPoly || this._drawPoly.length < 3) return;
+    const minPts = this._drawingZone === "channel" ? 2 : 3;
+    if (!this._hass || !this._config.mower_entity || !this._drawPoly || this._drawPoly.length < minPts) return;
     const polygon = this._drawPoly.map((p) => ({ x: +p.x.toFixed(4), y: +p.y.toFixed(4) }));
     const type = this._drawingZone;
     this._cancelDraw();
     const bar = this.shadowRoot.querySelector(".edit-bar");
     if (bar) bar.textContent = "Saving…";
     try {
-      await this._hass.callService("lymow", "add_zone", {
-        entity_id: this._config.mower_entity,
-        polygon,
-        cut_height_mm: 40,
-        // type field carries go/nogo intent once backend supports it
-        ...(type === "nogo" ? { name: "No-go zone" } : {}),
-      });
+      if (type === "nogo") {
+        await this._hass.callService("lymow", "add_nogo_zone", {
+          entity_id: this._config.mower_entity,
+          polygon,
+        });
+      } else if (type === "channel") {
+        await this._hass.callService("lymow", "add_channel", {
+          entity_id: this._config.mower_entity,
+          polygon,
+          cut_height_mm: 40,
+        });
+      } else {
+        await this._hass.callService("lymow", "add_zone", {
+          entity_id: this._config.mower_entity,
+          polygon,
+          cut_height_mm: 40,
+        });
+      }
     } catch (err) {
-      console.error("lymow-map-card: add zone failed", err);
+      console.error("lymow-map-card: add zone/channel failed", err);
       if (bar) bar.textContent = `⚠️ ${err?.message || err}`;
     }
   }
