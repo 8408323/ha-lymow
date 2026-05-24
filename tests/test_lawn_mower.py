@@ -1384,8 +1384,15 @@ def test_set_recharge_resume_schema_parses_time_strings_and_bounds() -> None:
     assert parsed["period_start"] == (8, 30)
     assert parsed["recharge_bat"] == 15
 
-    # Bad time formats — covers all three guards (no colon, non-int, out-of-range).
-    for bad_time in ("8", "abc:de", "8:60", "24:00", "not-a-time", ""):
+    # Whitespace and single-digit hour both accepted, per the docstring.
+    assert _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "period_start": " 9:05 "})["period_start"] == (
+        9,
+        5,
+    )
+
+    # Bad time formats — covers all three guards (no colon, non-int, out-of-range)
+    # plus non-string input (e.g. an int) which must raise instead of silently parsing.
+    for bad_time in ("8", "abc:de", "8:60", "24:00", "not-a-time", "", 900):
         with pytest.raises(vol_.Invalid):
             _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "period_start": bad_time})
 

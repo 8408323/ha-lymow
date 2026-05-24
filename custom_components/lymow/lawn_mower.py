@@ -141,14 +141,17 @@ def _to_day_int(value: Any) -> int:
 
 
 def _to_hour_minute(value: Any) -> tuple[int, int]:
-    """Accept ``"HH:MM"`` or ``"H:MM"`` and return a bounded (hour, minute) tuple."""
-    if not isinstance(value, str) or ":" not in value:
-        raise vol.Invalid("must be HH:MM (24-hour time)")
-    h_s, m_s = value.split(":", 1)
+    """Accept ``"H:MM"`` or ``"HH:MM"`` (24-hour) and return a bounded (hour, minute) tuple."""
+    if not isinstance(value, str):
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM")
+    stripped = value.strip()
+    if ":" not in stripped:
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM")
+    h_s, m_s = stripped.split(":", 1)
     try:
         hour, minute = int(h_s), int(m_s)
     except ValueError:
-        raise vol.Invalid("must be HH:MM (24-hour time)") from None
+        raise vol.Invalid("must be a 24-hour time string like H:MM or HH:MM") from None
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         raise vol.Invalid("hour must be 0-23 and minute 0-59")
     return hour, minute
