@@ -338,6 +338,23 @@ async def test_async_set_run_time_config_publishes_encoded_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_recharge_resume_round_trip() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_recharge_resume(THING, enable=True, period_start=(8, 0), resume_bat=75)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    rr = _decode_fields(_first(cfg, 18))
+    assert _first(rr, 1) == 1  # enableRr
+    start = _decode_fields(_first(rr, 2))
+    assert _first(start, 1) == 8
+    assert _first(rr, 5) == 75  # resumeBat
+
+
+@pytest.mark.asyncio
 async def test_async_set_robot_config_publishes_metric_4g_without_userctrl() -> None:
     from lymow.protocol import _decode_fields, _first
 

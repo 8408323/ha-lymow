@@ -735,6 +735,49 @@ SIGNAL_TURN_ON_VEHICLE_LIGHT = 10
 SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11
 
 
+def _encode_pb_timezone(hour: int, minute: int) -> bytes:
+    """Encode a PbTimeZone {f1 hour:int, f2 minute:int} sub-message.
+
+    Bounds are checked at the public API layer; here we just emit the wire form.
+    """
+    return _field_i32(1, int(hour)) + _field_i32(2, int(minute))
+
+
+def encode_set_recharge_resume(
+    *,
+    enable: bool | None = None,
+    period_start: tuple[int, int] | None = None,
+    period_end: tuple[int, int] | None = None,
+    recharge_bat: int | None = None,
+    resume_bat: int | None = None,
+) -> bytes:
+    """Encode a PbRobotConfig.rrConfig (Recharge & Resume) write.
+
+    Field layout from PbRRConfig.encode (Hermes fn #9494 at offset 0x004a6f9b):
+      f1 enableRr bool, f2 resumePeriodStart PbTimeZone, f3 resumePeriodEnd
+      PbTimeZone, f4 rechargeBat int32, f5 resumeBat int32.
+
+    rrConfig sits at PbRobotConfig field 18 (tag 146; from PbRobotConfig.encode
+    line 413258). Only set parameters are encoded so partial writes preserve
+    the other R&R fields on the robot side.
+    """
+    rr = b""
+    if enable is not None:
+        rr += _field_i32(1, 1 if enable else 0)
+    if period_start is not None:
+        rr += _field_bytes(2, _encode_pb_timezone(*period_start))
+    if period_end is not None:
+        rr += _field_bytes(3, _encode_pb_timezone(*period_end))
+    if recharge_bat is not None:
+        rr += _field_i32(4, int(recharge_bat))
+    if resume_bat is not None:
+        rr += _field_i32(5, int(resume_bat))
+    cfg = _field_bytes(18, rr)  # PbRobotConfig.rrConfig
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
 def encode_set_robot_config(**fields: Any) -> bytes:
     """Encode a PbInput carrying only a PbRobotConfig sub-message.
 

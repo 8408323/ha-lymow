@@ -1923,6 +1923,45 @@ def test_encode_set_robot_config_rejects_unsupported_kind() -> None:
         del _ROBOT_CONFIG_FIELDS["__test_bogus__"]
 
 
+def test_encode_set_recharge_resume_full_message() -> None:
+    """Wire: PbInput.robotConfig (f13) → PbRobotConfig.rrConfig (f18) → PbRRConfig."""
+    from lymow.protocol import encode_set_recharge_resume
+
+    pb = encode_set_recharge_resume(
+        enable=True,
+        period_start=(9, 30),
+        period_end=(18, 0),
+        recharge_bat=20,
+        resume_bat=80,
+    )
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # version
+    assert _first(f, 5) is None  # no userCtrl (robotConfig dispatch)
+    cfg = _decode_fields(_first(f, 13))  # PbInput.robotConfig
+    rr = _decode_fields(_first(cfg, 18))  # PbRobotConfig.rrConfig
+    assert _first(rr, 1) == 1  # enableRr
+    assert _first(rr, 4) == 20  # rechargeBat
+    assert _first(rr, 5) == 80  # resumeBat
+
+    start = _decode_fields(_first(rr, 2))  # PbTimeZone start
+    assert _first(start, 1) == 9 and _first(start, 2) == 30
+
+    end = _decode_fields(_first(rr, 3))  # PbTimeZone end
+    assert _first(end, 1) == 18 and _first(end, 2) == 0
+
+
+def test_encode_set_recharge_resume_partial_skips_unset() -> None:
+    from lymow.protocol import encode_set_recharge_resume
+
+    pb = encode_set_recharge_resume(enable=False)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    rr = _decode_fields(_first(cfg, 18))
+    assert _first(rr, 1) == 0  # enableRr false
+    # All other PbRRConfig fields absent so a partial write doesn't blow them away.
+    for fno in (2, 3, 4, 5):
+        assert _first(rr, fno) is None
+
+
 def test_encode_set_robot_config_signal_field_for_vehicle_led() -> None:
     """Vehicle LED writes go via the signal field (one-shot), not isOpenLed."""
     from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT, encode_set_robot_config
