@@ -580,7 +580,7 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
     f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
     f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
     f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
-    f10 cmdCellularSwitch bool, f11 metric_4g bool.
+    f10 cmdCellularSwitch bool, f11 metric_4g bool, f22 dockOnError bool.
 
     Untrusted wire data: only fields we read are decoded; unknown values are
     left absent rather than coerced.
@@ -600,6 +600,7 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         (7, "isOpenLed"),
         (10, "cmdCellularSwitch"),
         (11, "metric_4g"),
+        (22, "dockOnError"),
     ):
         v = _first(f, field_no)
         if v is not None:
@@ -717,10 +718,21 @@ def encode_set_task_config(**fields: Any) -> bytes:
 # (see setNetworkType fn #8970). Extend when adding new fields (only the ones
 # we surface as HA entities/services need to be in the writer map).
 _ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
-    "isOpenLed": (7, "bool"),  # vehicle (mower) status LED on/off
+    "isOpenLed": (
+        7,
+        "bool",
+    ),  # vehicle (mower) status LED — settings-page write fallback (the app's runtime toggle uses signal=10/11 instead, see SIGNAL_TURN_*_VEHICLE_LIGHT)
     "audioVolume": (6, "int"),  # mower beep/voice volume 0-100
+    "signal": (8, "int"),  # one-shot action signals (e.g. SIGNAL_TURN_ON_VEHICLE_LIGHT=10, _OFF=11)
     "metric_4g": (11, "bool"),  # true = 4G preferred, false = WiFi preferred
+    "dockOnError": (22, "bool"),  # auto-dock when the mower errors out
 }
+
+# Selected signal-values published via PbRobotConfig.signal (field 8) — they
+# fire a one-shot device action rather than persisting a config field. Numeric
+# values come from the SocSignal enum in the APK (Hermes string-id 40889).
+SIGNAL_TURN_ON_VEHICLE_LIGHT = 10
+SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11
 
 
 def encode_set_robot_config(**fields: Any) -> bytes:
