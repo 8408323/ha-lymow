@@ -61,8 +61,22 @@ class LymowFirmwareUpdate(CoordinatorEntity[LymowCoordinator], UpdateEntity):
 
     @property
     def release_summary(self) -> str | None:
-        # releaseNote arrives with literal "\n" escape sequences — render them
-        # as real newlines so the HA UI shows multi-line text.
+        # release_summary is the short blurb (HA caps it at 255 chars). The
+        # full text is delivered through async_release_notes — keeping both
+        # avoids the "Unknown error" the frontend raises when an entity
+        # advertises UpdateEntityFeature.RELEASE_NOTES without overriding
+        # async_release_notes.
+        return self._formatted_release_note()
+
+    async def async_release_notes(self) -> str | None:
+        # Full release notes for the modal in HA's UI; the RELEASE_NOTES
+        # feature flag enables this code path and the frontend calls it
+        # whenever the entity card is opened.
+        return self._formatted_release_note()
+
+    def _formatted_release_note(self) -> str | None:
+        # otaReleaseNote arrives with literal "\n" escape sequences — render
+        # them as real newlines so HA renders multi-line text properly.
         note = self._device_data.get("otaReleaseNote")
         if not isinstance(note, str):
             return None
