@@ -708,8 +708,8 @@ async def test_update_zone_cut_height_publishes_sync_map() -> None:
 
     await coord.async_update_zone_cut_height(THING, "zone0001", 60)
 
-    assert mqtt.async_publish_command.await_count == 1
-    thing, _ = mqtt.async_publish_command.call_args[0]
+    assert mqtt.async_publish_command.await_count == 2  # sync-map + query-map
+    thing, _ = mqtt.async_publish_command.await_args_list[0].args
     assert thing == THING
 
 
@@ -959,8 +959,8 @@ async def test_update_zone_enabled_publishes_sync_map() -> None:
 
     await coord.async_update_zone_enabled(THING, "zone0001", False)
 
-    assert mqtt.async_publish_command.await_count == 1
-    thing, _ = mqtt.async_publish_command.call_args[0]
+    assert mqtt.async_publish_command.await_count == 2  # sync-map + query-map
+    thing, _ = mqtt.async_publish_command.await_args_list[0].args
     assert thing == THING
 
 
@@ -2546,3 +2546,19 @@ async def test_async_delete_nogo_zone_sends_command_then_queries_map() -> None:
     assert _first(f, 5) == USER_CTRL_CLEAR_ZONE
     zone = _decode_fields(_first(_decode_fields(_first(f, 12)), 2))  # nogoZones (f2) -> PbZone
     assert _first(_decode_fields(_first(zone, 1)), 3) == b"ng1"  # basicInfo.hashId
+
+
+@pytest.mark.asyncio
+async def test_async_sync_map_publishes_sync_then_queries_map() -> None:
+    from lymow.const import USER_CTRL_SYNC_MAP
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    map_data: dict[str, Any] = {"goZones": [], "nogoZones": [], "channels": []}
+    await coord.async_sync_map(THING, map_data)
+    # sync command + query-map — robot does not re-broadcast map after SYNC_MAP on its own
+    assert mqtt.async_publish_command.await_count == 2
+    thing, pb = mqtt.async_publish_command.await_args_list[0].args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == USER_CTRL_SYNC_MAP

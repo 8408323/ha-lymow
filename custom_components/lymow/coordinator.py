@@ -627,6 +627,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if self.data and thing_name in self.data:
             new_device = {**self.data[thing_name], "mapData": map_data}
             self.async_set_updated_data({**self.data, thing_name: new_device})
+        # Robot does not re-broadcast map on pboutput after SYNC_MAP; query forces it to,
+        # so the Lymow app (which listens on pboutput) picks up the updated map.
+        await self.async_query_map(thing_name)
 
     async def async_delete_zone(self, thing_name: str, hash_id: str) -> None:
         """Delete a go-zone by hashId using USER_CTRL_CLEAR_ZONE=8."""
