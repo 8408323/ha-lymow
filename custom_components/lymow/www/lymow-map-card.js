@@ -7,8 +7,9 @@
  *   • Expand button: fills the full browser viewport
  *   • Status bar: work status, battery, mow progress, RTK fix badge
  *   • Edit mode: tap a go-zone or no-go zone → drag vertices; tap edge + to insert;
- *     tap ✕ to delete; Save / Cancel; rename zone in edit mode
- *   • Zone enable/disable: long-press a go-zone to toggle enabled state
+ *     tap ✕ to delete vertex; Save / Delete zone / Cancel; rename zone in edit mode
+ *   • Zone enable/disable: long-press a go-zone to toggle enabled state (calls set_zone_enabled)
+ *   • Map rotation: right-click drag to rotate; click north arrow to reset to north-up
  *   • Pin-and-go: double-tap anywhere on map to send robot to that point
  *   • North arrow + scale bar fixed to viewport corners (pixel-space, no zoom scaling)
  *   • Markers (robot, RTK, station) fixed pixel size via inverse-zoom SVG transform
@@ -64,10 +65,17 @@ class LymowMapCard extends HTMLElement {
     this._vx = 0; this._vy = 0; this._vw = 100; this._vh = 100;
     this._mapReady = false;
 
+    // Map rotation (degrees, 0 = north up, clockwise positive)
+    this._mapRotation = 0;
+
     // Pan gesture
     this._panning = false;
     this._panStart = null;
     this._panMoved = false;
+
+    // Rotate gesture (right-click drag)
+    this._rotating = false;
+    this._rotateStart = null;
 
     // Pinch zoom
     this._pinchStart = null;
@@ -163,7 +171,10 @@ class LymowMapCard extends HTMLElement {
     if (!svg) return null;
     const pt = svg.createSVGPoint();
     pt.x = evt.clientX; pt.y = evt.clientY;
-    const u = pt.matrixTransform(svg.getScreenCTM().inverse());
+    // Use the inner rotation group CTM so vertex drags are correct on a rotated map
+    const rotG = svg.querySelector("g[transform*=rotate]");
+    const ctm = rotG ? rotG.getScreenCTM() : svg.getScreenCTM();
+    const u = pt.matrixTransform(ctm.inverse());
     return this._toEnu(u.x, u.y);
   }
 
@@ -430,6 +441,7 @@ class LymowMapCard extends HTMLElement {
         editActions = `
           ${this._editHash ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
           ${this._editHash && this._editType === "go" ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
+          ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete this zone permanently">🗑 Delete</button>` : ""}
           <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
       }
       toolbar = `
@@ -608,6 +620,7 @@ class LymowMapCard extends HTMLElement {
         :host(:not(.expanded)) .map-wrap { aspect-ratio: ${mapAspect}; flex: none; }
         svg { width: 100%; height: 100%; border-radius: 6px; background: #e8f5e9; display: block; touch-action: none; user-select: none; cursor: grab; }
         svg.panning { cursor: grabbing; }
+        svg.rotating { cursor: ew-resize; }
         svg.pin-mode { cursor: crosshair; }
         /* Fixed-pixel overlays sit on top of the SVG in pixel space */
         .map-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; border-radius: 6px; }
@@ -670,6 +683,7 @@ class LymowMapCard extends HTMLElement {
                xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet"
                class="${this._pinAndGoMode ? 'pin-mode' : ''}">
             <defs>${goLabelDefs}</defs>
+            <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
             ${goPaths}
             ${goLabels}
@@ -679,13 +693,19 @@ class LymowMapCard extends HTMLElement {
             ${robotHtml}
             ${rtkHtml}
             ${editOverlay}
+            </g>
           </svg>
           <div class="map-overlay" id="map-overlay">
-            <svg class="north-arrow" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg">
+            <svg class="north-arrow" viewBox="0 0 44 44" xmlns="http://www.w3.org/2000/svg"
+                 data-action="rotate-north" style="cursor:pointer" title="${this._mapRotation !== 0 ? 'Click to reset to north' : 'North up'}">
               <circle cx="22" cy="22" r="20" fill="white" opacity="0.85"/>
-              <line x1="22" y1="30" x2="22" y2="12" stroke="#333" stroke-width="2"/>
-              <polygon points="22,10 17,20 27,20" fill="#c0392b"/>
+              <g transform="rotate(${(-this._mapRotation).toFixed(2)}, 22, 22)">
+                <line x1="22" y1="30" x2="22" y2="12" stroke="#333" stroke-width="2"/>
+                <polygon points="22,10 17,20 27,20" fill="#c0392b"/>
+                <line x1="22" y1="14" x2="22" y2="34" stroke="#aaa" stroke-width="1.5"/>
+              </g>
               <text x="22" y="40" text-anchor="middle" font-size="9" fill="#333" font-weight="bold">N</text>
+              ${this._mapRotation !== 0 ? `<circle cx="22" cy="22" r="20" fill="none" stroke="#03a9f4" stroke-width="2" stroke-dasharray="4,2"/>` : ''}
             </svg>
             <div class="scale-bar-wrap" id="scale-bar-wrap">
               <span class="scale-bar-label" id="scale-bar-label">…</span>
@@ -832,6 +852,8 @@ class LymowMapCard extends HTMLElement {
           case "apply-settings":    this._applySettings(); break;
           case "cut-height-raise":  this._adjustCutHeight(true); break;
           case "cut-height-lower":  this._adjustCutHeight(false); break;
+          case "rotate-north":      this._resetRotation(); break;
+          case "delete-zone":       this._deleteEditZone(); break;
         }
       });
     });
@@ -884,19 +906,50 @@ class LymowMapCard extends HTMLElement {
     }
 
     // Pan: any pointer drag on SVG background (not on zone polygons or markers)
+    // Right-click drag = rotate map
+    svg.addEventListener("contextmenu", (e) => e.preventDefault());
     svg.addEventListener("pointerdown", (e) => {
       if (this._dragIdx != null) return;
-      // Don't capture pan from zone polygon clicks — let click event reach the polygon
       if (e.target?.dataset?.hash || e.target?.dataset?.type) return;
+      if (e.button === 2) {
+        // Right-click drag → rotate
+        this._rotating = true;
+        this._panMoved = false;
+        this._rotateStart = { x: e.clientX, rotation: this._mapRotation };
+        svg.setPointerCapture(e.pointerId);
+        svg.classList.add("rotating");
+        return;
+      }
       this._panning = true;
       this._panMoved = false;
       this._panStart = { x: e.clientX, y: e.clientY, vx: this._vx, vy: this._vy };
       svg.setPointerCapture(e.pointerId);
       svg.classList.add("panning");
     });
-    svg.addEventListener("pointermove", (e) => this._onPan(e));
-    svg.addEventListener("pointerup", () => { this._panning = false; svg.classList.remove("panning"); });
-    svg.addEventListener("pointercancel", () => { this._panning = false; svg.classList.remove("panning"); });
+    svg.addEventListener("pointermove", (e) => {
+      if (this._rotating && this._rotateStart) {
+        const dx = e.clientX - this._rotateStart.x;
+        this._mapRotation = (this._rotateStart.rotation + dx * 0.4 + 360) % 360;
+        this._panMoved = true;
+        this._updateSvgRotation();
+        return;
+      }
+      this._onPan(e);
+    });
+    svg.addEventListener("pointerup", () => {
+      this._panning = false;
+      this._rotating = false;
+      this._rotateStart = null;
+      svg.classList.remove("panning");
+      svg.classList.remove("rotating");
+    });
+    svg.addEventListener("pointercancel", () => {
+      this._panning = false;
+      this._rotating = false;
+      this._rotateStart = null;
+      svg.classList.remove("panning");
+      svg.classList.remove("rotating");
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -940,6 +993,28 @@ class LymowMapCard extends HTMLElement {
   }
 
   _onTouchEnd(e) { if (e.touches.length < 2) this._pinchStart = null; }
+
+  _updateSvgRotation() {
+    const svg = this.shadowRoot?.querySelector("svg");
+    if (!svg) return;
+    const g = svg.querySelector("g[transform*=rotate]");
+    if (!g) return;
+    const cx = (this._vx + this._vw / 2).toFixed(3);
+    const cy = (this._vy + this._vh / 2).toFixed(3);
+    g.setAttribute("transform", `rotate(${this._mapRotation.toFixed(2)}, ${cx}, ${cy})`);
+    // Update north arrow counter-rotation
+    const northG = this.shadowRoot.querySelector(".north-arrow g[transform*=rotate]");
+    if (northG) northG.setAttribute("transform", `rotate(${(-this._mapRotation).toFixed(2)}, 22, 22)`);
+    // Show/hide the rotation indicator ring
+    const ring = this.shadowRoot.querySelector(".north-arrow circle[stroke='#03a9f4']");
+    const northSvg = this.shadowRoot.querySelector(".north-arrow");
+    if (northSvg) northSvg.title = this._mapRotation !== 0 ? 'Click to reset to north' : 'North up';
+  }
+
+  _resetRotation() {
+    this._mapRotation = 0;
+    this._render();
+  }
 
   _touchDist(e) {
     const dx = e.touches[0].clientX - e.touches[1].clientX;
@@ -1155,15 +1230,28 @@ class LymowMapCard extends HTMLElement {
     const zone = mapData?.goZones?.find(z => z.hashId === hashId);
     if (!zone) return;
     const nowEnabled = zone.isEnabled !== false;
+    const newEnabled = !nowEnabled;
+    // Optimistic UI: flip isEnabled locally
+    const goZoneState = this._hass.states[this._config.entity];
+    if (goZoneState?.attributes?.go_zones) {
+      const z = goZoneState.attributes.go_zones.find(z => z.hashId === hashId);
+      if (z) z.isEnabled = newEnabled;
+    }
+    this._render();
     try {
-      // Use set_task_config with zone targeting isn't available yet — use start_zone
-      // workaround: rename service will toggle if backend supports it; for now use
-      // lymow.start_zone with empty list to signal no-op, or call lymow.enable_zone.
-      // The actual service is pending backend implementation — show optimistic UI.
-      // TODO(joha): wire to lymow.enable_zone / lymow.disable_zone once backend ready
-      console.info(`lymow-map-card: zone ${hashId} enable toggle → ${!nowEnabled} (backend pending)`);
+      await this._hass.callService("lymow", "set_zone_enabled", {
+        entity_id: this._config.mower_entity,
+        zone_hash_id: hashId,
+        is_enabled: newEnabled,
+      });
     } catch (err) {
-      console.warn("lymow-map-card: zone toggle failed", err);
+      console.warn("lymow-map-card: zone enable toggle failed", err);
+      // Revert optimistic change
+      if (goZoneState?.attributes?.go_zones) {
+        const z = goZoneState.attributes.go_zones.find(z => z.hashId === hashId);
+        if (z) z.isEnabled = nowEnabled;
+      }
+      this._render();
     }
   }
 
@@ -1332,6 +1420,31 @@ class LymowMapCard extends HTMLElement {
     if (!this._workPoly || this._workPoly.length <= 3) return;
     this._workPoly.splice(idx, 1);
     this._render();
+  }
+
+  async _deleteEditZone() {
+    if (!this._hass || !this._editHash || !this._config.mower_entity) return;
+    const hashId = this._editHash;
+    const isNogo = this._editType === "nogo";
+    this._cancelEdit();
+    try {
+      if (isNogo) {
+        await this._hass.callService("lymow", "delete_nogo_zone", {
+          entity_id: this._config.mower_entity,
+          nogo_hash_id: hashId,
+        });
+      } else {
+        await this._hass.callService("lymow", "delete_zone", {
+          entity_id: this._config.mower_entity,
+          zone_hash_id: hashId,
+        });
+      }
+    } catch (err) {
+      console.error("lymow-map-card: delete zone failed", err);
+      this._render();
+      const bar = this.shadowRoot.querySelector(".edit-bar");
+      if (bar) bar.textContent = `⚠️ Delete failed: ${err?.message || err}`;
+    }
   }
 
   async _saveEdit() {
