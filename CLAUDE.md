@@ -100,8 +100,12 @@ uv run pytest tests/ -v
   # Resolve a thread
   gh api graphql -f query='mutation { resolveReviewThread(input: {threadId: "THREAD_NODE_ID"}) { thread { isResolved } } }'
   ```
-- Then comment `@copilot please review again` and `@codex[agent] review`
-  on each PR; wait ~5 minutes for re-review
+- Then re-request review per the **Pull Request Review Discipline** rule: resolve
+  the fixed threads, request re-review in one comment mentioning every reviewer
+  (`@claude review`, `@codex review`, `@codex[agent] review`, `@copilot review`),
+  and **wait for each reviewer to finish the round** — a green/mergeable PR with a
+  reviewer still running is not ready. Batch several pushes and re-request only on
+  the final one. Never merge while a review is in progress.
 - Cross-PR false alarms (reviewer sees each PR in isolation): explain in a comment,
   do not duplicate code across PRs
 
