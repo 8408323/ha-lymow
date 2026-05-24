@@ -98,6 +98,7 @@ WORK_STATUS_CHARGING_FULL = 12  # fully charged
 WORK_STATUS_EMERGENCY_STOP = 13  # emergency stop triggered
 WORK_STATUS_ESCAPING = 14  # escaping obstacle
 WORK_STATUS_RTT = 15  # factory RTT test
+WORK_STATUS_AGING_TEST = 16  # factory aging test
 WORK_STATUS_OFFLINE = -1  # virtual — no MQTT shadow
 
 # Groups used for LawnMowerActivity mapping
@@ -219,3 +220,129 @@ SERVICE_BLE_DRIVE = "ble_drive"
 ATTR_LINEAR = "linear"
 ATTR_ANGULAR = "angular"
 ATTR_DURATION = "duration"
+
+# ---------------------------------------------------------------------------
+# Protobuf enum values (extracted from the APK Hermes bytecode 2026-05-24).
+# Each map is {wire_value: APP_CONSTANT_NAME} so unknown values come back as
+# the integer (caller's responsibility); use ``.get(v, v)`` for label lookups.
+# Field-of-origin recorded next to each.
+# ---------------------------------------------------------------------------
+
+# PbRunTimeConfig.cleanMode (int) / PbTaskConfig.cleanMode (int).
+CLEAN_MODES = {
+    0: "NONE",
+    1: "ZIGZAG",
+    2: "ADAPTIVE_ZIGZAG",
+    3: "CHESS_BOARD",
+    4: "PERIMETER_LAPS_ONLY",
+}
+
+# PbTaskConfig.obsDecMode (int): obstacle-detection sensitivity.
+OBS_DEC_MODES = {
+    0: "NONE",
+    1: "TOUCH_ONLY",
+    2: "SMART_DEC",
+    3: "SMART_DEC_MEDIUM_SENS",
+    4: "SMART_DEC_LOW_SENS",
+}
+
+# PbTaskConfig.perimeterMowDir (int).
+MOW_DIRS = {
+    0: "CLOCKWISE",
+    1: "COUNTERCLOCKWISE",
+    2: "SHUFFLE",
+}
+
+# PbRobotInfo.startMode (int): how the current task was started.
+START_MODES = {
+    0: "NONE",
+    1: "APP_SELECT",  # user selected zone(s) in the app
+    2: "APP_ALL",  # user pressed "mow all"
+    3: "ROBOT_KEY",  # physical button on the robot
+    4: "APP_SCHEDULES",  # auto-started by a schedule
+}
+
+# PbRobotInfo.isCharging/isRecharging map to this discrete bat status.
+BAT_STATUSES = {
+    0: "NONE",
+    1: "NO_CHARGING",
+    2: "CHARGING",
+    3: "CHARGING_FULL",
+}
+
+# PbRobotConfig.vehLedStatus/camLedStatus brightness levels.
+LED_LEVELS = {
+    0: "NONE",
+    1: "LOW",
+    2: "MEDIUM",
+    3: "HIGH",
+    4: "OFF",
+}
+
+# Wireless link state (used by Wi-Fi / 4G / BT status fields).
+WIRELESS_STATES = {
+    0: "NONE",
+    1: "CONNECTED",
+    2: "DISCONNECTED",
+    3: "BROADCASTING",
+}
+
+# rtkStatus values surfaced as the LymowRtkSensor state (PbOutput.rtkStatus,
+# field 4 of the GPS/RTK sub-message). Matches the LymowRtkSensor label map.
+RTK_SIGNAL_QUALITY = {
+    0: "NO_SIGNAL",
+    1: "SINGLE_POINT",
+    2: "FLOAT_FIXED",
+    3: "FIXED",
+}
+
+# Camera auto-exposure gear (PbDebugSetting.aeGear).
+AE_GEARS = {
+    0: "NONE",
+    1: "GEAR_1",
+    2: "GEAR_2",
+    3: "GEAR_3",
+    4: "GEAR_4",
+    5: "GEAR_5",
+    6: "GEAR_6",
+    7: "MAX",
+}
+
+# PbAlgoLocOutput.nodeStatus (algorithm runtime state).
+ALGO_NODE_STATES = {
+    0: "NONE",
+    1: "WAITING",
+    2: "INITIALIZING",
+    3: "RUNNING",
+}
+
+# PbOutput.outputCtrl values — server-side reply opcodes (analogous to userCtrl).
+OUTPUT_CTRLS = {
+    0: "NONE",
+    1: "QUERY_MAP",
+    2: "UPLOAD_SCHEDULES",
+    3: "SAVE_MAP",
+    6: "QUERY_PATH",
+    7: "MODIFY_ZONE_INFO",
+    8: "SYNC_MAP",
+    9: "GLOBAL_SETTING_Y",
+    10: "GLOBAL_SETTING_N",
+    11: "SET_RUN_TIME_CONFIG",
+    12: "QUERY_RUN_TIME_CONFIG",
+    13: "DELETE_ADD_CHANNEL",
+}
+
+# PbRobotConfig.signal one-shot codes (subset — only the ones we publish today
+# need numeric constants; the rest are documented for reference). See the
+# SocSignal enum in the APK (Hermes string-id 40889).
+SIGNAL_POWER_OFF = 1
+SIGNAL_BRAKE = 2
+SIGNAL_STOP = 3
+SIGNAL_TURN_ON_CAMERA_LIGHT = 6
+SIGNAL_TURN_OFF_CAMERA_LIGHT = 7
+SIGNAL_ONE_CLICK_LIFT = 8
+SIGNAL_ONE_CLICK_LOWER = 9
+# (SIGNAL_TURN_ON/OFF_VEHICLE_LIGHT live in protocol.py since the codec uses them.)
+SIGNAL_TURN_ON_BT_BROADCAST = 12
+SIGNAL_RELEASE_BRAKE = 25
+SIGNAL_ROBOT_SHUTDOWN = 28
