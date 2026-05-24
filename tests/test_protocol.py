@@ -2076,13 +2076,29 @@ def test_decode_clean_report_status_times_packed_int32() -> None:
     assert decode_clean_report(_field_bytes(5, packed))["statusTimes"] == [120, 0, 60]
 
 
-def test_decode_clean_report_status_times_drops_out_of_range() -> None:
-    """Bound each duration at one year of seconds so a misaligned varint
-    can't surface a wildly large 64-bit value as a sensor attribute."""
+def test_decode_clean_report_status_times_clamps_preserves_index_alignment() -> None:
+    """Bound each duration at [0, one year of seconds] so a misaligned varint
+    can't surface a wildly large 64-bit value — but CLAMP rather than drop:
+    statusTimes[i] must keep mapping to workStatus == i. A mid-array out-of-
+    range entry becoming 0 preserves the position of the entries after it."""
     from lymow.protocol import _encode_varint, _field_bytes, decode_clean_report
 
     packed = _encode_varint(100) + _encode_varint(31_536_001) + _encode_varint(200)
-    assert decode_clean_report(_field_bytes(5, packed))["statusTimes"] == [100, 200]
+    assert decode_clean_report(_field_bytes(5, packed))["statusTimes"] == [100, 31_536_000, 200]
+    # Negative wire values (sign-extended varint) clamp to 0 too.
+    neg_packed = _encode_varint(50) + _encode_varint(0xFFFFFFFF) + _encode_varint(75)
+    assert decode_clean_report(_field_bytes(5, neg_packed))["statusTimes"] == [50, 0, 75]
+
+
+def test_decode_clean_report_status_times_concatenates_multiple_segments() -> None:
+    """Protobuf wire permits a packed-repeated field to be split across
+    multiple key/value segments — decoders must concatenate them. Two f5
+    segments with [10, 20] and [30] must surface as [10, 20, 30]."""
+    from lymow.protocol import _encode_varint, _field_bytes, decode_clean_report
+
+    seg1 = _field_bytes(5, _encode_varint(10) + _encode_varint(20))
+    seg2 = _field_bytes(5, _encode_varint(30))
+    assert decode_clean_report(seg1 + seg2)["statusTimes"] == [10, 20, 30]
 
 
 def test_decode_clean_report_status_times_absent_when_empty_bytes() -> None:

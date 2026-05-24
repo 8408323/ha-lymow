@@ -782,13 +782,17 @@ def decode_clean_report(data: bytes) -> dict[str, Any]:
     end_type = _first(f, 3)
     if isinstance(end_type, int) and 0 <= end_type <= 2:
         out["mowEndType"] = end_type
-    status_times_raw = _first(f, 5)
-    if isinstance(status_times_raw, bytes) and status_times_raw:
-        # Bound: cap individual durations at one year of seconds so a
-        # misaligned varint can't surface a wildly negative or absurdly
-        # large value into the sensor attributes.
-        decoded = _decode_packed_int32s(status_times_raw)
-        out["statusTimes"] = [s for s in decoded if 0 <= s <= 31_536_000]
+    # Concatenate every f5 segment before unpacking — protobuf permits a
+    # packed-repeated field to be split across multiple key/value occurrences,
+    # which decoders must rejoin (using ``_first`` would drop later segments).
+    status_times_segments = [seg for seg in _all(f, 5) if isinstance(seg, bytes) and seg]
+    if status_times_segments:
+        decoded = _decode_packed_int32s(b"".join(status_times_segments))
+        # Clamp each entry to [0, one year of seconds] so a misaligned or
+        # sign-extended varint can't surface a wildly large duration — but
+        # preserve positional semantics: statusTimes[i] still maps to
+        # workStatus == i, so we clamp rather than drop.
+        out["statusTimes"] = [max(0, min(s, 31_536_000)) for s in decoded]
     used = _first(f, 6)
     if isinstance(used, int) and 0 <= used <= 100:
         out["usedBattery"] = used
