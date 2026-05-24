@@ -2050,6 +2050,19 @@ def test_encode_set_robot_config_timezone_offset_writes_field_21() -> None:
     assert _first(cfg, 21) == 3600
 
 
+def test_encode_set_robot_config_negative_timezone_round_trips_through_decoder() -> None:
+    """Americas timezones are negative UTC offsets — verify the int32 varint
+    survives the encoder + decoder round-trip without flipping sign."""
+    from lymow.protocol import _signed32, decode_robot_config, encode_set_robot_config
+
+    pb = encode_set_robot_config(timezoneOffset=-18000)  # UTC-5
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    # On the wire the varint is the two's-complement uint64; _signed32 brings
+    # it back to a signed int32 the way decode_robot_config does internally.
+    assert _signed32(_first(cfg, 21)) == -18000
+    assert decode_robot_config(_first(_decode_fields(pb), 13)) == {"timezoneOffset": -18000}
+
+
 def test_decode_robot_config_extracts_timezone_offset() -> None:
     from lymow.protocol import decode_robot_config
 
