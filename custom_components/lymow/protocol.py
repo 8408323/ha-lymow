@@ -426,8 +426,9 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
     rather than silently flipping the switch on.
 
     This is the *same* PbTaskConfig written by ``encode_set_device_settings``;
-    not the broader 18-field map exposed via ``_TASK_CONFIG_FIELDS`` (which is
-    really a PbZoneConfig — pre-existing mislabel, tracked separately).
+    not the broader 18-field map exposed via ``_ZONE_CONFIG_FIELDS`` (which is
+    actually a PbZoneConfig — historically published over the PbTaskConfig
+    wire path; #157 tracks the rewire).
     """
     f = _decode_fields(data)
     out: dict[str, Any] = {}
@@ -742,10 +743,23 @@ def encode_userctrl(command: int) -> bytes:
     return pb
 
 
-# PbTaskConfig field map — (proto field number, wire kind) — derived from APK
-# (Hermes) analysis of the app's ts-proto encoder. The message is carried in
-# PbInput field 26 under USER_CTRL_SET_TASK_CONFIG.
-_TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+# PbZoneConfig field map — (proto field number, wire kind) — confirmed from
+# PbZoneConfig.encode (Hermes #9434 @ 0x004a42b5). These are PER-ZONE cutting
+# parameters that the app writes via PbMap.goZones[i].zoneConfig over the
+# SYNC_MAP wire path (see fn customizeConfig #9009 in the APK).
+#
+# This map was historically named ``_TASK_CONFIG_FIELDS`` after the misnamed
+# ``encode_set_task_config`` / ``lymow.set_task_config`` service that publishes
+# it over the PbInput.taskConfig wire path with USER_CTRL_SET_TASK_CONFIG=36.
+# That path actually expects the FOUR-field PbTaskConfig (chargingMode /
+# zoneOrder / rainCleaning / disableChargingPark) — see #157 for the proper
+# fix. The robot appears to silently ignore unknown PbTaskConfig fields, so
+# the service has shipped without obvious breakage, but everything it writes
+# via this map is effectively a no-op until the wire path is corrected.
+#
+# Field 1 (cutHeight, int32) is intentionally omitted — it's set per-zone via
+# the SYNC_MAP path through ``ZoneCutHeightNumber``, the correct wire path.
+_ZONE_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "raiseCutHeight": (2, "bool"),
     "lowerCutHeight": (3, "bool"),
     "moveSpeed": (4, "float"),
@@ -768,19 +782,30 @@ _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
 
 
 def encode_set_task_config(**fields: Any) -> bytes:
-    """Encode a USER_CTRL_SET_TASK_CONFIG command setting only the given fields.
+    """Encode a USER_CTRL_SET_TASK_CONFIG command setting the given fields.
 
-    Field names match PbTaskConfig (see ``_TASK_CONFIG_FIELDS``); ``None``
+    .. deprecated::
+        The wire path is wrong (see #157): this encodes PbZoneConfig-shaped
+        bytes and publishes them over PbInput.taskConfig, where the robot
+        expects the 4-field PbTaskConfig. The robot appears to silently
+        ignore unknown fields, so writes go through without errors but
+        likely have no effect. ``encode_set_device_settings`` is the correct
+        encoder for the real PbTaskConfig (Device Settings page); per-zone
+        cutting params should go through SYNC_MAP via the goZones[i].zoneConfig
+        sub-field.
+
+    Field names match PbZoneConfig (see :data:`_ZONE_CONFIG_FIELDS`); ``None``
     values are skipped so only explicitly-set parameters are sent. Unknown
-    field names raise ValueError.
+    field names raise ValueError. The function name and the service it backs
+    are kept for backward compatibility until the rewire lands.
     """
     cfg = b""
     for name, value in fields.items():
         if value is None:
             continue
-        if name not in _TASK_CONFIG_FIELDS:
-            raise ValueError(f"unknown task-config field: {name}")
-        field_no, kind = _TASK_CONFIG_FIELDS[name]
+        if name not in _ZONE_CONFIG_FIELDS:
+            raise ValueError(f"unknown zone-config field: {name}")
+        field_no, kind = _ZONE_CONFIG_FIELDS[name]
         if kind == "bool":
             cfg += _field_i32(field_no, 1 if value else 0)
         elif kind == "float":
@@ -951,8 +976,10 @@ def encode_set_device_settings(
                                     we invert here.
 
     Note: this is a *different* PbTaskConfig from the broader 18-field map
-    in ``_TASK_CONFIG_FIELDS`` (which is actually a PbZoneConfig per APK fn
-    #9432 — pre-existing labelling bug, tracked separately).
+    in ``_ZONE_CONFIG_FIELDS`` — those fields are PbZoneConfig (constructor
+    Hermes #9432, encoder #9434) and are published over this same userCtrl=36
+    / PbInput.taskConfig wire path by ``encode_set_task_config``; #157 tracks
+    the rewire to the proper PbMap.goZones[i].zoneConfig path.
 
     Only the provided parameters are sent; ``None`` is skipped so partial
     writes preserve the other fields on the robot side.

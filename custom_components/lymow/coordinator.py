@@ -710,8 +710,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:
         """Set mowing task-config parameters (USER_CTRL_SET_TASK_CONFIG).
 
-        Only the provided PbTaskConfig fields are sent; see
-        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
+        Only the provided fields are sent; see :data:`protocol._ZONE_CONFIG_FIELDS`
+        for the supported names. **Wire-path mismatch (#157):** the names are
+        PbZoneConfig fields, but the encoder publishes them over the
+        PbTaskConfig wire path — the robot appears to silently ignore the
+        unknown fields. ``async_set_device_settings`` covers the actual
+        PbTaskConfig (Device Settings page) and per-zone cutting params are
+        already exposed through the SYNC_MAP-based Number entities.
         """
         from .protocol import encode_set_task_config
 
