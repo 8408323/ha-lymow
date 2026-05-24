@@ -1198,6 +1198,27 @@ def test_headlight_window_sensor_unknown_when_wire_payload_not_dict() -> None:
     assert LymowHeadlightWindowSensor(coord, DEVICE).native_value is None
 
 
+def test_headlight_window_sensor_unknown_when_partial_or_out_of_range_dict() -> None:
+    """A dict missing one key, with wrong types, or with out-of-range values
+    must return None — never raise during state rendering."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    # Missing 'minute' key.
+    coord_missing = MagicMock()
+    coord_missing.data = {THING: {"robotConfig": {"openLedTime": {"hour": 21}}}}
+    assert LymowHeadlightWindowSensor(coord_missing, DEVICE).native_value is None
+    # Non-int 'hour'.
+    coord_str_hour = MagicMock()
+    coord_str_hour.data = {THING: {"robotConfig": {"openLedTime": {"hour": "21", "minute": 0}}}}
+    assert LymowHeadlightWindowSensor(coord_str_hour, DEVICE).native_value is None
+    # Out-of-range hour.
+    e_bad_hour = LymowHeadlightWindowSensor(_make_hw_coord({"hour": 24, "minute": 0}, None), DEVICE)
+    assert e_bad_hour.native_value is None
+    # Out-of-range minute.
+    e_bad_min = LymowHeadlightWindowSensor(_make_hw_coord({"hour": 5, "minute": 60}, None), DEVICE)
+    assert e_bad_min.native_value is None
+
+
 async def test_async_setup_entry_registers_headlight_window_sensor() -> None:
     from lymow.const import DOMAIN
     from lymow.sensor import LymowHeadlightWindowSensor

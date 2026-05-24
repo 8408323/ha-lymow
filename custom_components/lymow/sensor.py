@@ -863,11 +863,11 @@ class LymowHeadlightWindowSensor(CoordinatorEntity[LymowCoordinator], SensorEnti
     Surfaces ``openLedTime`` + ``closeLedTime`` (decoded from PbRobotConfig
     f14/f15) as a single human-friendly state string like ``"21:00–06:00"``,
     with each end also exposed as an attribute for automations that need
-    the raw HH:MM strings. The wire has no explicit "schedule enabled"
-    bit (``setNightMode`` rewrites the full window each press and uses
-    a co-published ``SIGNAL_TURN_OFF_CAMERA_LIGHT`` to disable the light
-    immediately — see encode_set_night_mode), so this sensor is purely
-    descriptive: it shows *what window is configured*, not *whether the
+    the raw HH:MM strings. The wire has no explicit "schedule enabled" bit:
+    ``setNightMode`` rewrites the full window each press and uses a
+    co-published ``SIGNAL_TURN_OFF_CAMERA_LIGHT`` to disable the light
+    immediately (see ``encode_set_night_mode``). So this sensor is purely
+    descriptive — it shows *what window is configured*, not *whether the
     light is currently on*. The Camera light Select handles the latter."""
 
     _attr_has_entity_name = True
@@ -889,12 +889,20 @@ class LymowHeadlightWindowSensor(CoordinatorEntity[LymowCoordinator], SensorEnti
     @staticmethod
     def _format(tz: Any) -> str | None:
         # decode_robot_config already validates 0-23 / 0-59 before surfacing
-        # the dict, so we can format unconditionally — the type check is just
-        # to short-circuit when the field was absent and the dict was never
-        # populated.
+        # the dict, but coordinator state could come from a less-strict source
+        # someday (a future restore-from-cache, an integration-internal seed,
+        # or a partial pboutput that slipped through). Re-validate the keys
+        # here so a missing or wrong-typed entry returns None instead of
+        # raising mid-render and breaking the entity update.
         if not isinstance(tz, dict):
             return None
-        return f"{tz['hour']:02d}:{tz['minute']:02d}"
+        hour = tz.get("hour")
+        minute = tz.get("minute")
+        if not isinstance(hour, int) or not isinstance(minute, int):
+            return None
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+        return f"{hour:02d}:{minute:02d}"
 
     @property
     def native_value(self) -> str | None:
