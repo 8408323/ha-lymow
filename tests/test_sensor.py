@@ -1129,6 +1129,92 @@ async def test_async_setup_entry_registers_last_clean_sensor() -> None:
 
 
 # ---------------------------------------------------------------------------
+# LymowRobotTimezoneSensor — robotConfig.timezoneOffset (signed seconds east of UTC)
+# ---------------------------------------------------------------------------
+
+
+def _make_tz_coord(offset_seconds: int | None = None) -> MagicMock:
+    state: dict = {"robotConfig": {}}
+    if offset_seconds is not None:
+        state["robotConfig"]["timezoneOffset"] = offset_seconds
+    return _make_coord(state)
+
+
+def test_robot_timezone_sensor_metadata_and_disabled_default() -> None:
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    e = LymowRobotTimezoneSensor(_make_tz_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_robot_timezone"
+    assert e._attr_name == "Robot timezone"
+    # Disabled by default — most users only need the Sync Timezone button.
+    assert e._attr_entity_registry_enabled_default is False
+
+
+def test_robot_timezone_sensor_formats_positive_offset_as_signed_hhmm() -> None:
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    e = LymowRobotTimezoneSensor(_make_tz_coord(9 * 3600), DEVICE)  # Asia/Tokyo
+    assert e.native_value == "+09:00"
+    assert e.extra_state_attributes == {"offset_seconds": 9 * 3600, "offset_hours": 9.0}
+
+
+def test_robot_timezone_sensor_formats_negative_offset_and_half_hour() -> None:
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    # America/New_York during standard time: UTC-5
+    e_ny = LymowRobotTimezoneSensor(_make_tz_coord(-5 * 3600), DEVICE)
+    assert e_ny.native_value == "-05:00"
+    assert e_ny.extra_state_attributes == {"offset_seconds": -5 * 3600, "offset_hours": -5.0}
+
+    # Asia/Kolkata: UTC+5:30 — half-hour offset must format correctly.
+    e_in = LymowRobotTimezoneSensor(_make_tz_coord(5 * 3600 + 30 * 60), DEVICE)
+    assert e_in.native_value == "+05:30"
+    assert e_in.extra_state_attributes["offset_hours"] == 5.5
+
+
+def test_robot_timezone_sensor_unknown_when_offset_missing_or_out_of_bounds() -> None:
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    # Field absent → unknown (rather than guessing UTC). Both the state and the
+    # attribute dict drop out so HA doesn't show a stale offset under an
+    # already-unknown state.
+    e_missing = LymowRobotTimezoneSensor(_make_tz_coord(None), DEVICE)
+    assert e_missing.native_value is None
+    assert e_missing.extra_state_attributes is None
+    # Non-int wire payload (e.g. a string the robot shouldn't send but might
+    # if firmware ever changes types) → unknown rather than crashing the
+    # bound check or stringifying garbage. Build the state dict directly so
+    # we can put a non-int in the slot _make_tz_coord otherwise restricts.
+    coord_str = MagicMock()
+    coord_str.data = {THING: {"robotConfig": {"timezoneOffset": "+09:00"}}}
+    assert LymowRobotTimezoneSensor(coord_str, DEVICE).native_value is None
+    # Outside the [-12h, +14h] real-world range — drop as hostile.
+    assert LymowRobotTimezoneSensor(_make_tz_coord(15 * 3600), DEVICE).native_value is None
+    assert LymowRobotTimezoneSensor(_make_tz_coord(-13 * 3600), DEVICE).native_value is None
+    # Sub-minute offset — no real timezone has one; rejecting prevents the
+    # ±HH:MM formatter from silently truncating stray seconds (e.g. 5h0m33s
+    # would render as "+05:00" and lie about the actual configured value).
+    assert LymowRobotTimezoneSensor(_make_tz_coord(5 * 3600 + 33), DEVICE).native_value is None
+
+
+async def test_async_setup_entry_registers_robot_timezone_sensor() -> None:
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert any(isinstance(e, LymowRobotTimezoneSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
 # LymowHeadlightWindowSensor — robotConfig.openLedTime / closeLedTime
 # ---------------------------------------------------------------------------
 
@@ -1196,6 +1282,19 @@ def test_headlight_window_sensor_unknown_when_wire_payload_not_dict() -> None:
     coord = MagicMock()
     coord.data = {THING: {"robotConfig": {"openLedTime": "21:00", "closeLedTime": 600}}}
     assert LymowHeadlightWindowSensor(coord, DEVICE).native_value is None
+
+
+def test_headlight_window_sensor_unknown_when_robot_config_not_dict() -> None:
+    """A non-dict ``robotConfig`` from a malformed cache hydrate (list, str,
+    int, …) must not crash ``.get`` — the sensor returns unknown."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    for bad in ([], ["junk"], "not-a-dict", 42):
+        coord = MagicMock()
+        coord.data = {THING: {"robotConfig": bad}}
+        e = LymowHeadlightWindowSensor(coord, DEVICE)
+        assert e.native_value is None
+        assert e.extra_state_attributes is None
 
 
 def test_headlight_window_sensor_unknown_when_partial_or_out_of_range_dict() -> None:

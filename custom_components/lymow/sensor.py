@@ -883,7 +883,13 @@ class LymowHeadlightWindowSensor(CoordinatorEntity[LymowCoordinator], SensorEnti
 
     @property
     def _times(self) -> tuple[str | None, str | None]:
-        cfg = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
+        cfg = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig")
+        # ``or {}`` would still pass through a truthy non-dict (e.g. a stray
+        # list or string from a malformed cache hydrate) and explode in
+        # ``.get`` below — guard the type explicitly so _format's defensive
+        # path can return None instead of the sensor raising mid-render.
+        if not isinstance(cfg, dict):
+            return None, None
         return self._format(cfg.get("openLedTime")), self._format(cfg.get("closeLedTime"))
 
     @staticmethod
