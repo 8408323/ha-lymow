@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -17,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ERROR_DESCRIPTIONS, WARNING_DESCRIPTIONS
+from .const import DOMAIN, ERROR_DESCRIPTIONS, MOW_END_TYPES, WARNING_DESCRIPTIONS
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
@@ -364,6 +365,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowCleanHistoryDetailsSensor(coordinator, device))
         entities.append(LymowBackupMapsSensor(coordinator, device))
         entities.append(LymowSchedulesSensor(coordinator, device))
+        entities.append(LymowLastCleanSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -680,3 +682,51 @@ class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         data = self.coordinator.data.get(self._thing_name) or {}
         entries = data.get("backupMapList") or []
         return {"backups": entries}
+
+
+class LymowLastCleanSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Last mowing session — PbCleanReport from QUERY_CLEANING_SUMMARY.
+
+    Native value is the session start timestamp; end-type (completed,
+    user-cancelled, or none) and battery-used are surfaced as attributes
+    so a Lovelace card can render a single 'Last mow' tile with both
+    'when' and 'how it ended'.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:clock-end"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_last_mow_session"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Last mow session"
+
+    @property
+    def _report(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get(self._thing_name, {}).get("cleanReport") or {}
+
+    @property
+    def native_value(self) -> datetime | None:
+        # decode_clean_report already bounds cleanStartTime to a sane POSIX
+        # epoch range, so fromtimestamp can't raise here. We still re-check
+        # the type/positivity in case a future code path skips the decoder.
+        start = self._report.get("cleanStartTime")
+        if not isinstance(start, int) or start <= 0:
+            return None
+        return datetime.fromtimestamp(start, tz=UTC)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        report = self._report
+        attrs: dict[str, Any] = {}
+        end_type = report.get("mowEndType")
+        if isinstance(end_type, int) and end_type in MOW_END_TYPES:
+            attrs["end_type"] = MOW_END_TYPES[end_type]
+        used = report.get("usedBattery")
+        if isinstance(used, int):
+            attrs["used_battery_pct"] = used
+        return attrs

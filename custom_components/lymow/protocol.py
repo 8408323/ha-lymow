@@ -653,6 +653,14 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     if isinstance(robot_config_raw, bytes):
         state["robotConfig"] = decode_robot_config(robot_config_raw)
 
+    # Last cleaning summary (PbOutput field 28 = PbCleanReport — from PbOutput.encode
+    # tag 226 = (28<<3)|2). Populated by QUERY_CLEANING_SUMMARY (userCtrl 34).
+    clean_report_raw = _first(fields, 28)
+    if isinstance(clean_report_raw, bytes):
+        report = decode_clean_report(clean_report_raw)
+        if report:
+            state["cleanReport"] = report
+
     return state
 
 
@@ -732,6 +740,37 @@ def decode_rr_config(data: bytes) -> dict[str, Any]:
         v = _first(f, field_no)
         if isinstance(v, int) and 0 <= v <= 100:
             out[name] = v
+    return out
+
+
+def decode_clean_report(data: bytes) -> dict[str, Any]:
+    """Decode a PbCleanReport sub-message — the QUERY_CLEANING_SUMMARY reply.
+
+    Field map from PbCleanReport.encode (Hermes fn #9794):
+      f1 cleanStartTime (varint, unix seconds — Long on the wire),
+      f2 cleanInfo PbCleanInfo (skipped here — already decoded for live session),
+      f3 mowEndType enum (0=MOW_END_NONE, 1=MOW_END_100, 2=MOW_END_USER_CANCEL),
+      f4 errorList repeated (skipped — needs PbErrorList sub-decode),
+      f5 statusTimes repeated (skipped — needs PbStatusTime sub-decode),
+      f6 usedBattery (varint int32, percent).
+
+    Only present-fields surface so a partial payload doesn't clobber state.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    start = _first(f, 1)
+    # cleanStartTime is a Long on the wire — a malformed (or sign-extended)
+    # huge varint could overflow ``datetime.fromtimestamp`` downstream, so
+    # cap at the POSIX-portable int32 epoch ceiling (year 2038). Anything
+    # beyond it is almost certainly garbage from a misaligned decode.
+    if isinstance(start, int) and 0 < start <= 2_147_483_647:
+        out["cleanStartTime"] = start
+    end_type = _first(f, 3)
+    if isinstance(end_type, int) and 0 <= end_type <= 2:
+        out["mowEndType"] = end_type
+    used = _first(f, 6)
+    if isinstance(used, int) and 0 <= used <= 100:
+        out["usedBattery"] = used
     return out
 
 

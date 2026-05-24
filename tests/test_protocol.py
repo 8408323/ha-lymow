@@ -2028,6 +2028,62 @@ def test_decode_pboutput_no_robotConfig_key_when_field17_absent() -> None:
 
 
 # ---------------------------------------------------------------------------
+# decode_clean_report (PbOutput.f28 — QUERY_CLEANING_SUMMARY reply)
+# ---------------------------------------------------------------------------
+
+
+def test_decode_clean_report_all_scalar_fields() -> None:
+    """PbCleanReport: f1 cleanStartTime, f3 mowEndType, f6 usedBattery."""
+    from lymow.protocol import decode_clean_report
+
+    payload = _field_i32(1, 1_700_000_000) + _field_i32(3, 1) + _field_i32(6, 35)
+    assert decode_clean_report(payload) == {
+        "cleanStartTime": 1_700_000_000,
+        "mowEndType": 1,
+        "usedBattery": 35,
+    }
+
+
+def test_decode_clean_report_drops_out_of_range_values() -> None:
+    """Untrusted wire: bound mowEndType to the APK enum (0-2) and usedBattery
+    to a percentage; drop a non-positive start time so HA doesn't surface 1970,
+    and drop a huge start time so ``datetime.fromtimestamp`` can't OverflowError
+    downstream — cap at the POSIX-portable int32 ceiling (year 2038)."""
+    from lymow.protocol import decode_clean_report
+
+    assert decode_clean_report(_field_i32(1, 0)) == {}
+    assert decode_clean_report(_field_i32(3, 99)) == {}
+    assert decode_clean_report(_field_i32(6, 150)) == {}
+    # Boundary: max accepted is 2^31-1 (year 2038)
+    assert decode_clean_report(_field_i32(1, 2_147_483_647)) == {"cleanStartTime": 2_147_483_647}
+    # Boundary: one past the cap is rejected
+    assert decode_clean_report(_field_i32(1, 2_147_483_648)) == {}
+
+
+def test_decode_clean_report_empty_returns_empty_dict() -> None:
+    from lymow.protocol import decode_clean_report
+
+    assert decode_clean_report(b"") == {}
+
+
+def test_decode_pboutput_surfaces_clean_report_under_cleanReport_key() -> None:
+    pb = _build_pboutput(work_status=2) + _field_bytes(28, _field_i32(1, 1_700_000_000) + _field_i32(3, 2))
+    assert decode_pboutput(pb)["cleanReport"] == {"cleanStartTime": 1_700_000_000, "mowEndType": 2}
+
+
+def test_decode_pboutput_no_cleanReport_key_when_field28_absent() -> None:
+    assert "cleanReport" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
+def test_decode_pboutput_no_cleanReport_key_when_field28_empty() -> None:
+    """An empty PbCleanReport (no scalar fields present) should NOT surface a
+    truthy ``cleanReport`` entry — otherwise the sensor would render with
+    everything None."""
+    pb = _build_pboutput(work_status=2) + _field_bytes(28, b"")
+    assert "cleanReport" not in decode_pboutput(pb)
+
+
+# ---------------------------------------------------------------------------
 # decode_rr_config (PbRobotConfig.rrConfig — Recharge & Resume)
 # ---------------------------------------------------------------------------
 
