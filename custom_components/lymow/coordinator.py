@@ -225,18 +225,39 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     # MQTT callbacks (called from mqtt.py via loop.call_soon_threadsafe)
     # ------------------------------------------------------------------
 
+    # Nested patch keys that must deep-merge on top of existing state rather
+    # than replace it: a pboutput carrying only one PbRobotConfig sub-field
+    # (e.g. metric_4g after a network-priority change) would otherwise blow
+    # away every other known robotConfig field.
+    _DEEP_MERGE_KEYS = ("robotConfig",)
+
     def on_mqtt_state(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Receive a state update from MQTT and push to HA."""
         # A QUERY_SCHEDULES reply carries the full schedule list in one message
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
-        if thing_name not in self._mqtt_state:
-            self._mqtt_state[thing_name] = {}
-        self._mqtt_state[thing_name].update(patch)
+        merged_patch = self._merge_nested_patch(self._mqtt_state.setdefault(thing_name, {}), patch)
+        self._mqtt_state[thing_name].update(merged_patch)
         if self.data and thing_name in self.data:
-            merged = {**self.data[thing_name], **patch}
+            existing = self.data[thing_name]
+            merged_patch_for_data = self._merge_nested_patch(existing, patch)
+            merged = {**existing, **merged_patch_for_data}
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
+
+    def _merge_nested_patch(self, existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+        """Return a copy of patch where each ``_DEEP_MERGE_KEYS`` dict is overlaid
+        on the matching dict in ``existing`` (one level deep) so partial replies
+        keep keys they don't mention. Non-dict patch values are passed through."""
+        if not any(k in patch for k in self._DEEP_MERGE_KEYS):
+            return patch
+        out = dict(patch)
+        for key in self._DEEP_MERGE_KEYS:
+            new = patch.get(key)
+            old = existing.get(key)
+            if isinstance(new, dict) and isinstance(old, dict):
+                out[key] = {**old, **new}
+        return out
 
     def _check_work_status_transition(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Fire HA event bus events and persistent notifications on notable work status changes."""

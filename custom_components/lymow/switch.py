@@ -33,6 +33,7 @@ async def async_setup_entry(
                 FindRobotSwitch(coordinator, device),
                 MobileNotificationSwitch(coordinator, device),
                 AlertsOnlySwitch(coordinator, device),
+                VehicleLedSwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
             ]
         )
@@ -184,6 +185,51 @@ class AlertsOnlySwitch(_DeviceFeatureSwitch):
         await self.coordinator.async_set_device_feature(
             self._thing_name, **{self._feature_key: MobileNotificationSwitch._ON_VALUE}
         )
+
+
+class _RobotConfigBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
+    """Base class for bool switches backed by PbInput.robotConfig writes.
+
+    Unlike device-feature switches (REST /update-device-feature), these go over
+    MQTT as a PbInput with only the robotConfig submessage set — the robot
+    dispatches by submessage shape, no userCtrl. State comes from the
+    PbOutput.robotConfig (decoded into coordinator.data[thing]["robotConfig"]).
+    """
+
+    _config_key: str = ""
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, icon: str) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = name
+        self._attr_unique_id = f"{self._thing_name}_{self._config_key}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_icon = icon
+
+    @property
+    def is_on(self) -> bool | None:
+        config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
+        value = config.get(self._config_key)
+        return bool(value) if value is not None else None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_robot_config(self._thing_name, **{self._config_key: True})
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_robot_config(self._thing_name, **{self._config_key: False})
+
+
+class VehicleLedSwitch(_RobotConfigBoolSwitch):
+    """Mower's status LED (the app's Device Settings → Vehicle LED toggle).
+
+    Wire: PbRobotConfig.isOpenLed (field 7, bool).
+    """
+
+    _config_key = "isOpenLed"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Vehicle LED", "mdi:led-on")
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):

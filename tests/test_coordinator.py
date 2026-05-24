@@ -250,6 +250,34 @@ def test_on_mqtt_state_publishes_full_schedule_list() -> None:
     assert coord.data[THING]["schedules"] == schedules
 
 
+def test_on_mqtt_state_deep_merges_robot_config_partial_patch() -> None:
+    """A partial robotConfig push must not drop other known robotConfig keys."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"robotConfig": {"isOpenLed": True, "metric_4g": False}}}
+    coord._mqtt_state[THING] = {"robotConfig": {"isOpenLed": True, "metric_4g": False}}
+
+    # Robot pushes only metric_4g — isOpenLed must stick around.
+    coord.on_mqtt_state(THING, {"robotConfig": {"metric_4g": True}})
+    assert coord.data[THING]["robotConfig"] == {"isOpenLed": True, "metric_4g": True}
+    assert coord._mqtt_state[THING]["robotConfig"] == {"isOpenLed": True, "metric_4g": True}
+
+
+def test_on_mqtt_state_no_deep_merge_when_existing_lacks_key() -> None:
+    """First robotConfig sighting is stored verbatim — nothing to merge with."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"battery": 70}}
+    coord.on_mqtt_state(THING, {"robotConfig": {"metric_4g": True}})
+    assert coord.data[THING]["robotConfig"] == {"metric_4g": True}
+
+
+def test_on_mqtt_state_non_robot_config_patches_unchanged() -> None:
+    """Patches without robotConfig take the fast path (no extra dict copy)."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"battery": 70, "robotConfig": {"isOpenLed": True}}}
+    coord.on_mqtt_state(THING, {"battery": 65})
+    assert coord.data[THING] == {"battery": 65, "robotConfig": {"isOpenLed": True}}
+
+
 @pytest.mark.asyncio
 async def test_async_query_schedules_clears_stale_and_publishes() -> None:
     coord, mqtt, _ = _make_coordinator()
