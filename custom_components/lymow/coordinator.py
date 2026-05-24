@@ -819,7 +819,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         patch = {name: value for name, value in fields.items() if value is not None}
         if patch and self.data and thing_name in self.data:
             existing = (self.data[thing_name].get("runTimeConfig") or {}) | patch
-            self._publish_ota_patch(thing_name, {"runTimeConfig": existing})
+            self._publish_device_patch(thing_name, {"runTimeConfig": existing})
 
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
         """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*
@@ -1086,7 +1086,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         patch = self._ota_patch_from_check(data)
         if patch:
             self._ota_state.setdefault(thing_name, {}).update(patch)
-            self._publish_ota_patch(thing_name, patch)
+            self._publish_device_patch(thing_name, patch)
         return data
 
     async def async_install_firmware_update(self, thing_name: str, object_key: str) -> str | None:
@@ -1100,7 +1100,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         result = await self._client.create_ota_job(thing_name, object_key)
         job_id = result.get("jobId") if isinstance(result, dict) else None
         self._ota_state.setdefault(thing_name, {})["otaJobId"] = job_id
-        self._publish_ota_patch(thing_name, {"otaJobId": job_id})
+        self._publish_device_patch(thing_name, {"otaJobId": job_id})
         return job_id
 
     async def async_get_ota_progress(self, thing_name: str, job_id: str) -> dict[str, Any]:
@@ -1114,11 +1114,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         status = result.get("status") if isinstance(result, dict) else None
         if isinstance(status, str) and status in _OTA_TERMINAL_STATUSES:
             self._ota_state.get(thing_name, {}).pop("otaJobId", None)
-            self._publish_ota_patch(thing_name, {"otaJobId": None})
+            self._publish_device_patch(thing_name, {"otaJobId": None})
         return result
 
-    def _publish_ota_patch(self, thing_name: str, patch: dict[str, Any]) -> None:
-        """Merge ``patch`` into self.data[thing_name] and publish a fresh snapshot."""
+    def _publish_device_patch(self, thing_name: str, patch: dict[str, Any]) -> None:
+        """Merge ``patch`` into self.data[thing_name] and publish a fresh snapshot.
+
+        Generic — used by OTA progress writes and by optimistic-state writes for
+        run-time-config Numbers / device-settings entities. No-op if the device
+        isn't in coordinator data yet (avoids seeding pre-poll).
+        """
         if not self.data or thing_name not in self.data:
             return
         new_device = {**self.data[thing_name], **patch}

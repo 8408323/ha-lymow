@@ -2199,11 +2199,11 @@ async def test_maybe_poll_ota_progress_skips_when_no_job_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_ota_patch_noop_when_data_missing() -> None:
+async def test_publish_device_patch_noop_when_data_missing() -> None:
     """The publish helper is safe to call before the first coordinator tick."""
     coord, _, _ = _make_coordinator()
     coord.data = None
-    coord._publish_ota_patch(THING, {"otaJobId": "JOB-42"})
+    coord._publish_device_patch(THING, {"otaJobId": "JOB-42"})
     assert coord.data is None
 
 

@@ -534,7 +534,7 @@ def test_live_cut_height_unknown_until_first_write() -> None:
 
     e = LiveCutHeightNumber(_make_runtime_coord(None), DEVICE)
     assert e.native_value is None
-    assert e._attr_unique_id == f"{THING}_live_cutHeight"
+    assert e._attr_unique_id == f"{THING}_live_cut_height"
     assert e._attr_entity_registry_enabled_default is False
 
 

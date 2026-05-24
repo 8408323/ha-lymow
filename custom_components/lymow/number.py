@@ -300,11 +300,15 @@ class _RunTimeConfigNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
     _attr_has_entity_name = True
     _attr_mode = NumberMode.BOX
     _proto_field: str = ""
+    # snake_case key for the unique-id suffix, kept in lockstep with the
+    # camelCase _proto_field. Matches the rest of the integration's IDs
+    # (e.g. _geofence_radius, _rtk_pause_threshold, _audio_volume).
+    _unique_id_key: str = ""
 
     def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, icon: str) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
-        self._attr_unique_id = f"{self._thing_name}_live_{self._proto_field}"
+        self._attr_unique_id = f"{self._thing_name}_live_{self._unique_id_key}"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = name
         self._attr_icon = icon
@@ -320,6 +324,7 @@ class LiveCutHeightNumber(_RunTimeConfigNumber):
     """Live cut-height override (mm) for the currently-running mow."""
 
     _proto_field = "cutHeight"
+    _unique_id_key = "cut_height"
     _attr_device_class = NumberDeviceClass.DISTANCE
     _attr_native_unit_of_measurement = UnitOfLength.MILLIMETERS
     _attr_native_min_value = 20
@@ -338,6 +343,7 @@ class LiveMoveSpeedNumber(_RunTimeConfigNumber):
     """Live move-speed override (m/s) for the currently-running mow."""
 
     _proto_field = "moveSpeed"
+    _unique_id_key = "move_speed"
     _attr_native_unit_of_measurement = "m/s"
     _attr_native_min_value = 0.1
     _attr_native_max_value = 1.5
@@ -355,6 +361,7 @@ class LiveCutSpeedNumber(_RunTimeConfigNumber):
     """Live cut-speed override (blade speed, robot units) for the currently-running mow."""
 
     _proto_field = "cutSpeed"
+    _unique_id_key = "cut_speed"
     _attr_native_min_value = 0
     _attr_native_max_value = 1000
     _attr_native_step = 1
