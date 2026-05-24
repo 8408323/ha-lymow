@@ -23,14 +23,16 @@ _LOGGER = logging.getLogger(__name__)
 _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
 _DASHBOARD_CREATED_KEY = f"{DOMAIN}_dashboard_created"
 
+
 def _card_url() -> str:
-    """Return card URL with integration version as cache buster."""
+    """Return card URL with file mtime as cache buster so deploys auto-invalidate."""
+    js = Path(__file__).parent / "www" / "lymow-map-card.js"
     try:
-        manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
-        version = manifest.get("version", "0")
+        version = int(js.stat().st_mtime)
     except Exception:
-        version = "0"
+        version = 0
     return f"/custom_components/{DOMAIN}/lymow-map-card.js?v={version}"
+
 
 _DASHBOARD_URL_PATH = "lymow-mower"
 _DASHBOARD_URL_PATH = "lymow-mower"
@@ -147,14 +149,16 @@ async def _async_create_dashboard(hass: HomeAssistant, devices: list[dict]) -> N
         if collection is None:
             return
 
-        await collection.async_create_item({
-            "url_path": _DASHBOARD_URL_PATH,
-            "mode": "storage",
-            "title": "Lymow",
-            "icon": "mdi:robot-mower",
-            "show_in_sidebar": True,
-            "require_admin": False,
-        })
+        await collection.async_create_item(
+            {
+                "url_path": _DASHBOARD_URL_PATH,
+                "mode": "storage",
+                "title": "Lymow",
+                "icon": "mdi:robot-mower",
+                "show_in_sidebar": True,
+                "require_admin": False,
+            }
+        )
 
         # Build a view config using the entity IDs derived from the first device.
         if not devices:
