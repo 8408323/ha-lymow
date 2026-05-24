@@ -527,6 +527,31 @@ class LymowMapCard extends HTMLElement {
           </select>
           <span class="sp-val"></span>
         </div>
+        <div class="sp-row">
+          <label>Mowing pattern</label>
+          <select class="sp-input sp-select" data-field="clean_mode" data-type="int">
+            <option value="0" ${(sv.clean_mode ?? 0) === 0 ? "selected" : ""}>Parallel</option>
+            <option value="1" ${(sv.clean_mode ?? 0) === 1 ? "selected" : ""}>Spiral</option>
+            <option value="2" ${(sv.clean_mode ?? 0) === 2 ? "selected" : ""}>Random</option>
+          </select>
+          <span class="sp-val"></span>
+        </div>
+        <div class="sp-row">
+          <label>Path order</label>
+          <select class="sp-input sp-select" data-field="path_order" data-type="int">
+            <option value="0" ${!(sv.path_order) ? "selected" : ""}>Normal</option>
+            <option value="1" ${sv.path_order ? "selected" : ""}>Reverse</option>
+          </select>
+          <span class="sp-val"></span>
+        </div>
+        <div class="sp-row">
+          <label>Line follow</label>
+          <select class="sp-input sp-select" data-field="line_follow_mode" data-type="int">
+            <option value="0" ${!(sv.line_follow_mode) ? "selected" : ""}>Off</option>
+            <option value="1" ${sv.line_follow_mode ? "selected" : ""}>On</option>
+          </select>
+          <span class="sp-val"></span>
+        </div>
         <button class="sp-apply" data-action="apply-settings">Apply settings</button>
         <div class="sp-status"></div>
       </div>` : "";
@@ -1043,6 +1068,7 @@ class LymowMapCard extends HTMLElement {
         move_speed: 0.6, cut_speed: 0.6, brush_speed: 0.6,
         path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
         perimeter_mow_dir: 0, obs_dec_mode: 0,
+        clean_mode: 0, path_order: 0, line_follow_mode: 0,
       };
     }
     this._render();
