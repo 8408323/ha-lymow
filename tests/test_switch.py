@@ -737,3 +737,73 @@ async def test_charging_handbrake_turn_on_off_passes_ui_bool_through() -> None:
     coord2 = _make_task_config_coord({"disableChargingPark": False})
     await ChargingHandbrakeSwitch(coord2, DEVICE).async_turn_off()
     coord2.async_set_device_settings.assert_awaited_once_with(THING, charging_handbrake=False)
+
+
+# ---------------------------------------------------------------------------
+# RechargeResumeSwitch — PbRobotConfig.rrConfig.enable (f1)
+# ---------------------------------------------------------------------------
+
+
+def _make_rr_coord(rr_config: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    state: dict = {"robotConfig": {}}
+    if rr_config is not None:
+        state["robotConfig"]["rrConfig"] = rr_config
+    coord.data = {THING: state}
+    coord.devices = [DEVICE]
+    coord.async_set_recharge_resume = AsyncMock()
+    return coord
+
+
+def test_recharge_resume_switch_metadata_and_unknown_when_missing() -> None:
+    from lymow.switch import RechargeResumeSwitch
+
+    e = RechargeResumeSwitch(_make_rr_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_recharge_resume"
+    assert e._attr_name == "Recharge & resume"
+    assert e.is_on is None
+
+
+def test_recharge_resume_switch_reads_state_and_period_attrs() -> None:
+    from lymow.switch import RechargeResumeSwitch
+
+    e = RechargeResumeSwitch(
+        _make_rr_coord(
+            {
+                "enable": True,
+                "periodStart": {"hour": 4, "minute": 0},
+                "periodEnd": {"hour": 20, "minute": 30},
+            }
+        ),
+        DEVICE,
+    )
+    assert e.is_on is True
+    assert e.extra_state_attributes == {"period_start": "04:00", "period_end": "20:30"}
+
+
+def test_recharge_resume_switch_no_attrs_when_periods_missing() -> None:
+    from lymow.switch import RechargeResumeSwitch
+
+    e = RechargeResumeSwitch(_make_rr_coord({"enable": False}), DEVICE)
+    assert e.is_on is False
+    assert e.extra_state_attributes is None
+
+
+def test_recharge_resume_switch_unknown_when_enable_not_bool() -> None:
+    """``decode_rr_config`` already drops non-0/1 enable values, but guard the
+    entity too in case rrConfig is built from a different source someday."""
+    from lymow.switch import RechargeResumeSwitch
+
+    assert RechargeResumeSwitch(_make_rr_coord({"enable": 1}), DEVICE).is_on is None
+
+
+async def test_recharge_resume_switch_turn_on_off_calls_coordinator() -> None:
+    from lymow.switch import RechargeResumeSwitch
+
+    coord = _make_rr_coord({"enable": False})
+    await RechargeResumeSwitch(coord, DEVICE).async_turn_on()
+    coord.async_set_recharge_resume.assert_awaited_once_with(THING, enable=True)
+
+    coord2 = _make_rr_coord({"enable": True})
+    await RechargeResumeSwitch(coord2, DEVICE).async_turn_off()
+    coord2.async_set_recharge_resume.assert_awaited_once_with(THING, enable=False)

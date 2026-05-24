@@ -38,6 +38,7 @@ async def async_setup_entry(
                 DockOnErrorSwitch(coordinator, device),
                 RainCleaningSwitch(coordinator, device),
                 ChargingHandbrakeSwitch(coordinator, device),
+                RechargeResumeSwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
             ]
         )
@@ -350,6 +351,58 @@ class ChargingHandbrakeSwitch(_DeviceSettingsBoolSwitch):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Charging handbrake", "mdi:car-brake-parking", "charging_handbrake")
+
+
+class RechargeResumeSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
+    """Recharge & Resume master toggle.
+
+    Wire: ``PbRobotConfig.rrConfig.enableRr`` (PbRRConfig f1, bool).
+    Decoded into coordinator state as ``rrConfig['enable']`` by
+    ``decode_rr_config`` (the wire name is renamed to drop the redundant
+    ``Rr`` prefix once it's already inside ``rrConfig``).
+
+    Period start/end and the two battery thresholds are exposed separately
+    (period times as ``extra_state_attributes`` for now; the thresholds as
+    Number entities). Writes go via the no-userCtrl PbInput.robotConfig
+    path the app uses for setRrConfig.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:battery-sync"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Recharge & resume"
+        self._attr_unique_id = f"{self._thing_name}_recharge_resume"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    @property
+    def _rr_config(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("rrConfig") or {}
+
+    @property
+    def is_on(self) -> bool | None:
+        value = self._rr_config.get("enable")
+        if not isinstance(value, bool):
+            return None
+        return value
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        rr = self._rr_config
+        attrs: dict[str, Any] = {}
+        for key, label in (("periodStart", "period_start"), ("periodEnd", "period_end")):
+            t = rr.get(key)
+            if isinstance(t, dict) and "hour" in t and "minute" in t:
+                attrs[label] = f"{t['hour']:02d}:{t['minute']:02d}"
+        return attrs or None
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_recharge_resume(self._thing_name, enable=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_recharge_resume(self._thing_name, enable=False)
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):

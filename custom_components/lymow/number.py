@@ -25,11 +25,14 @@ async def async_setup_entry(
     added: set[tuple[str, str]] = set()
 
     # Per-device numbers (one of each): geofence radius (geoFence feature),
-    # RTK auto-pause threshold (coordinator-state knob), and mower volume
-    # (PbRobotConfig.audioVolume).
+    # RTK auto-pause threshold (coordinator-state knob), mower volume
+    # (PbRobotConfig.audioVolume) and the two Recharge & Resume battery
+    # thresholds (PbRobotConfig.rrConfig f4/f5).
     device_numbers: list[NumberEntity] = [GeofenceRadiusNumber(coordinator, device) for device in coordinator.devices]
     device_numbers.extend(RtkPauseThresholdNumber(coordinator, device) for device in coordinator.devices)
     device_numbers.extend(MowerVolumeNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(RechargeBatteryThresholdNumber(coordinator, device) for device in coordinator.devices)
+    device_numbers.extend(ResumeBatteryThresholdNumber(coordinator, device) for device in coordinator.devices)
     if device_numbers:
         async_add_entities(device_numbers)
 
@@ -207,3 +210,73 @@ class MowerVolumeNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         await self.coordinator.async_set_robot_config(self._thing_name, audioVolume=int(value))
+
+
+class _RrBatteryThresholdNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
+    """Base class for the two Recharge & Resume battery-threshold sliders.
+
+    Read: PbRobotConfig.rrConfig.<wire_key> (decoded by ``decode_rr_config``).
+    Write: ``coordinator.async_set_recharge_resume`` carries the change
+    over the no-userCtrl PbInput.robotConfig path the app uses (Hermes
+    setRrConfig fn pathway).
+    """
+
+    _wire_key: str = ""
+    _settings_kwarg: str = ""
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    # min=0 to match the decoder's 0-100 bound: the app's UI doesn't expose 0,
+    # but if a (future / hostile / off-app) write ever sets the wire field to 0
+    # we'd rather surface it as 0% than make HA mark the state invalid for
+    # being out of [min, max].
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "%"
+    _attr_device_class = NumberDeviceClass.BATTERY
+
+    def __init__(
+        self,
+        coordinator: LymowCoordinator,
+        device: dict,
+        name: str,
+        icon: str,
+        unique_suffix: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_{unique_suffix}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = name
+        self._attr_icon = icon
+
+    @property
+    def native_value(self) -> float | None:
+        rr = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("rrConfig") or {}
+        v = rr.get(self._wire_key)
+        if not isinstance(v, int) or not 0 <= v <= 100:
+            return None
+        return float(v)
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.async_set_recharge_resume(self._thing_name, **{self._settings_kwarg: int(value)})
+
+
+class RechargeBatteryThresholdNumber(_RrBatteryThresholdNumber):
+    """Battery % at which the mower returns to the dock to recharge."""
+
+    _wire_key = "rechargeBat"
+    _settings_kwarg = "recharge_bat"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Recharge threshold", "mdi:battery-charging-low", "recharge_threshold")
+
+
+class ResumeBatteryThresholdNumber(_RrBatteryThresholdNumber):
+    """Battery % at which the mower resumes mowing after recharging."""
+
+    _wire_key = "resumeBat"
+    _settings_kwarg = "resume_bat"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Resume threshold", "mdi:battery-charging-high", "resume_threshold")

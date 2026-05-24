@@ -620,7 +620,8 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
     f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
     f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
     f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
-    f10 cmdCellularSwitch bool, f11 metric_4g bool, f22 dockOnError bool.
+    f10 cmdCellularSwitch bool, f11 metric_4g bool, f18 rrConfig PbRRConfig,
+    f22 dockOnError bool.
 
     Untrusted wire data: only fields we read are decoded; unknown values are
     left absent rather than coerced.
@@ -645,6 +646,47 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         v = _first(f, field_no)
         if v is not None:
             out[name] = bool(v)
+    rr_raw = _first(f, 18)
+    if isinstance(rr_raw, bytes):
+        rr = decode_rr_config(rr_raw)
+        if rr:
+            out["rrConfig"] = rr
+    return out
+
+
+def decode_rr_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbRRConfig (Recharge & Resume) sub-message.
+
+    Field layout from PbRRConfig.encode (Hermes fn #9494 at offset 0x004a6f9b);
+    mirrors :func:`encode_set_recharge_resume`:
+      f1 enableRr (bool) — only 0/1 accepted to avoid hostile non-zero ints
+                           silently flipping the switch on.
+      f2 resumePeriodStart PbTimeZone {f1 hour, f2 minute}
+      f3 resumePeriodEnd   PbTimeZone {f1 hour, f2 minute}
+      f4 rechargeBat int32 — battery % at which the mower returns to dock
+      f5 resumeBat   int32 — battery % at which the mower resumes after charging
+
+    Battery percentages are bounded to 0-100 and hour/minute to 0-23 / 0-59;
+    anything outside the wire's documented range is dropped rather than
+    surfaced as garbage HA state.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    enable = _first(f, 1)
+    if enable in (0, 1):
+        out["enable"] = bool(enable)
+    for field_no, name in ((2, "periodStart"), (3, "periodEnd")):
+        raw = _first(f, field_no)
+        if isinstance(raw, bytes):
+            sub = _decode_fields(raw)
+            hour = _first(sub, 1)
+            minute = _first(sub, 2)
+            if isinstance(hour, int) and isinstance(minute, int) and 0 <= hour <= 23 and 0 <= minute <= 59:
+                out[name] = {"hour": hour, "minute": minute}
+    for field_no, name in ((4, "rechargeBat"), (5, "resumeBat")):
+        v = _first(f, field_no)
+        if isinstance(v, int) and 0 <= v <= 100:
+            out[name] = v
     return out
 
 

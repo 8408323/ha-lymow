@@ -247,8 +247,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def _merge_nested_patch(self, existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         """Return a copy of patch where each ``_DEEP_MERGE_KEYS`` dict is overlaid
-        on the matching dict in ``existing`` (one level deep) so partial replies
-        keep keys they don't mention. Non-dict patch values are passed through."""
+        on the matching dict in ``existing`` (two levels deep for robotConfig)
+        so partial replies keep keys they don't mention. A pboutput that only
+        carries ``rrConfig: {enable: True}`` after a toggle must not wipe the
+        sibling ``rechargeBat`` / ``resumeBat`` / period fields. Non-dict patch
+        values are passed through."""
         if not any(k in patch for k in self._DEEP_MERGE_KEYS):
             return patch
         out = dict(patch)
@@ -256,7 +259,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             new = patch.get(key)
             old = existing.get(key)
             if isinstance(new, dict) and isinstance(old, dict):
-                out[key] = {**old, **new}
+                merged = {**old, **new}
+                for sub_key, sub_new in new.items():
+                    sub_old = old.get(sub_key)
+                    if isinstance(sub_new, dict) and isinstance(sub_old, dict):
+                        merged[sub_key] = {**sub_old, **sub_new}
+                out[key] = merged
         return out
 
     def _check_work_status_transition(self, thing_name: str, patch: dict[str, Any]) -> None:
