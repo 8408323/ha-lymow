@@ -1923,6 +1923,34 @@ def test_encode_set_robot_config_rejects_unsupported_kind() -> None:
         del _ROBOT_CONFIG_FIELDS["__test_bogus__"]
 
 
+def test_encode_set_robot_config_signal_field_for_vehicle_led() -> None:
+    """Vehicle LED writes go via the signal field (one-shot), not isOpenLed."""
+    from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT, encode_set_robot_config
+
+    pb_on = encode_set_robot_config(signal=SIGNAL_TURN_ON_VEHICLE_LIGHT)
+    cfg = _decode_fields(_first(_decode_fields(pb_on), 13))
+    assert _first(cfg, 8) == SIGNAL_TURN_ON_VEHICLE_LIGHT == 10
+
+    pb_off = encode_set_robot_config(signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
+    cfg_off = _decode_fields(_first(_decode_fields(pb_off), 13))
+    assert _first(cfg_off, 8) == SIGNAL_TURN_OFF_VEHICLE_LIGHT == 11
+
+
+def test_encode_set_robot_config_dock_on_error_field_22() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(dockOnError=True)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 22) == 1
+
+
+def test_decode_robot_config_surfaces_dock_on_error() -> None:
+    from lymow.protocol import decode_robot_config
+
+    assert decode_robot_config(_field_i32(22, 1)) == {"dockOnError": True}
+    assert decode_robot_config(_field_i32(22, 0)) == {"dockOnError": False}
+
+
 def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     from lymow.protocol import encode_set_run_time_config
 

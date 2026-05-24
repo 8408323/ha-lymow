@@ -361,6 +361,7 @@ async def test_async_setup_entry_creates_feature_switches() -> None:
     assert "AlertsOnlySwitch" in feature_types
     assert "VehicleLedSwitch" in feature_types
     assert "Prefer4gSwitch" in feature_types
+    assert "DockOnErrorSwitch" in feature_types
 
 
 # ---------------------------------------------------------------------------
@@ -393,14 +394,17 @@ def test_vehicle_led_switch_reads_state_from_robot_config() -> None:
     assert off.is_on is False
 
 
-async def test_vehicle_led_switch_turn_on_off_publishes_robot_config() -> None:
+async def test_vehicle_led_switch_writes_via_signal_not_isOpenLed() -> None:
+    """Match the app's switchVehicleLed: write signal=10 (on) / 11 (off), not isOpenLed."""
+    from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT
+
     coord_on = _make_robot_config_coord({"isOpenLed": False})
     await VehicleLedSwitch(coord_on, DEVICE).async_turn_on()
-    coord_on.async_set_robot_config.assert_awaited_once_with(THING, isOpenLed=True)
+    coord_on.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_ON_VEHICLE_LIGHT)
 
     coord_off = _make_robot_config_coord({"isOpenLed": True})
     await VehicleLedSwitch(coord_off, DEVICE).async_turn_off()
-    coord_off.async_set_robot_config.assert_awaited_once_with(THING, isOpenLed=False)
+    coord_off.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +433,33 @@ async def test_prefer_4g_switch_turn_on_off_publishes_robot_config() -> None:
     coord_off = _make_robot_config_coord({"metric_4g": True})
     await Prefer4gSwitch(coord_off, DEVICE).async_turn_off()
     coord_off.async_set_robot_config.assert_awaited_once_with(THING, metric_4g=False)
+
+
+# ---------------------------------------------------------------------------
+# DockOnErrorSwitch — robotConfig.dockOnError (bool)
+# ---------------------------------------------------------------------------
+
+
+def test_dock_on_error_switch_reads_state_and_unique_id() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    on = DockOnErrorSwitch(_make_robot_config_coord({"dockOnError": True}), DEVICE)
+    assert on._attr_unique_id == f"{THING}_dockOnError"
+    assert on.is_on is True
+    assert DockOnErrorSwitch(_make_robot_config_coord({"dockOnError": False}), DEVICE).is_on is False
+    assert DockOnErrorSwitch(_make_robot_config_coord(None), DEVICE).is_on is None
+
+
+async def test_dock_on_error_switch_writes_robot_config() -> None:
+    from lymow.switch import DockOnErrorSwitch
+
+    coord_on = _make_robot_config_coord({"dockOnError": False})
+    await DockOnErrorSwitch(coord_on, DEVICE).async_turn_on()
+    coord_on.async_set_robot_config.assert_awaited_once_with(THING, dockOnError=True)
+
+    coord_off = _make_robot_config_coord({"dockOnError": True})
+    await DockOnErrorSwitch(coord_off, DEVICE).async_turn_off()
+    coord_off.async_set_robot_config.assert_awaited_once_with(THING, dockOnError=False)
 
 
 # ---------------------------------------------------------------------------

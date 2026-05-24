@@ -35,6 +35,7 @@ async def async_setup_entry(
                 AlertsOnlySwitch(coordinator, device),
                 VehicleLedSwitch(coordinator, device),
                 Prefer4gSwitch(coordinator, device),
+                DockOnErrorSwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
             ]
         )
@@ -224,13 +225,28 @@ class _RobotConfigBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
 class VehicleLedSwitch(_RobotConfigBoolSwitch):
     """Mower's status LED (the app's Device Settings → Vehicle LED toggle).
 
-    Wire: PbRobotConfig.isOpenLed (field 7, bool).
+    Read: PbRobotConfig.isOpenLed (field 7, bool — the persistent state).
+    Write: PbRobotConfig.signal (field 8, int) carrying
+    ``SIGNAL_TURN_ON_VEHICLE_LIGHT=10`` / ``SIGNAL_TURN_OFF_VEHICLE_LIGHT=11``
+    — same one-shot action the app's switchVehicleLed function publishes
+    (Hermes fn #9021). The robot reflects the action back into ``isOpenLed``
+    on the next pboutput, so the read key matches the write outcome.
     """
 
     _config_key = "isOpenLed"
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Vehicle LED", "mdi:led-on")
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        from .protocol import SIGNAL_TURN_ON_VEHICLE_LIGHT
+
+        await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_ON_VEHICLE_LIGHT)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        from .protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT
+
+        await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
 
 
 class Prefer4gSwitch(_RobotConfigBoolSwitch):
@@ -248,6 +264,19 @@ class Prefer4gSwitch(_RobotConfigBoolSwitch):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Prefer 4G", "mdi:signal-4g")
+
+
+class DockOnErrorSwitch(_RobotConfigBoolSwitch):
+    """Auto-dock when the mower errors out (app's Device Settings toggle).
+
+    Wire: PbRobotConfig.dockOnError (field 22, bool). When on, after an error
+    the mower attempts to return to the dock instead of stopping in place.
+    """
+
+    _config_key = "dockOnError"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Auto-dock on error", "mdi:home-alert")
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
