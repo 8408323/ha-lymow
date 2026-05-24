@@ -570,7 +570,49 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     if isinstance(robot_config_raw, bytes):
         state["robotConfig"] = decode_robot_config(robot_config_raw)
 
+    # Task config (PbOutput field 32 = PbTaskConfig — from PbOutput.encode tag
+    # 258 = (32<<3)|2). The app's "Rainy Mowing", "Charging Handbrake", and
+    # the next-mow zone-order / charging-mode settings live here. Bool fields
+    # are decoded as bool so HA binary_sensor entities can read them directly.
+    task_config_raw = _first(fields, 32)
+    if isinstance(task_config_raw, bytes):
+        state["taskConfig"] = decode_task_config(task_config_raw)
+
     return state
+
+
+def decode_task_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbTaskConfig sub-message into a flat dict.
+
+    Field map from PbTaskConfig.encode (Hermes fn #9590 at offset 0x004aed0b):
+    f1 chargingMode int, f2 zoneOrder int, f3 rainCleaning bool,
+    f4 disableChargingPark bool.
+
+    Note: this is a *different* message from the per-zone PbZoneConfig the
+    integration's ``set_task_config`` service writes (that one has 19 fields
+    and lives at PbInput field 26). They share the userCtrl 36 but the
+    submessage shape is what disambiguates them on the wire.
+
+    Untrusted wire data: missing fields are left absent so a partial reply
+    doesn't clobber previously-decoded keys.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    for field_no, name in (
+        (1, "chargingMode"),
+        (2, "zoneOrder"),
+    ):
+        v = _first(f, field_no)
+        if v is not None:
+            out[name] = _signed32(v)
+    for field_no, name in (
+        (3, "rainCleaning"),
+        (4, "disableChargingPark"),
+    ):
+        v = _first(f, field_no)
+        if v is not None:
+            out[name] = bool(v)
+    return out
 
 
 def decode_robot_config(data: bytes) -> dict[str, Any]:

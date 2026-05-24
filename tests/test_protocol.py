@@ -1840,6 +1840,39 @@ def test_decode_pboutput_no_robotConfig_key_when_field17_absent() -> None:
     assert "robotConfig" not in decode_pboutput(_build_pboutput(work_status=1))
 
 
+def test_decode_task_config_extracts_known_fields() -> None:
+    from lymow.protocol import decode_task_config
+
+    # f1=chargingMode int, f2=zoneOrder int, f3=rainCleaning bool, f4=disableChargingPark bool
+    cfg = _field_i32(1, 2) + _field_i32(2, 1) + _field_i32(3, 1) + _field_i32(4, 0)
+    assert decode_task_config(cfg) == {
+        "chargingMode": 2,
+        "zoneOrder": 1,
+        "rainCleaning": True,
+        "disableChargingPark": False,
+    }
+
+
+def test_decode_task_config_absent_fields_left_out() -> None:
+    """Partial replies must not clobber existing state — fields the robot
+    didn't send stay absent from the dict."""
+    from lymow.protocol import decode_task_config
+
+    assert decode_task_config(_field_i32(3, 1)) == {"rainCleaning": True}
+    assert decode_task_config(b"") == {}
+
+
+def test_decode_pboutput_surfaces_task_config_under_taskConfig_key() -> None:
+    # f32 = taskConfig; carry the four-field PbTaskConfig and verify round-trip
+    pb = _build_pboutput(work_status=2) + _field_bytes(32, _field_i32(3, 1) + _field_i32(4, 0))
+    state = decode_pboutput(pb)
+    assert state["taskConfig"] == {"rainCleaning": True, "disableChargingPark": False}
+
+
+def test_decode_pboutput_no_taskConfig_key_when_field32_absent() -> None:
+    assert "taskConfig" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
 def test_encode_set_task_config_wraps_in_pbinput() -> None:
     from lymow.protocol import encode_set_task_config
 

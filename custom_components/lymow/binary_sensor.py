@@ -29,6 +29,8 @@ async def async_setup_entry(
                 RechargingBinarySensor(coordinator, device),
                 StolenBinarySensor(coordinator, device),
                 DeviceLockedBinarySensor(coordinator, device),
+                RainyMowingBinarySensor(coordinator, device),
+                ChargingHandbrakeBinarySensor(coordinator, device),
             ]
         )
     if entities:
@@ -103,6 +105,69 @@ class DeviceLockedBinarySensor(_LymowBinarySensor):
     def is_on(self) -> bool | None:
         """LOCK device class: ``on`` means *unlocked*. Invert the underlying flag."""
         value = self._device_data.get(self._field)
+        if value is None:
+            return None
+        return not bool(value)
+
+
+class _TaskConfigBinarySensor(CoordinatorEntity[LymowCoordinator], BinarySensorEntity):
+    """Read-only base for PbTaskConfig bool fields (decoded from PbOutput f32).
+
+    These mirror the app's Device Settings → Rainy Mowing / Charging
+    Handbrake toggles. Read-only for now (the write path is a separate
+    PbInput shape from the per-zone task-config encoder); decoded into
+    coordinator.data[thing]["taskConfig"] by ``decode_pboutput``.
+    """
+
+    _config_key: str = ""
+    _attr_has_entity_name = True
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict, name: str, suffix: str, icon: str) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = name
+        self._attr_unique_id = f"{self._thing_name}_{suffix}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_icon = icon
+        self._attr_entity_registry_enabled_default = False
+
+    @property
+    def is_on(self) -> bool | None:
+        config = (self.coordinator.data or {}).get(self._thing_name, {}).get("taskConfig") or {}
+        value = config.get(self._config_key)
+        return bool(value) if value is not None else None
+
+
+class RainyMowingBinarySensor(_TaskConfigBinarySensor):
+    """Mirrors the app's Device Settings → Rainy Mowing toggle (read-only).
+
+    Wire: PbTaskConfig.rainCleaning (field 3, bool). When true, the robot is
+    allowed to mow in light rain.
+    """
+
+    _config_key = "rainCleaning"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Rainy mowing", "rainy_mowing", "mdi:weather-pouring")
+
+
+class ChargingHandbrakeBinarySensor(_TaskConfigBinarySensor):
+    """Mirrors the app's Device Settings → Charging Handbrake toggle (read-only).
+
+    Wire: PbTaskConfig.disableChargingPark (field 4, bool), reported INVERTED
+    here — the app shows "Charging Handbrake: on" when ``disableChargingPark``
+    is *false*. Prevents the mower sliding off the dock on a slope.
+    """
+
+    _config_key = "disableChargingPark"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Charging handbrake", "charging_handbrake", "mdi:car-brake-hold")
+
+    @property
+    def is_on(self) -> bool | None:
+        config = (self.coordinator.data or {}).get(self._thing_name, {}).get("taskConfig") or {}
+        value = config.get(self._config_key)
         if value is None:
             return None
         return not bool(value)

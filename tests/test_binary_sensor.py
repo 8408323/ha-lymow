@@ -122,7 +122,7 @@ def test_device_locked_none_when_missing() -> None:
     assert e.is_on is None
 
 
-async def test_async_setup_entry_creates_four_per_device() -> None:
+async def test_async_setup_entry_creates_six_per_device() -> None:
     coord = _make_coord({"isCharging": True, "isRecharging": False, "stolenStatus": False, "deviceLocked": False})
 
     hass = MagicMock()
@@ -134,18 +134,20 @@ async def test_async_setup_entry_creates_four_per_device() -> None:
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     # Exact count, not just type set — catches accidental duplicates.
-    assert len(added) == 4
+    assert len(added) == 6
     types = [type(e).__name__ for e in added]
     assert sorted(types) == [
         "ChargingBinarySensor",
+        "ChargingHandbrakeBinarySensor",
         "DeviceLockedBinarySensor",
+        "RainyMowingBinarySensor",
         "RechargingBinarySensor",
         "StolenBinarySensor",
     ]
 
 
-async def test_async_setup_entry_creates_four_per_device_with_two_devices() -> None:
-    """Two devices → exactly eight entities (no duplicates, no skips)."""
+async def test_async_setup_entry_six_per_device_with_two_devices() -> None:
+    """Two devices → exactly twelve entities (no duplicates, no skips)."""
     coord = _make_coord({"isCharging": True})
     coord.devices = [DEVICE, {"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
 
@@ -157,9 +159,41 @@ async def test_async_setup_entry_creates_four_per_device_with_two_devices() -> N
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 8
+    assert len(added) == 12
     thing_names = sorted({e._thing_name for e in added})
     assert thing_names == ["mower-001", "mower-002"]
+
+
+def test_rainy_mowing_sensor_reads_task_config() -> None:
+    """rainCleaning=true in the decoded taskConfig surfaces as is_on=True."""
+    from lymow.binary_sensor import RainyMowingBinarySensor
+
+    coord = _make_coord({"taskConfig": {"rainCleaning": True}})
+    assert RainyMowingBinarySensor(coord, DEVICE).is_on is True
+
+
+def test_rainy_mowing_sensor_unknown_when_field_absent() -> None:
+    from lymow.binary_sensor import RainyMowingBinarySensor
+
+    assert RainyMowingBinarySensor(_make_coord({}), DEVICE).is_on is None
+    assert RainyMowingBinarySensor(_make_coord({"taskConfig": {}}), DEVICE).is_on is None
+
+
+def test_charging_handbrake_inverts_disable_charging_park() -> None:
+    """The app shows the handbrake as on when PbTaskConfig.disableChargingPark
+    is false — sensor inverts the wire value so the entity matches the app."""
+    from lymow.binary_sensor import ChargingHandbrakeBinarySensor
+
+    coord_on = _make_coord({"taskConfig": {"disableChargingPark": False}})
+    coord_off = _make_coord({"taskConfig": {"disableChargingPark": True}})
+    assert ChargingHandbrakeBinarySensor(coord_on, DEVICE).is_on is True
+    assert ChargingHandbrakeBinarySensor(coord_off, DEVICE).is_on is False
+
+
+def test_charging_handbrake_unknown_when_field_absent() -> None:
+    from lymow.binary_sensor import ChargingHandbrakeBinarySensor
+
+    assert ChargingHandbrakeBinarySensor(_make_coord({}), DEVICE).is_on is None
 
 
 async def test_async_setup_entry_no_devices() -> None:
