@@ -1894,6 +1894,35 @@ def test_encode_set_robot_config_false_and_unknown_rejected() -> None:
         encode_set_robot_config(nonsense=1)
 
 
+def test_encode_set_robot_config_int_field_audio_volume() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(audioVolume=42)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 6) == 42  # field 6 = audioVolume
+
+
+def test_encode_set_robot_config_mixed_int_and_bool_in_one_message() -> None:
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(audioVolume=80, isOpenLed=True)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 6) == 80
+    assert _first(cfg, 7) == 1
+
+
+def test_encode_set_robot_config_rejects_unsupported_kind() -> None:
+    """Guard against silent mis-encoding if the kind map ever grows past bool/int."""
+    from lymow.protocol import _ROBOT_CONFIG_FIELDS, encode_set_robot_config
+
+    _ROBOT_CONFIG_FIELDS["__test_bogus__"] = (99, "float")
+    try:
+        with pytest.raises(ValueError, match="unsupported robot-config kind"):
+            encode_set_robot_config(__test_bogus__=1.5)
+    finally:
+        del _ROBOT_CONFIG_FIELDS["__test_bogus__"]
+
+
 def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     from lymow.protocol import encode_set_run_time_config
 

@@ -34,6 +34,7 @@ async def async_setup_entry(
                 MobileNotificationSwitch(coordinator, device),
                 AlertsOnlySwitch(coordinator, device),
                 VehicleLedSwitch(coordinator, device),
+                Prefer4gSwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
             ]
         )
@@ -230,6 +231,23 @@ class VehicleLedSwitch(_RobotConfigBoolSwitch):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Vehicle LED", "mdi:led-on")
+
+
+class Prefer4gSwitch(_RobotConfigBoolSwitch):
+    """Network priority: 4G preferred (on) vs Wi-Fi preferred (off).
+
+    Wire: PbRobotConfig.metric_4g (field 11, bool). True = always prefer
+    cellular (may incur data charges), false = prefer Wi-Fi, fall back to 4G
+    if it drops — same options the app's Network Settings → Network Priority
+    page exposes. The lymow.set_network_priority service is kept alongside
+    (semantically equivalent) for automations that prefer the explicit "4g"/
+    "wifi" enum.
+    """
+
+    _config_key = "metric_4g"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Prefer 4G", "mdi:signal-4g")
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):

@@ -360,6 +360,7 @@ async def test_async_setup_entry_creates_feature_switches() -> None:
     assert "MobileNotificationSwitch" in feature_types
     assert "AlertsOnlySwitch" in feature_types
     assert "VehicleLedSwitch" in feature_types
+    assert "Prefer4gSwitch" in feature_types
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +401,34 @@ async def test_vehicle_led_switch_turn_on_off_publishes_robot_config() -> None:
     coord_off = _make_robot_config_coord({"isOpenLed": True})
     await VehicleLedSwitch(coord_off, DEVICE).async_turn_off()
     coord_off.async_set_robot_config.assert_awaited_once_with(THING, isOpenLed=False)
+
+
+# ---------------------------------------------------------------------------
+# Prefer4gSwitch — robotConfig.metric_4g (bool, on=4G/off=Wi-Fi)
+# ---------------------------------------------------------------------------
+
+
+def test_prefer_4g_switch_metadata_and_reads_state() -> None:
+    from lymow.switch import Prefer4gSwitch
+
+    e = Prefer4gSwitch(_make_robot_config_coord({"metric_4g": True}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_metric_4g"
+    assert "4G" in e._attr_name
+    assert e.is_on is True
+    assert Prefer4gSwitch(_make_robot_config_coord({"metric_4g": False}), DEVICE).is_on is False
+    assert Prefer4gSwitch(_make_robot_config_coord(None), DEVICE).is_on is None
+
+
+async def test_prefer_4g_switch_turn_on_off_publishes_robot_config() -> None:
+    from lymow.switch import Prefer4gSwitch
+
+    coord_on = _make_robot_config_coord({"metric_4g": False})
+    await Prefer4gSwitch(coord_on, DEVICE).async_turn_on()
+    coord_on.async_set_robot_config.assert_awaited_once_with(THING, metric_4g=True)
+
+    coord_off = _make_robot_config_coord({"metric_4g": True})
+    await Prefer4gSwitch(coord_off, DEVICE).async_turn_off()
+    coord_off.async_set_robot_config.assert_awaited_once_with(THING, metric_4g=False)
 
 
 # ---------------------------------------------------------------------------

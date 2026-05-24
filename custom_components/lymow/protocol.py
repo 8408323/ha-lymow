@@ -710,16 +710,16 @@ def encode_set_task_config(**fields: Any) -> bytes:
     return pb
 
 
-# PbRobotConfig field map — (proto field number) — derived from APK (Hermes)
-# analysis of PbRobotConfig.encode (fn #9506 at offset 0x004a7ce8). Carried in
-# PbInput.robotConfig (field 13) for device-config writes; the app omits
-# userCtrl on these — the robot dispatches based on the submessage shape (see
-# setNetworkType fn #8970). Only the bool fields we expose today are listed
-# here; broaden the codec when adding non-bool fields (audioVolume int,
-# rcCutHeight int, etc.).
-_ROBOT_CONFIG_BOOL_FIELDS: dict[str, int] = {
-    "isOpenLed": 7,  # vehicle (mower) status LED on/off
-    "metric_4g": 11,  # true = 4G preferred, false = WiFi preferred
+# PbRobotConfig field map — (proto field number, wire kind) — derived from APK
+# (Hermes) analysis of PbRobotConfig.encode (fn #9506 at offset 0x004a7ce8).
+# Carried in PbInput.robotConfig (field 13) for device-config writes; the app
+# omits userCtrl on these — the robot dispatches based on the submessage shape
+# (see setNetworkType fn #8970). Extend when adding new fields (only the ones
+# we surface as HA entities/services need to be in the writer map).
+_ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "isOpenLed": (7, "bool"),  # vehicle (mower) status LED on/off
+    "audioVolume": (6, "int"),  # mower beep/voice volume 0-100
+    "metric_4g": (11, "bool"),  # true = 4G preferred, false = WiFi preferred
 }
 
 
@@ -734,9 +734,16 @@ def encode_set_robot_config(**fields: Any) -> bytes:
     for name, value in fields.items():
         if value is None:
             continue
-        if name not in _ROBOT_CONFIG_BOOL_FIELDS:
+        if name not in _ROBOT_CONFIG_FIELDS:
             raise ValueError(f"unknown robot-config field: {name}")
-        cfg += _field_i32(_ROBOT_CONFIG_BOOL_FIELDS[name], 1 if value else 0)
+        field_no, kind = _ROBOT_CONFIG_FIELDS[name]
+        if kind == "bool":
+            cfg += _field_i32(field_no, 1 if value else 0)
+        elif kind == "int":
+            cfg += _field_i32(field_no, int(value))
+        else:
+            # Guard against silent mis-encoding if a new kind ever lands in the map.
+            raise ValueError(f"unsupported robot-config kind: {kind!r}")
     pb = _field_i32(2, PB_VERSION)
     pb += _field_bytes(13, cfg)  # PbInput.robotConfig
     return pb
