@@ -904,11 +904,11 @@ class LymowMapCard extends HTMLElement {
     if (this._editing) {
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
         el.addEventListener("pointerdown", () => { this._panMoved = false; });
-        el.addEventListener("click", () => { if (!this._panMoved) this._chooseEditZone(el.dataset.hash, "go"); });
+        el.addEventListener("click", () => { if (!this._panMoved && !this._drawingZone) this._chooseEditZone(el.dataset.hash, "go"); });
       });
       this.shadowRoot.querySelectorAll('polygon[data-type="nogo"]').forEach((el) => {
         el.addEventListener("pointerdown", () => { this._panMoved = false; });
-        el.addEventListener("click", () => { if (!this._panMoved) this._chooseEditZone(el.dataset.hash, "nogo"); });
+        el.addEventListener("click", () => { if (!this._panMoved && !this._drawingZone) this._chooseEditZone(el.dataset.hash, "nogo"); });
       });
       this.shadowRoot.querySelectorAll(".midpoint").forEach((el) => {
         el.addEventListener("click", (e) => { e.stopPropagation(); this._insertVertex(+el.dataset.edge); });
