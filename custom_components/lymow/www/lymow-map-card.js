@@ -106,9 +106,10 @@ class LymowMapCard extends HTMLElement {
   }
 
   _onKeyDown(e) {
-    // Don't steal keys when an input is focused
-    const tag = document.activeElement?.tagName?.toLowerCase();
-    if (tag === 'input' || tag === 'textarea' || document.activeElement?.isContentEditable) return;
+    // Don't steal keys when an input is focused (check shadow DOM too)
+    const active = this.shadowRoot?.activeElement || document.activeElement;
+    const tag = active?.tagName?.toLowerCase();
+    if (tag === 'input' || tag === 'textarea' || active?.isContentEditable) return;
     switch (e.key) {
       case 'Escape':
         if (this._expanded) { this._toggleExpand(); break; }
