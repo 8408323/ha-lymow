@@ -407,6 +407,44 @@ set_recharge_resume:
       selector:
         number: { min: 0, max: 100, step: 1, unit_of_measurement: "%", mode: box }
 
+set_night_mode:
+  name: Set headlight schedule (Night Mode)
+  description: >
+    Configure the camera headlight schedule window. Mirrors the app's
+    Settings → Headlight page (called "Night Mode" in the wire format /
+    APK). When enable=false, the schedule is still recorded but a
+    one-shot SIGNAL_TURN_OFF_CAMERA_LIGHT is co-published so the light
+    turns off immediately too — matching what the app does on disable.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    open_time:
+      name: Light-on time (HH:MM)
+      description: Time of day the headlight schedule starts (24h).
+      example: "21:00"
+      required: true
+      selector:
+        text:
+    close_time:
+      name: Light-off time (HH:MM)
+      description: Time of day the headlight schedule ends.
+      example: "06:00"
+      required: true
+      selector:
+        text:
+    enable:
+      name: Enable schedule
+      description: >
+        True keeps the schedule running. False records the same schedule
+        but also forces the light off right now via a co-published
+        SIGNAL_TURN_OFF_CAMERA_LIGHT.
+      example: true
+      required: true
+      selector:
+        boolean:
+
 set_network_priority:
   name: Set network priority
   description: >

@@ -44,6 +44,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_set_run_time_config = AsyncMock()
     coord.async_set_robot_config = AsyncMock()
     coord.async_set_recharge_resume = AsyncMock()
+    coord.async_set_night_mode = AsyncMock()
     coord.async_set_device_settings = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
@@ -241,9 +242,9 @@ async def test_async_setup_entry_registers_services() -> None:
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 set-device-name
     # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 set-network-priority
-    # + 1 set-recharge-resume + 1 set-device-settings + 1 rename-zone + 1 clear-schedules
-    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume + 1 pause.
-    assert hass.services.async_register.call_count == 37
+    # + 1 set-recharge-resume + 1 set-night-mode + 1 set-device-settings + 1 rename-zone
+    # + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume + 1 pause.
+    assert hass.services.async_register.call_count == 38
 
 
 # ---------------------------------------------------------------------------
@@ -1494,6 +1495,54 @@ def test_set_recharge_resume_schema_parses_time_strings_and_bounds() -> None:
     # Out-of-range battery
     with pytest.raises(vol_.Invalid):
         _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "resume_bat": 150})
+
+
+async def test_handle_set_night_mode_forwards_all_three_required_kwargs() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"open_time": (21, 0), "close_time": (6, 30), "enable": True},
+    )
+    await handlers["set_night_mode"](call)
+    coord.async_set_night_mode.assert_awaited_once_with("mower-001", open_time=(21, 0), close_time=(6, 30), enable=True)
+
+
+async def test_handle_set_night_mode_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_night_mode"](
+        _make_call(["lawn_mower.other"], {"open_time": (21, 0), "close_time": (6, 0), "enable": True})
+    )
+    coord.async_set_night_mode.assert_not_awaited()
+
+
+def test_set_night_mode_schema_requires_all_three_fields_and_parses_times() -> None:
+    """All three fields are required — the app rewrites the whole window on each
+    press, so partial updates have no defined wire-level meaning."""
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_NIGHT_MODE_SCHEMA
+
+    parsed = _SET_NIGHT_MODE_SCHEMA(
+        {"entity_id": ["lawn_mower.x"], "open_time": "21:00", "close_time": "06:30", "enable": False}
+    )
+    assert parsed["open_time"] == (21, 0)
+    assert parsed["close_time"] == (6, 30)
+    assert parsed["enable"] is False
+
+    for missing in ("open_time", "close_time", "enable"):
+        kwargs = {"entity_id": ["lawn_mower.x"], "open_time": "21:00", "close_time": "06:00", "enable": True}
+        kwargs.pop(missing)
+        with pytest.raises(vol_.Invalid):
+            _SET_NIGHT_MODE_SCHEMA(kwargs)
 
 
 async def test_handle_set_device_settings_maps_choices_and_inverts_handbrake() -> None:

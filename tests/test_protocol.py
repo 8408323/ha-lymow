@@ -2349,6 +2349,72 @@ def test_encode_set_recharge_resume_partial_skips_unset() -> None:
         assert _first(rr, fno) is None
 
 
+def test_encode_set_night_mode_enable_true_writes_only_times() -> None:
+    """enable=True publishes the window without the kill-the-light signal."""
+    from lymow.protocol import encode_set_night_mode
+
+    pb = encode_set_night_mode(open_time=(21, 0), close_time=(6, 30), enable=True)
+    f = _decode_fields(pb)
+    assert _first(f, 5) is None  # no userCtrl
+    cfg = _decode_fields(_first(f, 13))  # PbInput.robotConfig
+
+    open_tz = _decode_fields(_first(cfg, 14))
+    assert _first(open_tz, 1) == 21
+    assert _first(open_tz, 2) == 0
+    close_tz = _decode_fields(_first(cfg, 15))
+    assert _first(close_tz, 1) == 6
+    assert _first(close_tz, 2) == 30
+    # No signal field — the schedule keeps running, light stays on its own time.
+    assert _first(cfg, 8) is None
+
+
+def test_encode_set_night_mode_enable_false_co_publishes_off_signal() -> None:
+    """enable=False still records the schedule but forces the light off now."""
+    from lymow.const import SIGNAL_TURN_OFF_CAMERA_LIGHT
+    from lymow.protocol import encode_set_night_mode
+
+    pb = encode_set_night_mode(open_time=(22, 0), close_time=(5, 0), enable=False)
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert isinstance(_first(cfg, 14), bytes)  # openLedTime still written
+    assert isinstance(_first(cfg, 15), bytes)  # closeLedTime still written
+    assert _first(cfg, 8) == SIGNAL_TURN_OFF_CAMERA_LIGHT
+
+
+def test_encode_set_night_mode_rejects_out_of_range_times() -> None:
+    """Bound-check at the encoder so a malformed service call can't publish garbage."""
+    from lymow.protocol import encode_set_night_mode
+
+    for bad in ((24, 0), (-1, 0), (0, 60), (0, -1)):
+        with pytest.raises(ValueError, match="out of range"):
+            encode_set_night_mode(open_time=bad, close_time=(6, 0), enable=True)
+        with pytest.raises(ValueError, match="out of range"):
+            encode_set_night_mode(open_time=(0, 0), close_time=bad, enable=True)
+
+
+def test_decode_robot_config_extracts_open_close_led_time() -> None:
+    """The robot echoes the schedule window back in pboutput so users see the
+    current window on the entity card without a separate poll."""
+    from lymow.protocol import decode_robot_config
+
+    cfg = _field_bytes(14, _field_i32(1, 21) + _field_i32(2, 0)) + _field_bytes(
+        15, _field_i32(1, 6) + _field_i32(2, 30)
+    )
+    out = decode_robot_config(cfg)
+    assert out == {
+        "openLedTime": {"hour": 21, "minute": 0},
+        "closeLedTime": {"hour": 6, "minute": 30},
+    }
+
+
+def test_decode_robot_config_drops_out_of_range_led_times() -> None:
+    """A hostile pboutput must not surface 25:99 or -1:-1 to HA state."""
+    from lymow.protocol import decode_robot_config
+
+    bad = _field_bytes(14, _field_i32(1, 24) + _field_i32(2, 0))  # 24h is invalid
+    bad += _field_bytes(15, _field_i32(1, 0) + _field_i32(2, 60))  # minute 60 invalid
+    assert decode_robot_config(bad) == {}
+
+
 def test_encode_set_robot_config_signal_field_for_vehicle_led() -> None:
     """Vehicle LED writes go via the signal field (one-shot), not isOpenLed."""
     from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT, encode_set_robot_config

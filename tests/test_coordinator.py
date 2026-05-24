@@ -391,6 +391,33 @@ async def test_async_set_recharge_resume_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_night_mode_publishes_robot_config_with_times() -> None:
+    """Mirrors setNightMode (#9019): openLedTime/closeLedTime on
+    PbRobotConfig over the no-userCtrl robotConfig path. enable=True keeps
+    only the window; enable=False also adds SIGNAL_TURN_OFF_CAMERA_LIGHT."""
+    from lymow.const import SIGNAL_TURN_OFF_CAMERA_LIGHT
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_night_mode(THING, open_time=(21, 0), close_time=(6, 30), enable=True)
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) is None  # no userCtrl
+    cfg = _decode_fields(_first(f, 13))
+    assert _first(cfg, 8) is None  # no kill-light signal when enabled
+    open_tz = _decode_fields(_first(cfg, 14))
+    assert _first(open_tz, 1) == 21
+    assert _first(open_tz, 2) == 0
+
+    mqtt.async_publish_command.reset_mock()
+    await coord.async_set_night_mode(THING, open_time=(22, 0), close_time=(5, 0), enable=False)
+    _, pb_off = mqtt.async_publish_command.await_args.args
+    cfg_off = _decode_fields(_first(_decode_fields(pb_off), 13))
+    assert _first(cfg_off, 8) == SIGNAL_TURN_OFF_CAMERA_LIGHT
+
+
+@pytest.mark.asyncio
 async def test_async_set_run_time_config_mirrors_write_into_runtime_config_dict() -> None:
     """Optimistic state for the Live cut-height/move-speed/cut-speed Numbers:
     a successful write lands in self.data[thing]["runTimeConfig"] so those
