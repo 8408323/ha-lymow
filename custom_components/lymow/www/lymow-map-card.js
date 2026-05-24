@@ -48,6 +48,7 @@ class LymowMapCard extends HTMLElement {
     this._lastZoneCount = 0;
     this._settingsOpen = false;
     this._scheduleOpen = false;
+    this._advancedOpen = false; // tracks <details class="sp-advanced"> open state across renders
     this._settingsValues = null;
     // 0=name, 1=area, 2=both, 3=none
     this._goLabelMode = 0;
@@ -675,7 +676,7 @@ class LymowMapCard extends HTMLElement {
           </select>
           <span class="sp-val"></span>
         </div>
-        <details class="sp-advanced">
+        <details class="sp-advanced"${this._advancedOpen ? " open" : ""}>
           <summary>Advanced</summary>
           <div class="sp-row">
             <label>Mowing pattern</label>
@@ -769,6 +770,14 @@ class LymowMapCard extends HTMLElement {
     // Aspect ratio for the map area
     const mapAspect = (TOTAL_W / TOTAL_H).toFixed(4);
 
+    // Preserve scroll position and <details> state across full DOM replace.
+    const prevAdvanced = this.shadowRoot.querySelector(".sp-advanced");
+    if (prevAdvanced) this._advancedOpen = prevAdvanced.open;
+    const prevPanel = this.shadowRoot.querySelector(".settings-panel");
+    const prevScrollTop = prevPanel?.scrollTop ?? 0;
+    // Page-level scroll jumps when the card's height changes briefly during innerHTML swap.
+    const savedScrollY = window.scrollY;
+
     this.shadowRoot.innerHTML = `
       <style>
         :host { display: block; }
@@ -801,7 +810,7 @@ class LymowMapCard extends HTMLElement {
         .btn.settings-active { background: #ef6c00; }
         .rename-input { flex: 1; padding: 7px 8px; border: 1px solid var(--divider-color,#444); border-radius: 6px; background: var(--card-background-color,#1c1c1c); color: var(--primary-text-color); font-size: 0.85em; }
         .settings-panel { margin-top: 8px; padding: 10px 12px; background: var(--card-background-color, #1c1c1c);
-          border: 1px solid var(--divider-color, #444); border-radius: 8px; flex-shrink: 0; }
+          border: 1px solid var(--divider-color, #444); border-radius: 8px; flex-shrink: 0; overflow-y: auto; max-height: 60vh; }
         .settings-panel .sp-title { font-size: 0.8em; font-weight: 600; color: var(--secondary-text-color);
           text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
         .sp-row { display: grid; grid-template-columns: 120px 1fr 42px; align-items: center; gap: 6px; margin-bottom: 6px; }
@@ -885,19 +894,34 @@ class LymowMapCard extends HTMLElement {
 
     this._updateScaleBar();
     this._wireEvents();
-    // If _pxPerUnit came from the fallback estimate, re-render once after layout
-    // using the real measured SVG width. The tolerance check prevents re-render loops.
-    requestAnimationFrame(() => {
-      const svg = this.shadowRoot?.querySelector("svg");
-      if (!svg) return;
-      const r = svg.getBoundingClientRect();
-      if (!r.width) return;
-      const truePpu = r.width / this._vw;
-      if (Math.abs(truePpu - this._pxPerUnit) > 0.2) {
-        this._pxPerUnit = truePpu;
-        this._render();
-      }
-    });
+
+    // Restore settings panel scroll and page scroll after full DOM replace.
+    if (prevScrollTop > 0) {
+      const newPanel = this.shadowRoot.querySelector(".settings-panel");
+      if (newPanel) newPanel.scrollTop = prevScrollTop;
+    }
+    if (savedScrollY > 0) window.scrollTo(0, savedScrollY);
+
+    // Persist <details> open/close toggle into component state so next render restores it.
+    const advEl = this.shadowRoot.querySelector(".sp-advanced");
+    if (advEl) advEl.addEventListener("toggle", () => { this._advancedOpen = advEl.open; });
+
+    // Re-render once after layout if _pxPerUnit was a fallback estimate.
+    // Guard: only fire when pxPerUnit is still the default (2.8) so this
+    // doesn't loop on every hass update.
+    if (this._pxPerUnit === 2.8) {
+      requestAnimationFrame(() => {
+        const svg = this.shadowRoot?.querySelector("svg");
+        if (!svg) return;
+        const r = svg.getBoundingClientRect();
+        if (!r.width) return;
+        const truePpu = r.width / this._vw;
+        if (Math.abs(truePpu - this._pxPerUnit) > 0.2) {
+          this._pxPerUnit = truePpu;
+          this._render();
+        }
+      });
+    }
   }
 
   _niceNumber(x) {
