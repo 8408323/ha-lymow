@@ -315,9 +315,16 @@ class _RunTimeConfigNumber(CoordinatorEntity[LymowCoordinator], NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        cfg = (self.coordinator.data or {}).get(self._thing_name, {}).get("runTimeConfig") or {}
+        # Coordinator state may be missing or malformed (untrusted MQTT payload
+        # round-tripped through decode): only accept a dict and a numeric value,
+        # otherwise surface `None` so a bad cache doesn't break the entity.
+        cfg = (self.coordinator.data or {}).get(self._thing_name, {}).get("runTimeConfig")
+        if not isinstance(cfg, dict):
+            return None
         val = cfg.get(self._proto_field)
-        return float(val) if val is not None else None
+        if not isinstance(val, (int, float)) or isinstance(val, bool):
+            return None
+        return float(val)
 
 
 class LiveCutHeightNumber(_RunTimeConfigNumber):

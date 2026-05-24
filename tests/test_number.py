@@ -545,6 +545,22 @@ def test_live_cut_height_reflects_cached_state() -> None:
     assert e.native_value == 45.0
 
 
+def test_live_cut_height_none_on_malformed_runtime_config() -> None:
+    """Coordinator state is untrusted: a non-dict runTimeConfig or a non-numeric
+    field value must surface as None instead of raising."""
+    from lymow.number import LiveCutHeightNumber
+
+    coord = _make_runtime_coord(None)
+    coord.data = {THING: {"runTimeConfig": "not a dict"}}
+    assert LiveCutHeightNumber(coord, DEVICE).native_value is None
+    coord.data = {THING: {"runTimeConfig": ["x"]}}
+    assert LiveCutHeightNumber(coord, DEVICE).native_value is None
+    assert LiveCutHeightNumber(_make_runtime_coord({"cutHeight": "60"}), DEVICE).native_value is None
+    # Bool is a subclass of int but is not a meaningful cut height; reject it
+    # so a buggy write doesn't render the slider at 1mm.
+    assert LiveCutHeightNumber(_make_runtime_coord({"cutHeight": True}), DEVICE).native_value is None
+
+
 async def test_live_cut_height_set_writes_run_time_config_as_int() -> None:
     from lymow.number import LiveCutHeightNumber
 
