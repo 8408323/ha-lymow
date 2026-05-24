@@ -175,7 +175,11 @@ except ImportError:
         except _zi.ZoneInfoNotFoundError:
             return None
 
+    async def _async_get_time_zone(name):  # mimic homeassistant.util.dt.async_get_time_zone
+        return _get_time_zone(name)
+
     _ha_util_dt.get_time_zone = _get_time_zone  # type: ignore[attr-defined]
+    _ha_util_dt.async_get_time_zone = _async_get_time_zone  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.util.dt", _ha_util_dt)
     _ha_util.dt = _ha_util_dt  # type: ignore[attr-defined]
 

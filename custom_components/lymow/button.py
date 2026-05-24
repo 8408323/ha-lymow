@@ -82,18 +82,21 @@ class SyncTimezoneButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
         self._attr_unique_id = f"{self._thing_name}_sync_timezone"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
 
-    def _current_offset_seconds(self) -> int:
+    async def _current_offset_seconds(self) -> int:
         # Resolve HA's configured time_zone string (e.g. "Europe/Stockholm") to
-        # a zoneinfo and read its offset right now. ``utcoffset()`` returns a
-        # timedelta with whole-second resolution at most — round to int seconds
-        # so the wire value matches what the app would write from the phone.
+        # a zoneinfo and read its offset right now. ``async_get_time_zone``
+        # offloads the (potentially disk-touching) ZoneInfo construction to
+        # the executor so we don't block the event loop on a cache miss.
+        # ``utcoffset()`` returns a timedelta with whole-second resolution at
+        # most — round to int seconds so the wire value matches what the app
+        # would write from the phone.
         tz_name = self._hass.config.time_zone or "UTC"
-        tz = dt_util.get_time_zone(tz_name) or dt_util.UTC
+        tz = await dt_util.async_get_time_zone(tz_name) or dt_util.UTC
         offset = datetime.now(tz).utcoffset()
         return int(offset.total_seconds()) if offset is not None else 0
 
     async def async_press(self) -> None:
-        await self.coordinator.async_sync_timezone(self._thing_name, self._current_offset_seconds())
+        await self.coordinator.async_sync_timezone(self._thing_name, await self._current_offset_seconds())
 
 
 class _UserCtrlButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):

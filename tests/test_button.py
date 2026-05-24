@@ -283,24 +283,24 @@ def test_sync_timezone_button_metadata() -> None:
     assert e._attr_name == "Sync timezone"
 
 
-def test_sync_timezone_button_resolves_known_offset() -> None:
+async def test_sync_timezone_button_resolves_known_offset() -> None:
     """Asia/Tokyo is fixed UTC+9 year-round; offset must be 9 * 3600."""
     from lymow.button import SyncTimezoneButton
 
     coord = _make_coord()
     coord.async_sync_timezone = AsyncMock()
     e = SyncTimezoneButton(coord, DEVICE, _make_tz_hass("Asia/Tokyo"))
-    assert e._current_offset_seconds() == 9 * 3600
+    assert await e._current_offset_seconds() == 9 * 3600
 
 
-def test_sync_timezone_button_falls_back_to_utc_when_zone_missing() -> None:
+async def test_sync_timezone_button_falls_back_to_utc_when_zone_missing() -> None:
     """Unknown / unset time_zone resolves to UTC (offset 0)."""
     from lymow.button import SyncTimezoneButton
 
     coord = _make_coord()
     coord.async_sync_timezone = AsyncMock()
-    assert SyncTimezoneButton(coord, DEVICE, _make_tz_hass(None))._current_offset_seconds() == 0
-    assert SyncTimezoneButton(coord, DEVICE, _make_tz_hass("Mars/Olympus"))._current_offset_seconds() == 0
+    assert await SyncTimezoneButton(coord, DEVICE, _make_tz_hass(None))._current_offset_seconds() == 0
+    assert await SyncTimezoneButton(coord, DEVICE, _make_tz_hass("Mars/Olympus"))._current_offset_seconds() == 0
 
 
 async def test_sync_timezone_button_press_publishes_offset() -> None:
