@@ -1,0 +1,363 @@
+"""Smoke test: every switch / number / select entity reads back from a
+maximally-populated coordinator state.
+
+Why this exists separately from the existing per-entity tests:
+
+Each test_<platform>.py builds a tailored fixture for each entity ("seed
+``geoFence: [{radius: 175}]`` then assert ``native_value == 175``"). That
+catches a wrong arithmetic op or wrong return type, but it CANNOT catch a
+producer-consumer drift: if a refactor renames the dict key the producer
+emits, every per-entity test still passes because each test fixture was
+authored alongside the entity it tests.
+
+This file inverts the dependency: one ground-truth state dict mirrors what
+the protocol decoder + REST poll + coordinator helpers actually write, and
+every write-path entity in the integration is instantiated against THAT
+state. If an entity reads a key that no producer emits, the corresponding
+test fails with "expected non-None, got None" — pointing at the broken
+read path immediately.
+
+Each test also covers the empty-state path (nothing in coordinator.data yet)
+to lock in the "first-poll-not-yet-arrived" behaviour: returns None / sane
+unavailable rather than raising.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+# Conftest doesn't pre-load lymow.select when HA isn't installed (the no-HA
+# branch was missing the call). The other test files that need select.py
+# already call _load_lymow_module manually — mirror that pattern.
+from tests.conftest import _load_lymow_module
+
+_load_lymow_module("select")
+
+from lymow.number import (  # noqa: E402
+    GeofenceRadiusNumber,
+    LiveCutHeightNumber,
+    LiveCutSpeedNumber,
+    LiveMoveSpeedNumber,
+    MowerVolumeNumber,
+    RechargeBatteryThresholdNumber,
+    ResumeBatteryThresholdNumber,
+    RtkPauseThresholdNumber,
+    ZoneCutHeightNumber,
+)
+from lymow.select import CameraLightSelect, ChargingModeSelect, ZoneOrderSelect  # noqa: E402
+from lymow.switch import (  # noqa: E402
+    AlertsOnlySwitch,
+    ChargingHandbrakeSwitch,
+    DockOnErrorSwitch,
+    FindRobotSwitch,
+    MobileNotificationSwitch,
+    Prefer4gSwitch,
+    RainCleaningSwitch,
+    RechargeResumeSwitch,
+    RtkAutoPauseSwitch,
+    TheftDetectionSwitch,
+    TheftLockSwitch,
+    VehicleLedSwitch,
+    ZoneEnabledSwitch,
+)
+
+THING = "thing-1"
+DEVICE = {"deviceThingName": THING, "deviceName": "Test Mower", "sn": "SN-TEST"}
+ZONE_HASH = "ABCD0001"
+
+
+# ---------------------------------------------------------------------------
+# Ground-truth populated state — mirrors what producers actually write.
+# Each key here must match what a producer (protocol.py, coordinator.py,
+# api.py, etc.) emits — if you rename a producer's key, the corresponding
+# entry below has to change too. That's the whole point.
+# ---------------------------------------------------------------------------
+
+
+def _populated_state() -> dict:
+    return {
+        # REST /device-feature response — drives device-feature switches.
+        "theftDetectionSwitch": True,
+        "theftLock": False,
+        "findRobotSwitch": True,
+        "mobileNotificationSwitch": 1,  # MobileNotificationSwitch._ON_VALUE
+        # PbOutput-decoded robotConfig — drives _RobotConfigBoolSwitch family
+        # plus MowerVolumeNumber, RechargeResumeSwitch, RR threshold numbers.
+        "robotConfig": {
+            "isOpenLed": True,
+            "metric_4g": False,
+            "dockOnError": True,
+            "audioVolume": 60,
+            "rrConfig": {
+                "enable": True,
+                "rechargeBat": 20,
+                "resumeBat": 80,
+                "periodStart": {"hour": 9, "minute": 0},
+                "periodEnd": {"hour": 18, "minute": 0},
+            },
+        },
+        # Map response — drives ZoneEnabledSwitch, ZoneCutHeightNumber and
+        # the PbTaskConfig selects/switches.
+        "mapData": {
+            "goZones": [
+                {"hashId": ZONE_HASH, "isEnabled": True, "cutHeight": 40, "polygon": []},
+            ],
+            "taskConfig": {
+                "chargingMode": 0,
+                "zoneOrder": 1,
+                "rainCleaning": True,
+                "disableChargingPark": False,
+            },
+        },
+        # /device-feature → geofence list (one entry minimum).
+        "geoFence": [{"name": "home", "latitude": 0.0, "longitude": 0.0, "radius": 175}],
+        # USER_CTRL_QUERY_RUN_TIME_CONFIG reply → drives the Live* numbers.
+        "runTimeConfig": {"cutHeight": 50, "moveSpeed": 0.6, "cutSpeed": 100},
+    }
+
+
+def _make_coord(state: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: state} if state is not None else {}
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    # The few methods entities call eagerly during __init__:
+    coord.is_rtk_guard_enabled = MagicMock(return_value=True)
+    coord.get_rtk_guard_threshold = MagicMock(return_value=2)
+    # Async setters (used by turn_on/turn_off + set_native_value) — the read
+    # tests below never trigger writes but make the stubs awaitable for safety.
+    coord.async_set_device_feature = AsyncMock()
+    coord.async_set_robot_config = AsyncMock()
+    coord.async_set_device_settings = AsyncMock()
+    coord.async_set_recharge_resume = AsyncMock()
+    coord.set_rtk_guard_enabled = MagicMock()
+    coord.set_rtk_guard_threshold = MagicMock()
+    coord.async_set_run_time_config = AsyncMock()
+    coord.async_set_geofence_radius = AsyncMock()
+    coord.async_update_zone_enabled = AsyncMock()
+    coord.async_update_zone_cut_height = AsyncMock()
+    return coord
+
+
+# ---------------------------------------------------------------------------
+# Switch entities — value property is ``is_on``
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "factory,expected",
+    [
+        (lambda c: TheftDetectionSwitch(c, DEVICE), True),
+        (lambda c: TheftLockSwitch(c, DEVICE), False),
+        (lambda c: FindRobotSwitch(c, DEVICE), True),
+        (lambda c: MobileNotificationSwitch(c, DEVICE), True),
+        # Fixture sets mobileNotificationSwitch = 1 = _ALERTS_ONLY_VALUE, so both
+        # the master tristate switch and the alerts-only sub-toggle read True.
+        (lambda c: AlertsOnlySwitch(c, DEVICE), True),
+        (lambda c: VehicleLedSwitch(c, DEVICE), True),
+        (lambda c: Prefer4gSwitch(c, DEVICE), False),
+        (lambda c: DockOnErrorSwitch(c, DEVICE), True),
+        (lambda c: RainCleaningSwitch(c, DEVICE), True),
+        # ChargingHandbrakeSwitch inverts disableChargingPark → on = handbrake engaged.
+        (lambda c: ChargingHandbrakeSwitch(c, DEVICE), True),
+        (lambda c: RechargeResumeSwitch(c, DEVICE), True),
+        (lambda c: ZoneEnabledSwitch(c, DEVICE, ZONE_HASH), True),
+        (lambda c: RtkAutoPauseSwitch(c, DEVICE), True),
+    ],
+)
+def test_switch_is_on_reads_populated_state(factory, expected) -> None:
+    """Every switch must return a bool from is_on when the coordinator has
+    the producer-written key present. If is_on returns None, the entity's
+    read path drifted from the producer."""
+    coord = _make_coord(_populated_state())
+    entity = factory(coord)
+    assert entity.is_on is expected, f"{type(entity).__name__}.is_on = {entity.is_on}, expected {expected}"
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda c: TheftDetectionSwitch(c, DEVICE),
+        lambda c: TheftLockSwitch(c, DEVICE),
+        lambda c: FindRobotSwitch(c, DEVICE),
+        lambda c: MobileNotificationSwitch(c, DEVICE),
+        lambda c: AlertsOnlySwitch(c, DEVICE),
+        lambda c: VehicleLedSwitch(c, DEVICE),
+        lambda c: Prefer4gSwitch(c, DEVICE),
+        lambda c: DockOnErrorSwitch(c, DEVICE),
+        lambda c: RainCleaningSwitch(c, DEVICE),
+        lambda c: ChargingHandbrakeSwitch(c, DEVICE),
+        lambda c: RechargeResumeSwitch(c, DEVICE),
+        lambda c: ZoneEnabledSwitch(c, DEVICE, ZONE_HASH),
+    ],
+)
+def test_switch_is_on_handles_empty_state_without_raising(factory) -> None:
+    """Coordinator hasn't received MQTT state yet (e.g. immediately after
+    config-entry setup, before the first poll). Every switch must return
+    None or a sane default rather than raising AttributeError / KeyError."""
+    coord = _make_coord(state={})
+    entity = factory(coord)
+    # Calling is_on must not raise. Result can be None (unknown) or a default.
+    _ = entity.is_on
+
+
+# ---------------------------------------------------------------------------
+# Number entities — value property is ``native_value``
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "factory,expected_value",
+    [
+        (lambda c: GeofenceRadiusNumber(c, DEVICE), 175.0),
+        (lambda c: ZoneCutHeightNumber(c, DEVICE, ZONE_HASH), 40.0),
+        (lambda c: RtkPauseThresholdNumber(c, DEVICE), 2),
+        (lambda c: MowerVolumeNumber(c, DEVICE), 60),
+        (lambda c: RechargeBatteryThresholdNumber(c, DEVICE), 20),
+        (lambda c: ResumeBatteryThresholdNumber(c, DEVICE), 80),
+        (lambda c: LiveCutHeightNumber(c, DEVICE), 50),
+        (lambda c: LiveMoveSpeedNumber(c, DEVICE), pytest.approx(0.6)),
+        (lambda c: LiveCutSpeedNumber(c, DEVICE), 100),
+    ],
+)
+def test_number_native_value_reads_populated_state(factory, expected_value) -> None:
+    coord = _make_coord(_populated_state())
+    entity = factory(coord)
+    assert entity.native_value == expected_value, (
+        f"{type(entity).__name__}.native_value = {entity.native_value}, expected {expected_value}"
+    )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda c: GeofenceRadiusNumber(c, DEVICE),
+        lambda c: ZoneCutHeightNumber(c, DEVICE, ZONE_HASH),
+        lambda c: MowerVolumeNumber(c, DEVICE),
+        lambda c: RechargeBatteryThresholdNumber(c, DEVICE),
+        lambda c: ResumeBatteryThresholdNumber(c, DEVICE),
+        lambda c: LiveCutHeightNumber(c, DEVICE),
+        lambda c: LiveMoveSpeedNumber(c, DEVICE),
+        lambda c: LiveCutSpeedNumber(c, DEVICE),
+    ],
+)
+def test_number_native_value_handles_empty_state_without_raising(factory) -> None:
+    """Same first-poll-not-arrived contract as switches."""
+    coord = _make_coord(state={})
+    entity = factory(coord)
+    _ = entity.native_value
+
+
+# ---------------------------------------------------------------------------
+# Select entities — value property is ``current_option``
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "factory,expected_option_in",
+    [
+        # chargingMode=0 from populated state → "Follow perimeter"
+        (lambda c: ChargingModeSelect(c, DEVICE), ("Follow perimeter", "Direct route")),
+        # zoneOrder=1 → "Custom"
+        (lambda c: ZoneOrderSelect(c, DEVICE), ("Optimize", "Custom")),
+    ],
+)
+def test_select_current_option_is_a_known_label(factory, expected_option_in) -> None:
+    """Selects must map the wire int into a labelled option. A None here
+    means either (a) the producer key drifted (taskConfig.chargingMode →
+    something else), or (b) the wire value isn't in the _value_to_label map."""
+    coord = _make_coord(_populated_state())
+    entity = factory(coord)
+    assert entity.current_option in expected_option_in, (
+        f"{type(entity).__name__}.current_option = {entity.current_option!r}, expected one of {expected_option_in}"
+    )
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda c: ChargingModeSelect(c, DEVICE),
+        lambda c: ZoneOrderSelect(c, DEVICE),
+        lambda c: CameraLightSelect(c, DEVICE),
+    ],
+)
+def test_select_handles_empty_state_without_raising(factory) -> None:
+    coord = _make_coord(state={})
+    entity = factory(coord)
+    _ = entity.current_option
+
+
+def test_camera_light_select_is_write_optimistic() -> None:
+    """CameraLightSelect doesn't read from coordinator state — it has no
+    PbOutput field that decodes back to a brightness. current_option starts
+    as None and only flips when the user explicitly selects."""
+    coord = _make_coord(_populated_state())
+    entity = CameraLightSelect(coord, DEVICE)
+    assert entity.current_option is None
+
+
+# ---------------------------------------------------------------------------
+# Cross-platform: every write-entity has a unique unique_id within its
+# platform when instantiated against the same device. Catches the within-
+# platform suffix collision that HA's entity registry would silently drop.
+# ---------------------------------------------------------------------------
+
+
+def _all_switches(coord):
+    return [
+        TheftDetectionSwitch(coord, DEVICE),
+        TheftLockSwitch(coord, DEVICE),
+        FindRobotSwitch(coord, DEVICE),
+        MobileNotificationSwitch(coord, DEVICE),
+        AlertsOnlySwitch(coord, DEVICE),
+        VehicleLedSwitch(coord, DEVICE),
+        Prefer4gSwitch(coord, DEVICE),
+        DockOnErrorSwitch(coord, DEVICE),
+        RainCleaningSwitch(coord, DEVICE),
+        ChargingHandbrakeSwitch(coord, DEVICE),
+        RechargeResumeSwitch(coord, DEVICE),
+        ZoneEnabledSwitch(coord, DEVICE, ZONE_HASH),
+        RtkAutoPauseSwitch(coord, DEVICE),
+    ]
+
+
+def _all_numbers(coord):
+    return [
+        GeofenceRadiusNumber(coord, DEVICE),
+        ZoneCutHeightNumber(coord, DEVICE, ZONE_HASH),
+        RtkPauseThresholdNumber(coord, DEVICE),
+        MowerVolumeNumber(coord, DEVICE),
+        RechargeBatteryThresholdNumber(coord, DEVICE),
+        ResumeBatteryThresholdNumber(coord, DEVICE),
+        LiveCutHeightNumber(coord, DEVICE),
+        LiveMoveSpeedNumber(coord, DEVICE),
+        LiveCutSpeedNumber(coord, DEVICE),
+    ]
+
+
+def _all_selects(coord):
+    return [
+        ChargingModeSelect(coord, DEVICE),
+        ZoneOrderSelect(coord, DEVICE),
+        CameraLightSelect(coord, DEVICE),
+    ]
+
+
+@pytest.mark.parametrize(
+    "platform,factory",
+    [("switch", _all_switches), ("number", _all_numbers), ("select", _all_selects)],
+)
+def test_unique_ids_are_unique_within_platform(platform, factory) -> None:
+    coord = _make_coord(_populated_state())
+    entities = factory(coord)
+    seen: dict[str, str] = {}
+    dupes: list[tuple[str, str, str]] = []
+    for e in entities:
+        uid = e._attr_unique_id
+        if uid in seen:
+            dupes.append((uid, seen[uid], type(e).__name__))
+        else:
+            seen[uid] = type(e).__name__
+    assert not dupes, f"{platform} unique_id collisions: {dupes}"
