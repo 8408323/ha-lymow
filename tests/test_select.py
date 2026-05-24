@@ -175,7 +175,7 @@ def test_camera_light_select_metadata_and_unknown_initially() -> None:
 
 
 async def test_camera_light_select_each_option_publishes_matching_signal() -> None:
-    from lymow.protocol import (
+    from lymow.const import (
         SIGNAL_TURN_OFF_CAMERA_LIGHT,
         SIGNAL_TURN_ON_CAMERA_LIGHT,
         SIGNAL_TURN_ON_CAMERA_LIGHT_LOW,

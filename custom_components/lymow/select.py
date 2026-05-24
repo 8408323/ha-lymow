@@ -8,15 +8,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
-from .coordinator import LymowCoordinator
-from .entity import lymow_device_info
-from .protocol import (
+from .const import (
+    DOMAIN,
     SIGNAL_TURN_OFF_CAMERA_LIGHT,
     SIGNAL_TURN_ON_CAMERA_LIGHT,
     SIGNAL_TURN_ON_CAMERA_LIGHT_LOW,
     SIGNAL_TURN_ON_CAMERA_LIGHT_MIDDLE,
 )
+from .coordinator import LymowCoordinator
+from .entity import lymow_device_info
 
 # Friendly labels for the app's Device Settings dropdowns. Values map 1:1 to
 # the wire enum codes in CHARGING_MODES / ZONE_ORDERS (const.py) — pinned in
@@ -137,8 +137,12 @@ class CameraLightSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
     fires the matching ``SIGNAL_TURN_ON_CAMERA_LIGHT*`` / ``_OFF`` signal
     over the no-userCtrl robotConfig path the app uses (same wiring as the
     Vehicle LED switch). The robot doesn't surface a decoded brightness in
-    pboutput, so this is a write-optimistic select: the last user choice
-    sticks until they pick another.
+    pboutput, so this is a write-optimistic select: the chosen value is
+    cached in memory only and resets to unknown on Home Assistant restart
+    or integration reload — re-press to re-state. (Persisting through
+    ``RestoreEntity`` would be possible but the cached value can lie if
+    the robot was toggled out-of-band, so leaving it as a press-driven
+    transient is the more honest default.)
     """
 
     _attr_has_entity_name = True

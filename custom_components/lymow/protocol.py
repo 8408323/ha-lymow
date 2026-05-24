@@ -919,19 +919,12 @@ _ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "dockOnError": (22, "bool"),  # auto-dock when the mower errors out
 }
 
-# SocSignal enum — one-shot action codes published via PbRobotConfig.signal
-# (field 8). Numeric values come from the APK enum table (Hermes string-id
-# 40889, value table built around offset 0x00488eb0). Only the codes we
-# actually publish are named here; the full table has 31 entries (0..31).
-# Brake / power-off / shutdown / heat are intentionally NOT exposed yet —
-# they're either dangerous to wire to HA controls or unclear in purpose.
-SIGNAL_TURN_ON_CAMERA_LIGHT = 6  # camera headlight, full brightness
-SIGNAL_TURN_OFF_CAMERA_LIGHT = 7  # camera headlight off (also: setNightMode disable)
-SIGNAL_TURN_ON_VEHICLE_LIGHT = 10  # status LED on
-SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11  # status LED off
-SIGNAL_TURN_ON_BT_BROADCAST = 12  # advertise BLE so the app/HA can re-pair
-SIGNAL_TURN_ON_CAMERA_LIGHT_MIDDLE = 15  # camera headlight, mid brightness
-SIGNAL_TURN_ON_CAMERA_LIGHT_LOW = 16  # camera headlight, low brightness
+# SocSignal codes used by the codec itself. The broader SocSignal enum lives
+# in const.py (Hermes value table at offset 0x00488eb0) — only the two below
+# stay here because they're referenced directly from this module's encoder
+# / by the matching VehicleLedSwitch in switch.py.
+SIGNAL_TURN_ON_VEHICLE_LIGHT = 10
+SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11
 
 
 def _encode_pb_timezone(hour: int, minute: int) -> bytes:

@@ -353,7 +353,7 @@ def test_bt_broadcast_button_metadata_and_disabled_default() -> None:
 
 async def test_bt_broadcast_button_press_publishes_signal_code() -> None:
     from lymow.button import BtBroadcastButton
-    from lymow.protocol import SIGNAL_TURN_ON_BT_BROADCAST
+    from lymow.const import SIGNAL_TURN_ON_BT_BROADCAST
 
     coord = _make_coord()
     coord.async_set_robot_config = AsyncMock()

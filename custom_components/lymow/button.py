@@ -124,7 +124,7 @@ class BtBroadcastButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
         self._attr_device_info = lymow_device_info(self.coordinator, device)
 
     async def async_press(self) -> None:
-        from .protocol import SIGNAL_TURN_ON_BT_BROADCAST
+        from .const import SIGNAL_TURN_ON_BT_BROADCAST
 
         await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_ON_BT_BROADCAST)
 
