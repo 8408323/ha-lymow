@@ -573,6 +573,15 @@ MOW_DIRS = {
     2: "SHUFFLE",
 }
 
+# PbCleanReport.mowEndType (int): how the last mowing session ended.
+# From PbCleanReport.fromObject (Hermes fn #9799) — name-and-value pairs in the
+# verify loop. MOW_END_100 = task completed normally (the "100" refers to 100% progress).
+MOW_END_TYPES = {
+    0: "NONE",
+    1: "COMPLETED",
+    2: "USER_CANCELLED",
+}
+
 # PbRobotInfo.startMode (int): how the current task was started.
 START_MODES = {
     0: "NONE",

@@ -913,3 +913,85 @@ async def test_async_setup_entry_registers_remaining_area_sensor() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
     assert any(isinstance(e, LymowRemainingAreaSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# LymowLastCleanSensor — PbCleanReport timestamp + end-type + battery
+# ---------------------------------------------------------------------------
+
+
+def test_last_clean_sensor_native_value_is_utc_timestamp() -> None:
+    from datetime import UTC, datetime
+
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"cleanStartTime": 1_700_000_000}})
+    e = LymowLastCleanSensor(coord, DEVICE)
+    assert e.native_value == datetime.fromtimestamp(1_700_000_000, tz=UTC)
+
+
+def test_last_clean_sensor_native_value_none_when_missing() -> None:
+    from lymow.sensor import LymowLastCleanSensor
+
+    assert LymowLastCleanSensor(_make_coord(None), DEVICE).native_value is None
+    assert LymowLastCleanSensor(_make_coord({}), DEVICE).native_value is None
+    assert LymowLastCleanSensor(_make_coord({"cleanReport": {}}), DEVICE).native_value is None
+
+
+def test_last_clean_sensor_native_value_none_when_start_invalid() -> None:
+    """A non-int or non-positive timestamp must not surface as a 1970-epoch date."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    assert LymowLastCleanSensor(_make_coord({"cleanReport": {"cleanStartTime": 0}}), DEVICE).native_value is None
+    assert LymowLastCleanSensor(_make_coord({"cleanReport": {"cleanStartTime": "bad"}}), DEVICE).native_value is None
+
+
+def test_last_clean_sensor_attrs_resolve_end_type_and_battery() -> None:
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"cleanStartTime": 1_700_000_000, "mowEndType": 1, "usedBattery": 30}})
+    e = LymowLastCleanSensor(coord, DEVICE)
+    assert e.extra_state_attributes == {"end_type": "COMPLETED", "used_battery_pct": 30}
+
+
+def test_last_clean_sensor_attrs_label_unknown_end_type() -> None:
+    """Should the wire ever carry a mowEndType outside the APK enum (0-2),
+    label it so it's visible in HA rather than silently dropping."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"mowEndType": 7}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {"end_type": "UNKNOWN_7"}
+
+
+def test_last_clean_sensor_attrs_empty_when_no_report() -> None:
+    from lymow.sensor import LymowLastCleanSensor
+
+    assert LymowLastCleanSensor(_make_coord({}), DEVICE).extra_state_attributes == {}
+
+
+def test_last_clean_sensor_unique_id_and_disabled_default() -> None:
+    from lymow.sensor import LymowLastCleanSensor
+
+    e = LymowLastCleanSensor(_make_coord({}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_last_mow_session"
+    assert e._attr_name == "Last mow session"
+    assert e._attr_entity_registry_enabled_default is False
+
+
+async def test_async_setup_entry_registers_last_clean_sensor() -> None:
+    from unittest.mock import MagicMock
+
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert any(isinstance(e, LymowLastCleanSensor) for e in added)
