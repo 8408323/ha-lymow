@@ -506,7 +506,11 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     else:
         state["warningCodes"] = []
 
-    # PbRobotInfo (field 5)
+    # PbRobotInfo (field 5) — field map verified against PbRobotInfo.encode
+    # (Hermes fn #9734 at offset 0x004b842c): f1 robotStatus, f2 battery,
+    # f3 wifiSignalQuality, f4 lteSignalQuality, f5 btSignalQuality,
+    # f6 workStatus, f7 isRecharging, f8 isCharging, f9 wifiWorking,
+    # f10 lteWorking. All int32 / bool varints.
     robot_info_raw = _first(fields, 5)
     if isinstance(robot_info_raw, bytes):
         ri = _decode_fields(robot_info_raw)
@@ -526,12 +530,37 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         lte_sig = _first(ri, 4)
         if lte_sig is not None:
             state["lteSignalQuality"] = _signed32(lte_sig)
+        bt_sig = _first(ri, 5)
+        if bt_sig is not None:
+            state["btSignalQuality"] = _signed32(bt_sig)
+        wifi_working = _first(ri, 9)
+        if wifi_working is not None:
+            state["wifiWorking"] = bool(wifi_working)
+        lte_working = _first(ri, 10)
+        if lte_working is not None:
+            state["lteWorking"] = bool(lte_working)
 
-    # PbDeviceProfile (field 10)
+    # PbDeviceProfile (field 10) — field map from PbDeviceProfile.encode
+    # (Hermes fn #9170 at offset 0x0049832f). f3 softwareVersion is a
+    # second software-version string distinct from f1 fwVersion (the app
+    # surfaces both); f4 wifiSsid + f8 rtkSn + f9 simId + f10 wheelVer +
+    # f11 knifeVer are diagnostic strings useful for sensors.
     profile_raw = _first(fields, 10)
     if isinstance(profile_raw, bytes):
         dp = _decode_fields(profile_raw)
-        for field_no, key in ((1, "fwVersion"), (2, "mcuVersion"), (5, "ipAddress"), (6, "macAddress"), (7, "sn")):
+        for field_no, key in (
+            (1, "fwVersion"),
+            (2, "mcuVersion"),
+            (3, "swVersionMqtt"),
+            (4, "wifiSsid"),
+            (5, "ipAddress"),
+            (6, "macAddress"),
+            (7, "sn"),
+            (8, "rtkSn"),
+            (9, "simIdMqtt"),
+            (10, "wheelVer"),
+            (11, "knifeVer"),
+        ):
             val = _first(dp, field_no)
             if isinstance(val, bytes):
                 state[key] = val.decode("utf-8", errors="replace")
