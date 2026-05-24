@@ -50,10 +50,10 @@ class LymowMapCard extends HTMLElement {
     this._scheduleOpen = false;
     this._advancedOpen = false; // tracks <details class="sp-advanced"> open state across renders
     this._settingsValues = null;
-    // 0=name, 1=area, 2=both, 3=none
-    this._goLabelMode = 0;
-    this._nogoLabelMode = 3;
-    this._chLabelMode = 3;
+    // 0=name, 1=area, 2=both, 3=none — persisted in localStorage across reloads
+    this._goLabelMode = parseInt(localStorage.getItem("lymow_go_label_mode") ?? "0", 10);
+    this._nogoLabelMode = parseInt(localStorage.getItem("lymow_nogo_label_mode") ?? "3", 10);
+    this._chLabelMode = parseInt(localStorage.getItem("lymow_ch_label_mode") ?? "3", 10);
     this._editing = false;
     this._editHash = null;
     this._editType = null; // "go" or "nogo"
@@ -1485,6 +1485,9 @@ class LymowMapCard extends HTMLElement {
     this._goLabelMode = this._settingsValues.go_label_mode ?? this._goLabelMode;
     this._nogoLabelMode = this._settingsValues.nogo_label_mode ?? this._nogoLabelMode;
     this._chLabelMode = this._settingsValues.ch_label_mode ?? this._chLabelMode;
+    localStorage.setItem("lymow_go_label_mode", this._goLabelMode);
+    localStorage.setItem("lymow_nogo_label_mode", this._nogoLabelMode);
+    localStorage.setItem("lymow_ch_label_mode", this._chLabelMode);
     const status = this.shadowRoot.querySelector(".sp-status");
     if (status) status.textContent = "Sending…";
     try {
