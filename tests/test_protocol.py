@@ -2001,7 +2001,7 @@ def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     cfg = _decode_fields(_first(_decode_fields(pb), 26))
     assert _first(cfg, 5) == 100  # brushSpeed (field 5) present
     assert _first(cfg, 6) is None  # cutSpeed (field 6) skipped (None)
-    with pytest.raises(ValueError, match="unknown task-config field"):
+    with pytest.raises(ValueError, match="unknown zone-config field"):
         encode_set_task_config(nonsense=1)
 
 
