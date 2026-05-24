@@ -56,6 +56,7 @@ class LymowMapCard extends HTMLElement {
     this._dragIdx = null;
     this._polyOverrides = {};
     this._nogoOverrides = {};
+    this._nameOverrides = {}; // optimistic rename until next MQTT update
     this._longPressTimer = null; // for zone enable/disable long-press
     this._pinAndGoMode = false; // double-click sends robot to point
 
@@ -97,9 +98,12 @@ class LymowMapCard extends HTMLElement {
     const state = this._hass && this._hass.states[this._config.entity];
     if (!state) return null;
     const a = state.attributes;
-    const goZones = (a.go_zones || []).map((z) =>
-      this._polyOverrides[z.hashId] ? { ...z, polygon: this._polyOverrides[z.hashId] } : z
-    );
+    const goZones = (a.go_zones || []).map((z) => {
+      const overrides = {};
+      if (this._polyOverrides[z.hashId]) overrides.polygon = this._polyOverrides[z.hashId];
+      if (this._nameOverrides[z.hashId] !== undefined) overrides.name = this._nameOverrides[z.hashId];
+      return Object.keys(overrides).length ? { ...z, ...overrides } : z;
+    });
     const nogoZones = (a.nogo_zones || []).map((z) =>
       this._nogoOverrides[z.hashId] ? { ...z, polygon: this._nogoOverrides[z.hashId] } : z
     );
@@ -1207,6 +1211,7 @@ class LymowMapCard extends HTMLElement {
       this._editRename = false; this._render(); return;
     }
     this._editRename = false;
+    this._nameOverrides[this._editHash] = newName;
     this._render();
     try {
       await this._hass.callService("lymow", "rename_zone", {
@@ -1216,6 +1221,8 @@ class LymowMapCard extends HTMLElement {
       });
     } catch (err) {
       console.warn("lymow-map-card: rename failed", err);
+      delete this._nameOverrides[this._editHash];
+      this._render();
     }
   }
 
