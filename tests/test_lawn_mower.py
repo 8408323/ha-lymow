@@ -239,8 +239,9 @@ async def test_async_setup_entry_registers_services() -> None:
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 set-device-name
     # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 set-network-priority
-    # + 1 rename-zone + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
-    assert hass.services.async_register.call_count == 34
+    # + 1 set-device-settings + 1 rename-zone + 1 clear-schedules + 1 set-schedules + 1 delete-channel
+    # + 1 delete-nogo-zone + 1 resume.
+    assert hass.services.async_register.call_count == 35
 
 
 # ---------------------------------------------------------------------------
@@ -1327,6 +1328,73 @@ def test_set_network_priority_schema_rejects_bad_choice() -> None:
         _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"], "preferred": "ethernet"})
     with pytest.raises(vol_.Invalid):
         _SET_NETWORK_PRIORITY_SCHEMA({"entity_id": ["lawn_mower.x"]})  # preferred missing
+
+
+async def test_handle_set_device_settings_maps_to_robot_config() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_device_settings"](
+        _make_call(
+            ["lawn_mower.mower_1"],
+            {
+                "audio_volume": 70,
+                "veh_led_status": 2,
+                "timezone_offset": 2,
+                "dock_on_error": True,
+                "cellular_radio": False,
+            },
+        )
+    )
+    coord.async_set_robot_config.assert_awaited_once_with(
+        "mower-001",
+        audioVolume=70,
+        vehLedStatus=2,
+        timezoneOffset=2,
+        dockOnError=True,
+        cmdCellularSwitch=False,
+    )
+
+
+async def test_handle_set_device_settings_requires_at_least_one_field() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    with pytest.raises(ServiceValidationError, match="at least one parameter"):
+        await handlers["set_device_settings"](_make_call(["lawn_mower.mower_1"], {}))
+    coord.async_set_robot_config.assert_not_awaited()
+
+
+async def test_handle_set_device_settings_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_device_settings"](_make_call(["lawn_mower.other"], {"audio_volume": 50}))
+    coord.async_set_robot_config.assert_not_awaited()
+
+
+def test_set_device_settings_schema_clamps_and_rejects() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_DEVICE_SETTINGS_SCHEMA
+
+    ok = _SET_DEVICE_SETTINGS_SCHEMA({"entity_id": ["lawn_mower.x"], "audio_volume": 50, "dock_on_error": True})
+    assert ok["audio_volume"] == 50
+    assert ok["dock_on_error"] is True
+    with pytest.raises(vol_.Invalid):
+        _SET_DEVICE_SETTINGS_SCHEMA({"entity_id": ["lawn_mower.x"], "audio_volume": 200})
+    with pytest.raises(vol_.Invalid):
+        _SET_DEVICE_SETTINGS_SCHEMA({"entity_id": ["lawn_mower.x"], "veh_led_status": 5})
+    with pytest.raises(vol_.Invalid):
+        _SET_DEVICE_SETTINGS_SCHEMA({"entity_id": ["lawn_mower.x"], "timezone_offset": 99})
 
 
 def _validated_schedule(**overrides) -> dict:

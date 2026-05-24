@@ -76,8 +76,25 @@ _SERVICE_SET_SCHEDULES = "set_schedules"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
+_SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
+
+# Service-field (snake_case) → PbRobotConfig field (camelCase) + numeric bounds.
+# Subset of PbRobotConfig the integration exposes as a single device-settings
+# service; the encoder supports more. Bounds are deliberately wide (the device
+# may reject out-of-range values, but the integration shouldn't second-guess).
+_DEVICE_SETTINGS_INT_FIELDS = {
+    "audio_volume": ("audioVolume", (0, 100)),
+    "cam_led_status": ("camLedStatus", (0, 2)),  # 0 off / 1 on / 2 auto
+    "veh_led_status": ("vehLedStatus", (0, 2)),  # 0 off / 1 on / 2 auto
+    "timezone_offset": ("timezoneOffset", (-12, 14)),  # UTC offset, hours
+}
+_DEVICE_SETTINGS_BOOL_FIELDS = {
+    "dock_on_error": "dockOnError",
+    "is_open_led": "isOpenLed",
+    "cellular_radio": "cmdCellularSwitch",
+}
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
 # subset of PbTaskConfig; the encoder supports more. All optional ints.
@@ -262,6 +279,16 @@ _SET_NETWORK_PRIORITY_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_PREFERRED): vol.In(("4g", "wifi")),
+    }
+)
+_SET_DEVICE_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        **{
+            vol.Optional(k): vol.All(vol.Coerce(int), vol.Range(min=lo, max=hi))
+            for k, (_proto, (lo, hi)) in _DEVICE_SETTINGS_INT_FIELDS.items()
+        },
+        **{vol.Optional(k): cv.boolean for k in _DEVICE_SETTINGS_BOOL_FIELDS},
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -597,6 +624,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_robot_config(entity._thing_name, metric_4g=metric_4g)
 
+    async def handle_set_device_settings(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        fields: dict[str, Any] = {}
+        for svc, (proto, _bounds) in _DEVICE_SETTINGS_INT_FIELDS.items():
+            if svc in call.data:
+                fields[proto] = call.data[svc]
+        for svc, proto in _DEVICE_SETTINGS_BOOL_FIELDS.items():
+            if svc in call.data:
+                fields[proto] = call.data[svc]
+        if not fields:
+            raise ServiceValidationError("set_device_settings: provide at least one parameter to set.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_robot_config(entity._thing_name, **fields)
+
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
@@ -740,6 +785,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_NETWORK_PRIORITY, handle_set_network_priority, schema=_SET_NETWORK_PRIORITY_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)

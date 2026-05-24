@@ -1894,6 +1894,28 @@ def test_encode_set_robot_config_false_and_unknown_rejected() -> None:
         encode_set_robot_config(nonsense=1)
 
 
+def test_encode_set_robot_config_int_fields_encode_as_varint() -> None:
+    """Non-bool fields (audioVolume, vehLedStatus, timezoneOffset, …) go through
+    the int branch — they must encode as a varint at the right field number."""
+    from lymow.protocol import encode_set_robot_config
+
+    pb = encode_set_robot_config(
+        audioVolume=70,
+        vehLedStatus=2,
+        camLedStatus=1,
+        timezoneOffset=2,
+        dockOnError=True,
+        cmdCellularSwitch=False,
+    )
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(cfg, 6) == 70  # audioVolume
+    assert _first(cfg, 13) == 2  # vehLedStatus
+    assert _first(cfg, 12) == 1  # camLedStatus
+    assert _first(cfg, 21) == 2  # timezoneOffset (UTC offset hours)
+    assert _first(cfg, 22) == 1  # dockOnError (bool True → 1)
+    assert _first(cfg, 10) == 0  # cmdCellularSwitch (bool False → 0)
+
+
 def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     from lymow.protocol import encode_set_run_time_config
 

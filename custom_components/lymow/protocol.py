@@ -710,16 +710,29 @@ def encode_set_task_config(**fields: Any) -> bytes:
     return pb
 
 
-# PbRobotConfig field map — (proto field number) — derived from APK (Hermes)
-# analysis of PbRobotConfig.encode (fn #9506 at offset 0x004a7ce8). Carried in
-# PbInput.robotConfig (field 13) for device-config writes; the app omits
-# userCtrl on these — the robot dispatches based on the submessage shape (see
-# setNetworkType fn #8970). Only the bool fields we expose today are listed
-# here; broaden the codec when adding non-bool fields (audioVolume int,
-# rcCutHeight int, etc.).
-_ROBOT_CONFIG_BOOL_FIELDS: dict[str, int] = {
-    "isOpenLed": 7,  # vehicle (mower) status LED on/off
-    "metric_4g": 11,  # true = 4G preferred, false = WiFi preferred
+# PbRobotConfig field map — (proto field number, wire kind) — derived from APK
+# (Hermes) analysis of PbRobotConfig.encode (fn #9506 at offset 0x004a7ce8).
+# Carried in PbInput.robotConfig (field 13) for device-config writes; the app
+# omits userCtrl on these — the robot dispatches based on the submessage shape
+# (see setNetworkType fn #8970). Embedded sub-messages (lcdPinCode=9,
+# openLedTime=14, closeLedTime=15, rtkBinding=17, rrConfig=18) are intentionally
+# omitted — broaden the codec when adding those.
+_ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "rcCutSpeed": (2, "int"),
+    "rcCutHeight": (3, "int"),
+    "rcRaiseCutHeight": (4, "bool"),
+    "rcLowerCutHeight": (5, "bool"),
+    "audioVolume": (6, "int"),  # robot speaker volume
+    "isOpenLed": (7, "bool"),  # mower's status LED on/off (app "Vehicle LED")
+    "cmdCellularSwitch": (10, "bool"),  # cellular radio on/off
+    "metric_4g": (11, "bool"),  # true = 4G preferred, false = Wi-Fi preferred
+    "camLedStatus": (12, "int"),  # camera LED tristate
+    "vehLedStatus": (13, "int"),  # vehicle LED tristate
+    "resumeBat": (16, "int"),
+    "scheduleId": (19, "int"),
+    "schedulePathOffset": (20, "int"),
+    "timezoneOffset": (21, "int"),  # UTC offset, hours
+    "dockOnError": (22, "bool"),  # return to dock when an error occurs
 }
 
 
@@ -734,9 +747,13 @@ def encode_set_robot_config(**fields: Any) -> bytes:
     for name, value in fields.items():
         if value is None:
             continue
-        if name not in _ROBOT_CONFIG_BOOL_FIELDS:
+        if name not in _ROBOT_CONFIG_FIELDS:
             raise ValueError(f"unknown robot-config field: {name}")
-        cfg += _field_i32(_ROBOT_CONFIG_BOOL_FIELDS[name], 1 if value else 0)
+        field_no, kind = _ROBOT_CONFIG_FIELDS[name]
+        if kind == "bool":
+            cfg += _field_i32(field_no, 1 if value else 0)
+        else:
+            cfg += _field_i32(field_no, int(value))
     pb = _field_i32(2, PB_VERSION)
     pb += _field_bytes(13, cfg)  # PbInput.robotConfig
     return pb

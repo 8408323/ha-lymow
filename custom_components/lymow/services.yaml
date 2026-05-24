@@ -276,6 +276,69 @@ set_network_priority:
             - "4g"
             - "wifi"
 
+set_device_settings:
+  name: Set device settings
+  description: >
+    Write one or more PbRobotConfig fields to the robot — mirrors the app's
+    Device Settings screen. Only the fields you set are sent; the rest are
+    untouched. Wire layout derived from the app (PbRobotConfig.encode in the
+    APK Hermes bundle).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    audio_volume:
+      name: Audio volume
+      description: Robot speaker volume (0–100).
+      example: 70
+      selector:
+        number: { min: 0, max: 100, step: 1, mode: slider }
+    cam_led_status:
+      name: Camera LED
+      description: 0 = off, 1 = on, 2 = auto.
+      example: 2
+      selector:
+        select:
+          options:
+            - { value: "0", label: "Off" }
+            - { value: "1", label: "On" }
+            - { value: "2", label: "Auto" }
+    veh_led_status:
+      name: Vehicle LED
+      description: 0 = off, 1 = on, 2 = auto.
+      example: 2
+      selector:
+        select:
+          options:
+            - { value: "0", label: "Off" }
+            - { value: "1", label: "On" }
+            - { value: "2", label: "Auto" }
+    timezone_offset:
+      name: Timezone offset (hours)
+      description: UTC offset in whole hours (-12 to 14).
+      example: 2
+      selector:
+        number: { min: -12, max: 14, step: 1, mode: box }
+    dock_on_error:
+      name: Dock on error
+      description: Return to dock automatically when an error occurs.
+      example: true
+      selector:
+        boolean:
+    is_open_led:
+      name: LED schedule enabled
+      description: Whether the LED schedule (openLedTime / closeLedTime) is active.
+      example: true
+      selector:
+        boolean:
+    cellular_radio:
+      name: Cellular radio
+      description: Turn the LTE radio on or off (independent of airplane-mode button).
+      example: true
+      selector:
+        boolean:
+
 set_run_time_config:
   name: Set run-time config
   description: >

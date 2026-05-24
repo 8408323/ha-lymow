@@ -714,8 +714,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         These writes don't set userCtrl — the robot dispatches by the presence
         of the robotConfig submessage. Supported field names are listed in
-        :data:`protocol._ROBOT_CONFIG_BOOL_FIELDS` (extend it, and
-        :func:`protocol.encode_set_robot_config`, to add non-bool fields).
+        :data:`protocol._ROBOT_CONFIG_FIELDS` (each entry is a
+        ``(field_no, kind)`` pair, where kind is ``"int"`` or ``"bool"``).
         """
         from .protocol import encode_set_robot_config
 
