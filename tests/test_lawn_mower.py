@@ -242,8 +242,8 @@ async def test_async_setup_entry_registers_services() -> None:
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 set-device-name
     # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 set-network-priority
     # + 1 set-recharge-resume + 1 set-device-settings + 1 rename-zone + 1 clear-schedules
-    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume.
-    assert hass.services.async_register.call_count == 36
+    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume + 1 pause.
+    assert hass.services.async_register.call_count == 37
 
 
 # ---------------------------------------------------------------------------
@@ -491,6 +491,46 @@ async def test_handle_start_zone_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.unknown"], {"zone_hash_ids": ["z1"]})
     await handlers["start_zone"](call)
     coord.async_start_zones.assert_not_called()
+
+
+async def test_handle_pause_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"])
+    await handlers["pause"](call)
+    coord.async_pause.assert_not_called()
+
+
+async def test_handle_pause_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers2 = {}
+
+    def _register2(domain, service, handler, schema=None, supports_response=False):
+        handlers2[service] = handler
+
+    hass.services.async_register.side_effect = _register2
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"])
+    await handlers2["pause"](call)
+    coord.async_pause.assert_called_once_with(THING)
 
 
 async def test_handle_query_map_unknown_entity_skips() -> None:
