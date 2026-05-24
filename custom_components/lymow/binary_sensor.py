@@ -122,12 +122,7 @@ class WifiWorkingBinarySensor(_LymowBinarySensor):
 
 
 class LteWorkingBinarySensor(_LymowBinarySensor):
-    """Live LTE link state from PbRobotInfo.lteWorking (field 10, bool).
-
-    Distinguishes "LTE radio is on" (the cellular switch) from "LTE has
-    actually established a connection" — useful for troubleshooting cell
-    coverage when the radio is enabled but not reaching the tower.
-    """
+    """Live LTE link state from PbRobotInfo.lteWorking (f10, bool) — distinct from the radio-on switch."""
 
     _field = "lteWorking"
     _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY

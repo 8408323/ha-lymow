@@ -302,6 +302,8 @@ def _build_pboutput(
     rtk_sn: str | None = None,
     wheel_ver: str | None = None,
     knife_ver: str | None = None,
+    sw_version_mqtt: str | None = None,
+    sim_id_mqtt: str | None = None,
 ) -> bytes:
     """Hand-build a minimal PbOutput blob for testing."""
     from lymow.protocol import PB_VERSION
@@ -330,10 +332,14 @@ def _build_pboutput(
         profile += _field_str(1, fw_version)
     if mcu_version is not None:
         profile += _field_str(2, mcu_version)
+    if sw_version_mqtt is not None:
+        profile += _field_str(3, sw_version_mqtt)
     if wifi_ssid is not None:
         profile += _field_str(4, wifi_ssid)
     if rtk_sn is not None:
         profile += _field_str(8, rtk_sn)
+    if sim_id_mqtt is not None:
+        profile += _field_str(9, sim_id_mqtt)
     if wheel_ver is not None:
         profile += _field_str(10, wheel_ver)
     if knife_ver is not None:
@@ -466,6 +472,18 @@ def test_decode_pboutput_extended_device_profile_strings() -> None:
     assert state["rtkSn"] == "RTK-XYZ-001"
     assert state["wheelVer"] == "wheel-1.2.3"
     assert state["knifeVer"] == "blade-0.4.1"
+
+
+def test_decode_pboutput_extended_device_profile_sw_version_and_sim_id() -> None:
+    """PbDeviceProfile f3 (softwareVersion) + f9 (simId) come over MQTT alongside
+    same-named REST fields. They're stored under distinct keys
+    (``swVersionMqtt`` / ``simIdMqtt``) so the REST sensors keep their existing
+    source — but the MQTT-side values still round-trip through the decoder so
+    a future refactor doesn't silently drop them."""
+    pb = _build_pboutput(sw_version_mqtt="2.1.48", sim_id_mqtt="8946070000000000000")
+    state = decode_pboutput(pb)
+    assert state["swVersionMqtt"] == "2.1.48"
+    assert state["simIdMqtt"] == "8946070000000000000"
 
 
 def test_decode_pboutput_empty_bytes() -> None:

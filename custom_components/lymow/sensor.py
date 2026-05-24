@@ -80,6 +80,7 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         value_key="btSignalQuality",
         entity_registry_enabled_default=False,
     ),
+    # PbDeviceProfile extras (decoded from PbOutput field 10 — APK fn #9170).
     LymowSensorDescription(
         key="wifi_ssid",
         name="Wi-Fi SSID",
