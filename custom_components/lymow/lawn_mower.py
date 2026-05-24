@@ -71,6 +71,8 @@ _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
 _SERVICE_RENAME_ZONE = "rename_zone"
+_SERVICE_SET_ZONE_ENABLED = "set_zone_enabled"
+_ATTR_IS_ENABLED = "is_enabled"
 _SERVICE_CLEAR_SCHEDULES = "clear_schedules"
 _SERVICE_SET_SCHEDULES = "set_schedules"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
@@ -241,6 +243,13 @@ _RENAME_ZONE_SCHEMA = vol.Schema(
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
         vol.Required(_ATTR_NAME): cv.string,
+    }
+)
+_SET_ZONE_ENABLED_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Required(_ATTR_IS_ENABLED): cv.boolean,
     }
 )
 _SET_TASK_CONFIG_SCHEMA = vol.Schema(
@@ -550,6 +559,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_rename_zone(entity._thing_name, hash_id, name)
 
+    async def handle_set_zone_enabled(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
+        is_enabled: bool = call.data[_ATTR_IS_ENABLED]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_update_zone_enabled(entity._thing_name, hash_id, is_enabled)
+
     async def handle_set_task_config(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         # Map provided snake_case params to PbTaskConfig field names.
@@ -704,6 +724,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DOMAIN, _SERVICE_SET_TASK_CONFIG, handle_set_task_config, schema=_SET_TASK_CONFIG_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_ZONE_ENABLED, handle_set_zone_enabled, schema=_SET_ZONE_ENABLED_SCHEMA
+    )
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_SET_SCHEDULES, handle_set_schedules, schema=_SET_SCHEDULES_SCHEMA)
 
