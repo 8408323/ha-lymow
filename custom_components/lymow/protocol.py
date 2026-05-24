@@ -763,9 +763,11 @@ def decode_clean_report(data: bytes) -> dict[str, Any]:
       f1 cleanStartTime (varint, unix seconds — Long on the wire),
       f2 cleanInfo PbCleanInfo (skipped here — already decoded for live session),
       f3 mowEndType enum (0=MOW_END_NONE, 1=MOW_END_100, 2=MOW_END_USER_CANCEL),
-      f4 errorList repeated PbErrorList — each entry has {code: int (f1),
-                  percent: float32 (f2)}: which errors fired and at what
-                  session progress (verified from PbErrorList.encode #9782),
+      f4 errorList repeated PbErrorList — each entry surfaces as
+                  ``{code: int, percent: int 0-100}``. On the wire f2 is a
+                  float32 fraction (0..1) per PbErrorList.encode #9782; the
+                  decoder scales it to 0..100 so the attribute matches
+                  ``mowProgress``.
       f5 statusTimes packed repeated int32 — seconds spent in each workStatus,
                      indexed by the enum value (array[i] = seconds at status i),
       f6 usedBattery (varint int32, percent).
@@ -819,8 +821,14 @@ def _decode_error_list_entry(data: bytes) -> dict[str, Any]:
     code = _first(f, 1)
     if isinstance(code, int):
         out["code"] = _signed32(code)
+    # f2 is wire-type 5 (fixed32) per the encoder, so ``_first`` should
+    # return an int — but the wire is untrusted, so a malformed payload
+    # could send the same field number with a length-delimited wire type
+    # and surface bytes here. ``_decode_f32`` would then raise on
+    # ``struct.pack`` of bytes; explicit isinstance(int) keeps the decoder
+    # robust to wire-type drift.
     pct_raw = _first(f, 2)
-    if pct_raw is not None:
+    if isinstance(pct_raw, int):
         pct = _decode_f32(pct_raw)
         # Wire is fraction 0..1 mirroring PbCleanInfo.mowProgress; bound it
         # so a misaligned float can't surface a -inf / NaN attribute.

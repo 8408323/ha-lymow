@@ -1026,6 +1026,16 @@ def test_last_clean_sensor_attrs_omit_empty_error_list() -> None:
     assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
 
 
+def test_last_clean_sensor_attrs_omit_error_list_when_filter_drops_all_entries() -> None:
+    """If every entry in the raw errorList is malformed (no int code), the
+    filter empties the list — drop the attribute entirely rather than render
+    an empty-array placeholder."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": ["junk", {"percent": 50.0}]}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
+
+
 def test_last_clean_sensor_attrs_empty_when_no_report() -> None:
     from lymow.sensor import LymowLastCleanSensor
 
