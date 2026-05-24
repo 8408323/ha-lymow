@@ -70,6 +70,45 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         value_key="wifiRssiDbm",
         entity_registry_enabled_default=False,
     ),
+    # PbRobotInfo extras (decoded from PbOutput field 5 — APK fn #9734).
+    LymowSensorDescription(
+        key="bt_signal",
+        name="Bluetooth signal",
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        native_unit_of_measurement="dBm",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_key="btSignalQuality",
+        entity_registry_enabled_default=False,
+    ),
+    # PbDeviceProfile extras (decoded from PbOutput field 10 — APK fn #9170).
+    LymowSensorDescription(
+        key="wifi_ssid",
+        name="Wi-Fi SSID",
+        value_key="wifiSsid",
+        icon="mdi:wifi-marker",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_serial",
+        name="RTK base serial",
+        value_key="rtkSn",
+        icon="mdi:satellite-uplink",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="wheel_firmware",
+        name="Wheel firmware",
+        value_key="wheelVer",
+        icon="mdi:car-cog",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="blade_firmware",
+        name="Blade firmware",
+        value_key="knifeVer",
+        icon="mdi:saw-blade",
+        entity_registry_enabled_default=False,
+    ),
     # REST sensors
     LymowSensorDescription(
         key="connectivity",

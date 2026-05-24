@@ -122,7 +122,7 @@ def test_device_locked_none_when_missing() -> None:
     assert e.is_on is None
 
 
-async def test_async_setup_entry_creates_four_per_device() -> None:
+async def test_async_setup_entry_creates_six_per_device() -> None:
     coord = _make_coord({"isCharging": True, "isRecharging": False, "stolenStatus": False, "deviceLocked": False})
 
     hass = MagicMock()
@@ -134,18 +134,20 @@ async def test_async_setup_entry_creates_four_per_device() -> None:
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     # Exact count, not just type set — catches accidental duplicates.
-    assert len(added) == 4
+    assert len(added) == 6
     types = [type(e).__name__ for e in added]
     assert sorted(types) == [
         "ChargingBinarySensor",
         "DeviceLockedBinarySensor",
+        "LteWorkingBinarySensor",
         "RechargingBinarySensor",
         "StolenBinarySensor",
+        "WifiWorkingBinarySensor",
     ]
 
 
-async def test_async_setup_entry_creates_four_per_device_with_two_devices() -> None:
-    """Two devices → exactly eight entities (no duplicates, no skips)."""
+async def test_async_setup_entry_six_per_device_with_two_devices() -> None:
+    """Two devices → exactly twelve entities (no duplicates, no skips)."""
     coord = _make_coord({"isCharging": True})
     coord.devices = [DEVICE, {"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
 
@@ -157,9 +159,25 @@ async def test_async_setup_entry_creates_four_per_device_with_two_devices() -> N
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 8
+    assert len(added) == 12
     thing_names = sorted({e._thing_name for e in added})
     assert thing_names == ["mower-001", "mower-002"]
+
+
+def test_wifi_working_reflects_pbrobotinfo_field() -> None:
+    from lymow.binary_sensor import WifiWorkingBinarySensor
+
+    assert WifiWorkingBinarySensor(_make_coord({"wifiWorking": True}), DEVICE).is_on is True
+    assert WifiWorkingBinarySensor(_make_coord({"wifiWorking": False}), DEVICE).is_on is False
+    assert WifiWorkingBinarySensor(_make_coord({}), DEVICE).is_on is None
+
+
+def test_lte_working_reflects_pbrobotinfo_field() -> None:
+    from lymow.binary_sensor import LteWorkingBinarySensor
+
+    assert LteWorkingBinarySensor(_make_coord({"lteWorking": True}), DEVICE).is_on is True
+    assert LteWorkingBinarySensor(_make_coord({"lteWorking": False}), DEVICE).is_on is False
+    assert LteWorkingBinarySensor(_make_coord({}), DEVICE).is_on is None
 
 
 async def test_async_setup_entry_no_devices() -> None:

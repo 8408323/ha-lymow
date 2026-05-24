@@ -29,6 +29,8 @@ async def async_setup_entry(
                 RechargingBinarySensor(coordinator, device),
                 StolenBinarySensor(coordinator, device),
                 DeviceLockedBinarySensor(coordinator, device),
+                WifiWorkingBinarySensor(coordinator, device),
+                LteWorkingBinarySensor(coordinator, device),
             ]
         )
     if entities:
@@ -106,3 +108,25 @@ class DeviceLockedBinarySensor(_LymowBinarySensor):
         if value is None:
             return None
         return not bool(value)
+
+
+class WifiWorkingBinarySensor(_LymowBinarySensor):
+    """Live Wi-Fi link state from PbRobotInfo.wifiWorking (field 9, bool)."""
+
+    _field = "wifiWorking"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Wi-Fi link", "wifi_working")
+
+
+class LteWorkingBinarySensor(_LymowBinarySensor):
+    """Live LTE link state from PbRobotInfo.lteWorking (f10, bool) — distinct from the radio-on switch."""
+
+    _field = "lteWorking"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "LTE link", "lte_working")

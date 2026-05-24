@@ -290,11 +290,20 @@ def _build_pboutput(
     is_recharging: int = 0,
     wifi_signal: int | None = None,
     lte_signal: int | None = None,
+    bt_signal: int | None = None,
+    wifi_working: bool | None = None,
+    lte_working: bool | None = None,
     robot_state: int | None = None,
     error_codes: list[int] | None = None,
     warning_codes: list[int] | None = None,
     fw_version: str | None = None,
     mcu_version: str | None = None,
+    wifi_ssid: str | None = None,
+    rtk_sn: str | None = None,
+    wheel_ver: str | None = None,
+    knife_ver: str | None = None,
+    sw_version_mqtt: str | None = None,
+    sim_id_mqtt: str | None = None,
 ) -> bytes:
     """Hand-build a minimal PbOutput blob for testing."""
     from lymow.protocol import PB_VERSION
@@ -310,6 +319,12 @@ def _build_pboutput(
         robot_info += _field_i32(3, wifi_signal)
     if lte_signal is not None:
         robot_info += _field_i32(4, lte_signal)
+    if bt_signal is not None:
+        robot_info += _field_i32(5, bt_signal)
+    if wifi_working is not None:
+        robot_info += _field_i32(9, 1 if wifi_working else 0)
+    if lte_working is not None:
+        robot_info += _field_i32(10, 1 if lte_working else 0)
 
     # PbDeviceProfile (sub-message, field 10)
     profile = b""
@@ -317,6 +332,18 @@ def _build_pboutput(
         profile += _field_str(1, fw_version)
     if mcu_version is not None:
         profile += _field_str(2, mcu_version)
+    if sw_version_mqtt is not None:
+        profile += _field_str(3, sw_version_mqtt)
+    if wifi_ssid is not None:
+        profile += _field_str(4, wifi_ssid)
+    if rtk_sn is not None:
+        profile += _field_str(8, rtk_sn)
+    if sim_id_mqtt is not None:
+        profile += _field_str(9, sim_id_mqtt)
+    if wheel_ver is not None:
+        profile += _field_str(10, wheel_ver)
+    if knife_ver is not None:
+        profile += _field_str(11, knife_ver)
 
     # Top-level PbOutput
     out = _field_i32(2, PB_VERSION)
@@ -409,6 +436,54 @@ def test_decode_pboutput_mcu_version() -> None:
     pb = _build_pboutput(mcu_version="2.3.0")
     state = decode_pboutput(pb)
     assert state["mcuVersion"] == "2.3.0"
+
+
+def test_decode_pboutput_bt_signal() -> None:
+    """PbRobotInfo.btSignalQuality (f5) — new sensor for the Bluetooth link."""
+    pb = _build_pboutput(bt_signal=-68)
+    state = decode_pboutput(pb)
+    assert state["btSignalQuality"] == -68
+
+
+def test_decode_pboutput_wifi_lte_working_bools() -> None:
+    """PbRobotInfo.wifiWorking (f9) + lteWorking (f10) — connectivity flags."""
+    pb_on = _build_pboutput(wifi_working=True, lte_working=False)
+    state = decode_pboutput(pb_on)
+    assert state["wifiWorking"] is True
+    assert state["lteWorking"] is False
+
+    # Field absent → key absent (no implicit False).
+    pb_neither = _build_pboutput()
+    state = decode_pboutput(pb_neither)
+    assert "wifiWorking" not in state
+    assert "lteWorking" not in state
+
+
+def test_decode_pboutput_extended_device_profile_strings() -> None:
+    """PbDeviceProfile extras (f4 wifiSsid, f8 rtkSn, f10 wheelVer, f11 knifeVer)."""
+    pb = _build_pboutput(
+        wifi_ssid="Haraldsson",
+        rtk_sn="RTK-XYZ-001",
+        wheel_ver="wheel-1.2.3",
+        knife_ver="blade-0.4.1",
+    )
+    state = decode_pboutput(pb)
+    assert state["wifiSsid"] == "Haraldsson"
+    assert state["rtkSn"] == "RTK-XYZ-001"
+    assert state["wheelVer"] == "wheel-1.2.3"
+    assert state["knifeVer"] == "blade-0.4.1"
+
+
+def test_decode_pboutput_extended_device_profile_sw_version_and_sim_id() -> None:
+    """PbDeviceProfile f3 (softwareVersion) + f9 (simId) come over MQTT alongside
+    same-named REST fields. They're stored under distinct keys
+    (``swVersionMqtt`` / ``simIdMqtt``) so the REST sensors keep their existing
+    source — but the MQTT-side values still round-trip through the decoder so
+    a future refactor doesn't silently drop them."""
+    pb = _build_pboutput(sw_version_mqtt="2.1.48", sim_id_mqtt="8946070000000000000")
+    state = decode_pboutput(pb)
+    assert state["swVersionMqtt"] == "2.1.48"
+    assert state["simIdMqtt"] == "8946070000000000000"
 
 
 def test_decode_pboutput_empty_bytes() -> None:
