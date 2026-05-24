@@ -750,6 +750,32 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_set_robot_config(**fields))
 
+    async def async_set_device_settings(
+        self,
+        thing_name: str,
+        *,
+        charging_mode: int | None = None,
+        zone_order: int | None = None,
+        rainy_mowing: bool | None = None,
+        charging_handbrake: bool | None = None,
+    ) -> None:
+        """Publish a Device Settings (PbTaskConfig) write.
+
+        See :func:`protocol.encode_set_device_settings`. Any of the four
+        params can be ``None`` to leave that field untouched.
+        """
+        from .protocol import encode_set_device_settings
+
+        await self._mqtt.async_publish_command(
+            thing_name,
+            encode_set_device_settings(
+                charging_mode=charging_mode,
+                zone_order=zone_order,
+                rainy_mowing=rainy_mowing,
+                charging_handbrake=charging_handbrake,
+            ),
+        )
+
     async def async_set_run_time_config(self, thing_name: str, **fields: Any) -> None:
         """Set run-time config parameters (USER_CTRL_SET_RUN_TIME_CONFIG).
 

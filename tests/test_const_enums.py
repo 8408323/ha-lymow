@@ -6,6 +6,7 @@ from lymow.const import (
     AE_GEARS,
     ALGO_NODE_STATES,
     BAT_STATUSES,
+    CHARGING_MODES,
     CLEAN_MODES,
     LED_LEVELS,
     MOW_DIRS,
@@ -15,7 +16,19 @@ from lymow.const import (
     START_MODES,
     WIRELESS_STATES,
     WORK_STATUS_AGING_TEST,
+    ZONE_ORDERS,
 )
+
+
+def test_charging_modes_pinned() -> None:
+    # PbTaskConfig.chargingMode (Return-to-Dock route on the Device Settings page).
+    # APK enum prefix is "CHARING_MODE" (sic, missing G in the JS); wire is unaffected.
+    assert CHARGING_MODES == {0: "NORMAL", 1: "QUICK"}
+
+
+def test_zone_orders_pinned() -> None:
+    # PbTaskConfig.zoneOrder
+    assert ZONE_ORDERS == {0: "OPTIMIZE", 1: "CUSTOM"}
 
 
 def test_work_status_aging_test_present() -> None:

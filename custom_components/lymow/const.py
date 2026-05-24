@@ -296,6 +296,19 @@ RTK_SIGNAL_QUALITY = {
     3: "FIXED",
 }
 
+# PbTaskConfig.chargingMode (int): "Return to Dock" route on Device Settings.
+# Note the (sic) APK enum prefix "CHARING_MODE" (missing G). Same wire field.
+CHARGING_MODES = {
+    0: "NORMAL",  # app label "Follow Perimeter"
+    1: "QUICK",  # app label "Direct Route"
+}
+
+# PbTaskConfig.zoneOrder (int).
+ZONE_ORDERS = {
+    0: "OPTIMIZE",
+    1: "CUSTOM",
+}
+
 # Camera auto-exposure gear (PbDebugSetting.aeGear).
 AE_GEARS = {
     0: "NONE",

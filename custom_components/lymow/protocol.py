@@ -843,6 +843,54 @@ def encode_set_run_time_config(**fields: Any) -> bytes:
     return pb
 
 
+def encode_set_device_settings(
+    *,
+    charging_mode: int | None = None,
+    zone_order: int | None = None,
+    rainy_mowing: bool | None = None,
+    charging_handbrake: bool | None = None,
+) -> bytes:
+    """Encode a USER_CTRL_SET_TASK_CONFIG write of the Device Settings page.
+
+    PbTaskConfig (the real one, app-side fn #9588 / encoder #9590 at
+    0x004aed0b) has FOUR fields, written into PbInput.taskConfig (f26)
+    alongside userCtrl=USER_CTRL_SET_TASK_CONFIG=36:
+
+      f1 chargingMode int      — "Return to Dock" route (0 NORMAL / 1 QUICK)
+      f2 zoneOrder int         — 0 OPTIMIZE / 1 CUSTOM
+      f3 rainCleaning bool     — "Rainy Mowing" toggle
+      f4 disableChargingPark bool — *inverted* "Charging Handbrake" (true =
+                                    handbrake disabled). The HA-facing
+                                    ``charging_handbrake`` param follows the
+                                    app's UI sense (on = handbrake engaged);
+                                    we invert here.
+
+    Note: this is a *different* PbTaskConfig from the broader 18-field map
+    in ``_TASK_CONFIG_FIELDS`` (which is actually a PbZoneConfig per APK fn
+    #9432 — pre-existing labelling bug, tracked separately).
+
+    Only the provided parameters are sent; ``None`` is skipped so partial
+    writes preserve the other fields on the robot side.
+    """
+    from .const import USER_CTRL_SET_TASK_CONFIG
+
+    cfg = b""
+    if charging_mode is not None:
+        cfg += _field_i32(1, int(charging_mode))
+    if zone_order is not None:
+        cfg += _field_i32(2, int(zone_order))
+    if rainy_mowing is not None:
+        cfg += _field_i32(3, 1 if rainy_mowing else 0)
+    if charging_handbrake is not None:
+        # UI sense → wire sense: handbrake engaged means disableChargingPark=false.
+        cfg += _field_i32(4, 0 if charging_handbrake else 1)
+
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_SET_TASK_CONFIG)
+    pb += _field_bytes(26, cfg)  # PbInput.taskConfig
+    return pb
+
+
 def encode_query_map(queryIndex: int = 0) -> bytes:
     """Encode a query-map command (userCtrl=19)."""
     sub = _field_i32(1, queryIndex) + _field_i32(4, 1)

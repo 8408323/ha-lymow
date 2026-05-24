@@ -77,6 +77,7 @@ _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
 _SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
+_SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
 _ATTR_RR_ENABLE = "enable"
@@ -84,6 +85,17 @@ _ATTR_RR_PERIOD_START = "period_start"
 _ATTR_RR_PERIOD_END = "period_end"
 _ATTR_RR_RECHARGE_BAT = "recharge_bat"
 _ATTR_RR_RESUME_BAT = "resume_bat"
+_ATTR_DS_CHARGING_MODE = "charging_mode"
+_ATTR_DS_ZONE_ORDER = "zone_order"
+_ATTR_DS_RAINY_MOWING = "rainy_mowing"
+_ATTR_DS_CHARGING_HANDBRAKE = "charging_handbrake"
+
+# Charging mode (return-to-dock route): app exposes two options.
+# Wire values from APK CHARING_MODE enum (sic): 0 NORMAL = Follow Perimeter,
+# 1 QUICK = Direct Route.
+_CHARGING_MODE_CHOICES = {"follow_perimeter": 0, "direct_route": 1}
+# Zone order on the multi-zone Mow page. Wire from APK ZONE_ORDER enum.
+_ZONE_ORDER_CHOICES = {"optimize": 0, "custom": 1}
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
 # subset of PbTaskConfig; the encoder supports more. All optional ints.
@@ -285,6 +297,15 @@ _SET_NETWORK_PRIORITY_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_PREFERRED): vol.In(("4g", "wifi")),
+    }
+)
+_SET_DEVICE_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Optional(_ATTR_DS_CHARGING_MODE): vol.In(tuple(_CHARGING_MODE_CHOICES)),
+        vol.Optional(_ATTR_DS_ZONE_ORDER): vol.In(tuple(_ZONE_ORDER_CHOICES)),
+        vol.Optional(_ATTR_DS_RAINY_MOWING): cv.boolean,
+        vol.Optional(_ATTR_DS_CHARGING_HANDBRAKE): cv.boolean,
     }
 )
 _SET_RECHARGE_RESUME_SCHEMA = vol.Schema(
@@ -648,6 +669,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_recharge_resume(entity._thing_name, **rr_kwargs)
 
+    async def handle_set_device_settings(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        cm = call.data.get(_ATTR_DS_CHARGING_MODE)
+        zo = call.data.get(_ATTR_DS_ZONE_ORDER)
+        ds_kwargs = {
+            "charging_mode": _CHARGING_MODE_CHOICES[cm] if cm is not None else None,
+            "zone_order": _ZONE_ORDER_CHOICES[zo] if zo is not None else None,
+            "rainy_mowing": call.data.get(_ATTR_DS_RAINY_MOWING),
+            "charging_handbrake": call.data.get(_ATTR_DS_CHARGING_HANDBRAKE),
+        }
+        if not any(v is not None for v in ds_kwargs.values()):
+            raise ServiceValidationError("set_device_settings: provide at least one parameter to set.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_device_settings(entity._thing_name, **ds_kwargs)
+
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
@@ -794,6 +834,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_RECHARGE_RESUME, handle_set_recharge_resume, schema=_SET_RECHARGE_RESUME_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)
