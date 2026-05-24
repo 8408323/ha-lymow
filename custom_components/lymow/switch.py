@@ -36,6 +36,8 @@ async def async_setup_entry(
                 VehicleLedSwitch(coordinator, device),
                 Prefer4gSwitch(coordinator, device),
                 DockOnErrorSwitch(coordinator, device),
+                RainCleaningSwitch(coordinator, device),
+                ChargingHandbrakeSwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
             ]
         )
@@ -277,6 +279,77 @@ class DockOnErrorSwitch(_RobotConfigBoolSwitch):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Auto-dock on error", "mdi:home-alert")
+
+
+class _DeviceSettingsBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
+    """Base class for the Device Settings boolean toggles (PbTaskConfig f3/f4).
+
+    Read from coordinator state at ``mapData.taskConfig.<wire_key>`` (decoded
+    from PbMap.f8 by ``decode_task_config``). Write via the existing
+    ``async_set_device_settings`` — keeps the encoder and the f4 inversion
+    (UI ``charging_handbrake`` vs wire ``disableChargingPark``) in one place.
+    """
+
+    _wire_key: str = ""
+    _settings_kwarg: str = ""
+    _invert_for_ui: bool = False
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: LymowCoordinator,
+        device: dict,
+        name: str,
+        icon: str,
+        unique_suffix: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = name
+        self._attr_unique_id = f"{self._thing_name}_{unique_suffix}"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_icon = icon
+
+    def _ui_from_wire(self, wire_value: bool) -> bool:
+        return not wire_value if self._invert_for_ui else wire_value
+
+    @property
+    def is_on(self) -> bool | None:
+        tc = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData", {}).get("taskConfig") or {}
+        value = tc.get(self._wire_key)
+        if not isinstance(value, bool):
+            return None
+        return self._ui_from_wire(value)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_settings(self._thing_name, **{self._settings_kwarg: True})
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        await self.coordinator.async_set_device_settings(self._thing_name, **{self._settings_kwarg: False})
+
+
+class RainCleaningSwitch(_DeviceSettingsBoolSwitch):
+    """Device Settings → Rainy mowing. PbTaskConfig.rainCleaning (f3, bool)."""
+
+    _wire_key = "rainCleaning"
+    _settings_kwarg = "rainy_mowing"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Rainy mowing", "mdi:weather-rainy", "rainy_mowing")
+
+
+class ChargingHandbrakeSwitch(_DeviceSettingsBoolSwitch):
+    """Device Settings → Charging handbrake. PbTaskConfig.disableChargingPark
+    (f4, bool) — inverted so the HA toggle reads in the UI's positive sense:
+    ON means "engage the handbrake while charging" = wire ``False``.
+    """
+
+    _wire_key = "disableChargingPark"
+    _settings_kwarg = "charging_handbrake"
+    _invert_for_ui = True
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Charging handbrake", "mdi:car-brake-parking", "charging_handbrake")
 
 
 class ZoneEnabledSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):

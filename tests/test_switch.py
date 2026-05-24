@@ -654,3 +654,86 @@ async def test_rtk_auto_pause_switch_turn_off_toggles_coordinator() -> None:
     e.async_write_ha_state = MagicMock()
     await e.async_turn_off()
     coord.set_rtk_guard_enabled.assert_called_once_with(THING, False)
+
+
+# ---------------------------------------------------------------------------
+# Device Settings boolean switches (PbTaskConfig f3/f4 — rainCleaning + the
+# inverted disableChargingPark).
+# ---------------------------------------------------------------------------
+
+
+def _make_task_config_coord(task_config: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    state: dict = {"mapData": {}}
+    if task_config is not None:
+        state["mapData"]["taskConfig"] = task_config
+    coord.data = {THING: state}
+    coord.devices = [DEVICE]
+    coord.async_set_device_settings = AsyncMock()
+    return coord
+
+
+def test_rain_cleaning_switch_metadata_and_reads_state() -> None:
+    from lymow.switch import RainCleaningSwitch
+
+    e = RainCleaningSwitch(_make_task_config_coord({"rainCleaning": True}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_rainy_mowing"
+    assert e._attr_name == "Rainy mowing"
+    assert e.is_on is True
+
+    e_off = RainCleaningSwitch(_make_task_config_coord({"rainCleaning": False}), DEVICE)
+    assert e_off.is_on is False
+
+
+def test_rain_cleaning_unknown_when_missing_or_non_bool() -> None:
+    from lymow.switch import RainCleaningSwitch
+
+    assert RainCleaningSwitch(_make_task_config_coord(), DEVICE).is_on is None
+    assert RainCleaningSwitch(_make_task_config_coord({}), DEVICE).is_on is None
+    # int 1 from a hostile decode must not be treated as bool — surfaces unknown.
+    assert RainCleaningSwitch(_make_task_config_coord({"rainCleaning": 1}), DEVICE).is_on is None
+
+
+async def test_rain_cleaning_turn_on_off_calls_coordinator() -> None:
+    from lymow.switch import RainCleaningSwitch
+
+    coord = _make_task_config_coord({"rainCleaning": False})
+    await RainCleaningSwitch(coord, DEVICE).async_turn_on()
+    coord.async_set_device_settings.assert_awaited_once_with(THING, rainy_mowing=True)
+
+    coord2 = _make_task_config_coord({"rainCleaning": True})
+    await RainCleaningSwitch(coord2, DEVICE).async_turn_off()
+    coord2.async_set_device_settings.assert_awaited_once_with(THING, rainy_mowing=False)
+
+
+def test_charging_handbrake_switch_inverts_wire_for_ui_sense() -> None:
+    """UI ON = handbrake engaged = wire ``disableChargingPark`` False."""
+    from lymow.switch import ChargingHandbrakeSwitch
+
+    on = ChargingHandbrakeSwitch(_make_task_config_coord({"disableChargingPark": False}), DEVICE)
+    assert on.is_on is True
+    off = ChargingHandbrakeSwitch(_make_task_config_coord({"disableChargingPark": True}), DEVICE)
+    assert off.is_on is False
+
+
+def test_charging_handbrake_metadata_and_unknown_when_missing() -> None:
+    from lymow.switch import ChargingHandbrakeSwitch
+
+    e = ChargingHandbrakeSwitch(_make_task_config_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_charging_handbrake"
+    assert e._attr_name == "Charging handbrake"
+    assert e.is_on is None
+
+
+async def test_charging_handbrake_turn_on_off_passes_ui_bool_through() -> None:
+    """The coordinator (encoder) is responsible for inversion — the entity
+    forwards the UI sense unchanged."""
+    from lymow.switch import ChargingHandbrakeSwitch
+
+    coord = _make_task_config_coord({"disableChargingPark": True})
+    await ChargingHandbrakeSwitch(coord, DEVICE).async_turn_on()
+    coord.async_set_device_settings.assert_awaited_once_with(THING, charging_handbrake=True)
+
+    coord2 = _make_task_config_coord({"disableChargingPark": False})
+    await ChargingHandbrakeSwitch(coord2, DEVICE).async_turn_off()
+    coord2.async_set_device_settings.assert_awaited_once_with(THING, charging_handbrake=False)

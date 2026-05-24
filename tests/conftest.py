@@ -40,6 +40,7 @@ try:
     import homeassistant.components.device_tracker  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
+    import homeassistant.components.select  # noqa: F401
     import homeassistant.components.sensor  # noqa: F401
     import homeassistant.components.switch  # noqa: F401
     import homeassistant.components.update  # noqa: F401
@@ -57,6 +58,7 @@ try:
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
     _load_lymow_module("number")
+    _load_lymow_module("select")
     _load_lymow_module("switch")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
@@ -350,6 +352,15 @@ except ImportError:
 
     _ha_switch.SwitchEntity = _SwitchEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.switch", _ha_switch)
+
+    # ── homeassistant.components.select ───────────────────────────────────────
+    _ha_select = types.ModuleType("homeassistant.components.select")
+
+    class _SelectEntity:
+        pass
+
+    _ha_select.SelectEntity = _SelectEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.select", _ha_select)
 
     # ── homeassistant.components.device_tracker ───────────────────────────────
     _ha_dt = types.ModuleType("homeassistant.components.device_tracker")
