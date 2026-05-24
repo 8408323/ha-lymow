@@ -122,7 +122,7 @@ def test_device_locked_none_when_missing() -> None:
     assert e.is_on is None
 
 
-async def test_async_setup_entry_creates_six_per_device() -> None:
+async def test_async_setup_entry_creates_seven_per_device() -> None:
     coord = _make_coord({"isCharging": True, "isRecharging": False, "stolenStatus": False, "deviceLocked": False})
 
     hass = MagicMock()
@@ -134,7 +134,7 @@ async def test_async_setup_entry_creates_six_per_device() -> None:
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     # Exact count, not just type set — catches accidental duplicates.
-    assert len(added) == 6
+    assert len(added) == 7
     types = [type(e).__name__ for e in added]
     assert sorted(types) == [
         "ChargingBinarySensor",
@@ -142,12 +142,13 @@ async def test_async_setup_entry_creates_six_per_device() -> None:
         "LteWorkingBinarySensor",
         "RechargingBinarySensor",
         "StolenBinarySensor",
+        "TheftLockBinarySensor",
         "WifiWorkingBinarySensor",
     ]
 
 
-async def test_async_setup_entry_six_per_device_with_two_devices() -> None:
-    """Two devices → exactly twelve entities (no duplicates, no skips)."""
+async def test_async_setup_entry_seven_per_device_with_two_devices() -> None:
+    """Two devices → exactly fourteen entities (no duplicates, no skips)."""
     coord = _make_coord({"isCharging": True})
     coord.devices = [DEVICE, {"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
 
@@ -159,9 +160,33 @@ async def test_async_setup_entry_six_per_device_with_two_devices() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 12
+    assert len(added) == 14
     thing_names = sorted({e._thing_name for e in added})
     assert thing_names == ["mower-001", "mower-002"]
+
+
+def test_theft_lock_inverts_for_lock_device_class() -> None:
+    """LOCK device class: is_on=True means *unlocked* — wire True (lock
+    engaged) renders as 'off' in the UI (the lock is engaged → not unlocked)."""
+    from lymow.binary_sensor import TheftLockBinarySensor
+
+    assert TheftLockBinarySensor(_make_coord({"theftLock": True}), DEVICE).is_on is False
+    assert TheftLockBinarySensor(_make_coord({"theftLock": False}), DEVICE).is_on is True
+
+
+def test_theft_lock_none_when_missing() -> None:
+    from lymow.binary_sensor import TheftLockBinarySensor
+
+    assert TheftLockBinarySensor(_make_coord({}), DEVICE).is_on is None
+
+
+def test_theft_lock_metadata() -> None:
+    from lymow.binary_sensor import TheftLockBinarySensor
+
+    e = TheftLockBinarySensor(_make_coord({}), DEVICE)
+    assert e._attr_entity_registry_enabled_default is False
+    assert e._attr_unique_id == f"{THING}_theft_lock"
+    assert "Anti-theft" in e._attr_name
 
 
 def test_wifi_working_reflects_pbrobotinfo_field() -> None:

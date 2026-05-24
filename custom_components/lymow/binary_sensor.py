@@ -31,6 +31,7 @@ async def async_setup_entry(
                 DeviceLockedBinarySensor(coordinator, device),
                 WifiWorkingBinarySensor(coordinator, device),
                 LteWorkingBinarySensor(coordinator, device),
+                TheftLockBinarySensor(coordinator, device),
             ]
         )
     if entities:
@@ -130,3 +131,28 @@ class LteWorkingBinarySensor(_LymowBinarySensor):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "LTE link", "lte_working")
+
+
+class TheftLockBinarySensor(_LymowBinarySensor):
+    """Robot's own anti-theft lock signal from PbOutput.theftLock (f27, bool).
+
+    Distinct from ``DeviceLockedBinarySensor`` (account-level lock from
+    /device-list-query) and ``StolenBinarySensor`` (the stolen-alert flag).
+    True while the robot has its motion-disable theft-lock engaged.
+    """
+
+    _field = "theftLock"
+    _attr_device_class = BinarySensorDeviceClass.LOCK
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Anti-theft lock", "theft_lock")
+
+    @property
+    def is_on(self) -> bool | None:
+        """LOCK device class: ``on`` means *unlocked*. Invert the wire flag
+        so True = locked-on-wire renders as off (= "locked" in the UI)."""
+        value = self._device_data.get(self._field)
+        if value is None:
+            return None
+        return not bool(value)

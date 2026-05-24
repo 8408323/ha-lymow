@@ -661,6 +661,15 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if report:
             state["cleanReport"] = report
 
+    # Anti-theft lock signal (PbOutput field 27 = bool — from PbOutput.encode
+    # tag 216 = (27<<3)|0 writing writer.bool). Distinct from /device-list-query
+    # ``deviceLocked`` (account-level lock) and from ``stolenStatus`` (the
+    # alert flag): theftLock is the robot's own theft-lock condition reported
+    # over pboutput.
+    theft_lock = _first(fields, 27)
+    if isinstance(theft_lock, int):
+        state["theftLock"] = bool(theft_lock)
+
     return state
 
 
