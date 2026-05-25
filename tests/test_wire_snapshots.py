@@ -342,7 +342,9 @@ def test_decode_map_response_synthetic_golden() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Parameterless queries — drift target: USER_CTRL code + envelope shape.
+# Parameterless commands — drift target: USER_CTRL code + envelope shape.
+# (query_* are reads, clear_schedules is a mutating "delete all" command;
+# grouped together because they share the no-payload envelope shape.)
 # ---------------------------------------------------------------------------
 
 
@@ -352,9 +354,10 @@ def test_query_schedules_is_byte_stable() -> None:
 
 
 def test_clear_schedules_is_byte_stable() -> None:
-    """USER_CTRL_SET_SCHEDULES=11 with an empty PbSchedules body (f11=<empty>)
-    — the wire shape the robot expects for "no schedules", per the
-    encode_clear_schedules contract."""
+    """No userCtrl is set — the robot routes on the PbInput.schedule sub-message
+    (f11) being present-and-empty. Pinning so a refactor can't silently start
+    setting userCtrl=USER_CTRL_SET_SCHEDULES=11 (the "set N entries" path)
+    when the contract is "delete everything"."""
     assert encode_clear_schedules().hex() == "10315a00"
 
 
@@ -383,7 +386,7 @@ def test_delete_nogo_zone_is_byte_stable() -> None:
 
 def test_rename_zone_is_byte_stable() -> None:
     """USER_CTRL_MODIFY_ZONE_INFO=9 + PbMap.goZones[] with basicInfo.hashId
-    and a PbZoneBasicInfo name string (field 2). Snake-tests the
+    and a PbZoneBasicInfo name string (field 2). Smoke-tests the
     name-then-hashId field-order convention captured from customizeConfig."""
     assert encode_rename_zone("ZONE0001", "Lawn").hex() == "1031280962140a120a1012044c61776e1a085a4f4e4530303031"
 
@@ -429,8 +432,8 @@ def test_set_device_settings_full_is_byte_stable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Runtime config writes — USER_CTRL_SET_RUN_TIME_CONFIG=50 +
-# PbInput.runTimeConfig (f12) with PbRunTimeConfig sub-message
+# Runtime config writes — USER_CTRL_SET_RUN_TIME_CONFIG=50 + PbInput.map (f12)
+# wrapping a PbMap.runTimeConfig (f13) with the PbRunTimeConfig sub-message.
 # ---------------------------------------------------------------------------
 
 
