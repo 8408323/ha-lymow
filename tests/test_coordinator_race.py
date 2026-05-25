@@ -21,7 +21,7 @@ import pytest
 
 # Importing test_coordinator triggers _make_ha_stubs() at import time, so
 # `from lymow.coordinator import LymowCoordinator` works after this.
-from tests.test_coordinator import DEVICE, THING, _make_coordinator  # noqa: F401
+from tests.test_coordinator import THING, _make_coordinator
 
 # ---------------------------------------------------------------------------
 # MQTT push arriving while _async_update_data is mid-await
@@ -231,8 +231,8 @@ async def test_two_concurrent_async_sync_map_calls_both_publish() -> None:
 @pytest.mark.asyncio
 async def test_on_mqtt_state_with_empty_patch_is_a_noop() -> None:
     """An empty patch (e.g. a pboutput that decoded to {} because every field
-    failed its boundary check) must not crash and must not push to HA — the
-    coordinator's existing data should be unchanged on the next read."""
+    failed its boundary check) must not crash; if HA is updated, the merged
+    state must remain unchanged for the target thing."""
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 5, "battery": 100}}
     pushed: list = []
