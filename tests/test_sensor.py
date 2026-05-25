@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import UnitOfTime
 from lymow.sensor import (
     SENSORS,
     LymowErrorSensor,
@@ -435,13 +437,7 @@ def test_mow_strip_count_sensor_disabled_by_default() -> None:
 
 
 def test_mow_strip_count_sensor_now_rendered_as_duration_in_seconds() -> None:
-    """PbCleanInfo.f1 was originally mislabelled as a strip count; once the
-    wire layout was confirmed it's clearly ``cleanTime`` (seconds spent in
-    the current session). The display moved to a duration with seconds
-    units so users don't see ``1800`` and read "1800 strips"."""
-    from homeassistant.components.sensor import SensorDeviceClass
-    from homeassistant.const import UnitOfTime
-
+    """f1 is cleanTime (seconds), not a strip counter — match the metadata."""
     desc = next(s for s in SENSORS if s.key == "mow_strip_count")
     assert desc.name == "Mow elapsed time"
     assert desc.device_class == SensorDeviceClass.DURATION
