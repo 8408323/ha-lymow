@@ -652,11 +652,17 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         d_north = _first(dock_fields, 2)
         d_theta = _first(dock_fields, 3)
         dock: dict[str, float] = {}
-        if d_east is not None:
+        # f1/f2/f3 are wire-type 5 (fixed32) per PbPose.encode, so ``_first``
+        # should return an int — but the wire is untrusted, so a malformed
+        # payload could send the same field number with a length-delimited
+        # wire type and surface bytes here. ``_decode_f32`` would then raise
+        # on ``struct.pack`` of bytes; explicit ``isinstance(int)`` keeps
+        # the decoder robust to wire-type drift.
+        if isinstance(d_east, int):
             dock["x"] = _decode_f32(d_east)
-        if d_north is not None:
+        if isinstance(d_north, int):
             dock["y"] = _decode_f32(d_north)
-        if d_theta is not None:
+        if isinstance(d_theta, int):
             dock["theta"] = _decode_f32(d_theta)
         if dock:
             state["chargingStationLoc"] = dock

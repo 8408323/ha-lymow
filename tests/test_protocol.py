@@ -1278,6 +1278,17 @@ def test_decode_pboutput_no_charging_station_loc_when_field24_empty() -> None:
     assert "chargingStationLoc" not in decode_pboutput(pb)
 
 
+def test_decode_pboutput_charging_station_loc_skips_wire_type_drift() -> None:
+    """PbPose f1/f2/f3 are wire-type 5 (fixed32) per the encoder, but the
+    wire is untrusted — if a malformed payload sends f1 as length-delimited
+    bytes, ``_decode_f32`` would otherwise raise. Drop the offending field
+    and surface the rest."""
+    # f1 sent as wire-type-2 bytes; f2 sent correctly as float32
+    dock = _field_bytes(1, b"\x00\x00") + _field_f32(2, 3.5)
+    pb = _build_pboutput() + _field_bytes(24, dock)
+    assert decode_pboutput(pb)["chargingStationLoc"] == {"y": 3.5}
+
+
 def test_decode_pboutput_no_rtk_when_absent() -> None:
     pb = _build_pboutput()
     state = decode_pboutput(pb)
