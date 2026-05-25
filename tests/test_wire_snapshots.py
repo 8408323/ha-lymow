@@ -130,8 +130,8 @@ def test_ble_drive_backward_left_turn_is_byte_stable() -> None:
 
 
 # ---------------------------------------------------------------------------
-# encode_set_task_config — PbInput { ..., taskConfig(26) = PbTaskConfig { ... } }
-# Drift target: each named option must map to its documented PbTaskConfig
+# encode_set_task_config — PbInput { ..., taskConfig(26) = PbZoneConfig { ... } }
+# Drift target: each named option must map to its documented PbZoneConfig
 # field number (raiseCutHeight=2, moveSpeed=4, cutSpeed=6, perimeterMowLaps=10).
 # ---------------------------------------------------------------------------
 
@@ -212,25 +212,6 @@ def test_set_schedules_single_entry_is_byte_stable() -> None:
     assert out.hex() == expected
 
 
-# ---------------------------------------------------------------------------
-# decode_pboutput — golden-bytes → expected state dict.
-#
-# Bytes synthesised from the documented PbOutput layout. If a future refactor
-# changes any of the field numbers (battery=2-within-PbRobotInfo, pose=14, etc.),
-# the decoded dict here will diverge from the literal.
-# ---------------------------------------------------------------------------
-
-_PBOUTPUT_GOLDEN = bytes.fromhex(
-    "1a022a63"  # f3 errorCodes packed [42, 99]
-    "2a0e08021057180320023005380040015"
-    "232"  # f5 PbRobotInfo (length 0x32 = 50 bytes)
-    "0a05312e322e331203342e352a0831302e302e302e31321161613a62623a63633a64643a65653a66663a07534e2d44454d4f"  # device profile fields
-    "320e080c150000c03f1d000020402004"  # f6 RTK + f5 close (sorry the offsets are mixed but the golden is what matters)
-    "720f0d00002041150000a0411dc3f5c83f"  # f14 pose
-    "b2010532032d3737"  # f22 wifi
-)
-
-
 def test_decode_pboutput_synthetic_golden() -> None:
     """A frozen PbOutput payload must decode to the same flat dict each time.
 
@@ -242,7 +223,6 @@ def test_decode_pboutput_synthetic_golden() -> None:
     # documents itself rather than depending on a magic hex string in the file.
     from lymow.protocol import _encode_varint, _field_bytes, _field_f32, _field_i32, _field_str
 
-    pb = _field_bytes(3, _encode_varint(42) + _encode_varint(99))
     ri = (
         _field_i32(1, 2)
         + _field_i32(2, 87)
@@ -252,19 +232,6 @@ def test_decode_pboutput_synthetic_golden() -> None:
         + _field_i32(7, 0)
         + _field_i32(8, 1)
     )
-    pb += _field_bytes(5, ri)
-    pb += _field_bytes(6, _field_i32(1, 12) + _field_f32(2, 1.5) + _field_f32(3, 2.5) + _field_i32(4, 4))
-    pb += _field_bytes(
-        10,
-        _field_str(1, "1.2.3")
-        + _field_str(2, "4.5")
-        + _field_str(5, "10.0.0.1")
-        + _field_str(6, "aa:bb:cc:dd:ee:ff")
-        + _field_str(7, "SN-DEMO"),
-    )
-    pb += _field_bytes(14, _field_f32(1, 10.0) + _field_f32(2, 20.0) + _field_f32(3, 1.57))
-    pb += _field_bytes(22, _field_str(6, "-77"))
-
     # Compose in field-number order: errs(3), ri(5), rtk(6), dp(10), pose(14), wifi(22).
     pb_sorted = (
         _field_bytes(3, _encode_varint(42) + _encode_varint(99))
@@ -362,7 +329,7 @@ def test_decode_map_response_synthetic_golden() -> None:
 
     out = decode_map_response(mr)
     # Top-level keys
-    assert list(out.keys()) >= ["goZones", "nogoZones", "channels", "chargingStation"]
+    assert set(out) >= {"goZones", "nogoZones", "channels", "chargingStation"}
 
     # Go zone
     z = out["goZones"][0]
