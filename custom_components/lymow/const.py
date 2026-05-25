@@ -159,9 +159,21 @@ USER_CTRL_FLOOR_MODIFY = 43  # modify floor info
 USER_CTRL_FLOOR_BACKUP = 44  # backup floor data
 USER_CTRL_FLOOR_RESTORE = 45  # restore floor data from backup
 USER_CTRL_START_MOW_SCHEDULE = 46  # activate a mowing schedule
-USER_CTRL_RESET_INIT = 47  # reinitialise robot
-USER_CTRL_GLOBAL_SETTING_Y = 48  # accept global setting change
-USER_CTRL_GLOBAL_SETTING_N = 49  # reject global setting change
+# USER_CTRL_RESET_INIT (47): defined in the proto enum but NOT called by any
+# RobotCommands method in the app (Hermes #9067 + the verify-loop table). Likely
+# reserved / firmware-internal. The intuitive "reinitialise robot" semantic from
+# the name is best matched by USER_CTRL_FORCE_REINIT (28) which the app DOES
+# use — don't ship a 47 button without a confirmed live capture of what it does.
+USER_CTRL_RESET_INIT = 47  # reserved — no app-side caller; do NOT expose as a button (see comment above)
+# USER_CTRL_GLOBAL_SETTING_Y/N (48/49) are sent by ``RobotCommands.globalConfig``
+# (Hermes fn #9012). Payload: ``PbInput { userCtrl: 48 or 49, map: PbMap {
+# globalZoneConfig: PbZoneConfig, globalChannelConfig: PbChannelConfig } }``.
+# 48 = "apply as default AND overwrite existing per-zone customizations";
+# 49 = "apply as default only; leave existing customizations alone".
+# Used to bulk-set defaults like cutHeight across every zone/channel. To ship
+# as a service we'd need the PbChannelConfig wire layout (not yet extracted).
+USER_CTRL_GLOBAL_SETTING_Y = 48  # set global zone/channel defaults + overwrite existing
+USER_CTRL_GLOBAL_SETTING_N = 49  # set global zone/channel defaults, preserve existing
 USER_CTRL_SET_RUN_TIME_CONFIG = 50  # set runtime configuration
 USER_CTRL_QUERY_RUN_TIME_CONFIG = 51  # query runtime configuration
 USER_CTRL_QUERY_WIFI_4G = 52  # query Wi-Fi / 4G status
