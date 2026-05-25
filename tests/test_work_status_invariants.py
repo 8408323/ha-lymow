@@ -91,6 +91,11 @@ def test_every_status_is_grouped_or_intentionally_unassigned() -> None:
     fall to ``LawnMowerActivity.ERROR``. Force the author to either put it
     in a group or add it to ``_INTENTIONALLY_UNASSIGNED`` with a comment."""
     grouped = set().union(*_ALL_GROUPS.values())
+    overlap = grouped & _INTENTIONALLY_UNASSIGNED
+    assert not overlap, (
+        "WORK_STATUS_* values cannot be both grouped and intentionally unassigned: "
+        f"{sorted(overlap)}"
+    )
     accounted_for = grouped | _INTENTIONALLY_UNASSIGNED
     orphans = {name: val for name, val in _ALL_STATUSES.items() if val not in accounted_for}
     assert not orphans, (
