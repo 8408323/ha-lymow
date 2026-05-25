@@ -213,12 +213,7 @@ def test_set_schedules_single_entry_is_byte_stable() -> None:
 
 
 def test_decode_pboutput_synthetic_golden() -> None:
-    """A frozen PbOutput payload must decode to the same flat dict each time.
-
-    The bytes here aren't from a live device — they were built by composing
-    the documented field tags. Any decoder change that renames or moves a
-    field will surface as a diff in the asserted values below.
-    """
+    """A frozen PbOutput payload must decode to the same flat dict each time."""
     # Re-build the golden bytes with the documented field layout so the test
     # documents itself rather than depending on a magic hex string in the file.
     from lymow.protocol import _encode_varint, _field_bytes, _field_f32, _field_i32, _field_str
@@ -296,8 +291,7 @@ def test_decode_pboutput_synthetic_golden() -> None:
 
 
 def test_decode_map_response_synthetic_golden() -> None:
-    """Pin the navigation path PbOutput → outer(23) → wrapper(2) → content(3),
-    plus the goZone/nogoZone/chargingStation/gpsOrigin field numbers."""
+    """Pin nav path PbOutput→outer(23)→wrapper(2)→content(3) + child field numbers."""
     from lymow.protocol import _field_bytes, _field_f32, _field_i32, _field_str
 
     # Build content the same way decode_map_response expects.
