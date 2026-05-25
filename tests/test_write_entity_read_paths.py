@@ -1,26 +1,4 @@
-"""Smoke test: every switch / number / select entity reads back from a
-maximally-populated coordinator state.
-
-Why this exists separately from the existing per-entity tests:
-
-Each test_<platform>.py builds a tailored fixture for each entity ("seed
-``geoFence: [{radius: 175}]`` then assert ``native_value == 175``"). That
-catches a wrong arithmetic op or wrong return type, but it CANNOT catch a
-producer-consumer drift: if a refactor renames the dict key the producer
-emits, every per-entity test still passes because each test fixture was
-authored alongside the entity it tests.
-
-This file inverts the dependency: one ground-truth state dict mirrors what
-the protocol decoder + REST poll + coordinator helpers actually write, and
-every write-path entity in the integration is instantiated against THAT
-state. If an entity reads a key that no producer emits, the corresponding
-test fails with "expected non-None, got None" — pointing at the broken
-read path immediately.
-
-Each test also covers the empty-state path (nothing in coordinator.data yet)
-to lock in the "first-poll-not-yet-arrived" behaviour: returns None / sane
-unavailable rather than raising.
-"""
+"""Smoke test: every switch/number/select entity reads from a populated coordinator state."""
 
 from __future__ import annotations
 
