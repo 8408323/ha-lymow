@@ -69,7 +69,7 @@ def _read(name: str) -> str:
 
 
 def _producer_haystack() -> str:
-    """All producer files concatenated — one grep target for the parity check."""
+    """Concatenate all producer files into one grep target for the parity check."""
     parts: list[str] = []
     for name in _PRODUCER_FILES:
         path = os.path.join(_LYMOW_DIR, name)
@@ -99,8 +99,7 @@ def test_sensor_parser_finds_known_keys() -> None:
 
 @pytest.mark.parametrize("key", sorted(_sensor_value_keys()))
 def test_every_sensor_value_key_has_a_producer_or_is_rest_api(key: str) -> None:
-    """Every value_key on a sensor must either appear as a literal in a
-    producer module or be documented as a REST-API-supplied key."""
+    """Every sensor value_key must appear as literal in a producer or be in REST allow-list."""
     if key in _REST_API_KEYS:
         return  # documented exception
     haystack = _producer_haystack()
@@ -154,9 +153,7 @@ _KEY_RE = re.compile(r'\bkey="([a-z][a-z0-9_]*)"')
 
 
 def test_sensor_description_keys_are_unique() -> None:
-    """SensorEntityDescription.key feeds into the entity's unique_id suffix
-    (``{thing_name}_{key}``). Two descriptions sharing a key would collide in
-    HA's entity registry under the same platform, dropping one of them silently."""
+    """Duplicate description keys would collide unique_ids and silently drop one entity."""
     sensor_src = _read("sensor.py")
     keys = _KEY_RE.findall(sensor_src)
     # Only count keys defined inside SensorEntityDescription(...) — the regex
@@ -177,9 +174,7 @@ def test_sensor_description_keys_are_unique() -> None:
 
 
 def test_binary_sensor_fields_are_unique_per_class() -> None:
-    """Two binary-sensor classes sharing a _field would produce duplicate
-    state for two unique_ids — confusing but not broken. Still, flag it:
-    typically a copy-paste bug."""
+    """Two classes sharing a _field produce duplicate state — usually a copy-paste bug."""
     fields_in_order = _BS_FIELD_RE.findall(_read("binary_sensor.py"))
     seen: dict[str, int] = {}
     for f in fields_in_order:
