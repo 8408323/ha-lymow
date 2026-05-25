@@ -9,10 +9,18 @@ from lymow.protocol import (
     decode_map_response,
     decode_pboutput,
     encode_ble_drive,
+    encode_clear_schedules,
     encode_delete_channel,
+    encode_delete_nogo_zone,
     encode_delete_zone,
+    encode_query_map,
+    encode_query_schedules,
+    encode_rename_zone,
+    encode_set_device_settings,
+    encode_set_night_mode,
     encode_set_recharge_resume,
     encode_set_robot_config,
+    encode_set_run_time_config,
     encode_set_schedules,
     encode_set_task_config,
     encode_start_zones,
@@ -331,3 +339,109 @@ def test_decode_map_response_synthetic_golden() -> None:
         "theta": pytest.approx(0.0),
     }
     assert out["gpsOrigin"] == {"lat": pytest.approx(59.0), "lon": pytest.approx(18.0)}
+
+
+# ---------------------------------------------------------------------------
+# Parameterless commands — drift target: USER_CTRL code + envelope shape.
+# (query_* are reads, clear_schedules is a mutating "delete all" command;
+# grouped together because they share the no-payload envelope shape.)
+# ---------------------------------------------------------------------------
+
+
+def test_query_schedules_is_byte_stable() -> None:
+    """USER_CTRL_QUERY_SCHEDULES=20, no payload."""
+    assert encode_query_schedules().hex() == "10312814"
+
+
+def test_clear_schedules_is_byte_stable() -> None:
+    """No userCtrl is set — the robot routes on the PbInput.schedule sub-message
+    (f11) being present-and-empty. Pinning so a refactor can't silently start
+    setting userCtrl=USER_CTRL_SET_SCHEDULES=11 (the "set N entries" path)
+    when the contract is "delete everything"."""
+    assert encode_clear_schedules().hex() == "10315a00"
+
+
+def test_query_map_full_is_byte_stable() -> None:
+    """USER_CTRL_QUERY_MAP=19 with a queryIndex=0 PbBtMap sub-message — the
+    default "give me the whole map" form."""
+    assert encode_query_map(0).hex() == "10312813ba010408002001"
+
+
+def test_query_map_diff_is_byte_stable() -> None:
+    """queryIndex=1 is the smaller "incremental" form. Pin the int so a future
+    encoder change can't silently flip the index direction."""
+    assert encode_query_map(1).hex() == "10312813ba010408012001"
+
+
+# ---------------------------------------------------------------------------
+# Zone edits — single-target mutators
+# ---------------------------------------------------------------------------
+
+
+def test_delete_nogo_zone_is_byte_stable() -> None:
+    """USER_CTRL_CLEAR_ZONE=8 + PbMap.nogoZones[].basicInfo.hashId — the
+    no-go variant of encode_delete_zone."""
+    assert encode_delete_nogo_zone("NOGO0001").hex() == "10312808620e120c0a0a1a084e4f474f30303031"
+
+
+def test_rename_zone_is_byte_stable() -> None:
+    """USER_CTRL_MODIFY_ZONE_INFO=9 + PbMap.goZones[] with basicInfo.hashId
+    and a PbZoneBasicInfo name string (field 2). Smoke-tests the
+    name-then-hashId field-order convention captured from customizeConfig."""
+    assert encode_rename_zone("ZONE0001", "Lawn").hex() == "1031280962140a120a1012044c61776e1a085a4f4e4530303031"
+
+
+# ---------------------------------------------------------------------------
+# PbRobotConfig writes — robotConfig sub-message (PbInput.f13), no userCtrl
+# ---------------------------------------------------------------------------
+
+
+def test_set_night_mode_enable_true_is_byte_stable() -> None:
+    """encode_set_night_mode with enable=True writes only openLedTime (f14)
+    and closeLedTime (f15) as PbTimeZones — no SIGNAL_TURN_OFF_CAMERA_LIGHT
+    co-publish. Pinning the layout so a refactor can't silently drop the
+    enable-true branch's "only schedule" semantic."""
+    assert (
+        encode_set_night_mode(open_time=(21, 0), close_time=(6, 30), enable=True).hex()
+        == "10316a0c7204081510007a040806101e"
+    )
+
+
+def test_set_night_mode_enable_false_appends_kill_light_signal() -> None:
+    """enable=False keeps the schedule but adds PbRobotConfig.signal (f8) =
+    SIGNAL_TURN_OFF_CAMERA_LIGHT (7) so the camera light goes off now."""
+    assert (
+        encode_set_night_mode(open_time=(21, 0), close_time=(6, 30), enable=False).hex()
+        == "10316a0e7204081510007a040806101e4007"
+    )
+
+
+# ---------------------------------------------------------------------------
+# PbTaskConfig writes — USER_CTRL_SET_TASK_CONFIG=36 + PbInput.taskConfig (f26)
+# ---------------------------------------------------------------------------
+
+
+def test_set_device_settings_full_is_byte_stable() -> None:
+    """All four PbTaskConfig fields set: chargingMode (f1 int), zoneOrder
+    (f2 int), rainCleaning (f3 bool), disableChargingPark (f4 bool — note
+    the encoder's UI→wire inversion: charging_handbrake=True → wire 0)."""
+    assert (
+        encode_set_device_settings(charging_mode=1, zone_order=0, rainy_mowing=True, charging_handbrake=True).hex()
+        == "10312824d201080801100018012000"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Runtime config writes — USER_CTRL_SET_RUN_TIME_CONFIG=50 + PbInput.map (f12)
+# wrapping a PbMap.runTimeConfig (f13) with the PbRunTimeConfig sub-message.
+# ---------------------------------------------------------------------------
+
+
+def test_set_run_time_config_full_is_byte_stable() -> None:
+    """cutHeight (f1, int) + moveSpeed (f4, float32) + cutSpeed (f6, int) —
+    mirrors the three Live cut-height / move-speed / cut-speed Numbers.
+    Pins both the field-number map and the float32-vs-int wire types."""
+    assert (
+        encode_set_run_time_config(cutHeight=30, moveSpeed=0.5, cutSpeed=200).hex()
+        == "10312832620c6a0a081e250000003f30c801"
+    )
