@@ -166,7 +166,7 @@ USER_CTRL_START_MOW_SCHEDULE = 46  # activate a mowing schedule
 # use — don't ship a 47 button without a confirmed live capture of what it does.
 USER_CTRL_RESET_INIT = 47  # reserved — no app-side caller; do NOT expose as a button (see comment above)
 # USER_CTRL_GLOBAL_SETTING_Y/N (48/49) are sent by ``RobotCommands.globalConfig``
-# (Hermes fn #9012). Payload: ``PbInput { userCtrl: 48 | 49, map: PbMap {
+# (Hermes fn #9012). Payload: ``PbInput { userCtrl: 48 or 49, map: PbMap {
 # globalZoneConfig: PbZoneConfig, globalChannelConfig: PbChannelConfig } }``.
 # 48 = "apply as default AND overwrite existing per-zone customizations";
 # 49 = "apply as default only; leave existing customizations alone".
