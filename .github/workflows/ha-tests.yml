@@ -1,0 +1,42 @@
+name: HA Integration Tests
+
+# Runs tests/test_integration_ha.py under pytest-homeassistant-custom-component
+# in an isolated env. Kept separate from the main `Tests` workflow because
+# PHCC pins exact versions of pytest, pytest-cov and aiohttp that conflict
+# with the main project's dev pins — see the docstring in
+# tests/test_integration_ha.py for details.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ha-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Set up Python 3.13
+        run: uv python install 3.13
+
+      - name: Run HA integration tests
+        run: |
+          uv run --isolated \
+            --with "pytest-homeassistant-custom-component==0.13.316" \
+            --with "pytest>=9.0,<10" \
+            --with "pytest-cov==7.0.0" \
+            --with aiomqtt \
+            --with voluptuous \
+            --with aiohttp \
+            pytest tests/test_integration_ha.py -v --tb=short
