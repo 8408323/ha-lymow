@@ -13,6 +13,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    SIGNAL_TURN_OFF_CAMERA_LIGHT,
     USER_CTRL_ABORT_OTA,
     USER_CTRL_CHARGING_STATION_RESET,
     USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
@@ -56,6 +57,7 @@ async def async_setup_entry(
                 BackupMapButton(coordinator, device),
                 SyncTimezoneButton(coordinator, device, hass),
                 BtBroadcastButton(coordinator, device),
+                CameraLightOffNowButton(coordinator, device),
             ]
         )
     if entities:
@@ -127,6 +129,39 @@ class BtBroadcastButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
         from .const import SIGNAL_TURN_ON_BT_BROADCAST
 
         await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_ON_BT_BROADCAST)
+
+
+class CameraLightOffNowButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
+    """One-shot "Turn camera light off now" — fires the same SocSignal the
+    app fires when a user disables Night Mode (per Hermes ``setNightMode``
+    #9019: it tacks ``SIGNAL_TURN_OFF_CAMERA_LIGHT`` onto its schedule write
+    to kill the light immediately, regardless of where in the window we are).
+
+    **Does NOT disable the Night Mode schedule** — the next scheduled open
+    time will still turn the light back on. Use ``lymow.set_night_mode``
+    with ``enable=false`` if you want to suppress the schedule too. Handy
+    here for automation shortcuts like a motion-triggered "lights out".
+    Functionally overlaps with ``CameraLightSelect.select_option("Off")``
+    (which also exposes Low/Medium/High brightness), so disabled by default
+    to avoid double entries on the device card.
+
+    Wire: ``PbRobotConfig.signal = SIGNAL_TURN_OFF_CAMERA_LIGHT (7)`` over
+    the no-userCtrl robotConfig path.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:lightbulb-off"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Camera light off now"
+        self._attr_unique_id = f"{self._thing_name}_camera_light_off_now"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_OFF_CAMERA_LIGHT)
 
 
 class _UserCtrlButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):

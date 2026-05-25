@@ -173,6 +173,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "BackupMapButton",
         "SyncTimezoneButton",
         "BtBroadcastButton",
+        "CameraLightOffNowButton",
     }
 
 
@@ -359,3 +360,30 @@ async def test_bt_broadcast_button_press_publishes_signal_code() -> None:
     coord.async_set_robot_config = AsyncMock()
     await BtBroadcastButton(coord, DEVICE).async_press()
     coord.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_ON_BT_BROADCAST)
+
+
+# ---------------------------------------------------------------------------
+# CameraLightOffNowButton — PbRobotConfig.signal one-shot (SIGNAL_TURN_OFF_CAMERA_LIGHT=7)
+# ---------------------------------------------------------------------------
+
+
+def test_camera_light_off_now_button_metadata_and_disabled_default() -> None:
+    from lymow.button import CameraLightOffNowButton
+
+    coord = _make_coord()
+    e = CameraLightOffNowButton(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_camera_light_off_now"
+    assert "Camera light off" in e._attr_name
+    # Disabled by default — overlaps with CameraLightSelect's "Off" option;
+    # users enable whichever idiom fits their automations.
+    assert e._attr_entity_registry_enabled_default is False
+
+
+async def test_camera_light_off_now_button_press_publishes_signal_code() -> None:
+    from lymow.button import CameraLightOffNowButton
+    from lymow.const import SIGNAL_TURN_OFF_CAMERA_LIGHT
+
+    coord = _make_coord()
+    coord.async_set_robot_config = AsyncMock()
+    await CameraLightOffNowButton(coord, DEVICE).async_press()
+    coord.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_OFF_CAMERA_LIGHT)
