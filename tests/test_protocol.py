@@ -1398,6 +1398,26 @@ def test_decode_pboutput_no_ae_range_level_key_when_field38_absent() -> None:
     assert "aeRangeLevel" not in decode_pboutput(_build_pboutput())
 
 
+def test_decode_pboutput_output_ctrl_resolves_to_label() -> None:
+    """PbOutput.f18 = outputCtrl varint enum — surfaces as the label string
+    from OUTPUT_CTRLS so a sensor renders ``QUERY_MAP`` rather than ``1``."""
+    assert decode_pboutput(_build_pboutput() + _field_i32(18, 1))["outputCtrl"] == "QUERY_MAP"
+    assert decode_pboutput(_build_pboutput() + _field_i32(18, 8))["outputCtrl"] == "SYNC_MAP"
+    assert decode_pboutput(_build_pboutput() + _field_i32(18, 0))["outputCtrl"] == "NONE"
+
+
+def test_decode_pboutput_output_ctrl_drops_unknown_codes() -> None:
+    """An outputCtrl outside OUTPUT_CTRLS (firmware drift) drops the key
+    rather than render a phantom label."""
+    assert "outputCtrl" not in decode_pboutput(_build_pboutput() + _field_i32(18, 99))
+    # Sign-extended -1 → _signed32 returns -1, not in OUTPUT_CTRLS.
+    assert "outputCtrl" not in decode_pboutput(_build_pboutput() + _field_i32(18, -1))
+
+
+def test_decode_pboutput_no_output_ctrl_key_when_field18_absent() -> None:
+    assert "outputCtrl" not in decode_pboutput(_build_pboutput())
+
+
 def test_decode_pboutput_clean_info_all_fields_together() -> None:
     """All five PbCleanInfo fields coexist in one PbOutput.f12 sub-message."""
     pb = _build_pboutput_with_extras(

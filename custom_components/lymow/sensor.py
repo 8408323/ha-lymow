@@ -222,6 +222,17 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:camera-iris",
         entity_registry_enabled_default=False,
     ),
+    # outputCtrl (PbOutput.f18) — what the robot is replying to, e.g. a
+    # QUERY_MAP / SYNC_MAP / SET_RUN_TIME_CONFIG. Label string decoded in
+    # protocol.py via the OUTPUT_CTRLS enum. Disabled by default —
+    # diagnostic, mostly useful for traffic-debugging.
+    LymowSensorDescription(
+        key="output_ctrl",
+        name="Last reply opcode",
+        value_key="outputCtrl",
+        icon="mdi:reply",
+        entity_registry_enabled_default=False,
+    ),
     # Robot pose in local ENU frame (pboutput field 14), disabled by default —
     # mostly useful for debugging and advanced visualisations.
     LymowSensorDescription(
