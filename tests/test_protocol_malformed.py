@@ -396,3 +396,13 @@ def test_pboutput_mowprogress_in_range_is_surfaced() -> None:
     pb = bytes([(12 << 3) | 2, len(area_pb)]) + area_pb
     state = decode_pboutput(pb)
     assert state["mowProgress"] == 50.0
+
+
+def test_pboutput_mowprogress_with_wrong_wire_type_is_skipped() -> None:
+    """f5 arriving as length-delimited bytes (wire type 2 instead of fixed32 wire 5)
+    must not crash _decode_f32 at struct.pack — Copilot review #196 flagged this."""
+    # f5 wire-type 2, length 4, payload doesn't matter.
+    area_pb = bytes([(5 << 3) | 2, 4]) + b"\x00\x00\x00\x00"
+    pb = bytes([(12 << 3) | 2, len(area_pb)]) + area_pb
+    state = decode_pboutput(pb)  # must not raise
+    assert "mowProgress" not in state

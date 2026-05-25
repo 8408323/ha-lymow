@@ -604,11 +604,13 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if strip_count is not None:
             state["mowStripCount"] = _signed32(strip_count)
         progress_raw = _first(area_fields, 5)
-        if progress_raw is not None:
+        # isinstance(progress_raw, int) guards against a wire-type drift (e.g. f5
+        # arriving as length-delimited bytes), which would crash _decode_f32 at
+        # struct.pack time. Mirrors the defensive pattern in _decode_error_list_entry.
+        if isinstance(progress_raw, int):
             # Wire fraction 0..1 → percent. Bound the decoded float before
             # scaling so a NaN/inf from a misaligned or corrupt payload can't
-            # surface as a garbage HA sensor state — mirrors the same guard
-            # in _decode_error_list_entry (see :line:846 in this module).
+            # surface as a garbage HA sensor state.
             pct = _decode_f32(progress_raw)
             if 0.0 <= pct <= 1.0:
                 state["mowProgress"] = round(pct * 100, 1)
