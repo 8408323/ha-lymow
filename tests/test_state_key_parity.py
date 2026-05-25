@@ -1,28 +1,4 @@
-"""Parity between sensor / binary-sensor consumer keys and their producers.
-
-Failure mode this catches:
-
-A sensor entity declares ``value_key="lastCleanAt"`` to read
-``coordinator.data[thing]["lastCleanAt"]``. If the coordinator writes
-``"lastCleanDate"`` instead (rename / typo), the sensor silently returns ``None``
-and the user sees "Unknown" forever — no exception, no warning, no test failure
-elsewhere. The sensor's own test is happy: ``_make_coord({"lastCleanAt": 123})``
-passes because the test seeds whatever key the sensor expects. Only an
-end-to-end check that the key is *actually produced somewhere* surfaces drift.
-
-How we test it:
-
-- Scrape every consumer key (sensor's ``value_key="..."``,
-  binary_sensor's ``_field = "..."``) from the source files via regex.
-- Assert each key appears as a literal string in at least one of the producer
-  modules (coordinator.py, protocol.py, api.py, mqtt.py) OR is in the
-  documented allow-list of keys that originate in cloud REST responses.
-
-The allow-list is the explicit list of keys that come straight from the AWS
-API (``get_device_info``, ``get_device_feature``, etc.) — those don't appear
-as literals in our codebase because the cloud chose the names. Anything else
-on that list is a bug.
-"""
+"""Parity between sensor / binary-sensor consumer keys and their producers."""
 
 from __future__ import annotations
 
