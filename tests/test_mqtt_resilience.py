@@ -69,9 +69,7 @@ def _make_mqtt(on_state=None, on_online=None) -> tuple[LymowMqttClient, list[tup
 
 @pytest.mark.asyncio
 async def test_reconnect_signs_url_with_new_credentials(monkeypatch):
-    """When the coordinator detects an expiring token and calls reconnect(),
-    the new access_key / secret / session_token must reach the SigV4 URL builder
-    — otherwise we'd just reconnect with stale (about-to-expire) creds."""
+    """reconnect() must pass new credentials to the SigV4 URL builder, not stale ones."""
     sign_calls: list[dict] = []
 
     real_builder = None  # captured below
@@ -124,8 +122,7 @@ async def test_reconnect_signs_url_with_new_credentials(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_reconnect_resubscribes_to_all_things(monkeypatch):
-    """Reconnect must re-issue subscriptions for every device — otherwise the
-    new connection would be silent (no pboutput / notify-app delivery)."""
+    """Reconnect must re-subscribe every device or new connection delivers nothing."""
     subscribed: list[str] = []
 
     class FakeClient:
@@ -165,9 +162,7 @@ async def test_reconnect_resubscribes_to_all_things(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_listen_loop_swallows_mqtt_error_mid_stream(caplog):
-    """If the broker drops the WebSocket mid-stream, aiomqtt raises MqttError on
-    the next __anext__. The loop must log and exit cleanly so the coordinator's
-    reconnect logic can take over — not bubble the exception out."""
+    """Listen loop must log and exit cleanly on MqttError so coordinator can reconnect."""
 
     class FakeClient:
         def __init__(self):
@@ -192,9 +187,7 @@ async def test_listen_loop_swallows_mqtt_error_mid_stream(caplog):
 
 @pytest.mark.asyncio
 async def test_dispatch_swallows_handler_exception_in_pboutput(monkeypatch, caplog):
-    """A pboutput handler that blows up (e.g. unwrap_envelope raises on garbage
-    bytes) must not kill the dispatch loop — the dispatch try/except logs and
-    continues so the next message is still delivered."""
+    """Handler exceptions must not kill dispatch loop — log and continue to next msg."""
     import sys
 
     proto = sys.modules["lymow.protocol"]
@@ -215,18 +208,14 @@ async def test_dispatch_swallows_handler_exception_in_pboutput(monkeypatch, capl
 
 
 def test_notify_handler_treats_missing_robotstate_as_offline():
-    """A notify-app message with valid JSON but no robotState key must default
-    to offline rather than crashing — the broker has historically sent shape-
-    drifted payloads on firmware updates."""
+    """Missing robotState key must default to offline (not crash) — broker shape drift."""
     client, _, onlines = _make_mqtt()
     client._handle_notify("t1", b'{"someOtherField": 1}')
     assert onlines == [("t1", False)]
 
 
 def test_notify_handler_handles_non_string_robotstate():
-    """If robotState arrives as a non-string (list, dict, int), the str() coerce
-    + lower() must not raise. Any value that doesn't lowercase to 'online' is
-    treated as offline."""
+    """Non-string robotState (list/dict/int) must coerce safely and treat as offline."""
     client, _, onlines = _make_mqtt()
     # int 1 stringifies to "1" — not "online" → offline
     client._handle_notify("t1", b'{"robotState": 1}')
@@ -236,17 +225,14 @@ def test_notify_handler_handles_non_string_robotstate():
 
 
 def test_notify_handler_treats_uppercase_online_as_online():
-    """Robot/firmware variants may send 'ONLINE' instead of 'online'.
-    Casefolded match must accept both."""
+    """Casefolded match must accept 'ONLINE' as well as 'online' (firmware variants)."""
     client, _, onlines = _make_mqtt()
     client._handle_notify("t1", b'{"robotState": "ONLINE"}')
     assert onlines == [("t1", True)]
 
 
 def test_notify_handler_silently_drops_invalid_json():
-    """Already covered elsewhere — pin the contract: bad JSON → no callback,
-    no exception (the dispatch try/except is not enough; _handle_notify owns it
-    so a garbled payload from one device doesn't affect the loop)."""
+    """Bad JSON in notify-app yields no callback and no exception (owned by _handle_notify)."""
     client, _, onlines = _make_mqtt()
     client._handle_notify("t1", b"not-json-at-all")
     assert onlines == []
@@ -259,10 +245,7 @@ def test_notify_handler_silently_drops_invalid_json():
 
 @pytest.mark.asyncio
 async def test_publish_command_dropped_silently_when_reconnecting(caplog):
-    """A publish_command (fire-and-forget) issued while self._client is None
-    (between disconnect and connect during reconnect) must NOT raise — the
-    coordinator's button/service handlers don't await it, so an exception
-    would propagate into HA's exception logger as a noisy unhandled task."""
+    """Fire-and-forget publish while client=None must not raise (would leak as task error)."""
     client, _, _ = _make_mqtt()
     assert client._client is None  # mid-reconnect, no client yet
 
@@ -275,8 +258,7 @@ async def test_publish_command_dropped_silently_when_reconnecting(caplog):
 
 @pytest.mark.asyncio
 async def test_async_publish_command_dropped_silently_when_reconnecting(caplog):
-    """Same contract as publish_command, but for the awaitable variant — must
-    return cleanly without raising or hanging."""
+    """Awaitable variant must return cleanly without raising or hanging when client=None."""
     client, _, _ = _make_mqtt()
     with caplog.at_level(logging.WARNING):
         await client.async_publish_command("t1", b"\x01\x02")
@@ -290,9 +272,7 @@ async def test_async_publish_command_dropped_silently_when_reconnecting(caplog):
 
 @pytest.mark.asyncio
 async def test_connect_propagates_oserror_after_cleanup(monkeypatch, caplog):
-    """OSError on subscribe (e.g. TCP RST after WebSocket upgrade) must propagate
-    to the caller so async_setup_entry raises ConfigEntryNotReady — but only
-    after __aexit__ cleanup, not as a leaked client."""
+    """OSError on subscribe must propagate after __aexit__ cleanup, no leaked client."""
     exited = {"v": False}
 
     class FakeClient:

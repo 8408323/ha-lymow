@@ -30,14 +30,7 @@ from tests.test_coordinator import THING, _make_coordinator
 
 @pytest.mark.asyncio
 async def test_mqtt_push_during_rest_poll_lands_in_final_merged_state() -> None:
-    """A pboutput message arriving while _async_update_data is awaiting
-    get_device_info must end up in the final merged result.
-
-    Why this matters: the poll snapshots ``self._mqtt_state[thing]`` at the end
-    of its for-loop body — _after_ all awaits inside that iteration. So any
-    MQTT push that completes before that snapshot must be visible. Conversely,
-    pushes after the snapshot are lost until the next poll.
-    """
+    """MQTT push mid-poll must be visible in merged result (snapshot is post-await)."""
     coord, mqtt, api = _make_coordinator()
 
     push_during_poll = asyncio.Event()
@@ -73,9 +66,7 @@ async def test_mqtt_push_during_rest_poll_lands_in_final_merged_state() -> None:
 
 @pytest.mark.asyncio
 async def test_two_mqtt_pushes_in_sequence_accumulate_in_mqtt_state() -> None:
-    """Two pboutput messages in quick succession on the same thing must produce
-    a union of their patches in ``_mqtt_state`` — neither one overwrites keys
-    the other set."""
+    """Successive patches union in _mqtt_state — neither overwrites the other's keys."""
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 5, "battery": 100}}
 
@@ -91,9 +82,7 @@ async def test_two_mqtt_pushes_in_sequence_accumulate_in_mqtt_state() -> None:
 
 @pytest.mark.asyncio
 async def test_mqtt_push_does_not_blow_away_unmentioned_keys() -> None:
-    """An MQTT push carrying only ``battery`` must NOT remove the existing
-    ``workStatus`` from the merged ``self.data`` snapshot — that would cause
-    sensors to briefly go ``unknown`` between polls."""
+    """Partial push must not erase unmentioned keys (would flash sensors to unknown)."""
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 5, "battery": 100, "wifiSignalQuality": 70}}
 
@@ -111,12 +100,7 @@ async def test_mqtt_push_does_not_blow_away_unmentioned_keys() -> None:
 
 @pytest.mark.asyncio
 async def test_robotconfig_partial_reply_does_not_wipe_sibling_fields() -> None:
-    """The whole point of _DEEP_MERGE_KEYS for ``robotConfig``: a pboutput that
-    just toggles one PbRobotConfig field (e.g. ``metric_4g``) must not erase
-    the others (``audioVolume``, ``isOpenLed``, ``rrConfig``...).
-
-    Without the deep-merge this is the exact regression the project memo flags
-    in [[reference_robotconfig_wire]] — a partial replied wipe of HA state."""
+    """robotConfig deep-merge: toggling one field must preserve sibling fields."""
     coord, _, _ = _make_coordinator()
     coord.data = {
         THING: {
@@ -143,8 +127,7 @@ async def test_robotconfig_partial_reply_does_not_wipe_sibling_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_robotconfig_partial_rrconfig_does_not_wipe_other_rr_keys() -> None:
-    """Nested rrConfig partial reply: only ``enableRr`` flips, but the period
-    and battery thresholds underneath must stay (two-level deep merge)."""
+    """Two-level deep merge: flipping rrConfig.enableRr preserves nested siblings."""
     coord, _, _ = _make_coordinator()
     coord.data = {
         THING: {
@@ -185,9 +168,7 @@ async def test_robotconfig_partial_rrconfig_does_not_wipe_other_rr_keys() -> Non
 
 @pytest.mark.asyncio
 async def test_two_concurrent_async_sync_map_calls_both_publish() -> None:
-    """Two concurrent map edits (e.g. user adds a zone while a polygon update
-    is in flight) must both reach the broker. There's no lock around publish,
-    so the contract is "both go out" rather than "one waits on the other"."""
+    """Concurrent map edits both reach broker — contract is "both go out", no serialising lock."""
     coord, mqtt, _ = _make_coordinator()
 
     published_in_order: list[bytes] = []
@@ -242,9 +223,7 @@ async def test_two_concurrent_async_sync_map_calls_both_publish() -> None:
 
 @pytest.mark.asyncio
 async def test_on_mqtt_state_with_empty_patch_is_a_noop() -> None:
-    """An empty patch (e.g. a pboutput that decoded to {} because every field
-    failed its boundary check) must not crash; if HA is updated, the merged
-    state must remain unchanged for the target thing."""
+    """Empty patch must not crash and must leave merged state unchanged for the thing."""
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 5, "battery": 100}}
     pushed: list = []
@@ -266,9 +245,7 @@ async def test_on_mqtt_state_with_empty_patch_is_a_noop() -> None:
 
 @pytest.mark.asyncio
 async def test_on_mqtt_state_for_unknown_thing_does_not_push_to_ha() -> None:
-    """A push for a thing that wasn't in the device list (mis-routed broker
-    message, race during teardown) must update `_mqtt_state` but NOT call
-    ``async_set_updated_data`` — there's nothing to merge into yet."""
+    """Push for unknown thing updates _mqtt_state but skips async_set_updated_data."""
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 5}}
     pushed: list = []
