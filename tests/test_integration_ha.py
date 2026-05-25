@@ -70,17 +70,13 @@ __import__("custom_components.lymow")
 
 @pytest.fixture(autouse=True)
 def _enable_custom_integrations(enable_custom_integrations):  # noqa: ARG001
-    """Make HA discover ``custom_components/lymow/`` without pip-installing requirements."""
+    """Make HA discover custom_components/lymow without pip-installing requirements."""
     yield
 
 
 @pytest.fixture(autouse=True)
 def _stub_heavy_ha_dependencies(hass):
-    """Replace ``bluetooth`` and ``ffmpeg`` (the manifest dependencies) with
-    no-op stubs so the test env doesn't have to pull bleak / dbus-fast /
-    pyserial / ha-ffmpeg / aiousbwatcher and their transitives just to satisfy
-    the dependency check. The actual BLE and camera code paths are exercised
-    by the targeted unit tests; here we only care about lymow's own setup."""
+    """Stub bluetooth/ffmpeg manifest deps to avoid pulling BLE/camera transitives."""
     for stub_domain in ("bluetooth", "ffmpeg"):
         mock_integration(hass, MockModule(stub_domain))
     # Pre-set the "www static path registered" key so async_setup_entry skips
@@ -95,12 +91,7 @@ def _stub_heavy_ha_dependencies(hass):
 
 @pytest.fixture
 def _patched_lymow_boundaries():
-    """Mock the network boundaries so async_setup_entry can finish without
-    talking to Cognito, the REST API, or the AWS IoT broker.
-
-    Patches must target the *bound* names inside ``custom_components.lymow``
-    (the path HA's discovery uses), not ``lymow.*`` (which is the conftest's
-    parallel tree — see the sys.modules cleanup above)."""
+    """Mock Cognito/REST/MQTT boundaries; patch the custom_components.lymow bound names."""
     auth_inst = MagicMock()
     auth_inst.login = AsyncMock(return_value={"AccessToken": "tok", "IdToken": "id-tok", "region": "eu-west-1"})
     auth_inst.login_region = AsyncMock(return_value={"AccessToken": "tok", "IdToken": "id-tok", "region": "eu-west-1"})
@@ -159,8 +150,7 @@ def _make_entry(hass) -> MockConfigEntry:
 
 
 async def test_async_setup_entry_transitions_entry_to_loaded(hass, _patched_lymow_boundaries):
-    """async_setup_entry must drive the entry into the LOADED state through HA's
-    real config-entries machinery — not just return True under our mocks."""
+    """async_setup_entry must drive entry to LOADED via real config-entries machinery."""
     entry = _make_entry(hass)
     assert await hass.config_entries.async_setup(entry.entry_id) is True
     await hass.async_block_till_done()
@@ -168,8 +158,7 @@ async def test_async_setup_entry_transitions_entry_to_loaded(hass, _patched_lymo
 
 
 async def test_async_unload_entry_transitions_entry_to_not_loaded(hass, _patched_lymow_boundaries):
-    """async_unload_entry must release every platform and the MQTT connection,
-    leaving the entry in NOT_LOADED so the user can reload it."""
+    """async_unload_entry releases platforms + MQTT and leaves entry NOT_LOADED."""
     entry = _make_entry(hass)
     assert await hass.config_entries.async_setup(entry.entry_id) is True
     await hass.async_block_till_done()
@@ -182,9 +171,7 @@ async def test_async_unload_entry_transitions_entry_to_not_loaded(hass, _patched
 
 
 async def test_full_reload_cycle_succeeds(hass, _patched_lymow_boundaries):
-    """A setup → unload → setup cycle must work without leftover state — covers
-    listener leaks, entity-registry-duplicate uniqueIDs, double-task spawn,
-    etc., all in one motion."""
+    """Setup → unload → setup must succeed (catches listener leaks, dupe IDs, dup tasks)."""
     entry = _make_entry(hass)
     assert await hass.config_entries.async_setup(entry.entry_id) is True
     await hass.async_block_till_done()
@@ -201,9 +188,7 @@ async def test_full_reload_cycle_succeeds(hass, _patched_lymow_boundaries):
 
 
 async def test_entities_appear_in_entity_registry_after_setup(hass, _patched_lymow_boundaries):
-    """After setup, the entity registry must hold at least the core entities
-    for the device. If unique_ids collided across platforms (a common
-    integration bug), HA would silently drop one of them — this catches that."""
+    """Entity registry must hold core entities — catches cross-platform unique_id drops."""
     from homeassistant.helpers import entity_registry as er
 
     entry = _make_entry(hass)
@@ -230,8 +215,7 @@ async def test_entities_appear_in_entity_registry_after_setup(hass, _patched_lym
 
 
 async def test_device_is_registered_with_correct_identifier(hass, _patched_lymow_boundaries):
-    """The integration must register the robot as a device in HA's device
-    registry, keyed by thing-name so the user sees one device-card per mower."""
+    """Device registered with thing-name identifier so user sees one card per mower."""
     from homeassistant.helpers import device_registry as dr
 
     entry = _make_entry(hass)
@@ -253,9 +237,7 @@ async def test_device_is_registered_with_correct_identifier(hass, _patched_lymow
 
 
 async def test_services_are_registered_with_lymow_domain(hass, _patched_lymow_boundaries):
-    """All custom lymow.* services must surface in hass.services.async_services().
-    Crosschecks the services.yaml ↔ async_register parity test under the real
-    HA machinery (not just by counting MagicMock calls)."""
+    """Custom lymow.* services must surface in real hass.services (not just mocks)."""
     entry = _make_entry(hass)
     await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
