@@ -302,13 +302,53 @@ Push a commit: `test-result: scenario 1 pass / scenario 4 fail — console error
 ## Findings (fill in as capture session reports)
 
 ### Task A findings
-_Pending capture session_
+_Pending — scoped out of this capture window; vertex move requires the user to physically pinch-zoom in the app (see "Capture blockers" below)._
 
-### Task B findings
-_Pending capture session_
+### Task B findings (zone rename) — partial
+**Live capture: BLOCKED.** Driving the Lymow Android app via ADB cannot reach the rename action without a physical pinch-zoom in the map view (see "Capture blockers" below).
 
-### Task C findings
-_Pending capture session_
+**Static encoder bytes** (for byte-exact diff against a future live capture):
+```
+encode_rename_zone("wsmjco1T", "Front lawn")
+→ 10312809621a0a180a16120a46726f6e74206c61776e1a0877736d6a636f3154
+```
+Breakdown: `10 31` version=49; `28 09` userCtrl=9 MODIFY_ZONE_INFO; `62 1a` field 12 PbMap len 26; `0a 18` goZones[0] len 24; `0a 16` basicInfo len 22; `12 0a "Front lawn"`; `1a 08 "wsmjco1T"`.
+
+**Important context confirmed from existing capture-lymow.txt**: no REST endpoint stores zone names (only `get-backup-map`, `get-s3-object`, `get-device-info`, `update-device-feature`, `update-user-profile`, `device-list-query` are present). And `BasicInfo.f2` is empty in all observed pboutput zones. **Conclusion (provisional, needs Task B live confirmation):** the robot ignores the name field; rename is a UI-only convenience. The lovelace card's `_nameOverrides` + the coordinator's optimistic `mapData.goZones[*].name` update are the only places the name lives.
+
+### Task C findings (zone delete) — partial
+**Live capture: BLOCKED.** Same reason as Task B.
+
+**Static encoder bytes**:
+```
+encode_delete_zone("wsmjco1T")
+→ 10312808620e0a0c0a0a1a0877736d6a636f3154
+encode_delete_nogo_zone("testnogoX")
+→ 10312808620f120d0a0b1a09746573746e6f676f58
+```
+Breakdown: `userCtrl=8` CLEAR_ZONE; PbMap with the target zone's `basicInfo.hashId` in goZones (field 1) or nogoZones (field 2). PbZone wrapper present (field 1 inside PbMap.goZones), matching `test_encode_delete_nogo_zone_uses_nogo_field_with_pbzone_wrapper`.
+
+### Real bug found and fixed (not from live capture — from coordinator audit)
+**Bug:** `LymowDataUpdateCoordinator.async_delete_zone` did **not** call `async_query_map` after the CLEAR_ZONE publish, while its sibling `async_delete_nogo_zone` and `async_delete_channel` both do. Effect: the lovelace card kept showing the deleted go-zone until the next periodic poll (up to 60 s of stale UI). The `_polyOverrides` mechanism in the card does not auto-clear on delete, so the card relies on the coordinator to refresh map data — but the coordinator never asked the robot for the refresh.
+
+**Fix:** added `await self.async_query_map(thing_name)` after the delete publish so map data refreshes immediately (commit forthcoming). Existing test `test_async_delete_zone_publishes_command` was tightened into `test_async_delete_zone_sends_command_then_queries_map` asserting two publishes (delete + query-map) and the userCtrl field on each.
+
+### Mower-control card — out-of-scope tracking issue
+Filed as **#197** so the second-card work (Mow/Pause/Dock/Resume + live status + signal bars + camera thumbnail) doesn't get lost while we finish `feat/map-lovelace-card`. Mirrors what the Lymow app's main device screen does. **Not** in this branch.
+
+---
+
+## Capture blockers
+
+- The Lymow app's map area renders only the robot dot at default zoom — go-zone polygons sit far outside the visible viewport.
+- ADB `input swipe` is single-touch, so it pans but does not pinch-zoom; the map UI requires a real two-finger gesture to zoom out far enough that a zone polygon is hittable.
+- A `sendevent`-based two-finger script was attempted but the app did not respond (likely needs simultaneous SLOT-0/SLOT-1 frames within one SYN_REPORT; the script sent them sequentially).
+- A force-restart of the app, a Select-Mow dialog, a bottom-sheet pull, and a tap on the eye/focus icon all left the map in robot-only view.
+
+**Unblock options** (pick one when the supervisor or user is back at a screen):
+1. Pinch-zoom the phone manually once, then leave the app on the zone-selection screen — ADB can then drive Rename / Delete from there without re-zooming.
+2. Use scrcpy from this laptop to interact with the phone screen as if local.
+3. Skip the app capture and assume the static encoders match (current state — supported by Hermes bytecode analysis but not byte-equal to a live frame).
 
 ---
 
@@ -328,12 +368,17 @@ _Pending capture session_
 - [x] Repo cloned at `/home/mint-laptop-4/private_projects/ha-lymow-lovelace`, branch checked out.
 - [x] ADB confirmed: USB `fc7d1e36`, WiFi `192.168.1.45:5555`.
 - [x] mitmproxy v12.2.3 available; LAN host `192.168.1.180`.
-- [ ] mitmdump + capture pipeline running.
-- [ ] Task B (rename) captured.
-- [ ] Task C (delete go-zone) captured.
-- [ ] Task C' (delete nogo zone) captured.
-- [ ] Task A (vertex move) — supervisor flagged HIGHEST PRIORITY but user scoped this session to rename + delete first; will pick up after B/C.
-- [ ] Encoder diff written into supervisor's "Findings" sections.
-- [ ] GH issue for the separate mower-control lovelace card filed.
+- [x] mitmdump + capture pipeline running (live; sibling clone holds it; LAN proxy already trusted by the phone via Magisk).
+- [~] Task B (rename) captured — **blocked**, see "Capture blockers" / Task B findings.
+- [~] Task C (delete go-zone) captured — **blocked**, see "Capture blockers" / Task C findings.
+- [~] Task C' (delete nogo zone) captured — **blocked**, see "Capture blockers".
+- [ ] Task A (vertex move) — supervisor flagged HIGHEST PRIORITY but user scoped this session to rename + delete first; same blocker applies.
+- [x] Encoder static bytes written into Findings — ready to diff against future live frames.
+- [x] **Bug fix: `async_delete_zone` now re-queries the map** so the lovelace card stops showing deleted go-zones. Test tightened to assert delete + query-map. All 970 tests pass (`uv run pytest tests/ -v`).
+- [x] GH issue #197 filed for the separate mower-control lovelace card.
 
 > User scope for this session: **rename + delete first**, then vertex move if time permits. The "mower control" card is out of scope and tracked as its own issue.
+
+### Hand-off note to supervisor
+- `test-ready:` not pushed for this round — the fix is backend-only (coordinator) and is covered by unit tests, so browser testing isn't strictly needed to merge it. If you want a sanity check anyway, scenario to run: in the lovelace card, delete a go-zone with the 🗑 button; expect it to disappear within ~1 s (used to wait up to ~60 s for the next poll).
+- Phone proxy is **still active** on `192.168.1.180:8888` — leaving it on so the capture stays available for the next session. Last session noted to clear before overnight (E29 dock-fail risk).

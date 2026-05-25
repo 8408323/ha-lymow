@@ -634,6 +634,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_delete_zone(self, thing_name: str, hash_id: str) -> None:
         """Delete a go-zone by hashId using USER_CTRL_CLEAR_ZONE=8."""
         await self._mqtt.async_publish_command(thing_name, encode_delete_zone(hash_id))
+        # Mirror nogo/channel delete: re-query so the lovelace card stops showing the deleted zone.
+        await self.async_query_map(thing_name)
 
     async def async_rename_zone(self, thing_name: str, hash_id: str, name: str) -> None:
         """Rename a go-zone by hashId using USER_CTRL_MODIFY_ZONE_INFO=9."""
