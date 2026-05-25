@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections import Counter
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,9 +22,13 @@ _SERVICES_YAML = os.path.join(os.path.dirname(__file__), "..", "custom_component
 _TOP_LEVEL_KEY_RE = re.compile(r"^([a-z][a-z0-9_]*):\s*$", re.MULTILINE)
 
 
-def _yaml_service_names() -> set[str]:
+def _yaml_service_names_in_order() -> list[str]:
     with open(_SERVICES_YAML, encoding="utf-8") as f:
-        return set(_TOP_LEVEL_KEY_RE.findall(f.read()))
+        return _TOP_LEVEL_KEY_RE.findall(f.read())
+
+
+def _yaml_service_names() -> set[str]:
+    return set(_yaml_service_names_in_order())
 
 
 async def _registered_service_names() -> set[str]:
@@ -75,3 +80,9 @@ def test_yaml_parser_finds_known_services() -> None:
     declared = _yaml_service_names()
     for name in ("delete_zone", "ble_drive", "set_schedules", "pin_and_go", "resume"):
         assert name in declared, f"regex parser missed known service {name!r}"
+
+
+def test_services_yaml_has_no_duplicate_top_level_keys() -> None:
+    names = _yaml_service_names_in_order()
+    duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
+    assert not duplicates, f"services.yaml contains duplicate top-level service keys: {duplicates}"
