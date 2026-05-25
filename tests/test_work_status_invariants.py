@@ -1,20 +1,4 @@
-"""Structural invariants on WORK_STATUS_* constants and the LawnMowerActivity mapping.
-
-Two failure modes these catch that the existing tests don't:
-
-1. **Partition drift.** Each WORK_STATUS_* value should live in *exactly one*
-   `_GROUP` (or be intentionally unassigned). A new status added to the enum
-   but forgotten in the groups falls silently into ``LawnMowerActivity.ERROR``;
-   a status accidentally listed in two groups makes activity-mapping ambiguous
-   depending on the order of the `if ws in ...` checks in
-   :py:meth:`LymowMower.activity`.
-
-2. **Activity-mapping snapshot.** The mapping from workStatus value → HA
-   :class:`LawnMowerActivity` is a load-bearing contract — frontend dashboards
-   and automations key off these values. We snapshot every documented
-   workStatus → activity so a future refactor of the groups can't silently
-   reclassify a state (e.g. a charging robot accidentally showing up as MOWING).
-"""
+"""Structural invariants on WORK_STATUS_* constants and the LawnMowerActivity mapping."""
 
 from __future__ import annotations
 
