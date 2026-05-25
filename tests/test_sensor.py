@@ -1297,6 +1297,28 @@ def test_headlight_window_sensor_unknown_when_robot_config_not_dict() -> None:
         assert e.extra_state_attributes is None
 
 
+def test_headlight_window_sensor_unknown_when_outer_layers_not_dict() -> None:
+    """The same defensive guard applies to every layer above ``robotConfig``:
+    a truthy non-dict at ``coordinator.data`` or ``data[thing]`` (e.g. from a
+    malformed cache hydrate) must drop to unknown, not raise AttributeError
+    halfway through the walk. Build the entity with a sane coordinator (so
+    DeviceInfo construction works), then mutate coordinator.data to the
+    abnormal shape and re-read."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    # coordinator.data itself flips to a non-dict.
+    e_data = LymowHeadlightWindowSensor(_make_coord({}), DEVICE)
+    e_data.coordinator.data = "not-a-dict"
+    assert e_data.native_value is None
+    assert e_data.extra_state_attributes is None
+
+    # data[thing] flips to a non-dict.
+    e_thing = LymowHeadlightWindowSensor(_make_coord({}), DEVICE)
+    e_thing.coordinator.data = {THING: ["bogus"]}
+    assert e_thing.native_value is None
+    assert e_thing.extra_state_attributes is None
+
+
 def test_headlight_window_sensor_unknown_when_partial_or_out_of_range_dict() -> None:
     """A dict missing one key, with wrong types, or with out-of-range values
     must return None — never raise during state rendering."""

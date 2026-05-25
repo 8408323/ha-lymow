@@ -883,11 +883,18 @@ class LymowHeadlightWindowSensor(CoordinatorEntity[LymowCoordinator], SensorEnti
 
     @property
     def _times(self) -> tuple[str | None, str | None]:
-        cfg = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig")
-        # ``or {}`` would still pass through a truthy non-dict (e.g. a stray
-        # list or string from a malformed cache hydrate) and explode in
-        # ``.get`` below — guard the type explicitly so _format's defensive
-        # path can return None instead of the sensor raising mid-render.
+        # Walk each level defensively: a truthy non-dict at any layer (from a
+        # malformed cache hydrate / future restore source) would crash the
+        # next .get with AttributeError mid-render and break the entity. The
+        # canonical shape is data[thing] -> {"robotConfig": {...}}, but any
+        # deviation must drop to unknown rather than raise.
+        data = self.coordinator.data
+        if not isinstance(data, dict):
+            return None, None
+        thing_state = data.get(self._thing_name)
+        if not isinstance(thing_state, dict):
+            return None, None
+        cfg = thing_state.get("robotConfig")
         if not isinstance(cfg, dict):
             return None, None
         return self._format(cfg.get("openLedTime")), self._format(cfg.get("closeLedTime"))
