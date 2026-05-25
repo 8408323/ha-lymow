@@ -1,31 +1,4 @@
-"""End-to-end integration setup / unload through the real Home Assistant stack.
-
-These run under ``pytest-homeassistant-custom-component`` (PHCC), which provides
-a real ``hass`` fixture, the real config-entries machinery, the real entity /
-device registries, and the standard ``enable_custom_integrations`` discovery
-mechanism. They catch a class of regressions that the rest of the suite — which
-calls integration code directly with hand-rolled mocks — cannot:
-
-  - Unique-ID collisions across platforms (the entity registry rejects them).
-  - Platform-forwarding bugs (e.g. ``PLATFORMS`` missing an entry).
-  - Service registration drift (services registered with mismatched schemas).
-  - ``async_unload_entry`` failing to release resources (listeners, tasks).
-
-Why this file is separate / isolated:
-PHCC pins exact versions of pytest, pytest-cov and aiohttp that conflict with
-the main project's dev pins. Rather than downgrade the main dev deps, we run
-this file in an isolated env via ``uv run --isolated --with pytest-homeassistant-custom-component``.
-See ``.github/workflows/ha-tests.yml`` for the CI invocation. Locally:
-
-    uv run --isolated \\
-        --with "pytest-homeassistant-custom-component==0.13.316" \\
-        --with "pytest>=9.0,<10" --with "pytest-cov==7.0.0" \\
-        --with aiomqtt --with voluptuous \\
-        pytest tests/test_integration_ha.py -v
-
-The file gracefully skips itself if PHCC isn't installed so a stray
-``pytest tests/`` from the main env doesn't error out.
-"""
+"""End-to-end setup/unload through the real Home Assistant stack via PHCC."""
 
 from __future__ import annotations
 
