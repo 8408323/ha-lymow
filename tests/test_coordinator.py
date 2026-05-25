@@ -1013,13 +1013,21 @@ async def test_update_zone_enabled_raises_when_no_map_data() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_delete_zone_publishes_command() -> None:
+async def test_async_delete_zone_sends_command_then_queries_map() -> None:
+    from lymow.const import USER_CTRL_CLEAR_ZONE, USER_CTRL_QUERY_MAP
+    from lymow.protocol import _decode_fields, _first
+
     coord, mqtt, _ = _make_coordinator()
     await coord.async_delete_zone(THING, "zone0001")
 
-    assert mqtt.async_publish_command.await_count == 1
-    thing, _ = mqtt.async_publish_command.call_args[0]
-    assert thing == THING
+    # 1 = delete (USER_CTRL_CLEAR_ZONE), 2 = query-map refresh so the card stops showing the deleted zone.
+    assert mqtt.async_publish_command.await_count == 2
+    thing_del, pb_del = mqtt.async_publish_command.await_args_list[0].args
+    thing_q, pb_q = mqtt.async_publish_command.await_args_list[1].args
+    assert thing_del == THING
+    assert thing_q == THING
+    assert _first(_decode_fields(pb_del), 5) == USER_CTRL_CLEAR_ZONE
+    assert _first(_decode_fields(pb_q), 5) == USER_CTRL_QUERY_MAP
 
 
 @pytest.mark.asyncio
