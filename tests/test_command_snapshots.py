@@ -1,22 +1,4 @@
-"""Snapshot tests for USER_CTRL_* command codes and button → command mapping.
-
-What this catches:
-
-1. **Constant value drift.** Every USER_CTRL_* in const.py is a wire-protocol
-   number documented from the Android APK. Changing one would silently swap
-   what the robot does on a given command. The values are pinned here so a
-   refactor of const.py (e.g. accidentally renumbering after a merge conflict)
-   is caught immediately.
-
-2. **Button → command rebinding.** Each ButtonEntity class subclasses
-   ``_UserCtrlButton`` and sets ``_user_ctrl`` to a specific constant. Renaming
-   the constant in const.py and updating button.py to match the new value (but
-   pointing it at the wrong button class by mistake) is a real risk — this test
-   pins which button sends which int, so a swap surfaces immediately.
-
-3. **Uniqueness.** Two USER_CTRL_* with the same value would let two
-   different operations share a wire code — silently equivalent on the wire.
-"""
+"""Snapshot tests for USER_CTRL_* command codes and button command mapping."""
 
 from __future__ import annotations
 
