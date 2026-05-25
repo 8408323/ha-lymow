@@ -707,9 +707,18 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     # the camera detects condensation / fog. A monotonically-increasing counter
     # — useful as a maintenance metric ("the heater has fired N times this
     # install") and as a coarse weather/condition indicator.
+    #
+    # ``_decode_varint`` always returns an unsigned int, so a sign-extended
+    # int32 (e.g. -1 encoded as a 10-byte varint = 0xFFFFFFFFFFFFFFFF) would
+    # surface as a 4-billion+ counter. Interpret through ``_signed32`` first
+    # so the unsigned wrap-around becomes a negative int (which we then
+    # reject), and cap at int32-max to keep the counter in a sensor-friendly
+    # range.
     heated_lens = _first(fields, 37)
-    if isinstance(heated_lens, int) and heated_lens >= 0:
-        state["heatedLensTimes"] = heated_lens
+    if isinstance(heated_lens, int):
+        signed = _signed32(heated_lens)
+        if 0 <= signed <= 2_147_483_647:
+            state["heatedLensTimes"] = signed
 
     return state
 

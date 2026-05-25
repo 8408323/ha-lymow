@@ -1366,6 +1366,16 @@ def test_decode_pboutput_heated_lens_times_zero_surfaces() -> None:
     assert decode_pboutput(pb)["heatedLensTimes"] == 0
 
 
+def test_decode_pboutput_heated_lens_times_drops_sign_extended_negative() -> None:
+    """``_decode_varint`` always returns unsigned, so a sign-extended int32
+    -1 (0xFFFFFFFFFFFFFFFF on the wire) would surface as 4-billion+ if we
+    only checked ``>= 0``. ``_signed32`` interprets the wrap-around as -1,
+    which we reject so the sensor doesn't render a nonsense counter."""
+    # _field_i32(37, -1) emits a 10-byte varint = 0xFFFFFFFFFFFFFFFF
+    pb = _build_pboutput() + _field_i32(37, -1)
+    assert "heatedLensTimes" not in decode_pboutput(pb)
+
+
 def test_decode_pboutput_clean_info_all_fields_together() -> None:
     """All five PbCleanInfo fields coexist in one PbOutput.f12 sub-message."""
     pb = _build_pboutput_with_extras(
