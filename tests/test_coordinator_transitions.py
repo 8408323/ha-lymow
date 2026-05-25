@@ -1,21 +1,4 @@
-"""Transition-matrix tests for LymowCoordinator's user-visible side effects.
-
-Two state-transition state machines run in :py:meth:`on_mqtt_state`:
-
-  1. ``_check_work_status_transition`` — fires HA event-bus events for every
-     workStatus change and persistent notifications for **only** the
-     mow-finished and entered-error transitions.
-  2. ``_check_rtk_guard`` — auto-pauses the mower when GPS quality falls
-     below a user-configured threshold, and auto-resumes once it recovers
-     (but only if *we* paused it — never resumes a user-initiated pause).
-
-Existing tests prove the happy path fires. These pin the **negative cases**
-(when notifications must *not* fire, when resume must *not* trigger) — those
-are the regressions a careless refactor causes that a happy-path test misses.
-
-Reuses ``_make_coordinator`` and ``THING`` from test_coordinator.py to avoid
-re-duplicating the HA-stub bootstrap.
-"""
+"""Transition-matrix tests for LymowCoordinator user-visible side effects."""
 
 from __future__ import annotations
 
