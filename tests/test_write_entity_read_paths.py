@@ -82,7 +82,7 @@ def _populated_state() -> dict:
         "theftDetectionSwitch": True,
         "theftLock": False,
         "findRobotSwitch": True,
-        "mobileNotificationSwitch": 1,  # MobileNotificationSwitch._ON_VALUE
+        "mobileNotificationSwitch": 1,  # MobileNotificationSwitch._ALERTS_ONLY_VALUE
         # PbOutput-decoded robotConfig — drives _RobotConfigBoolSwitch family
         # plus MowerVolumeNumber, RechargeResumeSwitch, RR threshold numbers.
         "robotConfig": {
@@ -113,7 +113,8 @@ def _populated_state() -> dict:
         },
         # /device-feature → geofence list (one entry minimum).
         "geoFence": [{"name": "home", "latitude": 0.0, "longitude": 0.0, "radius": 175}],
-        # USER_CTRL_QUERY_RUN_TIME_CONFIG reply → drives the Live* numbers.
+        # Coordinator optimistic write mirror (async_set_run_time_config) for
+        # the Live* numbers; QUERY_RUN_TIME_CONFIG decode is not implemented yet.
         "runTimeConfig": {"cutHeight": 50, "moveSpeed": 0.6, "cutSpeed": 100},
     }
 
@@ -191,6 +192,7 @@ def test_switch_is_on_reads_populated_state(factory, expected) -> None:
         lambda c: ChargingHandbrakeSwitch(c, DEVICE),
         lambda c: RechargeResumeSwitch(c, DEVICE),
         lambda c: ZoneEnabledSwitch(c, DEVICE, ZONE_HASH),
+        lambda c: RtkAutoPauseSwitch(c, DEVICE),
     ],
 )
 def test_switch_is_on_handles_empty_state_without_raising(factory) -> None:
@@ -201,6 +203,11 @@ def test_switch_is_on_handles_empty_state_without_raising(factory) -> None:
     entity = factory(coord)
     # Calling is_on must not raise. Result can be None (unknown) or a default.
     _ = entity.is_on
+
+    # Also cover pre-first-poll shape where coordinator.data has no thing key.
+    missing_coord = _make_coord()
+    missing_entity = factory(missing_coord)
+    _ = missing_entity.is_on
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +242,7 @@ def test_number_native_value_reads_populated_state(factory, expected_value) -> N
     [
         lambda c: GeofenceRadiusNumber(c, DEVICE),
         lambda c: ZoneCutHeightNumber(c, DEVICE, ZONE_HASH),
+        lambda c: RtkPauseThresholdNumber(c, DEVICE),
         lambda c: MowerVolumeNumber(c, DEVICE),
         lambda c: RechargeBatteryThresholdNumber(c, DEVICE),
         lambda c: ResumeBatteryThresholdNumber(c, DEVICE),
@@ -248,6 +256,10 @@ def test_number_native_value_handles_empty_state_without_raising(factory) -> Non
     coord = _make_coord(state={})
     entity = factory(coord)
     _ = entity.native_value
+
+    missing_coord = _make_coord()
+    missing_entity = factory(missing_coord)
+    _ = missing_entity.native_value
 
 
 # ---------------------------------------------------------------------------
@@ -287,6 +299,10 @@ def test_select_handles_empty_state_without_raising(factory) -> None:
     coord = _make_coord(state={})
     entity = factory(coord)
     _ = entity.current_option
+
+    missing_coord = _make_coord()
+    missing_entity = factory(missing_coord)
+    _ = missing_entity.current_option
 
 
 def test_camera_light_select_is_write_optimistic() -> None:
