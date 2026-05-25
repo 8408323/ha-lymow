@@ -547,16 +547,22 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         if "gpsOrigin" in map_data:
             attrs["gps_origin"] = map_data["gpsOrigin"]
         # Charging station position: map-derived (from PbMap.f4 via the
-        # last QUERY_MAP) is the default. A live PbOutput.f24 update
-        # (decoded as ``chargingStationLoc``) is fresher — the robot
-        # pushes f24 when the dock moves or is re-detected without a
-        # map re-query — so prefer it when present. The card reads the
-        # same ``charging_station`` attribute either way.
-        live_dock = data.get("chargingStationLoc")
-        if isinstance(live_dock, dict) and live_dock:
+        # last QUERY_MAP) is the base. A live PbOutput.f24 update
+        # (decoded as ``chargingStationLoc``) overlays fresher fields on
+        # top — the live message may carry only ``x`` and ``y`` without
+        # ``theta`` (legal partial update; see protocol decoder), so we
+        # merge field-by-field rather than wholesale-replace. That way a
+        # ``y``-only live update doesn't drop the existing ``x``/``theta``
+        # from the map dock and break the card's geometry. The card reads
+        # the same ``charging_station`` attribute either way.
+        map_dock = map_data.get("chargingStation") if isinstance(map_data.get("chargingStation"), dict) else None
+        live_dock = data.get("chargingStationLoc") if isinstance(data.get("chargingStationLoc"), dict) else None
+        if map_dock and live_dock:
+            attrs["charging_station"] = {**map_dock, **live_dock}
+        elif live_dock:
             attrs["charging_station"] = live_dock
-        elif "chargingStation" in map_data:
-            attrs["charging_station"] = map_data["chargingStation"]
+        elif map_dock:
+            attrs["charging_station"] = map_dock
         # Include live robot position so the card updates without a separate entity
         for key in ("poseEastM", "poseNorthM", "poseThetaRad"):
             val = data.get(key)
