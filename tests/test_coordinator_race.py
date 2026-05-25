@@ -1,15 +1,4 @@
-"""Concurrency / race-condition tests for LymowCoordinator.
-
-The coordinator merges three async input streams: 30 s REST polls
-(``_async_update_data``), real-time MQTT pushes (``on_mqtt_state`` /
-``on_mqtt_online``) and HA service / button command publishes. They share
-``self._mqtt_state`` and ``self.data`` and can interleave at any ``await``.
-These tests pin down the merge semantics so a future refactor can't silently
-reorder them.
-
-Pattern: tests reuse the HA-stub bootstrap already done by test_coordinator.py
-by importing from it — that way we don't duplicate the importlib dance.
-"""
+"""Concurrency / race tests for LymowCoordinator state-machine side effects."""
 
 from __future__ import annotations
 

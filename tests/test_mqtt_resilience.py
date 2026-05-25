@@ -1,14 +1,4 @@
-"""Resilience tests for LymowMqttClient — failures the happy-path tests don't trip.
-
-Cloud MQTT is the flakiest surface this integration owns: AWS Cognito session
-tokens expire (~1 h), the WebSocket can drop on any network blip, and the
-broker can send back malformed JSON for /notify-app or an unwrappable envelope
-for /pboutput. These tests pin down what must happen in each case so a future
-refactor can't silently regress the recovery behaviour.
-
-No real network: every aiomqtt.Client is replaced with a fake whose
-publish/subscribe/iterator behaviour the test controls.
-"""
+"""Resilience tests for LymowMqttClient: reconnect, token refresh, malformed payloads."""
 
 from __future__ import annotations
 
