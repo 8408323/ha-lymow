@@ -585,14 +585,15 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
 
     # Area / progress info (field 12 = PbCleanInfo per PbCleanInfo.encode in
     # the APK):
-    #   f1=cleanTime(int seconds, surfaced as mowStripCount for backward compat),
-    #   f2=cleanArea(float, m² mowed this session — surfaced as totalTaskAreaM2),
+    #   f1=cleanTime (int seconds spent mowing this session — initially
+    #     mislabelled as "mow strip count" in early RE; the state key is kept
+    #     as ``mowStripCount`` so existing automations / unique_ids survive,
+    #     but the sensor that surfaces it now renders as a duration),
+    #   f2=cleanArea (float, m² — task total / denominator for mowProgress),
     #   f4=remainCleanTime(int seconds — ETA for the current task),
     #   f5=cleanPercent(float 0-1, surfaced as mowProgress *100),
     #   f6=mapArea(float, m² — total area of the current map, much larger
     #   than the per-task cleanArea).
-    # The pre-PbCleanInfo names (mowStripCount/totalTaskAreaM2) are kept as
-    # aliases so existing automations and the lovelace card keep working.
     area_raw = _first(fields, 12)
     if isinstance(area_raw, bytes):
         area_fields = _decode_fields(area_raw)

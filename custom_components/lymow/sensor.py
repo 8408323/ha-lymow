@@ -165,11 +165,20 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:progress-clock",
     ),
     LymowSensorDescription(
+        # PbCleanInfo.cleanTime (f1, int seconds): time spent mowing the
+        # current session — initial APK RE mislabelled this as a "strip
+        # count" before the wire layout was confirmed against
+        # PbCleanInfo.encode (Hermes #9770). The entity ``key`` is kept
+        # to preserve existing user automations / entity_ids; only the
+        # display name, device class, and unit have moved to match
+        # what the field actually carries.
         key="mow_strip_count",
-        name="Mow strip count",
+        name="Mow elapsed time",
         value_key="mowStripCount",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:counter",
+        icon="mdi:timer-outline",
         entity_registry_enabled_default=False,
     ),
     # PbCleanInfo (PbOutput field 12) additional fields surfaced from APK RE.
