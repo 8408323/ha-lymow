@@ -594,6 +594,21 @@ MOW_END_TYPES = {
     2: "USER_CANCELLED",
 }
 
+# PbOutput.aeRangeLevel (int enum, field 38): the camera's auto-exposure
+# "gear" setting — controls the AE algorithm's exposure-time range. From
+# PbOutput.fromObject (Hermes fn #9067) name-and-value pairs around the
+# ``aeRangeLevel`` branch. MAX is the brightest; NONE means AE auto-controlled.
+AE_RANGE_LEVELS = {
+    0: "NONE",
+    1: "1",
+    2: "2",
+    3: "3",
+    4: "4",
+    5: "5",
+    6: "6",
+    7: "MAX",
+}
+
 # PbRobotInfo.startMode (int): how the current task was started.
 START_MODES = {
     0: "NONE",

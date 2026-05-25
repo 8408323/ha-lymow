@@ -1376,6 +1376,28 @@ def test_decode_pboutput_heated_lens_times_drops_sign_extended_negative() -> Non
     assert "heatedLensTimes" not in decode_pboutput(pb)
 
 
+def test_decode_pboutput_ae_range_level_resolves_to_label() -> None:
+    """PbOutput.f38 is the camera auto-exposure gear int enum 0..7 — the
+    decoder maps it to the AE_RANGE_LEVELS label so a plain LymowSensor
+    reads the string directly. Spot-check NONE (0), an in-range gear, and MAX (7)."""
+    assert decode_pboutput(_build_pboutput() + _field_i32(38, 0))["aeRangeLevel"] == "NONE"
+    assert decode_pboutput(_build_pboutput() + _field_i32(38, 3))["aeRangeLevel"] == "3"
+    assert decode_pboutput(_build_pboutput() + _field_i32(38, 7))["aeRangeLevel"] == "MAX"
+
+
+def test_decode_pboutput_ae_range_level_drops_out_of_range() -> None:
+    """An unknown gear value (firmware drift or wire corruption) must drop
+    the key rather than render an "AE Gear 42" phantom label."""
+    assert "aeRangeLevel" not in decode_pboutput(_build_pboutput() + _field_i32(38, 42))
+    # Sign-extended -1 wraps to 0xFFFFFFFFFFFFFFFF; ``_signed32`` interprets
+    # it as -1, which is outside [0, 7].
+    assert "aeRangeLevel" not in decode_pboutput(_build_pboutput() + _field_i32(38, -1))
+
+
+def test_decode_pboutput_no_ae_range_level_key_when_field38_absent() -> None:
+    assert "aeRangeLevel" not in decode_pboutput(_build_pboutput())
+
+
 def test_decode_pboutput_clean_info_all_fields_together() -> None:
     """All five PbCleanInfo fields coexist in one PbOutput.f12 sub-message."""
     pb = _build_pboutput_with_extras(

@@ -460,6 +460,21 @@ def test_heated_lens_times_sensor_metadata_is_a_total_increasing_counter() -> No
     assert desc.entity_registry_enabled_default is False
 
 
+def test_ae_range_level_sensor_reads_label_string() -> None:
+    """The label string is stored directly by decode_pboutput — the sensor
+    renders the AE gear name (NONE / 1..6 / MAX) without re-mapping."""
+    coord = _make_coord({"aeRangeLevel": "MAX"})
+    desc = next(s for s in SENSORS if s.key == "ae_range_level")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "MAX"
+
+
+def test_ae_range_level_sensor_disabled_by_default() -> None:
+    """Diagnostic field — most users won't care about camera AE tuning."""
+    desc = next(s for s in SENSORS if s.key == "ae_range_level")
+    assert desc.entity_registry_enabled_default is False
+
+
 # ---------------------------------------------------------------------------
 # robot_state sensor
 # ---------------------------------------------------------------------------

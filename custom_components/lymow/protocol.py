@@ -720,6 +720,21 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if 0 <= signed <= 2_147_483_647:
             state["heatedLensTimes"] = signed
 
+    # Camera auto-exposure gear (PbOutput.f38 = int32 enum, tag 304 =
+    # (38<<3)|0 writing ``writer.int32``). Values 0..7 per PbOutput.verify
+    # (Hermes fn #9066) — labels extracted from PbOutput.fromObject
+    # (Hermes fn #9067) around the aeRangeLevel name-and-value branch.
+    # The label is surfaced (not the raw int) so a plain LymowSensor reads
+    # it directly — out-of-range wire data drops the key rather than
+    # rendering a phantom "AE Gear 42".
+    ae_raw = _first(fields, 38)
+    if isinstance(ae_raw, int):
+        from .const import AE_RANGE_LEVELS
+
+        signed = _signed32(ae_raw)
+        if signed in AE_RANGE_LEVELS:
+            state["aeRangeLevel"] = AE_RANGE_LEVELS[signed]
+
     return state
 
 
