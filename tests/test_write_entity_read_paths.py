@@ -268,22 +268,24 @@ def test_number_native_value_handles_empty_state_without_raising(factory) -> Non
 
 
 @pytest.mark.parametrize(
-    "factory,expected_option_in",
+    "factory,expected_label",
     [
-        # chargingMode=0 from populated state → "Follow perimeter"
-        (lambda c: ChargingModeSelect(c, DEVICE), ("Follow perimeter", "Direct route")),
-        # zoneOrder=1 → "Custom"
-        (lambda c: ZoneOrderSelect(c, DEVICE), ("Optimize", "Custom")),
+        # _populated_state seeds chargingMode=0 → "Follow perimeter"; a value-to-label
+        # inversion bug would render "Direct route" here and break the assertion.
+        (lambda c: ChargingModeSelect(c, DEVICE), "Follow perimeter"),
+        # _populated_state seeds zoneOrder=1 → "Custom".
+        (lambda c: ZoneOrderSelect(c, DEVICE), "Custom"),
     ],
 )
-def test_select_current_option_is_a_known_label(factory, expected_option_in) -> None:
-    """Selects must map the wire int into a labelled option. A None here
-    means either (a) the producer key drifted (taskConfig.chargingMode →
-    something else), or (b) the wire value isn't in the _value_to_label map."""
+def test_select_current_option_matches_seeded_wire_value(factory, expected_label) -> None:
+    """Selects must map each concrete wire int to its exact documented label.
+    An ``in`` check (accepting any label from the option set) would let a
+    reversed _value_to_label mapping pass — assert the unique expected label
+    instead."""
     coord = _make_coord(_populated_state())
     entity = factory(coord)
-    assert entity.current_option in expected_option_in, (
-        f"{type(entity).__name__}.current_option = {entity.current_option!r}, expected one of {expected_option_in}"
+    assert entity.current_option == expected_label, (
+        f"{type(entity).__name__}.current_option = {entity.current_option!r}, expected {expected_label!r}"
     )
 
 
