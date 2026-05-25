@@ -638,6 +638,29 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if theta_rad is not None:
             state["poseThetaRad"] = _decode_f32(theta_rad)
 
+    # Live charging-station pose (PbOutput field 24 = PbPose — same sub-message
+    # type as f14, per PbOutput.encode in the APK). The map-query path already
+    # decodes the dock under ``mapData.chargingStation`` as ``{x, y, theta}``;
+    # this is the LIVE update channel — pushed whenever the dock moves or is
+    # re-detected without re-querying the full map. Surfaced under
+    # ``chargingStationLoc`` (top-level state, same ``{x, y, theta}`` shape as
+    # the map-derived entry) so a card can pick whichever is fresher.
+    dock_raw = _first(fields, 24)
+    if isinstance(dock_raw, bytes):
+        dock_fields = _decode_fields(dock_raw)
+        d_east = _first(dock_fields, 1)
+        d_north = _first(dock_fields, 2)
+        d_theta = _first(dock_fields, 3)
+        dock: dict[str, float] = {}
+        if d_east is not None:
+            dock["x"] = _decode_f32(d_east)
+        if d_north is not None:
+            dock["y"] = _decode_f32(d_north)
+        if d_theta is not None:
+            dock["theta"] = _decode_f32(d_theta)
+        if dock:
+            state["chargingStationLoc"] = dock
+
     # Mowing schedules: PbOutput field 16 = PbSchedules { tasks(1) = [PbSchedule] }.
     # The QUERY_SCHEDULES reply carries the full list (verified against a live
     # capture of the app — the input and output PbSchedule are the same message).
