@@ -154,8 +154,7 @@ async def test_turn_off_calls_coordinator() -> None:
 
 
 async def test_async_setup_entry_skips_async_add_entities_when_no_devices() -> None:
-    """coordinator.devices == [] → no feature switches; the early `if feature_entities:`
-    guard must keep async_add_entities from being called with an empty list."""
+    """Empty devices list must not call async_add_entities with an empty list."""
     from lymow.const import DOMAIN
 
     coord = MagicMock()

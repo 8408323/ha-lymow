@@ -67,12 +67,7 @@ def _nogo_zone(bi: bytes, pp: bytes | None = None, parent: bytes | None = None) 
 
 
 def test_go_zone_basic_info_with_wrong_wire_type_is_skipped() -> None:
-    """If goZone.f1 (BasicInfo) arrives as a varint, the BI branch is skipped.
-
-    Wire reality this models: a robot or man-in-the-middle sends a wrong-typed
-    field. The decoder must not raise — the zone is still emitted but with no
-    BI-derived attributes (hashId, polygon, isEnabled).
-    """
+    """Wrong-typed goZone.f1 (BasicInfo) skips BI branch — zone emitted without attrs."""
     zone_pb = _field_i32(1, 99) + _field_bytes(3, _field_i32(3, 0))
     content = _field_bytes(1, zone_pb)
     out = decode_map_response(_map_resp(content))
@@ -233,13 +228,7 @@ def test_delete_zone_preserves_fixed64_wire_field() -> None:
 
 
 def test_delete_zone_loop_continues_past_repeated_fixed_fields() -> None:
-    """Multiple wire-5 fields in a row force the loop-continuation branch on
-    the elif (covers protocol.py 254→239 — the back-edge of the for-loop).
-
-    The trailing varint field forces the wt==5 branch to fall through to the
-    next iteration body (rather than just to loop exit) so coverage records the
-    inter-iteration arc, not just enter-and-exit.
-    """
+    """Multiple wire-5 fields force loop back-edge coverage (protocol.py 254→239)."""
     tag5 = bytes([(5 << 3) | 5])
     f5 = tag5 + struct.pack("<I", 0x11111111)
     # A varint field 7 (wire type 0), value 42 → tag 0x38, then 0x2a.

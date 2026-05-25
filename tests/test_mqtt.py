@@ -386,10 +386,7 @@ def test_dispatch_routes_notify(monkeypatch):
 
 
 def test_dispatch_silently_drops_known_thing_unknown_suffix():
-    """A topic that matches a known thing but ends in neither /pboutput nor
-    /notify-app must be ignored without raising (e.g. /shadow/update or any
-    future AWS IoT topic the integration doesn't yet handle). Covers the
-    fall-through after the elif (mqtt.py: 252 → exit)."""
+    """Known-thing topic with unrecognized suffix must be ignored without raising."""
     state_events: list = []
     online_events: list = []
     client = LymowMqttClient("h", "eu-west-1", lambda *a: state_events.append(a), lambda *a: online_events.append(a))

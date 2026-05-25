@@ -2569,8 +2569,7 @@ async def test_async_delete_nogo_zone_sends_command_then_queries_map() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_last_clean_summary_without_totals_skips_them() -> None:
-    """clean_summary may be missing total_clean_time / total_clean_area — both
-    branches must skip without setting state keys (cov: 493→495, 495→498)."""
+    """Missing total_clean_time / total_clean_area branches skip without setting keys."""
     coord, _, api = _make_coordinator()
     api.get_clean_history.return_value = {
         "clean_history": [],
@@ -2584,8 +2583,7 @@ async def test_fetch_last_clean_summary_without_totals_skips_them() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_last_clean_last_entry_without_optional_fields() -> None:
-    """A clean_history entry may omit clean_area / clean_time / date — each
-    branch must skip silently (cov: 509→511, 511→513, 513→518)."""
+    """Entry without clean_area / clean_time / date — each branch skips silently."""
     coord, _, api = _make_coordinator()
     api.get_clean_history.return_value = {
         # entry has neither clean_area, clean_time nor date — only percent/used_battery
@@ -2603,9 +2601,7 @@ async def test_fetch_last_clean_last_entry_without_optional_fields() -> None:
 
 @pytest.mark.asyncio
 async def test_fetch_backup_map_entry_without_any_known_file_key_emits_none() -> None:
-    """If a backup entry carries none of the legacy file-key aliases, the
-    fallback loop exits without finding one and `file` stays None
-    (cov: 569→573, the break-less path)."""
+    """Backup entry without known file-key aliases leaves `file` as None (break-less path)."""
     coord, _, api = _make_coordinator()
     api.get_backup_map_list.return_value = [
         {"name": "no-file-here", "backup_time": 12345}  # no map_file / key / etc.
@@ -2620,8 +2616,7 @@ async def test_fetch_backup_map_entry_without_any_known_file_key_emits_none() ->
 
 @pytest.mark.asyncio
 async def test_update_zone_cut_height_unknown_hash_does_not_mutate_any_zone() -> None:
-    """An unknown hash_id must walk the goZones list without break (cov: 842→846,
-    843→842). The map is still published, but cutHeight on every zone is unchanged."""
+    """Unknown hash_id walks goZones without break — cutHeight unchanged on every zone."""
     import copy
 
     coord, _, _ = _make_coordinator()
@@ -2639,8 +2634,7 @@ async def test_update_zone_cut_height_unknown_hash_does_not_mutate_any_zone() ->
 
 @pytest.mark.asyncio
 async def test_update_zone_polygon_does_not_duplicate_existing_modify_hash() -> None:
-    """If hash_id is already in modifyHashs the list must NOT grow on a second
-    polygon edit (cov: 882→884, the False branch of `if hash_id not in ...`)."""
+    """hash_id already in modifyHashs must not grow on second edit (False branch)."""
     import copy
 
     coord, _, _ = _make_coordinator()
@@ -2663,8 +2657,7 @@ async def test_update_zone_polygon_does_not_duplicate_existing_modify_hash() -> 
 
 @pytest.mark.asyncio
 async def test_start_video_session_endpoints_without_https_skips_ice() -> None:
-    """A WebRTC session whose signalingEndpoints lacks the HTTPS URL must not
-    attempt to fetch ICE servers (cov: 1128→1134, the False guard)."""
+    """Missing HTTPS in signalingEndpoints skips ICE server fetch (False guard)."""
     coord, _, api = _make_coordinator()
     creds = {"accessKeyId": "AK", "secretAccessKey": "SK", "sessionToken": "ST"}
     api.start_video_session = AsyncMock(
@@ -2681,8 +2674,7 @@ async def test_start_video_session_endpoints_without_https_skips_ice() -> None:
 
 @pytest.mark.asyncio
 async def test_update_zone_enabled_unknown_hash_does_not_mutate_zones() -> None:
-    """Unknown hash → both go-zone and nogo-zone passes must walk the lists
-    without break and without mutating (cov: 1334→1338, 1335→1334)."""
+    """Unknown hash walks goZones and nogoZones without break or mutation."""
     import copy
 
     coord, _, _ = _make_coordinator()

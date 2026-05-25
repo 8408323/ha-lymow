@@ -549,11 +549,7 @@ async def test_async_create_dashboard_swallows_errors() -> None:
 
 
 async def test_async_create_dashboard_skips_save_when_store_has_no_async_save() -> None:
-    """A dashboards entry without `async_save` (older Lovelace shape) must be a no-op.
-
-    Covers the False branch of `if dashboard_store and hasattr(...)`. The
-    dashboard is still marked created so we don't retry it on every reload.
-    """
+    """Older Lovelace store without async_save is a no-op; still mark dashboard created."""
     reg = _FakeRegistry({"t_map": "sensor.t_map", "t": "lawn_mower.t"})
     hass = MagicMock()
     hass.data = {}
@@ -581,11 +577,7 @@ async def test_async_create_dashboard_skips_save_when_store_has_no_async_save() 
 
 
 async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> None:
-    """If the bundled www/ directory is absent (e.g. dev install without assets),
-    the integration must still set up — just without registering the card path.
-
-    Covers the False branch of `if www_path.is_dir():` in async_setup_entry.
-    """
+    """Missing www/ dir must still allow setup; card path simply not registered."""
     hass = _make_hass(www_registered=False)
     entry = _make_entry()
     auth = _make_auth(_make_tokens(), _make_creds())
@@ -618,9 +610,7 @@ async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> No
 
 
 async def test_async_setup_entry_skips_dashboard_task_when_already_created() -> None:
-    """Once _DASHBOARD_CREATED_KEY is set, async_setup_entry must NOT spawn the
-    dashboard task again (covers the False branch of the
-    `if not hass.data.get(_DASHBOARD_CREATED_KEY):` guard)."""
+    """Already-set _DASHBOARD_CREATED_KEY must skip spawning the dashboard task."""
     hass = _make_hass(www_registered=True)
     hass.data[_lymow._DASHBOARD_CREATED_KEY] = True
     entry = _make_entry()

@@ -186,8 +186,7 @@ async def test_async_setup_entry_registers_listener() -> None:
 
 
 async def test_async_setup_entry_skips_async_add_entities_when_no_devices() -> None:
-    """coordinator.devices == [] → device_numbers is empty; the early
-    `if device_numbers:` guard must prevent calling async_add_entities with []."""
+    """Empty devices list must not call async_add_entities with an empty batch."""
     from lymow.const import DOMAIN
 
     coord = MagicMock()
@@ -208,8 +207,7 @@ async def test_async_setup_entry_skips_async_add_entities_when_no_devices() -> N
 
 
 async def test_async_setup_entry_listener_skips_already_added_zones() -> None:
-    """When the listener fires again with the same map data, zones already in
-    `added` must be skipped (covers the False branch of `if key not in added`)."""
+    """Listener re-firing on same map data must skip zones already in `added`."""
     from lymow.const import DOMAIN
 
     coord = _make_coord({"mapData": {"goZones": [_ZONE]}})
