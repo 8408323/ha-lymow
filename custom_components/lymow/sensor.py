@@ -408,6 +408,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowSchedulesSensor(coordinator, device))
         entities.append(LymowLastCleanSensor(coordinator, device))
         entities.append(LymowRobotTimezoneSensor(coordinator, device))
+        entities.append(LymowHeadlightWindowSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -853,3 +854,76 @@ class LymowRobotTimezoneSensor(CoordinatorEntity[LymowCoordinator], SensorEntity
         if seconds is None:
             return None
         return {"offset_seconds": seconds, "offset_hours": round(seconds / 3600, 2)}
+
+
+# Camera-headlight schedule window — read-side companion to
+# ``lymow.set_night_mode``. Reads PbRobotConfig.openLedTime / closeLedTime
+# (f14/f15). The wire has no "schedule enabled" bit: setNightMode rewrites
+# the full window each press and co-publishes SIGNAL_TURN_OFF_CAMERA_LIGHT
+# to disable the light *now* (see encode_set_night_mode). So this sensor is
+# purely descriptive — it shows *what window is configured*; the existing
+# Camera light Select shows whether the light is currently on.
+class LymowHeadlightWindowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Headlight schedule window, formatted as ``HH:MM–HH:MM``."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:car-light-high"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_headlight_window"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Headlight schedule"
+
+    @property
+    def _times(self) -> tuple[str | None, str | None]:
+        # Walk each level defensively: a truthy non-dict at any layer (from a
+        # malformed cache hydrate / future restore source) would crash the
+        # next .get with AttributeError mid-render and break the entity. The
+        # canonical shape is data[thing] -> {"robotConfig": {...}}, but any
+        # deviation must drop to unknown rather than raise.
+        data = self.coordinator.data
+        if not isinstance(data, dict):
+            return None, None
+        thing_state = data.get(self._thing_name)
+        if not isinstance(thing_state, dict):
+            return None, None
+        cfg = thing_state.get("robotConfig")
+        if not isinstance(cfg, dict):
+            return None, None
+        return self._format(cfg.get("openLedTime")), self._format(cfg.get("closeLedTime"))
+
+    @staticmethod
+    def _format(tz: Any) -> str | None:
+        # decode_robot_config already validates 0-23 / 0-59 before surfacing
+        # the dict, but coordinator state could come from a less-strict source
+        # someday (a future restore-from-cache, an integration-internal seed,
+        # or a partial pboutput that slipped through). Re-validate the keys
+        # here so a missing or wrong-typed entry returns None instead of
+        # raising mid-render and breaking the entity update.
+        if not isinstance(tz, dict):
+            return None
+        hour = tz.get("hour")
+        minute = tz.get("minute")
+        if not isinstance(hour, int) or not isinstance(minute, int):
+            return None
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+        return f"{hour:02d}:{minute:02d}"
+
+    @property
+    def native_value(self) -> str | None:
+        open_s, close_s = self._times
+        if open_s is None or close_s is None:
+            return None
+        # En-dash (not hyphen) to match the app's UI rendering.
+        return f"{open_s}–{close_s}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        open_s, close_s = self._times
+        if open_s is None and close_s is None:
+            return None
+        return {"open_time": open_s, "close_time": close_s}

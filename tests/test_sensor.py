@@ -1198,8 +1198,6 @@ def test_robot_timezone_sensor_unknown_when_offset_missing_or_out_of_bounds() ->
 
 
 async def test_async_setup_entry_registers_robot_timezone_sensor() -> None:
-    from unittest.mock import MagicMock
-
     from lymow.const import DOMAIN
     from lymow.sensor import LymowRobotTimezoneSensor
 
@@ -1214,3 +1212,146 @@ async def test_async_setup_entry_registers_robot_timezone_sensor() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
     assert any(isinstance(e, LymowRobotTimezoneSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# LymowHeadlightWindowSensor — robotConfig.openLedTime / closeLedTime
+# ---------------------------------------------------------------------------
+
+
+def _make_hw_coord(open_tz: dict | None = None, close_tz: dict | None = None) -> MagicMock:
+    state: dict = {"robotConfig": {}}
+    if open_tz is not None:
+        state["robotConfig"]["openLedTime"] = open_tz
+    if close_tz is not None:
+        state["robotConfig"]["closeLedTime"] = close_tz
+    return _make_coord(state)
+
+
+def test_headlight_window_sensor_metadata_and_disabled_default() -> None:
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    e = LymowHeadlightWindowSensor(_make_hw_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_headlight_window"
+    assert e._attr_name == "Headlight schedule"
+    assert e._attr_entity_registry_enabled_default is False
+
+
+def test_headlight_window_sensor_formats_window_with_en_dash() -> None:
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    e = LymowHeadlightWindowSensor(
+        _make_hw_coord({"hour": 21, "minute": 0}, {"hour": 6, "minute": 30}),
+        DEVICE,
+    )
+    # En-dash (U+2013), matches the app's UI typography.
+    assert e.native_value == "21:00–06:30"
+    assert e.extra_state_attributes == {"open_time": "21:00", "close_time": "06:30"}
+
+
+def test_headlight_window_sensor_unknown_when_either_end_missing() -> None:
+    """One end missing → unknown state, but the present end still shows up in
+    attributes so the user can spot which side dropped."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    only_open = LymowHeadlightWindowSensor(_make_hw_coord({"hour": 21, "minute": 0}, None), DEVICE)
+    assert only_open.native_value is None
+    assert only_open.extra_state_attributes == {"open_time": "21:00", "close_time": None}
+
+    only_close = LymowHeadlightWindowSensor(_make_hw_coord(None, {"hour": 6, "minute": 0}), DEVICE)
+    assert only_close.native_value is None
+    assert only_close.extra_state_attributes == {"open_time": None, "close_time": "06:00"}
+
+
+def test_headlight_window_sensor_unknown_when_robot_config_missing() -> None:
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    # No robotConfig key at all → state unknown, no attributes (avoids a
+    # bare {"open_time": None, "close_time": None} attribute dict that
+    # would just be noise in the UI).
+    e = LymowHeadlightWindowSensor(_make_coord({}), DEVICE)
+    assert e.native_value is None
+    assert e.extra_state_attributes is None
+
+
+def test_headlight_window_sensor_unknown_when_wire_payload_not_dict() -> None:
+    """decode_robot_config already validates, but guard the sensor too in
+    case state is built from a different source someday."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    coord = MagicMock()
+    coord.data = {THING: {"robotConfig": {"openLedTime": "21:00", "closeLedTime": 600}}}
+    assert LymowHeadlightWindowSensor(coord, DEVICE).native_value is None
+
+
+def test_headlight_window_sensor_unknown_when_robot_config_not_dict() -> None:
+    """A non-dict ``robotConfig`` from a malformed cache hydrate (list, str,
+    int, …) must not crash ``.get`` — the sensor returns unknown."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    for bad in ([], ["junk"], "not-a-dict", 42):
+        coord = MagicMock()
+        coord.data = {THING: {"robotConfig": bad}}
+        e = LymowHeadlightWindowSensor(coord, DEVICE)
+        assert e.native_value is None
+        assert e.extra_state_attributes is None
+
+
+def test_headlight_window_sensor_unknown_when_outer_layers_not_dict() -> None:
+    """The same defensive guard applies to every layer above ``robotConfig``:
+    a truthy non-dict at ``coordinator.data`` or ``data[thing]`` (e.g. from a
+    malformed cache hydrate) must drop to unknown, not raise AttributeError
+    halfway through the walk. Build the entity with a sane coordinator (so
+    DeviceInfo construction works), then mutate coordinator.data to the
+    abnormal shape and re-read."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    # coordinator.data itself flips to a non-dict.
+    e_data = LymowHeadlightWindowSensor(_make_coord({}), DEVICE)
+    e_data.coordinator.data = "not-a-dict"
+    assert e_data.native_value is None
+    assert e_data.extra_state_attributes is None
+
+    # data[thing] flips to a non-dict.
+    e_thing = LymowHeadlightWindowSensor(_make_coord({}), DEVICE)
+    e_thing.coordinator.data = {THING: ["bogus"]}
+    assert e_thing.native_value is None
+    assert e_thing.extra_state_attributes is None
+
+
+def test_headlight_window_sensor_unknown_when_partial_or_out_of_range_dict() -> None:
+    """A dict missing one key, with wrong types, or with out-of-range values
+    must return None — never raise during state rendering."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    # Missing 'minute' key.
+    coord_missing = MagicMock()
+    coord_missing.data = {THING: {"robotConfig": {"openLedTime": {"hour": 21}}}}
+    assert LymowHeadlightWindowSensor(coord_missing, DEVICE).native_value is None
+    # Non-int 'hour'.
+    coord_str_hour = MagicMock()
+    coord_str_hour.data = {THING: {"robotConfig": {"openLedTime": {"hour": "21", "minute": 0}}}}
+    assert LymowHeadlightWindowSensor(coord_str_hour, DEVICE).native_value is None
+    # Out-of-range hour.
+    e_bad_hour = LymowHeadlightWindowSensor(_make_hw_coord({"hour": 24, "minute": 0}, None), DEVICE)
+    assert e_bad_hour.native_value is None
+    # Out-of-range minute.
+    e_bad_min = LymowHeadlightWindowSensor(_make_hw_coord({"hour": 5, "minute": 60}, None), DEVICE)
+    assert e_bad_min.native_value is None
+
+
+async def test_async_setup_entry_registers_headlight_window_sensor() -> None:
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert any(isinstance(e, LymowHeadlightWindowSensor) for e in added)
