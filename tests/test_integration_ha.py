@@ -20,7 +20,7 @@ See ``.github/workflows/ha-tests.yml`` for the CI invocation. Locally:
     uv run --isolated \\
         --with "pytest-homeassistant-custom-component==0.13.316" \\
         --with "pytest>=9.0,<10" --with "pytest-cov==7.0.0" \\
-        --with aiomqtt --with bleak --with voluptuous \\
+        --with aiomqtt --with voluptuous \\
         pytest tests/test_integration_ha.py -v
 
 The file gracefully skips itself if PHCC isn't installed so a stray
@@ -29,6 +29,7 @@ The file gracefully skips itself if PHCC isn't installed so a stray
 
 from __future__ import annotations
 
+import importlib
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -39,20 +40,18 @@ pytest_plugins = ["pytest_homeassistant_custom_component"]
 # Skip the whole file if PHCC + real HA aren't available. The regular `pytest
 # tests/` invocation in the main env does NOT have these — and that's fine,
 # the rest of the suite covers the unit-level behavior.
-try:
-    import pytest_homeassistant_custom_component  # noqa: F401
-    from homeassistant.config_entries import ConfigEntryState
-    from pytest_homeassistant_custom_component.common import (
-        MockConfigEntry,
-        MockModule,
-        mock_integration,
-    )
-except ImportError:  # pragma: no cover - env-dependent
-    pytest.skip(
-        "pytest-homeassistant-custom-component not installed; run under uv "
-        "run --isolated --with pytest-homeassistant-custom-component",
-        allow_module_level=True,
-    )
+pytest.importorskip(
+    "pytest_homeassistant_custom_component",
+    reason="pytest-homeassistant-custom-component not installed; run under uv "
+    "run --isolated --with pytest-homeassistant-custom-component",
+)
+
+from homeassistant.config_entries import ConfigEntryState  # noqa: E402
+from pytest_homeassistant_custom_component.common import (  # noqa: E402
+    MockConfigEntry,
+    MockModule,
+    mock_integration,
+)
 
 # The conftest.py at tests/ has its own importlib loader that creates a parallel
 # ``lymow.*`` module tree for the unit tests. That conflicts with HA's
@@ -67,7 +66,7 @@ for _mod in list(sys.modules):
 # Force-import the integration as a submodule of ``custom_components`` so that
 # ``patch("custom_components.lymow.X")`` can resolve via getattr — mock.patch
 # uses pkgutil which doesn't trigger lazy submodule discovery.
-import custom_components.lymow  # noqa: E402, F401
+importlib.import_module("custom_components.lymow")
 
 
 @pytest.fixture(autouse=True)
@@ -244,11 +243,9 @@ async def test_device_is_registered_with_correct_identifier(hass, _patched_lymow
     devices = dr.async_entries_for_config_entry(dev_reg, entry.entry_id)
     assert len(devices) == 1
     device = devices[0]
-    # Identifier must include the thing-name we returned from the mocked API.
+    # Identifier must match the thing-name we returned from the mocked API.
     identifiers = device.identifiers
-    assert any("thing-test-1" in str(ident) for ident in identifiers), (
-        f"thing-name not in device identifiers: {identifiers}"
-    )
+    assert ("lymow", "thing-test-1") in identifiers, f"thing-name not in device identifiers: {identifiers}"
 
 
 # ---------------------------------------------------------------------------

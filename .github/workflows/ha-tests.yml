@@ -37,7 +37,6 @@ jobs:
             --with "pytest>=9.0,<10" \
             --with "pytest-cov==7.0.0" \
             --with aiomqtt \
-            --with bleak \
             --with voluptuous \
             --with aiohttp \
             pytest tests/test_integration_ha.py -v --tb=short
