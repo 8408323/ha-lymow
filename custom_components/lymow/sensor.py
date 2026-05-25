@@ -212,6 +212,16 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:radiator",
         entity_registry_enabled_default=False,
     ),
+    # Camera auto-exposure gear (PbOutput.f38) — label string (NONE / 1..6 /
+    # MAX) decoded in protocol.py from the AE_RANGE_LEVELS enum. Disabled by
+    # default — diagnostic.
+    LymowSensorDescription(
+        key="ae_range_level",
+        name="Camera AE gear",
+        value_key="aeRangeLevel",
+        icon="mdi:camera-iris",
+        entity_registry_enabled_default=False,
+    ),
     # Robot pose in local ENU frame (pboutput field 14), disabled by default —
     # mostly useful for debugging and advanced visualisations.
     LymowSensorDescription(
