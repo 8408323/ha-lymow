@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import UnitOfTime
 from lymow.sensor import (
     SENSORS,
     LymowErrorSensor,
@@ -421,15 +423,25 @@ def test_mow_progress_sensor_returns_none_when_absent() -> None:
 
 
 def test_mow_strip_count_sensor_returns_value() -> None:
-    coord = _make_coord({"mowStripCount": 42})
+    """The state key is still ``mowStripCount`` (kept to preserve user
+    automations / entity_ids), but f1 is actually ``cleanTime`` in seconds."""
+    coord = _make_coord({"mowStripCount": 1800})
     desc = next(s for s in SENSORS if s.key == "mow_strip_count")
     sensor = LymowSensor(coord, DEVICE, desc)
-    assert sensor.native_value == 42
+    assert sensor.native_value == 1800
 
 
 def test_mow_strip_count_sensor_disabled_by_default() -> None:
     desc = next(s for s in SENSORS if s.key == "mow_strip_count")
     assert desc.entity_registry_enabled_default is False
+
+
+def test_mow_strip_count_sensor_now_rendered_as_duration_in_seconds() -> None:
+    """f1 is cleanTime (seconds), not a strip counter — match the metadata."""
+    desc = next(s for s in SENSORS if s.key == "mow_strip_count")
+    assert desc.name == "Mow elapsed time"
+    assert desc.device_class == SensorDeviceClass.DURATION
+    assert desc.native_unit_of_measurement == UnitOfTime.SECONDS
 
 
 # ---------------------------------------------------------------------------
