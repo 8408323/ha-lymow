@@ -735,6 +735,20 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if signed in AE_RANGE_LEVELS:
             state["aeRangeLevel"] = AE_RANGE_LEVELS[signed]
 
+    # outputCtrl (PbOutput.f18 = varint enum, tag 144 = (18<<3)|0 with
+    # ``writer.uint32``). Tells you what the robot is replying to — e.g. a
+    # pboutput with outputCtrl=QUERY_MAP is the answer to a userCtrl=19
+    # query. Surfaced as the label string via OUTPUT_CTRLS so a plain
+    # LymowSensor reads it directly. An unknown code (firmware drift)
+    # drops the key rather than rendering a phantom label.
+    out_ctrl = _first(fields, 18)
+    if isinstance(out_ctrl, int):
+        from .const import OUTPUT_CTRLS
+
+        signed = _signed32(out_ctrl)
+        if signed in OUTPUT_CTRLS:
+            state["outputCtrl"] = OUTPUT_CTRLS[signed]
+
     return state
 
 

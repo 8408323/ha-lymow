@@ -475,6 +475,21 @@ def test_ae_range_level_sensor_disabled_by_default() -> None:
     assert desc.entity_registry_enabled_default is False
 
 
+def test_output_ctrl_sensor_reads_label_string() -> None:
+    """outputCtrl is the robot's "what I'm replying to" indicator; the
+    decoder stores the label string so the sensor renders it directly."""
+    coord = _make_coord({"outputCtrl": "QUERY_MAP"})
+    desc = next(s for s in SENSORS if s.key == "output_ctrl")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "QUERY_MAP"
+
+
+def test_output_ctrl_sensor_disabled_by_default() -> None:
+    """Diagnostic — useful for traffic debugging but noise on a normal card."""
+    desc = next(s for s in SENSORS if s.key == "output_ctrl")
+    assert desc.entity_registry_enabled_default is False
+
+
 # ---------------------------------------------------------------------------
 # robot_state sensor
 # ---------------------------------------------------------------------------
