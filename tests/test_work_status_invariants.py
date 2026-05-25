@@ -70,9 +70,7 @@ _INTENTIONALLY_UNASSIGNED: set[int] = {
 
 
 def test_no_status_is_in_more_than_one_group() -> None:
-    """A status in two groups makes activity() ambiguous — the first
-    matching ``if ws in ...`` wins, but that's just an implementation
-    detail. Forbid overlap so the mapping is unambiguous."""
+    """Overlap makes activity() ambiguous (depends on if-chain order) — forbid it."""
     seen: dict[int, str] = {}
     overlaps: list[tuple[int, str, str]] = []
     for group_name, members in _ALL_GROUPS.items():
@@ -87,15 +85,10 @@ def test_no_status_is_in_more_than_one_group() -> None:
 
 
 def test_every_status_is_grouped_or_intentionally_unassigned() -> None:
-    """A new WORK_STATUS_* added without a group assignment will silently
-    fall to ``LawnMowerActivity.ERROR``. Force the author to either put it
-    in a group or add it to ``_INTENTIONALLY_UNASSIGNED`` with a comment."""
+    """Unassigned WORK_STATUS_* falls silently to ERROR — force an explicit choice."""
     grouped = set().union(*_ALL_GROUPS.values())
     overlap = grouped & _INTENTIONALLY_UNASSIGNED
-    assert not overlap, (
-        "WORK_STATUS_* values cannot be both grouped and intentionally unassigned: "
-        f"{sorted(overlap)}"
-    )
+    assert not overlap, f"WORK_STATUS_* values cannot be both grouped and intentionally unassigned: {sorted(overlap)}"
     accounted_for = grouped | _INTENTIONALLY_UNASSIGNED
     orphans = {name: val for name, val in _ALL_STATUSES.items() if val not in accounted_for}
     assert not orphans, (
@@ -106,9 +99,7 @@ def test_every_status_is_grouped_or_intentionally_unassigned() -> None:
 
 
 def test_all_status_values_are_unique() -> None:
-    """Two WORK_STATUS_* names with the same int would silently shadow each
-    other through the entire codebase (group membership tests, switch/if
-    chains, coordinator dispatch)."""
+    """Duplicate int values would silently shadow each other across the codebase."""
     by_value: dict[int, list[str]] = {}
     for name, val in _ALL_STATUSES.items():
         by_value.setdefault(val, []).append(name)
@@ -153,11 +144,7 @@ _EXPECTED_ACTIVITY: dict[str, str] = {
 
 
 def test_activity_mapping_covers_every_defined_status() -> None:
-    """The snapshot above must mention every WORK_STATUS_* defined in
-    const.py — so adding a new status forces the author to declare what HA
-    activity it should map to. Without this guard a new constant could pass
-    every other test (no group overlap, value unique) but slip through
-    unnoticed by frontends."""
+    """Snapshot must mention every WORK_STATUS_* so new ones can't slip through."""
     missing = set(_ALL_STATUSES) - set(_EXPECTED_ACTIVITY)
     extra = set(_EXPECTED_ACTIVITY) - set(_ALL_STATUSES)
     assert not missing, f"_EXPECTED_ACTIVITY is missing entries for: {sorted(missing)}"
@@ -166,10 +153,7 @@ def test_activity_mapping_covers_every_defined_status() -> None:
 
 @pytest.mark.parametrize("status_name,expected_activity", sorted(_EXPECTED_ACTIVITY.items()))
 def test_activity_mapping_snapshot(status_name: str, expected_activity: str) -> None:
-    """Pin the workStatus → LawnMowerActivity mapping under the real
-    `LymowMower.activity` property. Any change to the groups in const.py that
-    moves a status across activity boundaries (e.g. CHARGING → MOWING) will
-    surface as a failed parametrised case naming the exact status that moved."""
+    """Pin workStatus → LawnMowerActivity so cross-group moves fail with named case."""
     from unittest.mock import MagicMock
 
     from lymow.lawn_mower import LymowMower
@@ -186,9 +170,7 @@ def test_activity_mapping_snapshot(status_name: str, expected_activity: str) -> 
 
 
 def test_offline_short_circuits_to_error_regardless_of_work_status() -> None:
-    """``isOnline=False`` must clamp to ERROR before the workStatus mapping
-    runs — even if MQTT delivered a fresh MOWING state, the device being
-    offline should override it. Documents the precedence of the two checks."""
+    """isOnline=False clamps to ERROR before workStatus mapping — locks precedence."""
     from unittest.mock import MagicMock
 
     from lymow.lawn_mower import LymowMower
@@ -206,9 +188,7 @@ def test_offline_short_circuits_to_error_regardless_of_work_status() -> None:
 
 
 def test_missing_work_status_falls_to_offline_default_then_error() -> None:
-    """No workStatus key at all (e.g. coordinator has only REST data, no MQTT
-    yet) defaults to WORK_STATUS_OFFLINE → ERROR. Locks in the safer of two
-    plausible defaults: "ERROR until we know" beats "DOCKED until we know"."""
+    """Missing workStatus key defaults to OFFLINE → ERROR (safer than DOCKED)."""
     from unittest.mock import MagicMock
 
     from lymow.lawn_mower import LymowMower
