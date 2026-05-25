@@ -1344,6 +1344,38 @@ def test_decode_pboutput_map_area_decoded() -> None:
     assert abs(state["mapAreaM2"] - 4250.0) < 1.0
 
 
+def test_decode_pboutput_heated_lens_times_decoded_as_counter() -> None:
+    """PbOutput.f37 = uint32 — lens heater fire count, monotonically
+    increasing. Surfaces as ``heatedLensTimes`` for a maintenance sensor."""
+    pb = _build_pboutput() + _field_i32(37, 42)
+    state = decode_pboutput(pb)
+    assert state["heatedLensTimes"] == 42
+
+
+def test_decode_pboutput_no_heated_lens_times_key_when_field37_absent() -> None:
+    """When the robot doesn't report f37 (older firmware / no camera lens
+    on this SKU), the key must stay absent so the sensor doesn't show 0
+    as if the heater has fired zero times."""
+    assert "heatedLensTimes" not in decode_pboutput(_build_pboutput())
+
+
+def test_decode_pboutput_heated_lens_times_zero_surfaces() -> None:
+    """A reported 0 IS meaningful — the heater hasn't fired yet this install.
+    Distinct from "field absent" → key absent."""
+    pb = _build_pboutput() + _field_i32(37, 0)
+    assert decode_pboutput(pb)["heatedLensTimes"] == 0
+
+
+def test_decode_pboutput_heated_lens_times_drops_sign_extended_negative() -> None:
+    """``_decode_varint`` always returns unsigned, so a sign-extended int32
+    -1 (0xFFFFFFFFFFFFFFFF on the wire) would surface as 4-billion+ if we
+    only checked ``>= 0``. ``_signed32`` interprets the wrap-around as -1,
+    which we reject so the sensor doesn't render a nonsense counter."""
+    # _field_i32(37, -1) emits a 10-byte varint = 0xFFFFFFFFFFFFFFFF
+    pb = _build_pboutput() + _field_i32(37, -1)
+    assert "heatedLensTimes" not in decode_pboutput(pb)
+
+
 def test_decode_pboutput_clean_info_all_fields_together() -> None:
     """All five PbCleanInfo fields coexist in one PbOutput.f12 sub-message."""
     pb = _build_pboutput_with_extras(

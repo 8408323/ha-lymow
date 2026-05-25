@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfTime
 from lymow.sensor import (
     SENSORS,
@@ -442,6 +442,22 @@ def test_mow_strip_count_sensor_now_rendered_as_duration_in_seconds() -> None:
     assert desc.name == "Mow elapsed time"
     assert desc.device_class == SensorDeviceClass.DURATION
     assert desc.native_unit_of_measurement == UnitOfTime.SECONDS
+
+
+def test_heated_lens_times_sensor_reads_counter_state() -> None:
+    """PbOutput.f37 → heatedLensTimes; sensor surfaces the live counter."""
+    coord = _make_coord({"heatedLensTimes": 17})
+    desc = next(s for s in SENSORS if s.key == "heated_lens_times")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 17
+
+
+def test_heated_lens_times_sensor_metadata_is_a_total_increasing_counter() -> None:
+    """The heater count only goes up over the install lifetime — TOTAL_INCREASING
+    so HA's long-term-stats handle it correctly."""
+    desc = next(s for s in SENSORS if s.key == "heated_lens_times")
+    assert desc.state_class == SensorStateClass.TOTAL_INCREASING
+    assert desc.entity_registry_enabled_default is False
 
 
 # ---------------------------------------------------------------------------

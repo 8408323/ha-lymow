@@ -702,6 +702,24 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     if isinstance(theft_lock, int):
         state["theftLockEngaged"] = bool(theft_lock)
 
+    # Camera-lens heater fire count (PbOutput.f37 = uint32 — per PbOutput.encode
+    # tag 296 = (37<<3)|0 writing ``writer.uint32``). The lens heater fires when
+    # the camera detects condensation / fog. A monotonically-increasing counter
+    # — useful as a maintenance metric ("the heater has fired N times this
+    # install") and as a coarse weather/condition indicator.
+    #
+    # ``_decode_varint`` always returns an unsigned int, so a sign-extended
+    # int32 (e.g. -1 encoded as a 10-byte varint = 0xFFFFFFFFFFFFFFFF) would
+    # surface as a 4-billion+ counter. Interpret through ``_signed32`` first
+    # so the unsigned wrap-around becomes a negative int (which we then
+    # reject), and cap at int32-max to keep the counter in a sensor-friendly
+    # range.
+    heated_lens = _first(fields, 37)
+    if isinstance(heated_lens, int):
+        signed = _signed32(heated_lens)
+        if 0 <= signed <= 2_147_483_647:
+            state["heatedLensTimes"] = signed
+
     return state
 
 
