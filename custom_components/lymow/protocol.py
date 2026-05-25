@@ -638,6 +638,35 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if theta_rad is not None:
             state["poseThetaRad"] = _decode_f32(theta_rad)
 
+    # Live charging-station pose (PbOutput field 24 = PbPose — same sub-message
+    # type as f14, per PbOutput.encode in the APK). The map-query path already
+    # decodes the dock under ``mapData.chargingStation`` as ``{x, y, theta}``;
+    # this is the LIVE update channel — pushed whenever the dock moves or is
+    # re-detected without re-querying the full map. Surfaced under
+    # ``chargingStationLoc`` (top-level state, same ``{x, y, theta}`` shape as
+    # the map-derived entry) so a card can pick whichever is fresher.
+    dock_raw = _first(fields, 24)
+    if isinstance(dock_raw, bytes):
+        dock_fields = _decode_fields(dock_raw)
+        d_east = _first(dock_fields, 1)
+        d_north = _first(dock_fields, 2)
+        d_theta = _first(dock_fields, 3)
+        dock: dict[str, float] = {}
+        # f1/f2/f3 are wire-type 5 (fixed32) per PbPose.encode, so ``_first``
+        # should return an int — but the wire is untrusted, so a malformed
+        # payload could send the same field number with a length-delimited
+        # wire type and surface bytes here. ``_decode_f32`` would then raise
+        # on ``struct.pack`` of bytes; explicit ``isinstance(int)`` keeps
+        # the decoder robust to wire-type drift.
+        if isinstance(d_east, int):
+            dock["x"] = _decode_f32(d_east)
+        if isinstance(d_north, int):
+            dock["y"] = _decode_f32(d_north)
+        if isinstance(d_theta, int):
+            dock["theta"] = _decode_f32(d_theta)
+        if dock:
+            state["chargingStationLoc"] = dock
+
     # Mowing schedules: PbOutput field 16 = PbSchedules { tasks(1) = [PbSchedule] }.
     # The QUERY_SCHEDULES reply carries the full list (verified against a live
     # capture of the app — the input and output PbSchedule are the same message).

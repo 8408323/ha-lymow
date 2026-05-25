@@ -1241,6 +1241,54 @@ def test_decode_pboutput_pose_enu() -> None:
     assert abs(state["poseThetaRad"] - math.pi / 2) < 0.001
 
 
+def test_decode_pboutput_charging_station_loc_live_pose() -> None:
+    """PbOutput.f24 = PbPose (same sub-message type as f14 robot pose).
+    The live dock-position channel — surfaces as ``chargingStationLoc`` with
+    the ``{x, y, theta}`` shape that matches the map-query path's
+    ``mapData.chargingStation`` entry, so a card can pick whichever is fresher."""
+    import math
+
+    dock = _field_f32(1, 1.5) + _field_f32(2, 2.5) + _field_f32(3, math.pi)
+    pb = _build_pboutput() + _field_bytes(24, dock)
+    state = decode_pboutput(pb)
+    assert abs(state["chargingStationLoc"]["x"] - 1.5) < 0.001
+    assert abs(state["chargingStationLoc"]["y"] - 2.5) < 0.001
+    assert abs(state["chargingStationLoc"]["theta"] - math.pi) < 0.001
+
+
+def test_decode_pboutput_charging_station_loc_partial_present_fields() -> None:
+    """A pboutput carrying only the dock's east/north (no theta) still
+    surfaces, with theta absent — partial updates must not require all
+    three fields."""
+    dock = _field_f32(1, 5.0) + _field_f32(2, 7.0)
+    pb = _build_pboutput() + _field_bytes(24, dock)
+    state = decode_pboutput(pb)
+    assert state["chargingStationLoc"] == {"x": 5.0, "y": 7.0}
+
+
+def test_decode_pboutput_no_charging_station_loc_when_field24_absent() -> None:
+    assert "chargingStationLoc" not in decode_pboutput(_build_pboutput())
+
+
+def test_decode_pboutput_no_charging_station_loc_when_field24_empty() -> None:
+    """An empty f24 sub-message has no decodable scalars — drop the key
+    so a stale-but-known dock entry from the map path isn't shadowed by
+    an empty dict."""
+    pb = _build_pboutput() + _field_bytes(24, b"")
+    assert "chargingStationLoc" not in decode_pboutput(pb)
+
+
+def test_decode_pboutput_charging_station_loc_skips_wire_type_drift() -> None:
+    """PbPose f1/f2/f3 are wire-type 5 (fixed32) per the encoder, but the
+    wire is untrusted — if a malformed payload sends f1 as length-delimited
+    bytes, ``_decode_f32`` would otherwise raise. Drop the offending field
+    and surface the rest."""
+    # f1 sent as wire-type-2 bytes; f2 sent correctly as float32
+    dock = _field_bytes(1, b"\x00\x00") + _field_f32(2, 3.5)
+    pb = _build_pboutput() + _field_bytes(24, dock)
+    assert decode_pboutput(pb)["chargingStationLoc"] == {"y": 3.5}
+
+
 def test_decode_pboutput_no_rtk_when_absent() -> None:
     pb = _build_pboutput()
     state = decode_pboutput(pb)
