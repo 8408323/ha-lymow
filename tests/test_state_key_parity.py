@@ -15,7 +15,7 @@ How we test it:
 - Scrape every consumer key (sensor's ``value_key="..."``,
   binary_sensor's ``_field = "..."``) from the source files via regex.
 - Assert each key appears as a literal string in at least one of the producer
-  modules (coordinator.py, protocol.py, api.py, __init__.py) OR is in the
+  modules (coordinator.py, protocol.py, api.py, mqtt.py) OR is in the
   documented allow-list of keys that originate in cloud REST responses.
 
 The allow-list is the explicit list of keys that come straight from the AWS
@@ -39,13 +39,7 @@ _PRODUCER_FILES = (
     "coordinator.py",
     "protocol.py",
     "api.py",
-    "__init__.py",
-    # Some keys are also referenced for cleanup / dashboard wiring:
-    "switch.py",
-    "device_tracker.py",
-    "select.py",
-    "lawn_mower.py",
-    "number.py",
+    "mqtt.py",
 )
 
 # Keys that originate from the cloud REST API responses (get_device_info,
