@@ -1,16 +1,4 @@
-"""Malformed-payload regression tests for protocol.py decoders/encoders.
-
-These target the *defensive guards* — `isinstance(x, bytes)`, `if x is not None`,
-optional-field skips — that the happy-path tests never trip. They exist to:
-
-1. Lock in the security.md boundary rule: malformed/hostile wire data from the
-   robot must NOT surface as garbage HA state, raise an uncaught exception, or
-   blow up the coordinator update loop.
-2. Drive the 25 partial branches in protocol.py that line coverage alone hides.
-
-When extending: add the *minimal* synthetic payload that exercises one guard;
-don't pile multiple bad fields into one test (it muddles which guard is asserting).
-"""
+"""Malformed-payload regression tests for protocol.py decoders/encoders."""
 
 from __future__ import annotations
 

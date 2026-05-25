@@ -1,9 +1,4 @@
-"""Parity between services.yaml and the services registered by async_setup_entry.
-
-Catches drift where a service is renamed, added, or removed in code without the
-corresponding edit to services.yaml (or vice versa) — a class of regression that
-otherwise only shows up in the HA service-call UI at runtime.
-"""
+"""Parity between services.yaml and the services registered by async_setup_entry."""
 
 from __future__ import annotations
 
