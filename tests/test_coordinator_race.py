@@ -209,16 +209,28 @@ async def test_two_concurrent_async_sync_map_calls_both_publish() -> None:
     await asyncio.sleep(0)
     assert not task_a.done()
 
-    # Second call must not block on the first finishing — it should enter publish
-    # and append to the list while task_a is still parked.
+    # Second call must enter publish WHILE task_a is still parked. A regression
+    # that serialised commands (e.g. wrapped publish in an asyncio.Lock) would
+    # still pass the "both got through eventually" assertion once we release
+    # the first one — so the critical proof is: both payloads in the list AND
+    # task_a still blocked, simultaneously.
     task_b = asyncio.create_task(coord.async_sync_map(THING, map_b))
     await asyncio.sleep(0)
-    # task_b is also parked on the (now-shared) event — but the publish call
-    # itself was entered, so the payload was appended.
+
+    # Concurrency proof, taken BEFORE we release the first publish: task_b
+    # reached publish (its payload landed in the list) without task_a having
+    # returned. A serialising implementation would have task_b parked outside
+    # `_slow_publish` here, so the list would still hold only one entry.
+    assert len(published_in_order) == 2, (
+        "second async_sync_map call did NOT reach publish while the first was parked "
+        f"— got {len(published_in_order)} entries, expected 2. Likely a regression "
+        "that serialises commands (e.g. added a Lock around publish)."
+    )
+    assert not task_a.done(), "task_a should still be parked on publish_finished"
+
     publish_finished.set()
     await asyncio.gather(task_a, task_b)
 
-    assert len(published_in_order) == 2
     # Order is deterministic given how we awaited.
     assert published_in_order[0] != published_in_order[1]
 
