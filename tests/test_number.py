@@ -185,6 +185,59 @@ async def test_async_setup_entry_registers_listener() -> None:
     coord.async_add_listener.assert_called_once()
 
 
+async def test_async_setup_entry_skips_async_add_entities_when_no_devices() -> None:
+    """Empty devices list must not call async_add_entities with an empty batch."""
+    from lymow.const import DOMAIN
+
+    coord = MagicMock()
+    coord.devices = []
+    coord.data = {}
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    add_calls: list[list] = []
+    await async_setup_entry(hass, entry, lambda entities: add_calls.append(list(entities)))
+    # The platform still wires its listener for late device adds, but it must
+    # NOT call async_add_entities with an empty batch.
+    assert all(batch for batch in add_calls), f"empty batch passed to async_add_entities: {add_calls}"
+
+
+async def test_async_setup_entry_listener_skips_already_added_zones() -> None:
+    """Listener re-firing on same map data must skip zones already in `added`."""
+    from lymow.const import DOMAIN
+
+    coord = _make_coord({"mapData": {"goZones": [_ZONE]}})
+    coord.devices = [DEVICE]
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    captured_callback = None
+
+    def _register_listener(cb):
+        nonlocal captured_callback
+        captured_callback = cb
+        return lambda: None
+
+    coord.async_add_listener.side_effect = _register_listener
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    initial_zone_count = sum(1 for e in added if isinstance(e, ZoneCutHeightNumber))
+    assert initial_zone_count == 1
+
+    # Listener fires again — same map data, same hashId → no new entity added.
+    captured_callback()
+    final_zone_count = sum(1 for e in added if isinstance(e, ZoneCutHeightNumber))
+    assert final_zone_count == 1, "duplicate zone entity created on second listener fire"
+
+
 async def test_async_setup_entry_listener_callback_adds_new_zones() -> None:
     """Listener callback dynamically adds new zone entities when data updates."""
     from lymow.const import DOMAIN

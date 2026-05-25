@@ -546,3 +546,86 @@ async def test_async_create_dashboard_swallows_errors() -> None:
     # Must not raise; flag stays unset so a later setup can retry.
     await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
     assert _DASHBOARD_CREATED_KEY not in hass.data
+
+
+async def test_async_create_dashboard_skips_save_when_store_has_no_async_save() -> None:
+    """Older Lovelace store without async_save is a no-op; still mark dashboard created."""
+    reg = _FakeRegistry({"t_map": "sensor.t_map", "t": "lawn_mower.t"})
+    hass = MagicMock()
+    hass.data = {}
+    hass._entity_registry = reg
+    # Store object that intentionally lacks async_save (use a plain object — a
+    # MagicMock would auto-vivify async_save and hide the bug we're guarding against).
+
+    class _LegacyStore:
+        pass
+
+    legacy_store = _LegacyStore()
+    collection = MagicMock()
+
+    async def _create(item):
+        # Collection inserts the legacy-shape store after creation.
+        hass.data["lovelace"]["dashboards"][_DASHBOARD_URL_PATH] = legacy_store
+
+    collection.async_create_item = AsyncMock(side_effect=_create)
+    hass.data["lovelace"] = {"dashboards": {}, "dashboards_collection": collection}
+
+    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
+    # Creation still happens; save is skipped silently.
+    collection.async_create_item.assert_awaited_once()
+    assert hass.data[_DASHBOARD_CREATED_KEY] is True
+
+
+async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> None:
+    """Missing www/ dir must still allow setup; card path simply not registered."""
+    hass = _make_hass(www_registered=False)
+    entry = _make_entry()
+    auth = _make_auth(_make_tokens(), _make_creds())
+    client = _make_client()
+    mqtt = _make_mqtt()
+    coord = _make_coordinator()
+
+    fake_path = MagicMock()
+    fake_path.is_dir.return_value = False
+    # Path(__file__).parent / "www" → the second `/` op returns fake_path.
+    parent = MagicMock()
+    parent.__truediv__ = MagicMock(return_value=fake_path)
+    file_path = MagicMock()
+    file_path.parent = parent
+
+    with (
+        patch("lymow.Path", return_value=file_path),
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=mqtt),
+        patch("lymow.LymowCoordinator", return_value=coord),
+    ):
+        result = await async_setup_entry(hass, entry)
+
+    assert result is True
+    hass.http.async_register_static_paths.assert_not_awaited()
+    # The www-registered key is still set so we don't re-check the dir each setup.
+    assert hass.data[_WWW_REGISTERED_KEY] is True
+
+
+async def test_async_setup_entry_skips_dashboard_task_when_already_created() -> None:
+    """Already-set _DASHBOARD_CREATED_KEY must skip spawning the dashboard task."""
+    hass = _make_hass(www_registered=True)
+    hass.data[_lymow._DASHBOARD_CREATED_KEY] = True
+    entry = _make_entry()
+    auth = _make_auth(_make_tokens(), _make_creds())
+    client = _make_client()
+    mqtt = _make_mqtt()
+    coord = _make_coordinator()
+
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=mqtt),
+        patch("lymow.LymowCoordinator", return_value=coord),
+    ):
+        await async_setup_entry(hass, entry)
+
+    hass.async_create_task.assert_not_called()

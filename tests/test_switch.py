@@ -153,6 +153,25 @@ async def test_turn_off_calls_coordinator() -> None:
 # ---------------------------------------------------------------------------
 
 
+async def test_async_setup_entry_skips_async_add_entities_when_no_devices() -> None:
+    """Empty devices list must not call async_add_entities with an empty list."""
+    from lymow.const import DOMAIN
+
+    coord = MagicMock()
+    coord.devices = []
+    coord.data = {}
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    add_calls: list[list] = []
+    await async_setup_entry(hass, entry, lambda entities: add_calls.append(list(entities)))
+    assert all(batch for batch in add_calls), f"empty batch passed to async_add_entities: {add_calls}"
+
+
 async def test_async_setup_entry_no_zones_initially() -> None:
     from lymow.const import DOMAIN
 
