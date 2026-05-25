@@ -66,26 +66,28 @@ Update this file when findings come in. Strike tasks when done.
 
 ## Capture session tasks
 
-**The capture session is on another laptop with mitmproxy + Android phone access.**
+**The capture session is currently running on the Linux box** (was previously planned for Windows; switched because this branch's checkout + ADB + mitmproxy v12.2.3 are all already wired up there).
 Complete these tasks in order and paste findings into the "Findings" sections below.
 
-### Capture setup
+### Capture setup (Linux box — supersedes the earlier Windows plan)
 
-mitmproxy CA cert is installed as a **Magisk module** at `/data/adb/modules/mitmproxy_ca/` on the phone — should survive reboots. Phone WiFi ADB at `192.168.1.45:5555`. Windows IP is `192.168.1.147`.
+- mitmproxy CA cert: installed as a **Magisk module** at `/data/adb/modules/mitmproxy_ca/` on the phone — should survive reboots.
+- Phone ADB: USB serial `fc7d1e36`, WiFi `192.168.1.45:5555`.
+- Linux capture host: `192.168.1.180`, mitmproxy v12.2.3 (via `uv tool`).
+- Phone proxy → `192.168.1.180:8888` (set via ADB `settings put global http_proxy`).
 
-Start mitmdump **on Windows** (not WSL2), port 8888:
-```powershell
-mitmdump -s C:\temp\capture.py --listen-host 0.0.0.0 --listen-port 8888 --ssl-insecure
+Start mitmdump on the Linux box:
+```bash
+cd /home/mint-laptop-4/private_projects/ha-lymow-lovelace
+uv tool run --from mitmproxy mitmdump -s tools/capture.py \
+    --listen-host 0.0.0.0 --listen-port 8888 --ssl-insecure
 ```
-Output goes to `C:\temp\capture-lymow.txt` (the script writes it there, NOT via stdout redirect).
+Output goes to `tools/capture-lymow.txt` (the script writes it itself, not via stdout redirect; path is gitignored).
 
-Phone proxy: `192.168.1.147:8888`
-
-If port 8888 is already in use on Windows:
-```powershell
-netstat -ano | Select-String 8888
-# Kill offending PID, or:
-netsh interface portproxy delete v4tov4 listenaddress=192.168.1.147 listenport=8888
+If port 8888 is busy:
+```bash
+ss -ltnp 'sport = :8888'
+# kill the PID, then retry
 ```
 
 Verify cert is loaded: look for HTTPS traffic from `api.lymow.com` in the mitmdump output when opening the app. If you see TLS handshake errors, the cert isn't trusted — try manually overlaying it:
@@ -99,6 +101,8 @@ ls /system/etc/security/cacerts/ | grep 48750f0d
 cp /data/adb/modules/mitmproxy_ca/system/etc/security/cacerts/48750f0d.0 /system/etc/security/cacerts/
 chmod 644 /system/etc/security/cacerts/48750f0d.0
 ```
+
+**Remember to clear the phone proxy when done** — prior sessions hit E29 dock-fail when the proxy was left on overnight.
 
 ---
 
@@ -248,3 +252,20 @@ _Pending capture session_
 4. Run full test suite: `uv run pytest tests/ -v --cov --cov-fail-under=100`
 5. If zone names come from a REST endpoint (Task B): implement fetch + merge in coordinator's `_async_update_map_data`
 6. Remove this file, push final commits, open PR
+
+---
+
+## Capture session progress log
+
+- [x] Repo cloned at `/home/mint-laptop-4/private_projects/ha-lymow-lovelace`, branch checked out.
+- [x] ADB confirmed: USB `fc7d1e36`, WiFi `192.168.1.45:5555`.
+- [x] mitmproxy v12.2.3 available; LAN host `192.168.1.180`.
+- [ ] mitmdump + capture pipeline running.
+- [ ] Task B (rename) captured.
+- [ ] Task C (delete go-zone) captured.
+- [ ] Task C' (delete nogo zone) captured.
+- [ ] Task A (vertex move) — supervisor flagged HIGHEST PRIORITY but user scoped this session to rename + delete first; will pick up after B/C.
+- [ ] Encoder diff written into supervisor's "Findings" sections.
+- [ ] GH issue for the separate mower-control lovelace card filed.
+
+> User scope for this session: **rename + delete first**, then vertex move if time permits. The "mower control" card is out of scope and tracked as its own issue.
