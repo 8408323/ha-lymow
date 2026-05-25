@@ -113,18 +113,13 @@ _EXPECTED_USER_CTRL: dict[str, int] = {
 
 @pytest.mark.parametrize("name,expected", sorted(_EXPECTED_USER_CTRL.items()))
 def test_user_ctrl_value_pinned(name: str, expected: int) -> None:
-    """Each documented USER_CTRL_* must match the value captured from the APK.
-
-    Updating one of these is a deliberate wire-protocol change — the commit
-    that changes the snapshot must also update the matching encode_* test
-    and confirm the new value against current robot firmware."""
+    """Each documented USER_CTRL_* must match the APK-captured value."""
     actual = getattr(const, name)
     assert actual == expected, f"{name} = {actual}, expected {expected} (APK-pinned)"
 
 
 def test_user_ctrl_snapshot_covers_every_constant_in_const_py() -> None:
-    """A new USER_CTRL_* constant added without being pinned here is a
-    silent gap — drift would not be caught. Force the author to add it."""
+    """A new USER_CTRL_* added without a pin here is a silent drift gap."""
     declared = {name for name in dir(const) if name.startswith("USER_CTRL_") and isinstance(getattr(const, name), int)}
     missing = declared - set(_EXPECTED_USER_CTRL)
     extra = set(_EXPECTED_USER_CTRL) - declared
@@ -133,8 +128,7 @@ def test_user_ctrl_snapshot_covers_every_constant_in_const_py() -> None:
 
 
 def test_user_ctrl_values_are_unique() -> None:
-    """Two different USER_CTRL_* with the same int value would let the robot
-    silently treat distinct operations as the same wire command."""
+    """Duplicate int values would silently collapse distinct operations to one wire code."""
     by_value: dict[int, list[str]] = {}
     for name, val in _EXPECTED_USER_CTRL.items():
         by_value.setdefault(val, []).append(name)
@@ -143,10 +137,7 @@ def test_user_ctrl_values_are_unique() -> None:
 
 
 def test_user_ctrl_values_form_a_dense_range() -> None:
-    """Documenting an invariant: the constants are contiguous 1..MAX with no
-    gaps (matches the APK enum table). Any gap usually means a constant was
-    deleted without renumbering the rest — the wire codes won't be valid
-    against current firmware."""
+    """Constants must be contiguous 1..MAX with no gaps (matches APK enum table)."""
     values = sorted(_EXPECTED_USER_CTRL.values())
     assert values == list(range(1, _EXPECTED_USER_CTRL["USER_CTRL_MAX"] + 1)), (
         f"USER_CTRL_* values have gaps: missing {set(range(1, max(values) + 1)) - set(values)}"
@@ -182,9 +173,7 @@ _EXPECTED_BUTTON_MAPPING: dict[str, int] = {
 
 @pytest.mark.parametrize("class_name,expected_ctrl", sorted(_EXPECTED_BUTTON_MAPPING.items()))
 def test_button_user_ctrl_mapping(class_name: str, expected_ctrl: int) -> None:
-    """The contract is "Lock Robot button sends USER_CTRL_LOCK (=18) on press".
-    Changing the right-hand-side is a user-visible behavioural change and
-    needs an explicit snapshot bump."""
+    """Pin each ButtonEntity → USER_CTRL_* binding; changes require a snapshot bump."""
     button_mod = sys.modules.get("lymow.button")
     if button_mod is None:
         import importlib.util
@@ -201,9 +190,7 @@ def test_button_user_ctrl_mapping(class_name: str, expected_ctrl: int) -> None:
 
 
 def test_button_mapping_covers_every_user_ctrl_button() -> None:
-    """A new ButtonEntity subclass of ``_UserCtrlButton`` added without being
-    pinned here would silently swap commands later if its ``_user_ctrl`` is
-    reassigned. Force documentation of every button-command binding."""
+    """Every _UserCtrlButton subclass must be pinned to catch later reassignments."""
     import importlib.util
     import inspect
     import os
@@ -230,8 +217,7 @@ def test_button_mapping_covers_every_user_ctrl_button() -> None:
 
 
 def test_button_classes_use_distinct_user_ctrl_values() -> None:
-    """Two buttons pointing at the same USER_CTRL would let the user think
-    they're triggering different operations. Almost always a copy-paste bug."""
+    """Two buttons sharing one USER_CTRL is almost always a copy-paste bug."""
     by_ctrl: dict[int, list[str]] = {}
     for cls_name, ctrl in _EXPECTED_BUTTON_MAPPING.items():
         by_ctrl.setdefault(ctrl, []).append(cls_name)
@@ -245,8 +231,7 @@ def test_button_classes_use_distinct_user_ctrl_values() -> None:
 
 
 def test_clear_zone_encoder_uses_pinned_ctrl_value() -> None:
-    """The encoder for delete-zone is documented to send USER_CTRL_CLEAR_ZONE=8.
-    If the constant or the encoder drifts independently they go out of sync."""
+    """delete-zone encoder must send USER_CTRL_CLEAR_ZONE=8 — catches independent drift."""
     from lymow.protocol import _decode_fields, _first, encode_delete_zone
 
     pb = encode_delete_zone("ABCD0001")
