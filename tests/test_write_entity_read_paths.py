@@ -169,9 +169,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     ],
 )
 def test_switch_is_on_reads_populated_state(factory, expected) -> None:
-    """Every switch must return a bool from is_on when the coordinator has
-    the producer-written key present. If is_on returns None, the entity's
-    read path drifted from the producer."""
+    """Every switch must return a bool when producer-written keys are present."""
     coord = _make_coord(_populated_state())
     entity = factory(coord)
     assert entity.is_on is expected, f"{type(entity).__name__}.is_on = {entity.is_on}, expected {expected}"
@@ -196,9 +194,7 @@ def test_switch_is_on_reads_populated_state(factory, expected) -> None:
     ],
 )
 def test_switch_is_on_handles_empty_state_without_raising(factory) -> None:
-    """Coordinator hasn't received MQTT state yet (e.g. immediately after
-    config-entry setup, before the first poll). Every switch must return
-    None or a sane default rather than raising AttributeError / KeyError."""
+    """Pre-first-poll empty state must yield None or sane default, never raise."""
     coord = _make_coord(state={})
     entity = factory(coord)
     # Calling is_on must not raise. Result can be None (unknown) or a default.
@@ -278,10 +274,7 @@ def test_number_native_value_handles_empty_state_without_raising(factory) -> Non
     ],
 )
 def test_select_current_option_matches_seeded_wire_value(factory, expected_label) -> None:
-    """Selects must map each concrete wire int to its exact documented label.
-    An ``in`` check (accepting any label from the option set) would let a
-    reversed _value_to_label mapping pass — assert the unique expected label
-    instead."""
+    """Selects map each wire int to its exact label — catches reversed mappings."""
     coord = _make_coord(_populated_state())
     entity = factory(coord)
     assert entity.current_option == expected_label, (
@@ -308,9 +301,7 @@ def test_select_handles_empty_state_without_raising(factory) -> None:
 
 
 def test_camera_light_select_is_write_optimistic() -> None:
-    """CameraLightSelect doesn't read from coordinator state — it has no
-    PbOutput field that decodes back to a brightness. current_option starts
-    as None and only flips when the user explicitly selects."""
+    """CameraLightSelect has no state read-back; current_option is None until user selects."""
     coord = _make_coord(_populated_state())
     entity = CameraLightSelect(coord, DEVICE)
     assert entity.current_option is None
