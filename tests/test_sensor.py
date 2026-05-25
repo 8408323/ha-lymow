@@ -333,6 +333,58 @@ def test_map_sensor_extra_attrs_has_charging_station() -> None:
     assert sensor.extra_state_attributes["charging_station"] == cs
 
 
+def test_map_sensor_prefers_live_charging_station_loc_over_map_derived() -> None:
+    """PbOutput.f24 ``chargingStationLoc`` is the live update channel; when
+    both the map-query dock and the live dock are present and the live one
+    is full, it wins so the card reflects a moved dock immediately."""
+    map_cs = {"x": 1.0, "y": 2.0, "theta": 0.0}
+    live_cs = {"x": 1.5, "y": 2.5, "theta": 0.1}
+    coord = _make_coord({"mapData": {"chargingStation": map_cs}, "chargingStationLoc": live_cs})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["charging_station"] == live_cs
+
+
+def test_map_sensor_merges_partial_live_dock_over_map_dock() -> None:
+    """``chargingStationLoc`` can legally be partial (e.g. only ``y`` if
+    only the north coordinate changed). A wholesale replacement would
+    drop ``x`` / ``theta`` and break the card's geometry; the merge
+    behavior keeps the map fields underneath."""
+    map_cs = {"x": 1.0, "y": 2.0, "theta": 0.5}
+    live_cs = {"y": 9.9}  # partial — only north
+    coord = _make_coord({"mapData": {"chargingStation": map_cs}, "chargingStationLoc": live_cs})
+    sensor = LymowMapSensor(coord, DEVICE)
+    # x and theta survive from map; y is the fresher live value
+    assert sensor.extra_state_attributes["charging_station"] == {"x": 1.0, "y": 9.9, "theta": 0.5}
+
+
+def test_map_sensor_uses_live_dock_when_no_map_dock_yet() -> None:
+    """If we have a live PbOutput.f24 update before any QUERY_MAP reply
+    has populated mapData.chargingStation, the live one still surfaces."""
+    live_cs = {"x": 3.0, "y": 4.0}
+    coord = _make_coord({"mapData": {}, "chargingStationLoc": live_cs})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["charging_station"] == live_cs
+
+
+def test_map_sensor_ignores_empty_live_dock_dict() -> None:
+    """An empty ``chargingStationLoc`` dict (shouldn't happen — the decoder
+    omits the key when no scalars are present — but defend regardless) must
+    fall back to the map-derived dock rather than rendering an empty dict."""
+    map_cs = {"x": 1.0, "y": 2.0}
+    coord = _make_coord({"mapData": {"chargingStation": map_cs}, "chargingStationLoc": {}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["charging_station"] == map_cs
+
+
+def test_map_sensor_ignores_non_dict_live_dock() -> None:
+    """A future-mangled state where ``chargingStationLoc`` is the wrong
+    type (string, list…) must not crash the sensor — fall back to map."""
+    map_cs = {"x": 1.0, "y": 2.0}
+    coord = _make_coord({"mapData": {"chargingStation": map_cs}, "chargingStationLoc": "junk"})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["charging_station"] == map_cs
+
+
 def test_map_sensor_extra_attrs_includes_robot_pose() -> None:
     coord = _make_coord({"poseEastM": 0.1, "poseNorthM": 0.2, "poseThetaRad": 0.3, "mapData": {}})
     sensor = LymowMapSensor(coord, DEVICE)

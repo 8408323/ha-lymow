@@ -546,8 +546,23 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["channels"] = map_data["channels"]
         if "gpsOrigin" in map_data:
             attrs["gps_origin"] = map_data["gpsOrigin"]
-        if "chargingStation" in map_data:
-            attrs["charging_station"] = map_data["chargingStation"]
+        # Charging station position: map-derived (from PbMap.f4 via the
+        # last QUERY_MAP) is the base. A live PbOutput.f24 update
+        # (decoded as ``chargingStationLoc``) overlays fresher fields on
+        # top — the live message may carry only ``x`` and ``y`` without
+        # ``theta`` (legal partial update; see protocol decoder), so we
+        # merge field-by-field rather than wholesale-replace. That way a
+        # ``y``-only live update doesn't drop the existing ``x``/``theta``
+        # from the map dock and break the card's geometry. The card reads
+        # the same ``charging_station`` attribute either way.
+        map_dock = map_data.get("chargingStation") if isinstance(map_data.get("chargingStation"), dict) else None
+        live_dock = data.get("chargingStationLoc") if isinstance(data.get("chargingStationLoc"), dict) else None
+        if map_dock and live_dock:
+            attrs["charging_station"] = {**map_dock, **live_dock}
+        elif live_dock:
+            attrs["charging_station"] = live_dock
+        elif map_dock:
+            attrs["charging_station"] = map_dock
         # Include live robot position so the card updates without a separate entity
         for key in ("poseEastM", "poseNorthM", "poseThetaRad"):
             val = data.get(key)
