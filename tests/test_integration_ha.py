@@ -29,7 +29,6 @@ The file gracefully skips itself if PHCC isn't installed so a stray
 
 from __future__ import annotations
 
-import importlib
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -66,7 +65,7 @@ for _mod in list(sys.modules):
 # Force-import the integration as a submodule of ``custom_components`` so that
 # ``patch("custom_components.lymow.X")`` can resolve via getattr — mock.patch
 # uses pkgutil which doesn't trigger lazy submodule discovery.
-importlib.import_module("custom_components.lymow")
+__import__("custom_components.lymow")
 
 
 @pytest.fixture(autouse=True)
