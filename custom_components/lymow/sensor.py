@@ -201,6 +201,17 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:texture-box",
         entity_registry_enabled_default=False,
     ),
+    # Camera-lens heater (PbOutput.f37): monotonically-increasing count of
+    # how many times the heater has fired since the install — coarse
+    # condensation / fog indicator and a maintenance metric.
+    LymowSensorDescription(
+        key="heated_lens_times",
+        name="Lens heater fires",
+        value_key="heatedLensTimes",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:radiator",
+        entity_registry_enabled_default=False,
+    ),
     # Robot pose in local ENU frame (pboutput field 14), disabled by default —
     # mostly useful for debugging and advanced visualisations.
     LymowSensorDescription(

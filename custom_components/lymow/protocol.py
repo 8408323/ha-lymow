@@ -702,6 +702,15 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     if isinstance(theft_lock, int):
         state["theftLockEngaged"] = bool(theft_lock)
 
+    # Camera-lens heater fire count (PbOutput.f37 = uint32 — per PbOutput.encode
+    # tag 296 = (37<<3)|0 writing ``writer.uint32``). The lens heater fires when
+    # the camera detects condensation / fog. A monotonically-increasing counter
+    # — useful as a maintenance metric ("the heater has fired N times this
+    # install") and as a coarse weather/condition indicator.
+    heated_lens = _first(fields, 37)
+    if isinstance(heated_lens, int) and heated_lens >= 0:
+        state["heatedLensTimes"] = heated_lens
+
     return state
 
 
