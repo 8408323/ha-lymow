@@ -3,10 +3,36 @@
 # Branch: feat/map-lovelace-card — Supervisor Document
 
 **This document is the interface between two sessions:**
-- **Supervisor session** (this laptop, WSL2): has full codebase access, plans work, writes code
-- **Capture session** (other laptop): has mitmproxy running, can control the Lymow Android app, reports raw traffic back here
+- **Supervisor session** (this laptop, WSL2): has full codebase access, plans work, writes code, and **owns all browser testing** (HA Lovelace card in Chrome). This is the ONLY session that can do browser testing.
+- **Capture session** (other Linux box): has mitmproxy running, can control the Lymow Android app, decodes raw traffic, implements backend changes
 
 Update this file when findings come in. Strike tasks when done.
+
+### How the two sessions coordinate
+
+**Capture session → Supervisor:** Push a commit whose message starts with `test-ready:` when something needs browser testing. The supervisor polls for this (see "Supervisor: watching for commits" below) and picks it up.
+
+**Supervisor → Capture session:** Push a commit whose message starts with `test-result:` with a brief pass/fail summary so the capture session knows to continue.
+
+### Supervisor: watching for commits
+
+`gh` has no native watch command. Use this polling loop on the supervisor laptop — run it in a terminal, leave it in the background:
+
+```bash
+# Polls every 60 s; prints a line when the remote HEAD changes
+LAST=$(gh api repos/8408323/ha-lymow/git/refs/heads/feat/map-lovelace-card --jq '.object.sha')
+while true; do
+  sleep 60
+  NOW=$(gh api repos/8408323/ha-lymow/git/refs/heads/feat/map-lovelace-card --jq '.object.sha')
+  if [ "$NOW" != "$LAST" ]; then
+    echo "NEW COMMIT: $NOW"
+    gh api repos/8408323/ha-lymow/commits/$NOW --jq '.commit.message' | head -3
+    LAST=$NOW
+  fi
+done
+```
+
+When a `test-ready:` commit appears: `git pull`, run the browser test scenario described below, push a `test-result:` commit.
 
 ---
 
@@ -115,7 +141,7 @@ chmod 644 /system/etc/security/cacerts/48750f0d.0
 4. Tap Save / confirm
 5. Wait ~3 seconds for the app to send the update
 
-**What to look for in capture output (`C:\temp\capture-lymow.txt`):**
+**What to look for in capture output (`tools/capture-lymow.txt`):**
 - A `PBINPUT` line (outbound MQTT to `/device/<thing>/pbinput`)
 - Check the decoded `userCtrl` field — expect it to be **25** (SYNC_MAP) but may be something else
 - Paste the full `PBINPUT` block here
@@ -228,6 +254,48 @@ HA services registered in `lawn_mower.py`:
 - `lymow.sync_map` → `async_sync_map`
 
 Map card (`www/lymow-map-card.js`) already calls all of these correctly. Vertex edit drag-save calls `lymow.sync_map` with the updated polygon — this needs Task A to confirm the protocol is correct.
+
+---
+
+## Browser testing (supervisor session only)
+
+The supervisor session has Chrome + the HA Lovelace card running. These are the scenarios to test each time the capture session signals `test-ready:`.
+
+### Access
+- HA instance: local network (supervisor knows the URL/credentials)
+- Map card: `lymow-map-card.js` is served from `custom_components/lymow/www/`; HA caches it — after a code change, hard-reload with Ctrl+Shift+R or append `?v=<timestamp>` to force a fresh fetch
+
+### Test scenarios to run after each `test-ready:` commit
+
+#### Scenario 1 — Zone rename (after Task B is captured and implemented)
+1. Open the Lymow map card in HA
+2. Tap a go-zone → enter edit mode → tap Rename → type a new name → OK
+3. **Expected**: zone label updates immediately (optimistic), HA service `lymow.rename_zone` called, no console errors
+4. Reload the page — **Expected**: name persists (stored in `_nameOverrides` + localStorage)
+5. If the Lymow app has a server-side name store: open the app and confirm it shows the new name
+
+#### Scenario 2 — Zone delete (after Task C is captured and implemented)
+1. Create a small throwaway go-zone via the map card (draw polygon → name "Test delete")
+2. Enter edit mode → tap 🗑 → confirm
+3. **Expected**: zone disappears from map immediately, `lymow.delete_zone` service called, no console errors
+4. Reload — **Expected**: zone gone (not restored from localStorage)
+
+#### Scenario 3 — Zone vertex move (after Task A is captured and implemented)
+1. Tap a go-zone → enter edit mode → drag a vertex handle to a new position
+2. Tap Save
+3. **Expected**: polygon updates immediately (optimistic), `lymow.sync_map` service called, no console errors
+4. Reload — **Expected**: new shape persists
+
+#### Scenario 4 — Regression check (run after every `test-ready:` commit)
+1. Map loads with go-zones, nogo-zones, channels, charging station, robot pose visible
+2. Zoom/pan works (wheel + drag), pinch-zoom works if on touch device
+3. Scale bar and north arrow render
+4. Zone labels show name + area; label mode toggle (go/nogo/ch) persists across reload
+5. Fullscreen toggle (⊞ or F key) works
+6. Mowing settings panel opens and shows current values
+
+### How to report
+Push a commit: `test-result: scenario 1 pass / scenario 4 fail — console error: <brief>`
 
 ---
 
