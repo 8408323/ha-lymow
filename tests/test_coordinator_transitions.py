@@ -30,8 +30,7 @@ from tests.test_coordinator import THING, _make_coordinator  # noqa: F401
 
 @pytest.mark.asyncio
 async def test_patch_without_work_status_fires_no_event_or_notification() -> None:
-    """A pboutput that decoded only e.g. battery — no workStatus key — must
-    short-circuit before touching the event bus or persistent notifications."""
+    """Patch without workStatus key must short-circuit before bus / notifications."""
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 5}}
     coord._prev_work_status[THING] = 5
@@ -44,8 +43,7 @@ async def test_patch_without_work_status_fires_no_event_or_notification() -> Non
 
 @pytest.mark.asyncio
 async def test_event_fires_for_no_op_transitions_too() -> None:
-    """The event bus event must fire on every workStatus value seen, even
-    same → same — automations may depend on heartbeat semantics."""
+    """Event must fire even on same→same workStatus (heartbeat for automations)."""
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 2}}
     coord._prev_work_status[THING] = 2
@@ -66,9 +64,7 @@ async def test_event_fires_for_no_op_transitions_too() -> None:
 
 @pytest.mark.asyncio
 async def test_consecutive_error_states_do_not_re_notify() -> None:
-    """Two pboutputs both carrying WORK_STATUS_ERROR must produce ONE
-    persistent notification (on the entry transition), not two. Otherwise the
-    user sees a notification spam every 30 s while the robot is in error."""
+    """Two ERROR states fire only one notification (entry, not stay) to avoid spam."""
     from lymow.const import WORK_STATUS_ERROR
 
     coord, _, _ = _make_coordinator()
@@ -85,9 +81,7 @@ async def test_consecutive_error_states_do_not_re_notify() -> None:
 
 @pytest.mark.asyncio
 async def test_emergency_stop_after_error_does_not_re_notify() -> None:
-    """Both WORK_STATUS_ERROR and WORK_STATUS_EMERGENCY_STOP live in
-    ERROR_GROUP — switching between them is a *stay*, not an entry. The
-    user already knows there's a problem; don't double-notify."""
+    """ERROR → EMERGENCY_STOP is within ERROR_GROUP (a stay) — no re-notify."""
     from lymow.const import WORK_STATUS_EMERGENCY_STOP, WORK_STATUS_ERROR
 
     coord, _, _ = _make_coordinator()
@@ -100,9 +94,7 @@ async def test_emergency_stop_after_error_does_not_re_notify() -> None:
 
 @pytest.mark.asyncio
 async def test_first_observation_in_error_fires_notification() -> None:
-    """First MQTT push for a device defaults prev_work_status to -1 (OFFLINE),
-    which is NOT in ERROR_GROUP. So a freshly-online robot reporting ERROR
-    must fire the entry notification — the user wasn't previously aware."""
+    """First-ever push reporting ERROR must notify — prev defaults to OFFLINE (≠ERROR)."""
     from lymow.const import WORK_STATUS_ERROR
 
     coord, _, _ = _make_coordinator()
@@ -123,8 +115,7 @@ async def test_first_observation_in_error_fires_notification() -> None:
 
 @pytest.mark.asyncio
 async def test_charging_to_charging_full_does_not_fire_done() -> None:
-    """Both states live in DOCKED_GROUP. Going CHARGING → CHARGING_FULL is
-    a routine docked-state churn, not a mow-finished event."""
+    """CHARGING → CHARGING_FULL is intra-DOCKED churn, not a mow-finished event."""
     from lymow.const import WORK_STATUS_CHARGING, WORK_STATUS_CHARGING_FULL
 
     coord, _, _ = _make_coordinator()
@@ -137,8 +128,7 @@ async def test_charging_to_charging_full_does_not_fire_done() -> None:
 
 @pytest.mark.asyncio
 async def test_error_to_docked_does_not_fire_done() -> None:
-    """Errored robot gets manually docked — that's a recovery, not a mow
-    completion. ``prev_ws in MOWING|RETURNING`` must reject ERROR."""
+    """ERROR → DOCKED is recovery, not completion — prev must not match MOWING/RETURNING."""
     from lymow.const import WORK_STATUS_CHARGING, WORK_STATUS_ERROR
 
     coord, _, _ = _make_coordinator()
@@ -151,7 +141,7 @@ async def test_error_to_docked_does_not_fire_done() -> None:
 
 @pytest.mark.asyncio
 async def test_paused_to_docked_does_not_fire_done() -> None:
-    """User paused mid-mow, then docked the robot manually. Not a completion."""
+    """User paused mid-mow then docked manually is not a mow completion."""
     from lymow.const import WORK_STATUS_CHARGING, WORK_STATUS_PAUSE
 
     coord, _, _ = _make_coordinator()
@@ -164,8 +154,7 @@ async def test_paused_to_docked_does_not_fire_done() -> None:
 
 @pytest.mark.asyncio
 async def test_returning_to_docked_fires_done() -> None:
-    """The other half of the contract: mower in RETURNING_GROUP (e.g.
-    PAUSE_DOCKING or ESCAPING) reaching DOCKED is the mow-done signal."""
+    """RETURNING_GROUP → DOCKED is the mow-done signal."""
     from lymow.const import WORK_STATUS_CHARGING, WORK_STATUS_DOCKING
 
     coord, _, _ = _make_coordinator()
@@ -180,8 +169,7 @@ async def test_returning_to_docked_fires_done() -> None:
 
 @pytest.mark.asyncio
 async def test_notification_ids_differ_between_error_and_done() -> None:
-    """The two notification kinds must use distinct notification_ids — same id
-    would let one dismiss the other (HA dedupes by id)."""
+    """Error and done must use distinct notification_ids — HA dedupes by id."""
     from lymow.const import WORK_STATUS_CHARGING, WORK_STATUS_DOCKING, WORK_STATUS_ERROR
 
     # Error path
@@ -238,7 +226,7 @@ async def test_event_falls_back_to_thing_name_when_all_labels_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_rtk_guard_is_a_noop_when_disabled() -> None:
-    """Default state: guard disabled. RTK drop must NOT pause the robot."""
+    """Default guard disabled — RTK drop must not pause the robot."""
     from lymow.const import WORK_STATUS_MOWING
 
     coord, _, _ = _make_coordinator()
@@ -252,8 +240,7 @@ async def test_rtk_guard_is_a_noop_when_disabled() -> None:
 
 @pytest.mark.asyncio
 async def test_rtk_guard_ignores_patches_without_rtk_status() -> None:
-    """A patch carrying only e.g. battery must not trigger the guard — the
-    last-known rtk could be stale and trigger a spurious pause."""
+    """Patches lacking rtkStatus must not trigger guard — stale value would spuriously pause."""
     from lymow.const import WORK_STATUS_MOWING
 
     coord, _, _ = _make_coordinator()
@@ -287,8 +274,7 @@ async def test_rtk_guard_pauses_when_low_signal_while_mowing() -> None:
 
 @pytest.mark.asyncio
 async def test_rtk_guard_does_not_pause_when_robot_already_docked() -> None:
-    """Low RTK while docked is irrelevant — the robot isn't moving. Pausing
-    here would just confuse the next mow-start."""
+    """Low RTK while docked is irrelevant — guard must not pause a stationary robot."""
     from lymow.const import WORK_STATUS_CHARGING
 
     coord, _, _ = _make_coordinator()
@@ -302,9 +288,7 @@ async def test_rtk_guard_does_not_pause_when_robot_already_docked() -> None:
 
 @pytest.mark.asyncio
 async def test_rtk_guard_does_not_resume_user_initiated_pause() -> None:
-    """If the user paused (not the guard), active_pause is False — even if
-    RTK recovers, the guard must NOT auto-resume. This is the safety
-    property keeping a user's deliberate pause inviolate."""
+    """Guard never resumes a user-initiated pause (active_pause=False is sacred)."""
     from lymow.const import WORK_STATUS_PAUSE
 
     coord, _, _ = _make_coordinator()
@@ -320,8 +304,7 @@ async def test_rtk_guard_does_not_resume_user_initiated_pause() -> None:
 
 @pytest.mark.asyncio
 async def test_rtk_guard_resumes_only_when_we_were_the_pauser() -> None:
-    """The flip side: we DID pause, RTK recovers, robot still in PAUSED_GROUP
-    → schedule resume."""
+    """Guard resumes when active_pause=True, RTK recovers, robot still in PAUSED_GROUP."""
     from lymow.const import WORK_STATUS_PAUSE
 
     coord, _, _ = _make_coordinator()
@@ -340,8 +323,7 @@ async def test_rtk_guard_resumes_only_when_we_were_the_pauser() -> None:
 
 @pytest.mark.asyncio
 async def test_rtk_guard_handles_non_int_rtk_value_as_noop() -> None:
-    """A malformed rtkStatus (e.g. broker glitch sending a string) must not
-    raise — the guard silently no-ops so the rest of on_mqtt_state still runs."""
+    """Malformed rtkStatus must not raise — guard no-ops so rest of on_mqtt_state runs."""
     from lymow.const import WORK_STATUS_MOWING
 
     coord, _, _ = _make_coordinator()
@@ -356,9 +338,7 @@ async def test_rtk_guard_handles_non_int_rtk_value_as_noop() -> None:
 
 @pytest.mark.asyncio
 async def test_disabling_guard_clears_active_pause_flag() -> None:
-    """When the user toggles the switch off, the active_pause flag must
-    reset — otherwise a later natural pause/resume could be mis-attributed,
-    and re-enabling the guard would carry stale state."""
+    """Disabling guard must clear active_pause to prevent stale state on re-enable."""
     coord, _, _ = _make_coordinator()
     coord._rtk_guard_active_pause[THING] = True
     coord.set_rtk_guard_enabled(THING, True)
