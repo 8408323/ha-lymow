@@ -167,6 +167,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._mqtt_state: dict[str, dict[str, Any]] = {}
         # Track work status per device to detect important transitions.
         self._prev_work_status: dict[str, int] = {}
+        # Track online state so on_mqtt_online only fires the persistent-notification
+        # on a True → False transition. Without this, a dismissed offline notification
+        # re-appears on every subsequent offline message — annoying when the broker
+        # repeatedly re-asserts the same state. Default None means "never observed".
+        self._prev_online: dict[str, bool | None] = {}
         # Cached backup-map snapshot per device: (fetched_at, fields).
         self._backup_map_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
         # RTK auto-pause guard: per-device knobs and tracking.
@@ -375,7 +380,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Receive an online/offline notification from MQTT."""
         patch = {"isOnline": is_online, "deviceState": "online" if is_online else "offline"}
         self.on_mqtt_state(thing_name, patch)
-        if not is_online:
+        prev_online = self._prev_online.get(thing_name)
+        self._prev_online[thing_name] = is_online
+        # Fire the offline notification only on a True/None → False transition.
+        # Consecutive offline messages (or repeated assertions of the same state)
+        # would otherwise re-create a dismissed notification on every broker push.
+        if not is_online and prev_online is not False:
             device_label = next(
                 (
                     d.get("deviceName") or d.get("sn") or thing_name

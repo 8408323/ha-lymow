@@ -330,3 +330,54 @@ async def test_disabling_guard_clears_active_pause_flag() -> None:
     coord.set_rtk_guard_enabled(THING, False)
 
     assert coord._rtk_guard_active_pause[THING] is False
+
+
+# ---------------------------------------------------------------------------
+# on_mqtt_online — offline-notification transition guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_first_offline_observation_fires_notification() -> None:
+    """First offline message ever — prev is None, must fire."""
+    coord, _, _ = _make_coordinator()
+    coord.on_mqtt_online(THING, False)
+    coord.hass.components.persistent_notification.async_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_online_to_offline_transition_fires_notification() -> None:
+    """User saw online, robot went offline — should notify."""
+    coord, _, _ = _make_coordinator()
+    coord.on_mqtt_online(THING, True)  # seed online
+    coord.on_mqtt_online(THING, False)
+    coord.hass.components.persistent_notification.async_create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_consecutive_offline_messages_do_not_re_notify() -> None:
+    """Broker re-asserting offline must not re-create a dismissed notification.
+
+    Without the prev_online guard, a user dismissing the "X has gone offline"
+    notification would see it pop right back on the next periodic offline
+    push. The transition guard mirrors the work-status notification pattern
+    (one notification per entry into the state, not per assertion of it).
+    """
+    coord, _, _ = _make_coordinator()
+    coord.on_mqtt_online(THING, False)
+    assert coord.hass.components.persistent_notification.async_create.call_count == 1
+    coord.on_mqtt_online(THING, False)
+    coord.on_mqtt_online(THING, False)
+    assert coord.hass.components.persistent_notification.async_create.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_offline_after_recovery_fires_notification_again() -> None:
+    """User saw offline → robot came back online → went offline again. Each
+    fresh entry into offline-state notifies — only intra-state assertions
+    are deduped."""
+    coord, _, _ = _make_coordinator()
+    coord.on_mqtt_online(THING, False)
+    coord.on_mqtt_online(THING, True)  # recovery
+    coord.on_mqtt_online(THING, False)  # offline again
+    assert coord.hass.components.persistent_notification.async_create.call_count == 2
