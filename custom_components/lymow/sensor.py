@@ -856,19 +856,15 @@ class LymowRobotTimezoneSensor(CoordinatorEntity[LymowCoordinator], SensorEntity
         return {"offset_seconds": seconds, "offset_hours": round(seconds / 3600, 2)}
 
 
+# Camera-headlight schedule window — read-side companion to
+# ``lymow.set_night_mode``. Reads PbRobotConfig.openLedTime / closeLedTime
+# (f14/f15). The wire has no "schedule enabled" bit: setNightMode rewrites
+# the full window each press and co-publishes SIGNAL_TURN_OFF_CAMERA_LIGHT
+# to disable the light *now* (see encode_set_night_mode). So this sensor is
+# purely descriptive — it shows *what window is configured*; the existing
+# Camera light Select shows whether the light is currently on.
 class LymowHeadlightWindowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
-    """Camera-headlight schedule window — the read-side companion to the
-    ``lymow.set_night_mode`` service.
-
-    Surfaces ``openLedTime`` + ``closeLedTime`` (decoded from PbRobotConfig
-    f14/f15) as a single human-friendly state string like ``"21:00–06:00"``,
-    with each end also exposed as an attribute for automations that need
-    the raw HH:MM strings. The wire has no explicit "schedule enabled" bit:
-    ``setNightMode`` rewrites the full window each press and uses a
-    co-published ``SIGNAL_TURN_OFF_CAMERA_LIGHT`` to disable the light
-    immediately (see ``encode_set_night_mode``). So this sensor is purely
-    descriptive — it shows *what window is configured*, not *whether the
-    light is currently on*. The Camera light Select handles the latter."""
+    """Headlight schedule window, formatted as ``HH:MM–HH:MM``."""
 
     _attr_has_entity_name = True
     _attr_icon = "mdi:car-light-high"
