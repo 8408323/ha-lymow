@@ -86,7 +86,7 @@ When a `test-ready:` commit appears: `git pull`, run the browser test scenario d
 ### Original must-haves (Tasks A/B/C) — done
 - [x] **Zone vertex move capture** — app has no vertex-drag UX (Edit Boundary is drive-the-robot), card's vertex edit uses `encode_sync_map` validated by envelope symmetry with the live-confirmed rename.
 - [x] **Zone name round-trip confirmed at protocol level** — direct-MQTT round-trip + byte-equal BLE frame captured from the app. Robot persists name in `BasicInfo.f2`; decoder now reads it back for go AND nogo zones.
-- [x] **Tests at 100% coverage** — `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` → 1011 tests, 100% (after v=29 additions).
+- [x] **Tests at 100% coverage** — `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` → 1020 tests, 100% (after the 2026-05-26 decoder + encoder-bug-fix session).
 
 ### Gap audit (2026-05-26) — what's NOT understood / wired yet
 
@@ -104,6 +104,8 @@ Live query_map response (`scripts/query_map.py` against the real robot today) ca
 - **BasicInfo.f8 / BasicInfo.f9** — UNREAD on the first zone only. Likely a per-zone override flag.
 
 **Impact**: HA never surfaces real robot mowing settings (panel is currently driven by localStorage cache). User's question "can we edit and see it mirrored" → partial: zone NAME round-trip is solid, but zone CONFIG (cut height, path spacing, etc.) is not actually pulled from the robot.
+
+**Update 2026-05-26 (capture session)**: decoder is now complete — globalZoneConfig + per-zone configBox both decode end-to-end against the live frame. The card's localStorage shim can finally go. **Also discovered two encoder bugs while doing this work** (PbZoneConfig field numbers off-by-one in `_TASK_CONFIG_FIELDS`; PbRunTimeConfig was using PbZoneConfig field numbers) — both fixed. See "Concrete TODOs" below for the full list.
 
 #### B. Encoder gaps — userCtrls we don't have
 
@@ -141,19 +143,25 @@ Client-side merge/split work functionally, but: (1) robot might preserve child n
 ### Concrete TODOs before un-drafting PR #199
 
 Decoder (critical — wires up real robot settings instead of localStorage):
-- [ ] Extend `decode_task_config` to read all 11 wire fields (currently 4). Validate against live robot response.
-- [ ] Decode `PbMap.f11 globalZoneConfig` (16 fields). Find the Hermes function that produces it (search APK for `globalZoneConfig`).
-- [ ] Decode `PbMap.f12 globalChannelConfig` (3 fields).
-- [ ] Decode top-level `pb.f6 fixed64` (map version/timestamp).
-- [ ] Decode `PbZone.f8/f9` + `BasicInfo.f8/f9` (semantics unknown — search APK).
-- [ ] Once decoder is complete, **drop the lovelace card's localStorage shim** for mowing settings; feed the panel from real robot state.
+- [x] **`decode_task_config` clarified** (2026-05-26, capture session): PbTaskConfig is genuinely the 4-field device-settings record (chargingMode/zoneOrder/rainCleaning/disableChargingPark) — Hermes class #9588 confirms. The "11 wire fields" in the earlier audit were actually PbZoneConfig fields seen at PbMap.f11, not PbMap.f8. In the fresh `scripts/map_response.bin` PbMap.f8 is empty (0B).
+- [x] **`decode_zone_config` added** (2026-05-26): decodes the canonical 19-field PbZoneConfig (Hermes class #9432) — covers PbMap.f11 globalZoneConfig **and** PbZone.f2 per-zone override. Live frame confirms: globalZoneConfig{cutHeight:60, moveSpeed:0.6, pathSpacing:1, perimeterMowLaps:2, lineFollowMode:true, …}; zone-level overrides cutHeight:40 + moveSpeed:0.8.
+- [x] **`decode_channel_config` added** (2026-05-26): PbChannelConfig {detectMode, cutHeight, channelLift} for PbMap.f12 globalChannelConfig (Hermes class #9444).
+- [x] **chargingStation extended** (2026-05-26): PbPose.f4 z is now decoded when present; live frame has z=-0.030.
+- [x] **enuBasePoint added** (2026-05-26): PbMap.f7 is `PbRobotLLACoords {latitude, longitude, altitude}` (Hermes class #9276). Live frame: lat 59.682, lon 16.759, alt 34.09 m. `gpsOrigin` retained as an alias.
+- [x] **diagonalCoords added** (2026-05-26): PbMap.f6 (repeated PbPoint) decoded; live frame has two corners spanning the map bbox.
+- [~] **PbZone.f8/f9 + BasicInfo.f8/f9 — not present in fresh frame.** Earlier audit saw them on a different capture; conditional fields — defer until a frame surfaces them.
+- [~] **Top-level pb.f6 fixed64 — not in this frame either.** Top-level only has f23 + f4=1.
+- [ ] **Drop the lovelace card's `localStorage` shim for mowing settings** — globalZoneConfig is now decoded, so the panel can be driven from the real robot state. Card change only.
+
+**Two real encoder bugs found and fixed (2026-05-26)**:
+1. `_TASK_CONFIG_FIELDS` had fields f9–f16 off-by-one against the canonical PbZoneConfig wire (Hermes #9432). HA's `lymow.set_task_config` service was writing `pathSpacing` to f9 (which the robot interprets as `relativeCleanDir`), `perimeterMowLaps` to f10 (actually `pathSpacing`), etc. Six middle fields of the form were silently corrupting on the wire. **Fixed** — added `cutHeight` at f1 too, shifted `pathSpacing`/`perimeterMowLaps`/`perimeterMowDir`/`noGoMowLaps`/`obsDecMode`/`pathOrder`/`startProgress`/`relativeCleanDir` to canonical positions. Test `test_encode_set_task_config_wraps_in_pbinput` was pinning the buggy layout; rewritten to canonical.
+2. `_RUN_TIME_CONFIG_FIELDS` was using PbZoneConfig field numbers (f4 moveSpeed, f6 cutSpeed) but PbRunTimeConfig (Hermes #9456) has its own shape: f1 cutHeight, **f2 moveSpeed, f3 cutSpeed**, f4 channelConfig. `encode_set_run_time_config(moveSpeed=…)` was writing the float into f4 (a length-delimited bytes field — `channelConfig`). **Fixed** — test pin updated to canonical numbers. `encode_set_run_time_config(cutHeight=…)` already worked because f1 is shared between both messages.
 
 Encoder (important):
-- [ ] `encode_merge_zones(hash_ids)` for `MERGE_ZONE = 55`. Capture from app first.
-- [ ] `encode_cut_zone(hash_id, p1, p2)` for `CUT_ZONE = 56`. Capture from app first.
-- [ ] `encode_clear_all_zones_channels()` for `CLEAR_ALL_ZONES_CHANNELS = 15` (app's Delete All).
-- [ ] `encode_floor_backup` (44) + `encode_floor_restore` (45) — app's Map Backup & Restore. Likely also needs `encode_query_floor_list` / similar.
-- [ ] `encode_modify_zone_edge_start/stop` (10 / 11) — Edit Boundary drive-the-robot mode (joystick command itself rides existing `encode_ble_drive`).
+- [x] **`encode_merge_zones (55)` / `encode_cut_zone (56)` — APP DOES NOT SHIP EITHER FEATURE** (2026-05-26 capture). Tapping Merge Map or Split Map in the app's edit toolbar shows a "Stay tuned! This feature is coming soon" toast and sends **nothing** on the wire. The HA card's client-side merge (convex hull + SYNC_MAP) and split (polygon cut + SYNC_MAP) are therefore the ONLY user-facing paths. The userCtrl 55/56 enum values exist in the protocol but cannot be validated against the app. **Recommendation: keep the client-side impl and stop calling it a gap.**
+- [~] `encode_modify_zone_edge_start/stop (10 / 11)` — Edit Boundary is implemented in the app, but the wire frame for START requires (a) an element to be selected in edit mode, (b) tapping the "Edit Boundary" confirm button. Without a selected zone the app shows "Please select an element to modify" and no PBINPUT is sent. Reliable ADB-driven zone selection is non-trivial (taps inside zone interior didn't visibly mark it). Capture deferred until a session where joystick control is supervised in person — the same flow then drives the robot.
+- [ ] `encode_clear_all_zones_channels()` for `CLEAR_ALL_ZONES_CHANNELS = 15` (Delete All) — destructive, skipped this round.
+- [ ] `encode_floor_backup` (44) + `encode_floor_restore` (45) — deferred; needs Settings → Map Backup tap sequence.
 
 Wiring (low risk — code already does most of the work):
 - [x] **Add missing service entries to `services.yaml`** (2026-05-26, v=29): `add_nogo_zone`, `add_channel`, `move_charging_station`, `set_zone_enabled`, `update_nogo_polygon`, `rename_channel` — all documented.
@@ -608,6 +616,27 @@ Rename-confirm button center ≈ (1080, 966); in-dialog OK center ≈ (1272, 627
 - (c) Fix `decode_map_response` to read `BasicInfo.f2 = name`
 
 ---
+
+### Capture session reply 3 (2026-05-26, capture box) — decoder gap closed + app-feature audit
+
+Took the gap audit and worked it end-to-end. **Summary:**
+
+**Decoder (Section A)**: shipped. New `decode_zone_config` (19-field PbZoneConfig, Hermes #9432), `decode_channel_config` (PbChannelConfig, Hermes #9444), `enuBasePoint` with altitude, `chargingStation.z`, `diagonalCoords`. The live `scripts/map_response.bin` round-trips cleanly through `decode_map_response`: globalZoneConfig surfaces cutHeight=60/moveSpeed=0.6/pathSpacing=1/perimeterMowLaps=2/lineFollowMode=true; per-zone overrides cutHeight=40, moveSpeed=0.8. **The localStorage shim in the card can finally go** — feed the panel from the real `globalZoneConfig` field. Card-side change only; backend is ready.
+
+**Encoder bugs (found while doing the decode work)**:
+1. `_TASK_CONFIG_FIELDS` had **eight** fields on wrong wire positions (f9 was `pathSpacing` instead of `relativeCleanDir`, then everything from f10–f16 shifted by one). `lymow.set_task_config(path_spacing=X)` was silently writing X into `relativeCleanDir` on the robot. Fixed; the buggy test that pinned it is now correctly pinned to canonical wire positions.
+2. `_RUN_TIME_CONFIG_FIELDS` was using PbZoneConfig field numbers (f4 for moveSpeed, f6 for cutSpeed). PbRunTimeConfig has its own layout — f1 cutHeight, **f2 moveSpeed, f3 cutSpeed**. `encode_set_run_time_config(moveSpeed=…)` was writing the float into f4 which is `channelConfig` (length-delimited). Fixed.
+
+**App-feature audit (Section B encoders)**: Two surprises and one defer.
+- **Merge Map (userCtrl 55) and Split Map (userCtrl 56) are BOTH "Stay tuned! Coming soon" in the app** — toasted as not-shipped, send no wire frame. HA's client-side merge / split is the only user-facing path. **Stop calling these encoder gaps in the audit** — they will never be capturable from app traffic.
+- **Edit Boundary (10 / 11) is shipped** but the wire START frame is gated on a selected zone in edit mode. Without selection the app shows "Please select an element to modify" and no PBINPUT is sent. ADB-driven zone selection is unreliable (taps inside the polygon interior didn't visibly select it). Deferred to a session with the user available to supervise — confirming Edit Boundary also drives the robot.
+- Backup / restore (44 / 45) deferred (Settings menu, separate flow).
+
+**Test state**: 1020 tests, 100% coverage; `ruff format --check` + `ruff check` clean.
+
+**Phone state**: Returned to launcher cleanly. Phone proxy still set at `192.168.1.180:8888` per standing setup.
+
+**Recommend the supervisor next**: drop the card's `lymow_settings_values` localStorage shim and replace with `map_data.globalZoneConfig` from the decoded map. The legacy `cutHeight` / `pathSpacing` keys on each zone are still set, so existing card code that reads them keeps working — but the panel can now show the live robot value instead of the cached client one.
 
 ### Supervisor reply 2 (2026-05-26, supervisor laptop)
 

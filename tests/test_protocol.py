@@ -498,11 +498,13 @@ def _build_map_response(
         if pp:
             zone_pb += _field_bytes(3, pp)
         if zone.get("cutHeight") is not None or zone.get("pathSpacing") is not None:
+            # PbZoneConfig wire layout (Hermes #9432): f1 cutHeight (int),
+            # f10 pathSpacing (int).
             cfg = b""
             if zone.get("cutHeight") is not None:
                 cfg += _field_i32(1, zone["cutHeight"])
             if zone.get("pathSpacing") is not None:
-                cfg += _field_f32(4, zone["pathSpacing"])
+                cfg += _field_i32(10, int(zone["pathSpacing"]))
             zone_pb += _field_bytes(2, cfg)
 
         content += _field_bytes(1, zone_pb)
@@ -567,6 +569,17 @@ def _build_map_response(
     return _field_bytes(23, outer)
 
 
+def _build_map_response_with_raw_extra(extra_pb_bytes: bytes) -> bytes:
+    """Wrap raw PbMap field bytes in the f23→f2→f3 outer envelope.
+
+    Lets tests pin specific PbMap subfields (globalZoneConfig, diagonalCoords,
+    chargingStationLoc with z, enuBasePoint with altitude) without going
+    through the higher-level builder.
+    """
+    wrapper = _field_i32(1, 1) + _field_bytes(3, extra_pb_bytes)
+    return _field_bytes(23, _field_bytes(2, wrapper))
+
+
 def test_decode_map_response_empty_bytes() -> None:
     result = decode_map_response(b"")
     assert result == {}
@@ -618,14 +631,16 @@ def test_decode_map_response_go_zone_config() -> None:
                 "hashId": "cfgzone1",
                 "type": 1,
                 "cutHeight": 55,
-                "pathSpacing": 0.35,
+                "pathSpacing": 25,
             }
         ]
     )
     result = decode_map_response(pb)
     zone = result["goZones"][0]
     assert zone["cutHeight"] == 55
-    assert pytest.approx(zone["pathSpacing"], abs=1e-4) == 0.35
+    assert zone["pathSpacing"] == 25
+    # The full PbZoneConfig submessage is surfaced too.
+    assert zone["zoneConfig"] == {"cutHeight": 55, "pathSpacing": 25}
 
 
 def test_decode_map_response_multiple_go_zones() -> None:
@@ -766,6 +781,172 @@ def test_decode_task_config_drops_non_boolean_bool_fields() -> None:
     assert decode_task_config(pb) == {"chargingMode": 1, "disableChargingPark": True}
 
 
+def test_decode_zone_config_canonical_19_fields() -> None:
+    """PbZoneConfig wire layout — pinned to Hermes class #9432.
+
+    Field numbers and types come straight from the app's bytecode (see
+    BRANCH_STATUS gap audit, section A): an earlier mapping had several
+    fields off-by-one between f9 and f16, which the live capture revealed.
+    """
+    from lymow.protocol import decode_zone_config
+
+    # Exercise every supported field at its canonical wire position.
+    pb = (
+        _field_i32(1, 60)  # cutHeight
+        + _field_i32(2, 1)  # raiseCutHeight (bool=1)
+        + _field_i32(3, 0)  # lowerCutHeight (bool=0)
+        + _field_f32(4, 0.6)  # moveSpeed (float)
+        + _field_i32(5, 90)  # brushSpeed
+        + _field_i32(6, 4)  # cutSpeed
+        + _field_i32(7, 1)  # cleanMode
+        + _field_i32(8, 2)  # cleanDir
+        + _field_i32(9, 35)  # relativeCleanDir  ← was wrongly labelled pathSpacing
+        + _field_i32(10, 25)  # pathSpacing       ← was wrongly labelled perimeterMowLaps
+        + _field_i32(11, 2)  # perimeterMowLaps   ← was wrongly labelled perimeterMowDir
+        + _field_i32(12, 1)  # perimeterMowDir
+        + _field_i32(13, 1)  # noGoMowLaps
+        + _field_i32(14, 2)  # obsDecMode
+        + _field_i32(15, 1)  # pathOrder (bool=1)
+        + _field_i32(16, 0)  # startProgress
+        + _field_i32(17, 1)  # lineFollowMode (bool=1)
+        + _field_i32(18, 0)  # disableOuterDischarge (bool=0)
+        + _field_i32(19, 2)  # followDetectMode
+    )
+    out = decode_zone_config(pb)
+    assert out["cutHeight"] == 60
+    assert out["raiseCutHeight"] is True
+    assert out["lowerCutHeight"] is False
+    assert pytest.approx(out["moveSpeed"], abs=1e-4) == 0.6
+    assert out["brushSpeed"] == 90
+    assert out["cutSpeed"] == 4
+    assert out["cleanMode"] == 1
+    assert out["cleanDir"] == 2
+    assert out["relativeCleanDir"] == 35
+    assert out["pathSpacing"] == 25
+    assert out["perimeterMowLaps"] == 2
+    assert out["perimeterMowDir"] == 1
+    assert out["noGoMowLaps"] == 1
+    assert out["obsDecMode"] == 2
+    assert out["pathOrder"] is True
+    assert out["startProgress"] == 0
+    assert out["lineFollowMode"] is True
+    assert out["disableOuterDischarge"] is False
+    assert out["followDetectMode"] == 2
+
+
+def test_decode_zone_config_empty_and_partial() -> None:
+    from lymow.protocol import decode_zone_config
+
+    assert decode_zone_config(b"") == {}
+    # Only cutHeight present — other keys must not appear with default values.
+    assert decode_zone_config(_field_i32(1, 40)) == {"cutHeight": 40}
+
+
+def test_decode_zone_config_drops_non_boolean_bool_fields() -> None:
+    """Corrupted payload: a varint ≥ 2 on a bool field must NOT coerce to True.
+
+    Same hostile-input handling we apply in decode_task_config — silently
+    flipping a switch on from a malformed frame is worse than reporting
+    unknown.
+    """
+    from lymow.protocol import decode_zone_config
+
+    assert decode_zone_config(_field_i32(2, 7)) == {}  # raiseCutHeight=7 → dropped
+    assert decode_zone_config(_field_i32(15, 9)) == {}  # pathOrder=9 → dropped
+
+
+def test_decode_channel_config_three_fields() -> None:
+    """PbChannelConfig wire layout — pinned to Hermes class #9444.
+
+    f1 detectMode, f2 cutHeight, f3 channelLift — used at PbMap.f12
+    globalChannelConfig and at PbRunTimeConfig.channelConfig.
+    """
+    from lymow.protocol import decode_channel_config
+
+    out = decode_channel_config(_field_i32(1, 2) + _field_i32(2, 60) + _field_i32(3, 0))
+    assert out == {"detectMode": 2, "cutHeight": 60, "channelLift": 0}
+    # Missing fields are absent (not zero-filled).
+    assert decode_channel_config(b"") == {}
+    assert decode_channel_config(_field_i32(2, 35)) == {"cutHeight": 35}
+
+
+def test_decode_map_response_global_zone_and_channel_config() -> None:
+    """decode_map_response surfaces PbMap.f11 globalZoneConfig + f12 globalChannelConfig."""
+    extra = _field_bytes(
+        11,
+        _field_i32(1, 60)  # cutHeight
+        + _field_f32(4, 0.6)  # moveSpeed
+        + _field_i32(10, 25),  # pathSpacing
+    )
+    extra += _field_bytes(12, _field_i32(1, 2) + _field_i32(2, 60))
+    pb = _build_map_response_with_raw_extra(extra)
+    result = decode_map_response(pb)
+    gzc = result["globalZoneConfig"]
+    assert gzc["cutHeight"] == 60
+    assert pytest.approx(gzc["moveSpeed"], abs=1e-4) == 0.6
+    assert gzc["pathSpacing"] == 25
+    assert result["globalChannelConfig"] == {"detectMode": 2, "cutHeight": 60}
+
+
+def test_decode_map_response_charging_station_with_z_and_enu_altitude() -> None:
+    """PbPose.f4 = z (altitude) and PbRobotLLACoords.f3 = altitude both surface."""
+    extra = _field_bytes(
+        4,  # PbMap.f4 chargingStationLoc — PbPose with z
+        _field_f32(1, -0.05) + _field_f32(2, -0.12) + _field_f32(3, -1.53) + _field_f32(4, 0.42),
+    )
+    extra += _field_bytes(
+        7,  # PbMap.f7 enuBasePoint — PbRobotLLACoords with altitude
+        _field_f32(1, 59.68) + _field_f32(2, 16.76) + _field_f32(3, 34.09),
+    )
+    pb = _build_map_response_with_raw_extra(extra)
+    result = decode_map_response(pb)
+    cs = result["chargingStation"]
+    assert pytest.approx(cs["x"], abs=1e-3) == -0.05
+    assert pytest.approx(cs["z"], abs=1e-3) == 0.42
+    enu = result["enuBasePoint"]
+    assert pytest.approx(enu["lat"], abs=1e-3) == 59.68
+    assert pytest.approx(enu["lon"], abs=1e-3) == 16.76
+    assert pytest.approx(enu["altitude"], abs=1e-3) == 34.09
+    # gpsOrigin is kept as an alias of enuBasePoint for back-compat.
+    assert result["gpsOrigin"] is enu
+
+
+def test_decode_map_response_diagonal_coords() -> None:
+    """PbMap.f6 diagonalCoords (repeated PbPoint) lands as result['diagonalCoords']."""
+    p1 = _field_f32(1, -35.15) + _field_f32(2, -45.07)
+    p2 = _field_f32(1, 17.88) + _field_f32(2, 18.37)
+    extra = _field_bytes(6, p1) + _field_bytes(6, p2)
+    pb = _build_map_response_with_raw_extra(extra)
+    result = decode_map_response(pb)
+    pts = result["diagonalCoords"]
+    assert len(pts) == 2
+    assert pytest.approx(pts[0]["x"], abs=1e-2) == -35.15
+    assert pytest.approx(pts[1]["y"], abs=1e-2) == 18.37
+
+
+def test_decode_map_response_per_zone_config_surfaces_full_dict() -> None:
+    """A go-zone's f2 zoneConfig comes back as the full PbZoneConfig dict,
+    not just the two legacy keys."""
+    pb = _build_map_response(
+        go_zones=[
+            {
+                "hashId": "fullcfg1",
+                "type": 1,
+                # _build_map_response only writes cutHeight + pathSpacing into the
+                # zoneConfig wrapper, so the rest are zero — that's enough to
+                # prove the new "zoneConfig" key is plumbed end-to-end.
+                "cutHeight": 40,
+                "pathSpacing": 25,
+            }
+        ]
+    )
+    zone = decode_map_response(pb)["goZones"][0]
+    assert zone["zoneConfig"] == {"cutHeight": 40, "pathSpacing": 25}
+    # Legacy top-level keys still present for back-compat.
+    assert zone["cutHeight"] == 40
+    assert zone["pathSpacing"] == 25
+
+
 def test_decode_map_response_channels() -> None:
     pb = _build_map_response(
         channels=[
@@ -819,7 +1000,7 @@ def test_decode_map_response_full() -> None:
     pb = _build_map_response(
         go_zones=[
             {"hashId": "gozone01", "type": 1, "polygon": [{"x": 1.0, "y": 2.0}], "area": 100},
-            {"hashId": "gozone02", "type": 1, "cutHeight": 40, "pathSpacing": 1.0},
+            {"hashId": "gozone02", "type": 1, "cutHeight": 40, "pathSpacing": 25},
         ],
         nogo_zones=[
             {"hashId": "nogo0001", "type": 2, "parentZoneHashId": "gozone01"},
@@ -1604,6 +1785,45 @@ def test_decode_map_response_nogo_with_area_and_inner_point() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_encode_go_zone_zoneconfig_emits_full_pbzoneconfig() -> None:
+    """A zone's full ``zoneConfig`` dict round-trips through ``encode_sync_map``.
+
+    The map decoder surfaces the per-zone PbZoneConfig as ``zoneConfig`` —
+    when the card pushes that map back via sync_map, every field must be
+    re-emitted using canonical wire field numbers and types so settings are
+    not silently dropped on the round-trip.
+    """
+    map_data = {
+        "goZones": [
+            {
+                "hashId": "fullzone",
+                "type": 1,
+                "isEnabled": True,
+                "polygon": [],
+                "zoneConfig": {
+                    "cutHeight": 40,
+                    "moveSpeed": 0.8,
+                    "pathSpacing": 25,
+                    "lineFollowMode": True,
+                    "followDetectMode": None,  # None is skipped
+                },
+            }
+        ],
+        "nogoZones": [],
+    }
+    from lymow.protocol import _encode_go_zone, decode_zone_config
+
+    pb = _encode_go_zone(map_data["goZones"][0])
+    zf = _decode_fields(pb)
+    cfg_raw = _first(zf, 2)
+    cfg = decode_zone_config(cfg_raw)
+    assert cfg["cutHeight"] == 40
+    assert pytest.approx(cfg["moveSpeed"], abs=1e-3) == 0.8
+    assert cfg["pathSpacing"] == 25
+    assert cfg["lineFollowMode"] is True
+    assert "followDetectMode" not in cfg  # None skipped
+
+
 def test_encode_go_zone_with_optional_fields_roundtrips() -> None:
     """encode_sync_map round-trips go-zone optional fields."""
     map_data = {
@@ -1612,7 +1832,7 @@ def test_encode_go_zone_with_optional_fields_roundtrips() -> None:
                 "hashId": "gz1",
                 "type": 1,
                 "cutHeight": 30,
-                "pathSpacing": 0.5,
+                "pathSpacing": 25,
                 "isEnabled": True,
                 "polygon": [],
                 "boundMin": {"x": 0.1, "y": 0.2},
@@ -2096,14 +2316,24 @@ def test_decode_robot_config_drops_empty_rrConfig() -> None:
 def test_encode_set_task_config_wraps_in_pbinput() -> None:
     from lymow.protocol import encode_set_task_config
 
-    pb = encode_set_task_config(pathSpacing=200, perimeterMowLaps=2, pathOrder=True, moveSpeed=0.5)
+    pb = encode_set_task_config(
+        pathSpacing=200,
+        perimeterMowLaps=2,
+        pathOrder=True,
+        moveSpeed=0.5,
+        relativeCleanDir=35,
+        cutHeight=60,
+    )
     f = _decode_fields(pb)
     assert _first(f, 2) == 49  # version
     assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
-    cfg = _decode_fields(_first(f, 26))  # PbTaskConfig sub-message
-    assert _first(cfg, 9) == 200  # pathSpacing
-    assert _first(cfg, 10) == 2  # perimeterMowLaps
-    assert _first(cfg, 14) == 1  # pathOrder (bool -> 1)
+    cfg = _decode_fields(_first(f, 26))  # PbZoneConfig submessage
+    # Wire field numbers pinned to canonical PbZoneConfig (Hermes #9432).
+    assert _first(cfg, 1) == 60  # cutHeight
+    assert _first(cfg, 9) == 35  # relativeCleanDir
+    assert _first(cfg, 10) == 200  # pathSpacing
+    assert _first(cfg, 11) == 2  # perimeterMowLaps
+    assert _first(cfg, 15) == 1  # pathOrder (bool -> 1)
     # moveSpeed is a float32 (wire type 5)
     assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.5, rel=1e-5)
 
@@ -2323,10 +2553,12 @@ def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     # PbInput.map (field 12) → PbMap.runTimeConfig (field 13) → PbRunTimeConfig
     pb_map = _decode_fields(_first(f, 12))
     cfg = _decode_fields(_first(pb_map, 13))
+    # Wire field numbers pinned to canonical PbRunTimeConfig (Hermes #9456):
+    # f1 cutHeight / f2 moveSpeed / f3 cutSpeed / f4 channelConfig.
     assert _first(cfg, 1) == 45  # cutHeight
-    assert _first(cfg, 6) == 120  # cutSpeed
+    assert _first(cfg, 3) == 120  # cutSpeed
     # moveSpeed is float32 (wire type 5)
-    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.6, rel=1e-5)
+    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 2)))[0] == pytest.approx(0.6, rel=1e-5)
 
 
 def test_encode_set_run_time_config_skips_none_and_rejects_unknown() -> None:
@@ -2334,7 +2566,7 @@ def test_encode_set_run_time_config_skips_none_and_rejects_unknown() -> None:
 
     pb = encode_set_run_time_config(cutHeight=None, cutSpeed=80)
     cfg = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 12)), 13))
-    assert _first(cfg, 6) == 80  # cutSpeed present
+    assert _first(cfg, 3) == 80  # cutSpeed present
     assert _first(cfg, 1) is None  # cutHeight (None) skipped
     with pytest.raises(ValueError, match="unknown run-time-config field"):
         encode_set_run_time_config(nonsense=1)

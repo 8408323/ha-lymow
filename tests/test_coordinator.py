@@ -338,7 +338,7 @@ async def test_async_set_task_config_publishes_encoded_command() -> None:
     f = _decode_fields(pb)
     assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
     cfg = _decode_fields(_first(f, 26))
-    assert _first(cfg, 9) == 250  # pathSpacing
+    assert _first(cfg, 10) == 250  # pathSpacing — canonical PbZoneConfig field
 
 
 @pytest.mark.asyncio
