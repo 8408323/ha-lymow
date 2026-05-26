@@ -152,10 +152,13 @@ class LymowMapCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    // Don't blow away the DOM while the user is actively typing (rename or draw-name).
-    // We still update _hass so the next interaction sees fresh state.
-    const inp = this.shadowRoot?.querySelector('#rename-input, #draw-name-input');
-    if (inp) return;
+    // Don't re-render while the user is actively interacting with the UI:
+    // - typing in a rename/draw-name input
+    // - has focus inside any settings panel input or select (keeps dropdowns open)
+    // - is dragging a slider (pointerdown on a range input)
+    if (this._sliderActive) return;
+    const active = this.shadowRoot?.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'SELECT')) return;
     this._render();
   }
 
@@ -1086,6 +1089,13 @@ class LymowMapCard extends HTMLElement {
     svg.addEventListener("touchmove", (e) => this._onTouchMove(e), { passive: false });
     svg.addEventListener("touchend", (e) => this._onTouchEnd(e));
 
+    // Block re-renders while a range slider is being dragged.
+    this.shadowRoot.querySelectorAll('input[type="range"]').forEach((el) => {
+      el.addEventListener("pointerdown", () => { this._sliderActive = true; });
+      el.addEventListener("pointerup", () => { this._sliderActive = false; });
+      el.addEventListener("pointercancel", () => { this._sliderActive = false; });
+    });
+
     if (this._editing) {
       this.shadowRoot.querySelectorAll('polygon[data-type="go"]').forEach((el) => {
         el.addEventListener("pointerdown", () => { this._panMoved = false; });
@@ -1463,7 +1473,11 @@ class LymowMapCard extends HTMLElement {
     this._settingsOpen = !this._settingsOpen;
     this._scheduleOpen = false;
     if (this._settingsOpen && !this._settingsValues) {
-      this._settingsValues = {
+      // Restore last-applied settings from localStorage so values survive page reloads.
+      // The robot doesn't echo these back via MQTT, so localStorage is the only source
+      // of truth after a hard refresh.
+      const saved = localStorage.getItem("lymow_settings_values");
+      this._settingsValues = saved ? JSON.parse(saved) : {
         move_speed: 0.6, cut_speed: 0.6, brush_speed: 0.6,
         path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
         perimeter_mow_dir: 0, obs_dec_mode: 0,
@@ -1506,6 +1520,8 @@ class LymowMapCard extends HTMLElement {
     if (status) status.textContent = "Sending…";
     try {
       await this._hass.callService("lymow", "set_task_config", payload);
+      // Persist applied values so they survive page reloads (robot doesn't echo them back).
+      localStorage.setItem("lymow_settings_values", JSON.stringify(this._settingsValues));
       if (status) status.textContent = "✓ Applied";
       setTimeout(() => { if (status) status.textContent = ""; }, 3000);
     } catch (err) {
