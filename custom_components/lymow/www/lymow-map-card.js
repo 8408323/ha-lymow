@@ -201,6 +201,7 @@ class LymowMapCard extends HTMLElement {
       channels,
       gpsOrigin: a.gps_origin || null,
       chargingStation: a.charging_station || null,
+      mowingSettings: a.mowing_settings || null,
       poseEastM: a.poseEastM,
       poseNorthM: a.poseNorthM,
       poseThetaRad: a.poseThetaRad,
@@ -1513,16 +1514,31 @@ class LymowMapCard extends HTMLElement {
     this._settingsOpen = !this._settingsOpen;
     this._scheduleOpen = false;
     if (this._settingsOpen && !this._settingsValues) {
-      // Restore last-applied settings from localStorage so values survive page reloads.
-      // The robot doesn't echo these back via MQTT, so localStorage is the only source
-      // of truth after a hard refresh.
       const saved = localStorage.getItem("lymow_settings_values");
-      this._settingsValues = saved ? JSON.parse(saved) : {
+      const defaults = saved ? JSON.parse(saved) : {
         move_speed: 0.6, cut_speed: 0.6, brush_speed: 0.6,
         path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
         perimeter_mow_dir: 0, obs_dec_mode: 0,
         clean_mode: 0, path_order: 0, line_follow_mode: 0,
       };
+      // Overlay live robot state (globalZoneConfig echo) when available so the
+      // panel reflects what the robot actually has, not just what HA last sent.
+      const ms = this._getMapData()?.mowingSettings;
+      if (ms) {
+        const fromRobot = {
+          move_speed: ms.moveSpeed,
+          path_spacing: ms.pathSpacing,
+          perimeter_mow_laps: ms.perimeterMowLaps,
+          nogo_mow_laps: ms.noGoMowLaps,
+          perimeter_mow_dir: ms.perimeterMowDir,
+          obs_dec_mode: ms.obsDecMode,
+          clean_mode: ms.cleanMode,
+          path_order: ms.pathOrder ? 1 : 0,
+          line_follow_mode: ms.lineFollowMode ? 1 : 0,
+        };
+        Object.entries(fromRobot).forEach(([k, v]) => { if (v != null) defaults[k] = v; });
+      }
+      this._settingsValues = defaults;
     }
     this._render();
   }

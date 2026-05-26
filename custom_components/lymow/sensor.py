@@ -427,6 +427,10 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["gps_origin"] = map_data["gpsOrigin"]
         if "chargingStation" in map_data:
             attrs["charging_station"] = map_data["chargingStation"]
+        if "globalZoneConfig" in map_data:
+            attrs["mowing_settings"] = map_data["globalZoneConfig"]
+        if "globalChannelConfig" in map_data:
+            attrs["channel_config"] = map_data["globalChannelConfig"]
         # Include live robot + RTK position and fix quality so the card updates without a separate entity
         for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM", "rtkStatus", "workStatus"):
             val = data.get(key)
