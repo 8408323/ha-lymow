@@ -421,8 +421,12 @@ class LymowMapCard extends HTMLElement {
       const namePart = z.name || "⛔";
       const areaPart = z.area != null ? `${z.area} m²` : "";
       const label = nm === 3 ? "⛔" : nm === 0 ? namePart : nm === 1 ? (areaPart || namePart) : (areaPart ? `${namePart} · ${areaPart}` : namePart);
+      const nxs = z.polygon.map(p => p.x), nys = z.polygon.map(p => p.y);
+      const nbboxW = (Math.max(...nxs) - Math.min(...nxs)) * sc;
+      const nbboxH = (Math.max(...nys) - Math.min(...nys)) * sc;
+      const nogoFontSz = Math.max(0.5, Math.min(parseFloat(fontSz) * 0.9, Math.min(nbboxW, nbboxH) * 0.3)).toFixed(2);
       return `<text x="${sx(cx)}" y="${sy(cy)}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${(parseFloat(fontSz) * 0.9).toFixed(2)}" fill="#c62828" pointer-events="none">${label}</text>`;
+        font-size="${nogoFontSz}" fill="#c62828" pointer-events="none">${label}</text>`;
     }).join("\n");
 
     // ── Edit handles ──────────────────────────────────────────────────────────
@@ -491,10 +495,10 @@ class LymowMapCard extends HTMLElement {
       const csDrag = this._editing && !this._editHash;
       csHtml = `
         <g data-marker="cs" data-enu-x="${chargingStation.x}" data-enu-y="${chargingStation.y}" transform="translate(${cx},${cy}) scale(${invZf})" pointer-events="${csDrag ? "all" : "none"}" style="${csDrag ? "cursor:move" : ""}">
-          <circle r="${mPx(9)}" fill="#1565c0" opacity="0.9"/>
-          <circle r="${mPx(5)}" fill="white"/>
-          <text text-anchor="middle" dominant-baseline="middle" font-size="${mPx(8)}" fill="#1565c0" font-weight="bold">⚡</text>
-          ${csDrag ? `<circle r="${mPx(9)}" fill="none" stroke="#90caf9" stroke-width="${mPx(2)}" stroke-dasharray="${mPx(4)} ${mPx(2)}"/>` : ""}
+          <circle r="${mPx(12)}" fill="#1565c0" opacity="0.9"/>
+          <circle r="${mPx(7)}" fill="white"/>
+          <text text-anchor="middle" dominant-baseline="middle" font-size="${mPx(10)}" fill="#1565c0" font-weight="bold">⚡</text>
+          ${csDrag ? `<circle r="${mPx(12)}" fill="none" stroke="#90caf9" stroke-width="${mPx(2)}" stroke-dasharray="${mPx(4)} ${mPx(2)}"/>` : ""}
         </g>`;
     }
 
@@ -503,13 +507,13 @@ class LymowMapCard extends HTMLElement {
     if (poseEastM !== undefined && poseNorthM !== undefined) {
       const rx = sx(poseEastM), ry = sy(poseNorthM);
       const theta = poseThetaRad || 0;
-      const headLen = mPx(16);
+      const headLen = mPx(20);
       const arrowX = (Math.cos(theta) * headLen).toFixed(3);
       const arrowY = (-Math.sin(theta) * headLen).toFixed(3);
       robotHtml = `
         <g data-marker="robot" data-cx="${rx}" data-cy="${ry}" transform="translate(${rx},${ry}) scale(${invZf})" pointer-events="none">
-          <circle r="${mPx(8)}" fill="#e65100" stroke="white" stroke-width="${mPx(2)}"/>
-          <line x1="0" y1="0" x2="${arrowX}" y2="${arrowY}" stroke="#e65100" stroke-width="${mPx(3)}" stroke-linecap="round"/>
+          <circle r="${mPx(11)}" fill="#e65100" stroke="white" stroke-width="${mPx(2.5)}"/>
+          <line x1="0" y1="0" x2="${arrowX}" y2="${arrowY}" stroke="#e65100" stroke-width="${mPx(4)}" stroke-linecap="round"/>
         </g>`;
     }
 
@@ -520,8 +524,8 @@ class LymowMapCard extends HTMLElement {
       // Triangle: tip up, base down; centered at (0,0)
       rtkHtml = `
         <g data-marker="rtk" data-cx="${rx}" data-cy="${ry}" transform="translate(${rx},${ry}) scale(${invZf})" pointer-events="none">
-          <polygon points="0,${-mPx(11)} ${-mPx(9)},${mPx(7)} ${mPx(9)},${mPx(7)}" fill="#7b1fa2" stroke="white" stroke-width="${mPx(2)}" opacity="0.9"/>
-          <text y="${mPx(18)}" text-anchor="middle" font-size="${mPx(8)}" fill="#7b1fa2">RTK</text>
+          <polygon points="0,${-mPx(14)} ${-mPx(12)},${mPx(9)} ${mPx(12)},${mPx(9)}" fill="#7b1fa2" stroke="white" stroke-width="${mPx(2)}" opacity="0.9"/>
+          <text y="${mPx(22)}" text-anchor="middle" font-size="${mPx(10)}" fill="#7b1fa2">RTK</text>
         </g>`;
     }
 
@@ -878,11 +882,11 @@ class LymowMapCard extends HTMLElement {
             <defs>${goLabelDefs}</defs>
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
-            ${channelLabels}
             ${goPaths}
             ${goLabels}
             ${nogoPaths}
             ${nogoLabels}
+            ${channelLabels}
             ${csHtml}
             ${robotHtml}
             ${rtkHtml}
