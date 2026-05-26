@@ -428,6 +428,31 @@ rename_zone:
       selector:
         text:
 
+rename_nogo_zone:
+  name: Rename no-go zone
+  description: >
+    Rename a no-go zone on the robot's map (USER_CTRL_MODIFY_ZONE_INFO,
+    targets PbMap.nogoZones instead of goZones).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    nogo_hash_id:
+      name: No-go zone hash ID
+      description: The 8-character hash ID of the no-go zone to rename.
+      required: true
+      example: "ngabcdef"
+      selector:
+        text:
+    name:
+      name: New name
+      description: The new no-go zone name.
+      required: true
+      example: "Flower bed"
+      selector:
+        text:
+
 clear_schedules:
   name: Clear schedules
   description: >

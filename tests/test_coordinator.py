@@ -2433,6 +2433,33 @@ async def test_async_rename_zone_publishes_modify_zone_info() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_rename_nogo_zone_targets_nogo_field_and_updates_cache() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    # Seed coordinator cache with one nogo zone so we can verify the optimistic rename.
+    coord.data = {
+        THING: {
+            "mapData": {"goZones": [], "nogoZones": [{"hashId": "ngabcdef", "name": "Old"}]},
+        }
+    }
+    await coord.async_rename_nogo_zone(THING, "ngabcdef", "Flower bed")
+
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    pb_map = _decode_fields(_first(f, 12))
+    # The nogo rename must land in PbMap.nogoZones (field 2), not goZones (field 1)
+    assert _first(pb_map, 1) is None
+    bi = _decode_fields(_first(_decode_fields(_first(pb_map, 2)), 1))
+    assert _first(bi, 2).decode() == "Flower bed"
+    assert _first(bi, 3).decode() == "ngabcdef"
+    # Coordinator cache updated optimistically
+    assert coord.data[THING]["mapData"]["nogoZones"][0]["name"] == "Flower bed"
+
+
+@pytest.mark.asyncio
 async def test_async_clear_schedules_sends_empty_then_queries() -> None:
     coord, mqtt, _ = _make_coordinator()
     await coord.async_clear_schedules(THING)

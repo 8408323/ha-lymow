@@ -169,9 +169,12 @@ class LymowMapCard extends HTMLElement {
       if (this._nameOverrides[z.hashId] !== undefined) overrides.name = this._nameOverrides[z.hashId];
       return Object.keys(overrides).length ? { ...z, ...overrides } : z;
     });
-    const nogoZones = (a.nogo_zones || []).map((z) =>
-      this._nogoOverrides[z.hashId] ? { ...z, polygon: this._nogoOverrides[z.hashId] } : z
-    );
+    const nogoZones = (a.nogo_zones || []).map((z) => {
+      const overrides = {};
+      if (this._nogoOverrides[z.hashId]) overrides.polygon = this._nogoOverrides[z.hashId];
+      if (this._nameOverrides[z.hashId] !== undefined) overrides.name = this._nameOverrides[z.hashId];
+      return Object.keys(overrides).length ? { ...z, ...overrides } : z;
+    });
     return {
       goZones,
       nogoZones,
@@ -1722,18 +1725,28 @@ class LymowMapCard extends HTMLElement {
     if (!newName || !this._editHash || !this._hass || !this._config.mower_entity) {
       this._editRename = false; this._render(); return;
     }
+    const hashId = this._editHash;
+    const isNogo = this._editType === "nogo";
     this._editRename = false;
-    this._nameOverrides[this._editHash] = newName;
+    this._nameOverrides[hashId] = newName;
     this._render();
     try {
-      await this._hass.callService("lymow", "rename_zone", {
-        entity_id: this._config.mower_entity,
-        zone_hash_id: this._editHash,
-        name: newName,
-      });
+      if (isNogo) {
+        await this._hass.callService("lymow", "rename_nogo_zone", {
+          entity_id: this._config.mower_entity,
+          nogo_hash_id: hashId,
+          name: newName,
+        });
+      } else {
+        await this._hass.callService("lymow", "rename_zone", {
+          entity_id: this._config.mower_entity,
+          zone_hash_id: hashId,
+          name: newName,
+        });
+      }
     } catch (err) {
       console.warn("lymow-map-card: rename failed", err);
-      delete this._nameOverrides[this._editHash];
+      delete this._nameOverrides[hashId];
       this._render();
     }
   }

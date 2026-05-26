@@ -1328,6 +1328,23 @@ def encode_rename_zone(hash_id: str, name: str) -> bytes:
     return pb
 
 
+def encode_rename_nogo_zone(hash_id: str, name: str) -> bytes:
+    """Encode a USER_CTRL_MODIFY_ZONE_INFO command renaming a no-go zone.
+
+    Mirrors encode_rename_zone, but the zone goes in PbMap.nogoZones (field 2)
+    instead of goZones (field 1) — same shape used by encode_delete_nogo_zone.
+    """
+    from .const import USER_CTRL_MODIFY_ZONE_INFO
+
+    basic_info = _field_str(2, name) + _field_str(3, hash_id)
+    zone = _field_bytes(1, basic_info)
+    pb_map = _field_bytes(2, zone)  # PbMap.nogoZones, not goZones
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO)
+    pb += _field_bytes(12, pb_map)
+    return pb
+
+
 def delete_zone(map_data: dict, hash_id: str) -> dict:
     """Return a deep copy of map_data with the given zone (and its child no-go zones) removed.
 
