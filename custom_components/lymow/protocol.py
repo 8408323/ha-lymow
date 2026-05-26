@@ -188,13 +188,24 @@ def _decode_map_polygon(data: bytes) -> list[dict[str, float]]:
 # PbMapResponse decoder — extracts zones, no-go zones, base station, GPS
 # ---------------------------------------------------------------------------
 
-# Map content field numbers (inside the double-wrapped f23→f2→f3 structure)
+# Map content field numbers (PbMap, inside the double-wrapped f23→f2→f3 structure;
+# canonical names taken from the Hermes PbMap class declaration #9660).
 _MAP_CONTENT_GO_ZONES = 1
 _MAP_CONTENT_NOGO_ZONES = 2
 _MAP_CONTENT_CHANNELS = 3
-_MAP_CONTENT_CHARGING_STATION = 4
-_MAP_CONTENT_GPS_ORIGIN = 7
-_MAP_CONTENT_TASK_CONFIG = 8
+_MAP_CONTENT_CHARGING_STATION = 4  # PbPose: x, y, theta, z
+_MAP_CONTENT_IS_INCOMPLETE = 5
+_MAP_CONTENT_DIAGONAL_COORDS = 6  # repeated PbPoint (2 corners of map bbox)
+_MAP_CONTENT_ENU_BASE_POINT = 7  # PbRobotLLACoords: latitude, longitude, altitude
+_MAP_CONTENT_TASK_CONFIG = 8  # PbTaskConfig (4-field: chargingMode, zoneOrder, rainCleaning, disableChargingPark)
+_MAP_CONTENT_MODIFY_HASHS = 9
+_MAP_CONTENT_FLOOR_INFO = 10
+_MAP_CONTENT_GLOBAL_ZONE_CONFIG = 11  # PbZoneConfig (19 fields — the real mowing settings)
+_MAP_CONTENT_GLOBAL_CHANNEL_CONFIG = 12  # PbChannelConfig (3 fields)
+_MAP_CONTENT_RUN_TIME_CONFIG = 13
+
+# Back-compat alias — older code/tests refer to f7 as the GPS origin.
+_MAP_CONTENT_GPS_ORIGIN = _MAP_CONTENT_ENU_BASE_POINT
 
 
 def extract_raw_map_content(pb_bytes: bytes) -> bytes | None:
@@ -330,13 +341,14 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
 
         cfg_raw = _first(zf, 2)
         if isinstance(cfg_raw, bytes) and len(cfg_raw) > 0:
-            cf = _decode_fields(cfg_raw)
-            cut_h = _first(cf, 1)
-            path_sp = _first(cf, 4)
-            if cut_h is not None:
-                zone["cutHeight"] = cut_h
-            if path_sp is not None:
-                zone["pathSpacing"] = _decode_f32(path_sp)
+            cfg = decode_zone_config(cfg_raw)
+            zone["zoneConfig"] = cfg
+            # Surface the two most-asked-for fields directly on the zone so
+            # existing callers keep working.
+            if "cutHeight" in cfg:
+                zone["cutHeight"] = cfg["cutHeight"]
+            if "pathSpacing" in cfg:
+                zone["pathSpacing"] = cfg["pathSpacing"]
 
         go_zones.append(zone)
     result["goZones"] = go_zones
@@ -386,34 +398,62 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
             channels.append(decode_channel(chan_raw))
     result["channels"] = channels
 
-    # ---- Charging station pose (f4) — x/y/theta as i32 floats -----------
+    # ---- Charging station pose (f4) — PbPose: x/y/theta + optional z ----
     cs_raw = _first(content, _MAP_CONTENT_CHARGING_STATION)
     if isinstance(cs_raw, bytes):
         cs = _decode_fields(cs_raw)
         x_raw = _first(cs, 1)
         y_raw = _first(cs, 2)
         t_raw = _first(cs, 3)
-        result["chargingStation"] = {
+        z_raw = _first(cs, 4)
+        cs_out: dict[str, float] = {
             "x": _decode_f32(x_raw) if x_raw is not None else 0.0,
             "y": _decode_f32(y_raw) if y_raw is not None else 0.0,
             "theta": _decode_f32(t_raw) if t_raw is not None else 0.0,
         }
+        if z_raw is not None:
+            cs_out["z"] = _decode_f32(z_raw)
+        result["chargingStation"] = cs_out
 
-    # ---- GPS origin (f7) — lat/lon as i32 floats -------------------------
-    gps_raw = _first(content, _MAP_CONTENT_GPS_ORIGIN)
-    if isinstance(gps_raw, bytes):
-        gf = _decode_fields(gps_raw)
+    # ---- Diagonal map corners (f6, repeated PbPoint) — 2 entries = map bbox.
+    diag_pts: list[dict[str, float]] = []
+    for d_raw in _all(content, _MAP_CONTENT_DIAGONAL_COORDS):
+        if isinstance(d_raw, bytes):
+            diag_pts.append(_decode_map_point(d_raw))
+    if diag_pts:
+        result["diagonalCoords"] = diag_pts
+
+    # ---- enuBasePoint (f7) — PbRobotLLACoords: lat / lon / altitude -------
+    enu_raw = _first(content, _MAP_CONTENT_ENU_BASE_POINT)
+    if isinstance(enu_raw, bytes):
+        gf = _decode_fields(enu_raw)
         lat_raw = _first(gf, 1)
         lon_raw = _first(gf, 2)
-        result["gpsOrigin"] = {
+        alt_raw = _first(gf, 3)
+        gps = {
             "lat": _decode_f32(lat_raw) if lat_raw is not None else 0.0,
             "lon": _decode_f32(lon_raw) if lon_raw is not None else 0.0,
         }
+        if alt_raw is not None:
+            gps["altitude"] = _decode_f32(alt_raw)
+        result["gpsOrigin"] = gps
+        result["enuBasePoint"] = gps
 
     # ---- Device-settings PbTaskConfig (f8) — chargingMode/zoneOrder/etc.
     tc_raw = _first(content, _MAP_CONTENT_TASK_CONFIG)
     if isinstance(tc_raw, bytes):
         result["taskConfig"] = decode_task_config(tc_raw)
+
+    # ---- Global mowing settings (f11) — PbZoneConfig, the real source of
+    # truth for cut height / move speed / path spacing / etc.
+    gzc_raw = _first(content, _MAP_CONTENT_GLOBAL_ZONE_CONFIG)
+    if isinstance(gzc_raw, bytes) and len(gzc_raw) > 0:
+        result["globalZoneConfig"] = decode_zone_config(gzc_raw)
+
+    # ---- Global channel settings (f12) — PbChannelConfig (3 fields).
+    gcc_raw = _first(content, _MAP_CONTENT_GLOBAL_CHANNEL_CONFIG)
+    if isinstance(gcc_raw, bytes) and len(gcc_raw) > 0:
+        result["globalChannelConfig"] = decode_channel_config(gcc_raw)
 
     return result
 
@@ -432,8 +472,8 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
     rather than silently flipping the switch on.
 
     This is the *same* PbTaskConfig written by ``encode_set_device_settings``;
-    not the broader 18-field map exposed via ``_TASK_CONFIG_FIELDS`` (which is
-    really a PbZoneConfig — pre-existing mislabel, tracked separately).
+    the 19-field PbZoneConfig record (mowing settings: cutHeight, moveSpeed,
+    pathSpacing, …) is decoded by ``decode_zone_config``.
     """
     f = _decode_fields(data)
     out: dict[str, Any] = {}
@@ -449,6 +489,96 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
     dcp = _first(f, 4)
     if dcp in (0, 1):
         out["disableChargingPark"] = bool(dcp)
+    return out
+
+
+# PbZoneConfig wire layout — confirmed against Hermes class #9432 (PbZoneConfig).
+# This is the *mowing-settings* record: globally on PbMap.f11 globalZoneConfig
+# and per-zone as PbZone.f2 (zone-level override). Wire fields:
+#   f1  cutHeight (int, mm)
+#   f2  raiseCutHeight (bool, command trigger)
+#   f3  lowerCutHeight (bool, command trigger)
+#   f4  moveSpeed (float32, m/s)
+#   f5  brushSpeed (int)
+#   f6  cutSpeed (int)
+#   f7  cleanMode (int)
+#   f8  cleanDir (int — direction enum / bitmask)
+#   f9  relativeCleanDir (int, deg)
+#   f10 pathSpacing (int)
+#   f11 perimeterMowLaps (int)
+#   f12 perimeterMowDir (int)
+#   f13 noGoMowLaps (int)
+#   f14 obsDecMode (int)
+#   f15 pathOrder (bool)
+#   f16 startProgress (int)
+#   f17 lineFollowMode (bool)
+#   f18 disableOuterDischarge (bool)
+#   f19 followDetectMode (int)
+_ZONE_CONFIG_BOOL_FIELDS = {2, 3, 15, 17, 18}
+_ZONE_CONFIG_INT_NAMES: dict[int, str] = {
+    1: "cutHeight",
+    5: "brushSpeed",
+    6: "cutSpeed",
+    7: "cleanMode",
+    8: "cleanDir",
+    9: "relativeCleanDir",
+    10: "pathSpacing",
+    11: "perimeterMowLaps",
+    12: "perimeterMowDir",
+    13: "noGoMowLaps",
+    14: "obsDecMode",
+    16: "startProgress",
+    19: "followDetectMode",
+}
+_ZONE_CONFIG_BOOL_NAMES: dict[int, str] = {
+    2: "raiseCutHeight",
+    3: "lowerCutHeight",
+    15: "pathOrder",
+    17: "lineFollowMode",
+    18: "disableOuterDischarge",
+}
+
+
+def decode_zone_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbZoneConfig sub-message (the 19-field mowing-settings record).
+
+    Same shape is used for ``PbMap.f11 globalZoneConfig`` and the per-zone
+    override at ``PbZone.f2``. Missing fields are simply absent from the
+    returned dict — a value of None never appears.
+    """
+    out: dict[str, Any] = {}
+    for fn, _wt, val in _decode_fields(data):
+        if fn in _ZONE_CONFIG_BOOL_NAMES:
+            if val in (0, 1):
+                out[_ZONE_CONFIG_BOOL_NAMES[fn]] = bool(val)
+            continue
+        if fn == 4:  # moveSpeed (float32)
+            out["moveSpeed"] = _decode_f32(val)
+            continue
+        if fn in _ZONE_CONFIG_INT_NAMES and isinstance(val, int):
+            out[_ZONE_CONFIG_INT_NAMES[fn]] = val
+    return out
+
+
+def decode_channel_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbChannelConfig sub-message (Hermes class #9444).
+
+    Wire layout:
+      f1 detectMode (int, oneOf)
+      f2 cutHeight (int, mm)
+      f3 channelLift (int)
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    dm = _first(f, 1)
+    if isinstance(dm, int):
+        out["detectMode"] = dm
+    ch = _first(f, 2)
+    if isinstance(ch, int):
+        out["cutHeight"] = ch
+    lift = _first(f, 3)
+    if isinstance(lift, int):
+        out["channelLift"] = lift
     return out
 
 
@@ -748,10 +878,13 @@ def encode_userctrl(command: int) -> bytes:
     return pb
 
 
-# PbTaskConfig field map — (proto field number, wire kind) — derived from APK
-# (Hermes) analysis of the app's ts-proto encoder. The message is carried in
-# PbInput field 26 under USER_CTRL_SET_TASK_CONFIG.
+# PbZoneConfig field map — (proto field number, wire kind) — pinned to the
+# canonical PbZoneConfig class declaration in the app's Hermes bytecode (#9432).
+# The HA "set_task_config" service writes this submessage even though the
+# class name in the protocol is PbZoneConfig — the historical name is kept for
+# back-compat. Carried in PbInput.f26 under USER_CTRL_SET_TASK_CONFIG.
 _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "cutHeight": (1, "int"),
     "raiseCutHeight": (2, "bool"),
     "lowerCutHeight": (3, "bool"),
     "moveSpeed": (4, "float"),
@@ -759,14 +892,14 @@ _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "cutSpeed": (6, "int"),
     "cleanMode": (7, "int"),
     "cleanDir": (8, "int"),
-    "pathSpacing": (9, "int"),
-    "perimeterMowLaps": (10, "int"),
-    "perimeterMowDir": (11, "int"),
-    "noGoMowLaps": (12, "int"),
-    "obsDecMode": (13, "int"),
-    "pathOrder": (14, "bool"),
-    "startProgress": (15, "int"),
-    "relativeCleanDir": (16, "int"),
+    "relativeCleanDir": (9, "int"),
+    "pathSpacing": (10, "int"),
+    "perimeterMowLaps": (11, "int"),
+    "perimeterMowDir": (12, "int"),
+    "noGoMowLaps": (13, "int"),
+    "obsDecMode": (14, "int"),
+    "pathOrder": (15, "bool"),
+    "startProgress": (16, "int"),
     "lineFollowMode": (17, "bool"),
     "disableOuterDischarge": (18, "bool"),
     "followDetectMode": (19, "int"),
@@ -895,15 +1028,15 @@ def encode_set_robot_config(**fields: Any) -> bytes:
     return pb
 
 
-# PbRunTimeConfig field map — (proto field number, wire kind) — derived from APK
-# (Hermes) analysis of the app's ts-proto encoder (PbRunTimeConfig.encode). The
-# message is carried at PbInput.map.runTimeConfig (PbInput field 12 → PbMap
-# field 13) under USER_CTRL_SET_RUN_TIME_CONFIG. ``channelConfig`` (PbChannelConfig,
-# field 7) is intentionally omitted — per-channel overrides aren't exposed here.
+# PbRunTimeConfig field map — pinned to Hermes class #9456: f1 cutHeight, f2
+# moveSpeed, f3 cutSpeed, f4 channelConfig (PbChannelConfig — per-channel
+# override, not exposed here). Carried at PbMap.runTimeConfig (PbInput.f12 →
+# PbMap.f13) under USER_CTRL_SET_RUN_TIME_CONFIG. Distinct shape from
+# PbZoneConfig — don't reuse those field numbers.
 _RUN_TIME_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "cutHeight": (1, "int"),
-    "moveSpeed": (4, "float"),
-    "cutSpeed": (6, "int"),
+    "moveSpeed": (2, "float"),
+    "cutSpeed": (3, "int"),
 }
 
 
@@ -1160,12 +1293,28 @@ def _encode_go_zone(zone: dict) -> bytes:
     if zone.get("polygon"):
         bi += _field_bytes(5, _encode_map_polygon(zone["polygon"]))
 
-    # f2 = ZoneConfig (optional)
+    # f2 = ZoneConfig (PbZoneConfig — optional). Wire field numbers pinned to
+    # canonical Hermes class #9432: f1 cutHeight (int), f10 pathSpacing (int).
+    # If a full zoneConfig dict came back from the decoder we re-emit every
+    # field so a vertex-move sync_map round-trip preserves the other settings.
     cfg = b""
-    if "cutHeight" in zone:
-        cfg += _field_i32(1, zone["cutHeight"])
-    if "pathSpacing" in zone:
-        cfg += _field_f32(4, zone["pathSpacing"])
+    zc = zone.get("zoneConfig") or {}
+    if "cutHeight" in zone and "cutHeight" not in zc:
+        zc["cutHeight"] = zone["cutHeight"]
+    if "pathSpacing" in zone and "pathSpacing" not in zc:
+        zc["pathSpacing"] = zone["pathSpacing"]
+    for name, (field_no, kind) in _TASK_CONFIG_FIELDS.items():
+        if name not in zc:
+            continue
+        value = zc[name]
+        if value is None:
+            continue
+        if kind == "bool":
+            cfg += _field_i32(field_no, 1 if value else 0)
+        elif kind == "float":
+            cfg += _field_f32(field_no, float(value))
+        else:
+            cfg += _field_i32(field_no, int(value))
 
     # f3 = PpBasicInfo (optional)
     pp = b""
