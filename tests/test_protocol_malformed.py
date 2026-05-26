@@ -351,3 +351,58 @@ def test_encode_schedules_entry_omits_hour_when_absent() -> None:
     t = _decode_fields(task_blob)
     assert _first(t, 2) is None  # hour absent
     assert _first(t, 3) is None  # minute absent
+
+
+# ---------------------------------------------------------------------------
+# PbCleanInfo.cleanPercent (f5) — out-of-range bound check
+# ---------------------------------------------------------------------------
+
+
+def test_pboutput_mowprogress_above_one_is_dropped() -> None:
+    """A misaligned decode could surface a float >> 1.0 here. Without the
+    bound, the sensor would render '12300%' or similar garbage."""
+    import struct
+
+    # f5 = cleanPercent as float32 with raw bits forming 123.0 (clearly invalid).
+    bad_pct_bytes = struct.pack("<f", 123.0)
+    bad_pct_raw = int.from_bytes(bad_pct_bytes, "little")
+    area_pb = bytes([(5 << 3) | 5]) + bad_pct_bytes  # tag = field 5, wire 5
+    pb = bytes([(12 << 3) | 2, len(area_pb)]) + area_pb  # outer field 12
+    state = decode_pboutput(pb)
+    assert "mowProgress" not in state, (
+        f"out-of-range cleanPercent ({bad_pct_raw=}) should be dropped, got {state.get('mowProgress')}"
+    )
+
+
+def test_pboutput_mowprogress_nan_is_dropped() -> None:
+    """A NaN float (e.g. from a misaligned 4-byte boundary) must not surface
+    as a NaN sensor state — comparisons with NaN are False so the
+    `0.0 <= pct <= 1.0` guard cleanly rejects it."""
+    import struct
+
+    nan_bytes = struct.pack("<f", float("nan"))
+    area_pb = bytes([(5 << 3) | 5]) + nan_bytes
+    pb = bytes([(12 << 3) | 2, len(area_pb)]) + area_pb
+    state = decode_pboutput(pb)
+    assert "mowProgress" not in state
+
+
+def test_pboutput_mowprogress_in_range_is_surfaced() -> None:
+    """Sanity: the bound check doesn't reject the documented 0..1 range."""
+    import struct
+
+    half = struct.pack("<f", 0.5)
+    area_pb = bytes([(5 << 3) | 5]) + half
+    pb = bytes([(12 << 3) | 2, len(area_pb)]) + area_pb
+    state = decode_pboutput(pb)
+    assert state["mowProgress"] == 50.0
+
+
+def test_pboutput_mowprogress_with_wrong_wire_type_is_skipped() -> None:
+    """f5 arriving as length-delimited bytes (wire type 2 instead of fixed32 wire 5)
+    must not crash _decode_f32 at struct.pack — Copilot review #196 flagged this."""
+    # f5 wire-type 2, length 4, payload doesn't matter.
+    area_pb = bytes([(5 << 3) | 2, 4]) + b"\x00\x00\x00\x00"
+    pb = bytes([(12 << 3) | 2, len(area_pb)]) + area_pb
+    state = decode_pboutput(pb)  # must not raise
+    assert "mowProgress" not in state
