@@ -85,7 +85,7 @@ When a `test-ready:` commit appears: `git pull`, run the browser test scenario d
 ### Original must-haves (Tasks A/B/C) — done
 - [x] **Zone vertex move capture** — app has no vertex-drag UX (Edit Boundary is drive-the-robot), card's vertex edit uses `encode_sync_map` validated by envelope symmetry with the live-confirmed rename.
 - [x] **Zone name round-trip confirmed at protocol level** — direct-MQTT round-trip + byte-equal BLE frame captured from the app. Robot persists name in `BasicInfo.f2`; decoder now reads it back for go AND nogo zones.
-- [x] **Tests at 100% coverage** — `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` → 1006 tests, 100%.
+- [x] **Tests at 100% coverage** — `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` → 1011 tests, 100% (after v=29 additions).
 
 ### Gap audit (2026-05-26) — what's NOT understood / wired yet
 
@@ -155,10 +155,10 @@ Encoder (important):
 - [ ] `encode_modify_zone_edge_start/stop` (10 / 11) — Edit Boundary drive-the-robot mode (joystick command itself rides existing `encode_ble_drive`).
 
 Wiring (low risk — code already does most of the work):
-- [ ] Add 7 missing service entries to `services.yaml`.
-- [ ] Extend `_zone_name_overrides` to also cover nogo zones.
-- [ ] Add `_channel_name_overrides` + wire Rename button for channels in the card.
-- [ ] Add `length` computation + "Length (m)" option to `ch_label_mode`.
+- [x] **Add missing service entries to `services.yaml`** (2026-05-26, v=29): `add_nogo_zone`, `add_channel`, `move_charging_station`, `set_zone_enabled`, `update_nogo_polygon`, `rename_channel` — all documented.
+- [x] **Nogo zone name persistence** (2026-05-26): decoder already reads `BasicInfo.f2` for both go and nogo zones (b950429 fix); no coordinator change needed — robot is the single source of truth.
+- [x] **Channel name persistence** (2026-05-26, v=29): `async_rename_channel` added to coordinator; names stored in `_channel_name_overrides` and re-applied on every MQTT map update; card persists via `localStorage lymow_channel_names`; Rename button wired for channels in edit mode.
+- [x] **Channel length label** (2026-05-26, v=29): `length` (metres, rounded) computed per-channel in `_getMapData()`; `ch_label_mode` now has Length (m) and Name+Length options.
 - [ ] Expose `async_update_zone_cut_height` as a service + card UI.
 
 Manual verification:
