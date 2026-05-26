@@ -20,10 +20,12 @@ from lymow.protocol import (
     _field_str,
     _first,
     _signed32,
+    decode_channel_config,
     decode_map_response,
     decode_pboutput,
     decode_schedule_entry,
     decode_task_config,
+    decode_zone_config,
     delete_zone,
     encode_ble_drive,
     encode_delete_zone,
@@ -788,7 +790,6 @@ def test_decode_zone_config_canonical_19_fields() -> None:
     BRANCH_STATUS gap audit, section A): an earlier mapping had several
     fields off-by-one between f9 and f16, which the live capture revealed.
     """
-    from lymow.protocol import decode_zone_config
 
     # Exercise every supported field at its canonical wire position.
     pb = (
@@ -835,7 +836,6 @@ def test_decode_zone_config_canonical_19_fields() -> None:
 
 
 def test_decode_zone_config_empty_and_partial() -> None:
-    from lymow.protocol import decode_zone_config
 
     assert decode_zone_config(b"") == {}
     # Only cutHeight present — other keys must not appear with default values.
@@ -849,7 +849,6 @@ def test_decode_zone_config_drops_non_boolean_bool_fields() -> None:
     flipping a switch on from a malformed frame is worse than reporting
     unknown.
     """
-    from lymow.protocol import decode_zone_config
 
     assert decode_zone_config(_field_i32(2, 7)) == {}  # raiseCutHeight=7 → dropped
     assert decode_zone_config(_field_i32(15, 9)) == {}  # pathOrder=9 → dropped
@@ -861,7 +860,6 @@ def test_decode_channel_config_three_fields() -> None:
     f1 detectMode, f2 cutHeight, f3 channelLift — used at PbMap.f12
     globalChannelConfig and at PbRunTimeConfig.channelConfig.
     """
-    from lymow.protocol import decode_channel_config
 
     out = decode_channel_config(_field_i32(1, 2) + _field_i32(2, 60) + _field_i32(3, 0))
     assert out == {"detectMode": 2, "cutHeight": 60, "channelLift": 0}
@@ -1811,7 +1809,7 @@ def test_encode_go_zone_zoneconfig_emits_full_pbzoneconfig() -> None:
         ],
         "nogoZones": [],
     }
-    from lymow.protocol import _encode_go_zone, decode_zone_config
+    from lymow.protocol import _encode_go_zone
 
     pb = _encode_go_zone(map_data["goZones"][0])
     zf = _decode_fields(pb)

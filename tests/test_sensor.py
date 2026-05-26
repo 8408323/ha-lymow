@@ -314,6 +314,26 @@ def test_map_sensor_extra_attrs_empty_when_no_data() -> None:
     assert sensor.extra_state_attributes == {}
 
 
+def test_map_sensor_extra_attrs_has_mowing_settings() -> None:
+    ms = {"cutHeight": 60, "pathSpacing": 35, "moveSpeed": 0.6}
+    coord = _make_coord({"mapData": {"globalZoneConfig": ms}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["mowing_settings"] == ms
+
+
+def test_map_sensor_extra_attrs_has_channel_config() -> None:
+    cc = {"detectMode": 2, "cutHeight": 60}
+    coord = _make_coord({"mapData": {"globalChannelConfig": cc}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["channel_config"] == cc
+
+
+def test_map_sensor_extra_attrs_mowing_settings_absent_when_not_decoded() -> None:
+    coord = _make_coord({"mapData": {"goZones": []}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert "mowing_settings" not in sensor.extra_state_attributes
+
+
 # ---------------------------------------------------------------------------
 # async_setup_entry
 # ---------------------------------------------------------------------------
