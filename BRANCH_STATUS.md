@@ -304,17 +304,36 @@ Push a commit: `test-result: scenario 1 pass / scenario 4 fail — console error
 ### Task A findings
 _Pending — scoped out of this capture window; vertex move requires the user to physically pinch-zoom in the app (see "Capture blockers" below)._
 
-### Task B findings (zone rename) — partial
-**Live capture: BLOCKED.** Driving the Lymow Android app via ADB cannot reach the rename action without a physical pinch-zoom in the map view (see "Capture blockers" below).
+### Task B findings (zone rename) — major correction
+**Earlier claim was wrong**: a fresh `scripts/query_map.py` run today (`uv run python scripts/query_map.py`) returned a 6717-byte map whose `BasicInfo.f2` fields are **populated**, not empty. The bytes are right there in the response:
+
+```
+offset 0x000014: 'Front garden'    # PbZoneBasicInfo.f2 of go-zone wsmjco1T
+offset 0x000664: 'Back garden HA'  # PbZoneBasicInfo.f2 of go-zone KX1kGyat
+```
+
+So:
+- The robot **does** persist zone names in `BasicInfo.f2`.
+- Our `encode_rename_zone` writes the name into that exact field — round-trip works at the robot level.
+- The "Back garden HA" suffix was written by HA via `lymow.rename_zone`, confirming the existing implementation is live-correct end-to-end for go-zones.
+- Our decoder (`protocol.py:309`) already reads f2 into `zone["name"]`, so HA sees the persisted name on the next pboutput refresh.
+
+Why the earlier claim was wrong: the previous `tools/capture-lymow.txt` was recorded during a session that did not trigger a query-map, so the only pboutput frames in it were 22B/30B heartbeats and one large reply that the supervisor read past the name region. The freshly-decoded response disproves the "f2 empty" hypothesis.
+
+**Per the user (2026-05-26):** the Lymow app itself maintains its own persisted map cache (likely AsyncStorage and/or S3 backup metadata) that is **not** automatically reconciled with the robot's `BasicInfo.f2`. That is why the app can show a different label ("Front") for a zone the robot calls "Front garden". The app-side persistence is the next thing to capture — find where the app stores its own zone-name map, then make HA write to that same sink so app and HA stay in sync.
 
 **Static encoder bytes** (for byte-exact diff against a future live capture):
 ```
 encode_rename_zone("wsmjco1T", "Front lawn")
 → 10312809621a0a180a16120a46726f6e74206c61776e1a0877736d6a636f3154
+encode_rename_nogo_zone("ngabcdef", "Flower bed")
+→ 10312809621c12 ... (PbMap.field=2 wrapper; distinguishes from go-zone variant)
 ```
-Breakdown: `10 31` version=49; `28 09` userCtrl=9 MODIFY_ZONE_INFO; `62 1a` field 12 PbMap len 26; `0a 18` goZones[0] len 24; `0a 16` basicInfo len 22; `12 0a "Front lawn"`; `1a 08 "wsmjco1T"`.
+Breakdown of rename_zone: `10 31` version=49; `28 09` userCtrl=9 MODIFY_ZONE_INFO; `62 1a` field 12 PbMap len 26; `0a 18` goZones[0] len 24; `0a 16` basicInfo len 22; `12 0a "Front lawn"`; `1a 08 "wsmjco1T"`.
 
-**Important context confirmed from existing capture-lymow.txt**: no REST endpoint stores zone names (only `get-backup-map`, `get-s3-object`, `get-device-info`, `update-device-feature`, `update-user-profile`, `device-list-query` are present). And `BasicInfo.f2` is empty in all observed pboutput zones. **Conclusion (provisional, needs Task B live confirmation):** the robot ignores the name field; rename is a UI-only convenience. The lovelace card's `_nameOverrides` + the coordinator's optimistic `mapData.goZones[*].name` update are the only places the name lives.
+**App-side persistence — what we've looked at so far:**
+- `/data/data/com.lymow.app/databases/RKStorage` = AsyncStorage. Largest key `separatorBuffer_device_7890838300cd` (32 KB) is map separator geometry, not names. No `Front garden` / `Back garden` strings in any AsyncStorage value. So zone names are **not** in plain AsyncStorage.
+- REST endpoints observed: `get-backup-map`, `get-s3-object`, `get-device-info`, `update-device-feature`, `update-user-profile`, `device-list-query`. The S3 backup map is the next obvious place to check — but we need a fresh capture of an app-side rename to see the exact REST call (if any) the app fires.
 
 ### Task C findings (zone delete) — partial
 **Live capture: BLOCKED.** Same reason as Task B.
