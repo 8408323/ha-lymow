@@ -477,6 +477,8 @@ def _build_map_response(
 
     for zone in go_zones or []:
         bi = _field_i32(1, zone.get("type", 1))
+        if zone.get("name"):
+            bi += _field_str(2, zone["name"])
         bi += _field_str(3, zone["hashId"])
         bi += _field_i32(4, 1 if zone.get("isEnabled", True) else 0)
         if zone.get("polygon"):
@@ -507,6 +509,8 @@ def _build_map_response(
 
     for nogo in nogo_zones or []:
         bi = _field_i32(1, nogo.get("type", 2))
+        if nogo.get("name"):
+            bi += _field_str(2, nogo["name"])
         bi += _field_str(3, nogo["hashId"])
         bi += _field_i32(4, 1 if nogo.get("isEnabled", True) else 0)
         if nogo.get("polygon"):
@@ -664,6 +668,34 @@ def test_decode_map_response_nogo_no_parent() -> None:
     result = decode_map_response(pb)
     nogo = result["nogoZones"][0]
     assert "parentZoneHashId" not in nogo
+
+
+def test_decode_map_response_go_zone_name() -> None:
+    pb = _build_map_response(
+        go_zones=[{"hashId": "wsmjco1T", "type": 1, "name": "Front garden"}],
+    )
+    result = decode_map_response(pb)
+    assert result["goZones"][0]["name"] == "Front garden"
+
+
+def test_decode_map_response_go_zone_without_name_omits_key() -> None:
+    pb = _build_map_response(go_zones=[{"hashId": "wsmjco1T", "type": 1}])
+    result = decode_map_response(pb)
+    assert "name" not in result["goZones"][0]
+
+
+def test_decode_map_response_nogo_zone_name() -> None:
+    pb = _build_map_response(
+        nogo_zones=[{"hashId": "ngabcdef", "type": 2, "name": "Flower bed"}],
+    )
+    result = decode_map_response(pb)
+    assert result["nogoZones"][0]["name"] == "Flower bed"
+
+
+def test_decode_map_response_nogo_zone_without_name_omits_key() -> None:
+    pb = _build_map_response(nogo_zones=[{"hashId": "ngabcdef", "type": 2}])
+    result = decode_map_response(pb)
+    assert "name" not in result["nogoZones"][0]
 
 
 def test_decode_map_response_charging_station() -> None:
@@ -987,6 +1019,38 @@ def test_sync_map_after_delete_roundtrip() -> None:
     modify_raws = _all(content, 9)
     modify_ids = {b.decode() for b in modify_raws if isinstance(b, bytes)}
     assert "gozone01" in modify_ids
+
+
+def test_encode_sync_map_serializes_channels_in_field_3() -> None:
+    """A channel in map_data must round-trip through encode_sync_map into PbMap.f3."""
+    map_data = {
+        "goZones": [],
+        "nogoZones": [],
+        "channels": [
+            {
+                "hashId": "ch000001",
+                "zone1": "gozone01",
+                "zone2": "gozone02",
+                "isValid": True,
+                "isDockingChannel": False,
+                "polygon": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}],
+                "cutHeight": 45,
+                "channelLift": 1,
+            }
+        ],
+    }
+    raw = encode_sync_map(map_data)
+    content = _decode_fields(_first(_decode_fields(raw), 23))
+    ch_raws = _all(content, 3)
+    assert len(ch_raws) == 1
+    cf = _decode_fields(ch_raws[0])
+    assert _first(cf, 1).decode() == "ch000001"
+    assert _first(cf, 2).decode() == "gozone01"
+    assert _first(cf, 3).decode() == "gozone02"
+    assert _first(cf, 4) == 1
+    assert _first(cf, 6) == 0
+    assert _first(cf, 9) == 45
+    assert _first(cf, 10) == 1
 
 
 def test_encode_sync_map_preserves_task_config() -> None:
@@ -2322,6 +2386,46 @@ def test_encode_rename_zone_matches_live_confirmed_bytes() -> None:
         encode_rename_zone("wsmjco1T", "Front garden").hex()
         == "10312809621c0a1a0a18120c46726f6e742067617264656e1a0877736d6a636f3154"
     )
+
+
+def test_encode_rename_zone_envelope_matches_app_ble_capture() -> None:
+    """Cross-check encoder envelope against bytes captured from the Lymow app over BLE.
+
+    On 2026-05-26 we drove the Android app via ADB through Edit → Rename → pick
+    wsmjco1T → "ABCDEFG_TEST" → OK, and captured the resulting ATT WRITE_CMD on
+    GATT handle 0x0014 from the phone's BTSnoop HCI log. The 48-byte ASCII payload
+    is base64 of the protobuf below:
+
+        ATT b64:   EDEoCWIeChwKGhIMQUJDREVGR19URVNUGgh3c21qY28xVCAB
+        pb (36B):  10312809621e0a1c0a1a120c414243444546475f544553541a0877736d6a636f31542001
+
+    Compared to our encoder for the same hash+name, the app's frame also includes
+    BasicInfo.f4 = isEnabled = 1 at the tail. Our encoder omits it intentionally:
+    sending a blanket 1 would re-enable a user-disabled zone on a simple rename.
+    The robot accepts both forms — the direct-MQTT round-trip in rename_test.py
+    proves the no-f4 form is honored end-to-end.
+    """
+    from lymow.protocol import encode_rename_zone
+
+    # Strip the app's trailing isEnabled field and adjust the three nested length
+    # tags down by 2 bytes — the result must equal our encoder's output exactly.
+    ours = encode_rename_zone("wsmjco1T", "ABCDEFG_TEST")
+    assert ours.hex() == "10312809621c0a1a0a18120c414243444546475f544553541a0877736d6a636f3154"
+
+    # Same envelope, same nesting, same userCtrl, same name field, same hashId field
+    # as the captured app frame. Decode both and compare structurally.
+    app_pb = bytes.fromhex("10312809621e0a1c0a1a120c414243444546475f544553541a0877736d6a636f31542001")
+    app_f = _decode_fields(app_pb)
+    our_f = _decode_fields(ours)
+    assert _first(app_f, 2) == _first(our_f, 2) == 49  # PB_VERSION
+    assert _first(app_f, 5) == _first(our_f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    app_bi = _decode_fields(_first(_decode_fields(_first(_decode_fields(_first(app_f, 12)), 1)), 1))
+    our_bi = _decode_fields(_first(_decode_fields(_first(_decode_fields(_first(our_f, 12)), 1)), 1))
+    assert _first(app_bi, 2) == _first(our_bi, 2) == b"ABCDEFG_TEST"
+    assert _first(app_bi, 3) == _first(our_bi, 3) == b"wsmjco1T"
+    # The one structural difference: the app appends f4 isEnabled=1, we omit it.
+    assert _first(app_bi, 4) == 1
+    assert _first(our_bi, 4) is None
 
 
 def test_encode_clear_schedules_is_empty_schedule_field() -> None:
