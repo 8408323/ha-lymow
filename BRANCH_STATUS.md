@@ -236,7 +236,7 @@ The capture tool (`tools/capture.py`) already decodes MQTT-over-WebSocket and la
 ## Known-good implementations (do NOT re-implement)
 
 These are already done in `custom_components/lymow/protocol.py`. Verify against capture, don't rewrite:
-- `encode_rename_zone(hash_id, name)` — sends CLEAR_ZONE (userCtrl=8) with name in BasicInfo.f2
+- `encode_rename_zone(hash_id, name)` — sends MODIFY_ZONE_INFO (userCtrl=9) with name in BasicInfo.f2 **[static bytes in Task B findings confirm userCtrl=9, not 8 as originally assumed]**
 - `encode_delete_zone(hash_id)` — sends CLEAR_ZONE (userCtrl=8), zone in f1.f8.f3[0]
 - `encode_delete_nogo_zone(hash_id)` — same pattern, zone in f1.f8.f4[0] (nogo field)
 - `encode_sync_map(map_data)` / `encode_sync_map_raw(raw_content)` — userCtrl=25, full map push
@@ -382,3 +382,19 @@ Filed as **#197** so the second-card work (Mow/Pause/Dock/Resume + live status +
 ### Hand-off note to supervisor
 - `test-ready:` not pushed for this round — the fix is backend-only (coordinator) and is covered by unit tests, so browser testing isn't strictly needed to merge it. If you want a sanity check anyway, scenario to run: in the lovelace card, delete a go-zone with the 🗑 button; expect it to disappear within ~1 s (used to wait up to ~60 s for the next poll).
 - Phone proxy is **still active** on `192.168.1.180:8888` — leaving it on so the capture stays available for the next session. Last session noted to clear before overnight (E29 dock-fail risk).
+
+### Supervisor reply (2026-05-26)
+Good work on the coordinator bug and the static encoder breakdown — that's solid progress without live capture.
+
+**userCtrl=9 for rename**: Your static bytes confirm `encode_rename_zone` sends userCtrl=**9** (MODIFY_ZONE_INFO), not 8. I've corrected the "Known-good implementations" entry above. When you get a live frame, diff against this — if they match we're done.
+
+**Capture blocker — go with option 1**: Manually pinch-zoom the phone once on the map screen until zone polygons are visible, then hand control back to ADB. That should stay zoomed across taps. If the app resets zoom on focus loss, try keeping a `scrcpy` window open on the side so you can manually intervene without picking up the phone.
+
+**Browser sanity check for the delete fix**: Will run scenario 2 (delete a zone, verify it disappears within ~1 s) and report back with a `test-result:` commit.
+
+**Phone proxy**: clear it before leaving overnight to avoid the E29 dock-fail. `adb shell settings delete global http_proxy`
+
+**Priority order for next capture session**:
+1. Unblock via pinch-zoom → capture live rename (Task B) and delete (Task C) frames
+2. Diff live bytes against static encoder bytes — if they match, Tasks B+C are confirmed done
+3. Task A (vertex move) — same unblock approach; this is still the highest-priority unknown
