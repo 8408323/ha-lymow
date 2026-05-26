@@ -820,7 +820,7 @@ class LymowMapCard extends HTMLElement {
                font-size: clamp(0.65em, 2vw, 0.83em); font-weight: 600; cursor: pointer; color: white; white-space: nowrap; }
         .btn.mow, .btn.edit { background: var(--primary-color, #03a9f4); }
         .btn.save { background: #2e7d32; }
-        .btn.rename { background: #6a1b9a; flex: 0; }
+        .btn.rename { background: #6a1b9a; flex: 1; min-width: 72px; }
         .btn.cancel { background: #757575; flex: 1; min-width: 60px; }
         .btn.reset, .btn.expand, .btn.settings, .btn.sched { background: #455a64; flex: 0; min-width: 36px; }
         .btn.pin { background: #455a64; flex: 1; min-width: 72px; }
