@@ -187,6 +187,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._last_ota_check: dict[str, datetime] = {}
         # Lazily-created BLE manual-drive transport, reused across drive calls.
         self._ble_controller: LymowBleController | None = None
+        # Channel names have no protobuf field — store HA-side so renames survive
+        # MQTT polls. Keyed by thing_name → {hashId → name}. Lost on HA restart;
+        # the card's localStorage covers the browser-side persistence gap.
+        self._channel_name_overrides: dict[str, dict[str, str]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -235,6 +239,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Receive a state update from MQTT and push to HA."""
         # A QUERY_SCHEDULES reply carries the full schedule list in one message
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
+        if "mapData" in patch:
+            patch = self._apply_channel_name_overrides(thing_name, patch)
         merged_patch = self._merge_nested_patch(self._mqtt_state.setdefault(thing_name, {}), patch)
         self._mqtt_state[thing_name].update(merged_patch)
         if self.data and thing_name in self.data:
@@ -244,6 +250,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
+
+    def _apply_channel_name_overrides(self, thing_name: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Re-apply HA-side channel name overrides to a mapData patch before storing."""
+        overrides = self._channel_name_overrides.get(thing_name)
+        if not overrides:
+            return patch
+        map_data = patch["mapData"]
+        channels = map_data.get("channels", [])
+        new_channels = [
+            {**ch, "name": overrides[ch["hashId"]]} if ch.get("hashId") in overrides else ch for ch in channels
+        ]
+        return {**patch, "mapData": {**map_data, "channels": new_channels}}
 
     def _merge_nested_patch(self, existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         """Return a copy of patch where each ``_DEEP_MERGE_KEYS`` dict is overlaid
@@ -660,6 +678,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 {**z, "name": name} if z.get("hashId") == hash_id else z for z in map_data.get("nogoZones", [])
             ]
             new_map = {**map_data, "nogoZones": new_zones}
+            new_device = {**self.data[thing_name], "mapData": new_map}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
+
+    async def async_rename_channel(self, thing_name: str, hash_id: str, name: str) -> None:
+        """Assign a display name to a channel (HA-side only; no protobuf name field)."""
+        self._channel_name_overrides.setdefault(thing_name, {})[hash_id] = name
+        if self.data and thing_name in self.data:
+            map_data = self.data[thing_name].get("mapData", {})
+            new_channels = [
+                {**ch, "name": name} if ch.get("hashId") == hash_id else ch for ch in map_data.get("channels", [])
+            ]
+            new_map = {**map_data, "channels": new_channels}
             new_device = {**self.data[thing_name], "mapData": new_map}
             self.async_set_updated_data({**self.data, thing_name: new_device})
 
