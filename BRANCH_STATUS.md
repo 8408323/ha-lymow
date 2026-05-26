@@ -333,7 +333,28 @@ Breakdown of rename_zone: `10 31` version=49; `28 09` userCtrl=9 MODIFY_ZONE_INF
 
 **App-side persistence — what we've looked at so far:**
 - `/data/data/com.lymow.app/databases/RKStorage` = AsyncStorage. Largest key `separatorBuffer_device_7890838300cd` (32 KB) is map separator geometry, not names. No `Front garden` / `Back garden` strings in any AsyncStorage value. So zone names are **not** in plain AsyncStorage.
-- REST endpoints observed: `get-backup-map`, `get-s3-object`, `get-device-info`, `update-device-feature`, `update-user-profile`, `device-list-query`. The S3 backup map is the next obvious place to check — but we need a fresh capture of an app-side rename to see the exact REST call (if any) the app fires.
+- REST endpoints observed: `get-backup-map`, `get-s3-object`, `get-device-info`, `update-device-feature`, `update-user-profile`, `device-list-query`.
+
+### Task B — live confirmation (2026-05-26, MQTT-side via scripts/rename_test.py)
+
+I ran a direct-MQTT rename round-trip (no app, no HA UI involved) and traced what the system did:
+
+1. `encode_rename_zone("wsmjco1T", "Front garden RENAMETEST")` published to `/device/<thing>/pbinput`.
+2. Re-queried with `encode_query_map(0)` and parsed the reply: `BasicInfo.f2 = "Front garden RENAMETEST"` for hash `wsmjco1T`. ✓
+3. Restored the original name with another rename + verify pass.
+
+Bytes sent (exact wire frames the test produced — these match the encoder's static output exactly):
+```
+rename → "Front garden RENAMETEST":
+  1031280962270a250a23121746726f6e742067617264656e2052454e414d45544553541a0877736d6a636f3154
+rename back → "Front garden":
+  10312809621c0a1a0a18120c46726f6e742067617264656e1a0877736d6a636f3154
+```
+The capture in `tools/capture-lymow.txt` (Linux box) recorded **only** the robot's three large `pboutput` map broadcasts at 06:59:12 / 06:59:18 / 06:59:23 UTC. **The Lymow phone app made no REST call and no MQTT publish of its own during or after the rename.** Conclusion: there is no separate app-side persistence sink to mirror. The robot's `BasicInfo.f2` is the single source of truth; the app re-renders from the MQTT broadcast like any other subscriber.
+
+This means `encode_rename_zone` is **live-correct end-to-end**, `encode_rename_nogo_zone` (which mirrors the same shape into PbMap.nogoZones) follows by symmetry, and HA's existing rename path already syncs the app via the robot. No extra plumbing needed.
+
+The `scripts/rename_test.py` helper that ran this is committed alongside this BRANCH_STATUS — re-run anytime to re-confirm the round-trip after future changes.
 
 ### Task C findings (zone delete) — partial
 **Live capture: BLOCKED.** Same reason as Task B.
