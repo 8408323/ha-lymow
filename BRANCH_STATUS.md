@@ -679,21 +679,63 @@ Status of every map/zone operation, as of this capture session:
 **Captured in this session (2026-05-26):**
 - ✅ Live `query_map` decode against fresh robot bytes — every PbMap field accounted for.
 - ✅ Hermes class walks for: PbMap, PbZoneConfig, PbChannelConfig, PbTaskConfig, PbRunTimeConfig, PbPose, PbRobotLLACoords.
-- ✅ App-toolbar feature audit: tapped Merge Map → toast; tapped Split Map → toast; tapped Edit Boundary → joystick + element-required error.
-- ✅ Two encoder bugs found and fixed.
+- ✅ App-toolbar feature audit: Merge Map → "Coming soon" toast; Split Map → "Coming soon" toast; Edit Boundary → joystick UI with element-required gate.
+- ✅ Two encoder bugs found and fixed (PbZoneConfig field off-by-ones, PbRunTimeConfig wrong field numbers).
 
-**NOT captured in this session — left for a follow-up capture round:**
-- ❌ Mow / Pause / Dock wire frames (would need to drive the mower; safe inside the existing zone, just out of scope for this turn).
-- ❌ Add-zone-via-app — the app has no draw-polygon UI in its edit toolbar; the only "add" path is Edit Boundary (drive-the-robot). The card's draw-polygon-add is therefore a card exclusive.
-- ❌ Delete element via app — the toolbar's "Delete Element" button was present but I did not exercise it; the card's delete is already wire-validated by envelope symmetry with rename.
-- ❌ Nogo-zone-specific add/delete flows in the app (no app UI to add a nogo independently of Edit Boundary).
-- ❌ Channel-specific flows in the app (no channel add/delete in the app's edit toolbar — channels appear only as auto-generated path connectors).
-- ❌ Move charging station — was wire-validated in a **prior** capture session (MODIFY_STATION userCtrl=38), not re-validated here.
-- ❌ Schedule add/edit/delete via app.
-- ❌ Device settings (rain cleaning, charging mode) — were wire-validated in prior sessions.
-- ❌ Map Backup / Map Restore — Settings menu flow, not exercised.
+**Captured in the follow-up round (2026-05-26 / -27, after user pushback on incomplete capture):**
 
-The matrix above marks "wire-validated" only the things actually byte-captured by us at some point. "Envelope-validated" means we built the encoder bytes from the canonical Hermes class layout + matched the envelope shape to a captured frame of the same family. "Client-driven" means it's a card-only feature — no robot encoder needed beyond `sync_map`, and the card already does it.
+Full mowing-state machine captured via app BLE writes (ATT WRITE_CMD to handle 0x0014):
+
+| App button | Robot state when tapped | Wire frame (hex) | userCtrl | Matches `const.py` |
+|---|---|---|---|---|
+| **Mow** | Waiting (docked) | `10312801` | 1 (USER_CTRL_CLEAN) | ✅ |
+| **Pause** | Mowing | n/a (test ended in confirm dialog before tap) | expected 3 (USER_CTRL_PAUSE) | ✅ |
+| **Pause** | Docking | `10312815` | 21 (USER_CTRL_PAUSE_DOCK) | ✅ |
+| **Resume** | Paused | `10312804` | 4 (USER_CTRL_RESUME) | ✅ |
+| **Resume** | Pause-Docking | `10312816` | 22 (USER_CTRL_RESUME_DOCK) | ✅ |
+| **Dock** | Idle/docked (no confirmation) | `10312802` | 2 (USER_CTRL_DOCK — **destructive: cancels task progress**) | ✅ |
+| **Dock → "Yes forget progress"** | Mowing (confirmation dialog) | `10312802` | 2 (USER_CTRL_DOCK) | ✅ |
+| **Dock → "No keep progress"** | Mowing (confirmation dialog) | `10312821` | 33 (USER_CTRL_RECHARGE_DOCK) | ✅ |
+| **Clear Error** | Error state | `10312803` | 3 (USER_CTRL_PAUSE) — *no separate clear-error opcode; pause IS the clear* | ✅ |
+
+**Key behavior difference**: the HA card's "Dock" button currently goes through `USER_CTRL_RECHARGE_DOCK = 33` (preserves task progress). The Lymow app's "Dock" button when tapped during active mow opens an explicit **"After docking, should the mower forget its progress?"** dialog — **Yes** sends userCtrl=2 (cancel/destructive), **No** sends userCtrl=33 (preserve). When the robot is already idle/docked, the app's Dock button sends userCtrl=2 directly with no confirmation. The card could expose the same explicit choice for parity with the app's UX.
+
+**Device-settings (BLE writes captured this session):**
+
+| App control | Wire frame (hex) | Decode | Notes |
+|---|---|---|---|
+| **Vehicle LED toggle ON** | `10316a02400a` | `PbInput{robotConfig{signal: 10}}` | matches `SIGNAL_TURN_ON_VEHICLE_LIGHT = 10` |
+| **Vehicle LED toggle OFF** | `10316a02400b` | `PbInput{robotConfig{signal: 11}}` | matches `SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11` |
+| **Rainy Mowing ON** | `10312824d20106080018012000` | userCtrl=36 + `PbTaskConfig{chargingMode:0, rainCleaning:1, disableChargingPark:0}` | confirms PbTaskConfig 4-field layout; app re-sends ALL 4 fields every toggle |
+| **Charging Handbrake → disabled (toggle)** | `10312824d20106080018012001` | userCtrl=36 + `PbTaskConfig{chargingMode:0, rainCleaning:1, disableChargingPark:1}` | sends full 4-field PbTaskConfig |
+| **Return-to-Dock: Direct Route** | `10312824d20106080118012001` | userCtrl=36 + `PbTaskConfig{chargingMode:1, ...}` | `chargingMode=1` = QUICK = Direct Route; 0 = NORMAL = Follow Perimeter |
+
+All four device-settings frames confirm that the canonical `PbTaskConfig` (Hermes class #9588) is what `lymow.set_device_settings` should write — which our encoder already does correctly.
+
+**Cloud-side flows (NOT BLE — observed via mitmproxy):**
+
+| App action | Transport | Wire | Notes |
+|---|---|---|---|
+| **Map Backup (Settings → Map Backup → Back up → Confirm)** | MQTT pbinput | `1031282c` = userCtrl=44 (USER_CTRL_FLOOR_BACKUP) | matches our `button.py` BackupMapButton; already implemented |
+| **Map Restore (Settings → Map Backup → tap backup → Restore → Confirm)** | REST POST | `POST /prod/restore-map-v2` `{fromKey: "<thingName>/map/<key>.pb", toThingName: "<thingName>"}` | already implemented in our API client (per `reference_map_backup_delete.md`) |
+| **List backups** | REST GET | `GET /prod/get-backup-map?deviceThingName=<thingName>` returns S3 keys | already implemented |
+| **Download backup** | REST GET → S3 presigned | `GET /prod/get-s3-object?objectKey=<key>` → presigned S3 URL → raw map .pb | already implemented |
+
+This **resolves a structural assumption from the prior session**: an earlier finding claimed ALL app→robot commands go via BLE. That's wrong. **Some commands (map backup, MQTT-only operations) bypass BLE entirely and go through MQTT or REST.** The transport choice appears to be per-feature:
+
+- BLE writes to handle 0x0014: most one-shot commands (Mow, Pause, Dock, device settings, Vehicle LED) — fast, low-latency, close-proximity.
+- MQTT pbinput: backup (userCtrl=44) — confirmed; possibly others when an internet round-trip is expected.
+- REST API: restore (the cloud-side flow needs to coordinate AWS S3 + the robot fetch).
+
+**NOT captured this session — explicitly deferred:**
+- ❌ **Edit Boundary START frame (userCtrl=10)**. App requires a selected zone before the START frame is sent; ADB-driven zone selection unreliable. Capture deferred to a session with manual zone selection + supervision (the flow also drives the robot).
+- ❌ **Add-zone-via-app** — the app's edit toolbar has no draw-polygon button. The only "add" path is Edit Boundary (drive the robot). The card's draw-polygon-add is therefore a card exclusive — no app frame exists to compare against.
+- ❌ **Delete Element via app toolbar** — the button was present but not exercised this session (would have deleted a real zone). The card's delete is already wire-validated by envelope symmetry with the rename frame (which IS byte-captured).
+- ❌ **Move charging station** — wire-validated in a **prior** capture session (`MODIFY_STATION userCtrl=38`); not re-validated here.
+- ❌ **Schedule add/edit/delete** — Settings → Schedules page not exercised; encoder already implemented via `encode_set_schedules`.
+- ❌ **Delete backup** — Settings → Map Backup has no per-backup-delete button visible; might be long-press, not tested.
+
+The matrix above marks "wire-validated" only the things byte-captured by us at some point. "Envelope-validated" means we built the encoder bytes from the canonical Hermes class layout + matched the envelope shape to a captured frame of the same family. "Client-driven" means it's a card-only feature — no robot encoder needed beyond `sync_map`, and the card already does it.
 
 ### Supervisor reply 2 (2026-05-26, supervisor laptop)
 
