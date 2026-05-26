@@ -299,6 +299,33 @@ Push a commit: `test-result: scenario 1 pass / scenario 4 fail — console error
 
 ---
 
+## Browser test results (supervisor session)
+
+### test-ready: nogo-zone rename (commit `351820e`) — result: **PARTIAL PASS + 2 bugs found**
+
+**Tested 2026-05-26 on Desktop PC Chrome, HA 192.168.1.99:8123**
+
+#### What passed
+- Map loads correctly: go-zones, nogo-zones, robot pose, RTK badge, legend all render
+- Zone labels show name + area ("Front garden 349 m²", "Back garden HA 1222 m²")
+- Edit mode enters cleanly, status bar updates correctly
+- Rename dialog opens (input + OK + cancel buttons)
+- Optimistic label update is immediate after OK
+
+#### Bug 1 — rename input not cleared between opens (fixed in `8b86a49`)
+Typing a name, OK-ing, then opening rename again: the input retained the previous value. Second typing appended to first → "Old nameNew name". Root cause: shadow DOM incremental re-render doesn't reset `input.value` (only `defaultValue`). Fix: `_enterRename` now resets `inp.value = inp.defaultValue` and calls `inp.select()` before focus.
+
+#### Bug 2 — accidental go-zone rename during test
+During testing I clicked at map coordinate (820, 455) intending to select the nogo zone icon, but hit the underlying go-zone polygon instead (`_editType` was `"go"`, `_editHash` = `KX1kGyat`). Result: "Back garden HA" was renamed to "Test nogo zoneTest nogo zone 2" on the robot. Called `rename_zone(KX1kGyat, "Back garden HA")` to restore — **capture session please verify the zone name is restored after next query_map.** If not, restore from backup.
+
+#### nogo rename dispatch — NOT fully verified
+Could not get `_editType = "nogo"` during the test because my clicks kept landing on the larger go-zone polygon underneath the nogo icon. The dispatch code is correct in the JS (`isNogo = this._editType === "nogo"` → calls `rename_nogo_zone`), but needs a test where a nogo polygon is genuinely selected. **Capture session: please do a targeted nogo rename test** — tap the red hatched nogo polygon directly (not its icon), verify the status bar says "Editing no-go zone", then rename.
+
+#### Scenario 4 regression — PASS
+Map loads, zoom/pan, scale bar, north arrow, RTK badge, label toggle, fullscreen all working.
+
+---
+
 ## Findings (fill in as capture session reports)
 
 ### Task A findings
