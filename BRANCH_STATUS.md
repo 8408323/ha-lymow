@@ -85,10 +85,30 @@ When a `test-ready:` commit appears: `git pull`, run the browser test scenario d
 - [x] **Zone name round-trip confirmed** — resolved: direct-MQTT round-trip via `scripts/rename_test.py` + byte-equal BLE frame captured from the app (commit `b950429`). Robot persists name in `BasicInfo.f2`; decoder now reads it back for both go and no-go zones.
 - [x] **Tests at 100% coverage** — `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` → 1006 tests, 100% (after commit `8295778`).
 
+### Wiring gaps — 2026-05-26 supervisor audit
+
+#### services.yaml missing entries (work fine, just undocumented for external callers)
+Registered in `lawn_mower.py` and called by the card, absent from `services.yaml`:
+`add_nogo_zone`, `add_channel`, `move_charging_station`, `set_zone_enabled`, `update_nogo_polygon`, `sync_map`, `pause`
+- [ ] Add these 7 to `services.yaml`
+
+#### Nogo zone name persistence across HA restarts
+The coordinator `_zone_name_overrides` cache covers go-zones only. Nogo rename calls `async_rename_nogo_zone` (which sends the correct MQTT frame and the robot persists the name), but if HA restarts before the next MQTT poll brings the name back, the label shows the hashId fallback.
+- [ ] Extend `_zone_name_overrides` to also cover nogo zones (same dict, same pattern)
+
+#### Channel name persistence
+`PbChannel` has no name field (f1=hashId, f2=zone1, f3=zone2 — confirmed from Hermes bytecode). User-assigned channel names cannot be stored on the robot; they need an HA-side store.
+- [ ] Add `_channel_name_overrides` dict in coordinator (or `hass.data`), persisted across restarts; wire Rename button for channels in the card
+
+#### Channel length label
+Channel polygon points (ENU metres) are already in the sensor attribute. Length = sum of segment distances; no backend change needed.
+- [ ] Compute `length` in `_getMapData()` for channels; add a "Length (m)" option to `ch_label_mode` in the Advanced settings panel
+
 ### Nice-to-have / post-merge
-- [ ] Zone name server-side store — **N/A**: confirmed there is no app-side store. Robot's `BasicInfo.f2` is the single source of truth (see "Task B — live confirmation" + "Supervisor reply 2").
+- [ ] Zone name server-side store — **N/A**: no app-side store confirmed. Robot's `BasicInfo.f2` is the single source of truth.
 - [ ] PR review cycle: resolve all Copilot/Codex comments, re-request review, iterate until clean
-- [ ] Browser re-verify the nogo-rename dispatch (partial-pass on commit `351820e`, supervisor blocked by go-zone polygon under the nogo icon). Wire-level proof is solid (encoder + dispatch + decoder all unit-tested); this is purely a manual UI confirmation.
+- [ ] Browser re-verify the nogo-rename dispatch (partial-pass on commit `351820e`). Wire-level proof is solid; purely a manual UI confirmation needed.
+- [ ] Per-zone cut height — `async_update_zone_cut_height` exists in coordinator, no service or card UI yet
 
 ---
 
