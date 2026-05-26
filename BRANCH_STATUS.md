@@ -36,7 +36,7 @@ When a `test-ready:` commit appears: `git pull`, run the browser test scenario d
 
 ---
 
-## What has been done (69 commits vs main)
+## What has been done (77 commits vs main)
 
 ### Map Lovelace card (`lymow-map-card.js`)
 - **v1–v4**: Initial map card — zoom/pan (wheel + drag), pinch-zoom, scale bar, north arrow, go-zones, no-go zones, channels, charging station, robot pose, RTK base station marker
@@ -50,13 +50,14 @@ When a `test-ready:` commit appears: `git pull`, run the browser test scenario d
   - Split zone (✂ Split → click 2 boundary points)
   - Enable/disable zone (long-press outside edit mode)
 - **Charging station relocation**: Drag in edit mode (no zone selected) → calls `lymow.move_charging_station`
-- **Mowing settings panel**: Cut height, move speed, path spacing, clean direction, perimeter laps/dir, clean mode, path order, line follow mode; collapsible advanced section
+- **Mowing settings panel**: Cut height, move speed, path spacing, clean direction, perimeter laps/dir, clean mode, path order, line follow mode; collapsible advanced section; settings persist across hard reloads via localStorage (robot doesn't echo task config back via MQTT)
 - **Schedules panel**: View/edit mowing schedules
 - **Keyboard shortcuts**: F=fullscreen, E=enter edit, R=reset view, Esc=cancel/close; shadow DOM focus guard so typing in rename doesn't trigger shortcuts
-- **Zone labels**: Name + area two-line adaptive font size; go/nogo/channel label mode persisted in localStorage; bright green go-zones (#43a047) with white text
+- **Zone labels**: Name + area two-line adaptive font size; go/nogo/channel label mode persisted in localStorage; bright green go-zones (#43a047) with white text; nogo labels scale to zone bbox so tiny zones don't overflow; channel labels render above all zone polygons
+- **Markers**: Charging station, robot pose, RTK base — all scale with zoom (fixed-pixel via `invZf`); sizes bumped ~30% larger (2026-05-26)
 - **Status bar**: Pin-and-go, obstacle avoidance toggle, zone enable/disable feedback
 - **UI polish**: RTK status badge, auto-pause on RTK loss, channel legend, legend SVG symbols, viewport-fixed overlays, fullscreen toggle (⊞ or F), auto-register card + create Lymow dashboard on setup, JS mtime cache-buster
-- **Bug fixes**: Page scroll preserved across re-renders, details state preserved, taskConfig round-trip fixed, post-layout RAF re-render, zero-length edge guard, label placement
+- **Re-render guard (v=27/v=28)**: `set hass()` skips `_render()` while user is interacting — blocks on active INPUT/SELECT focus (keeps rename input and settings dropdowns alive across HA MQTT updates) and on `_sliderActive` flag (keeps slider value stable during drag)
 
 ### Integration backend (`custom_components/lymow/`)
 - **New services**: `rename_zone`, `delete_zone`, `delete_nogo_zone`, `sync_map`, `move_charging_station`, `set_device_settings`, `set_recharge_resume`, `set_network_priority`, `set_run_time_config`, `resume`, `query_map` — all documented in `services.yaml`
