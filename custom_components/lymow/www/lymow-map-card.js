@@ -916,14 +916,18 @@ class LymowMapCard extends HTMLElement {
     this._updateScaleBar();
     this._wireEvents();
 
-    // Restore settings panel scroll position after full DOM replace.
-    if (prevScrollTop > 0) {
-      const newPanel = this.shadowRoot.querySelector(".settings-panel");
-      if (newPanel) newPanel.scrollTop = prevScrollTop;
+    // Defer both scroll restores to after reflow — synchronous restore fires before
+    // the browser finishes laying out the new DOM, causing visible jumps.
+    if (prevScrollTop > 0 || savedScrollY > 0) {
+      const sr = this.shadowRoot;
+      requestAnimationFrame(() => {
+        if (prevScrollTop > 0) {
+          const newPanel = sr.querySelector(".settings-panel");
+          if (newPanel) newPanel.scrollTop = prevScrollTop;
+        }
+        if (savedScrollY > 0) window.scrollTo(0, savedScrollY);
+      });
     }
-    // Defer page scroll restore to after reflow — synchronous scrollTo fires before
-    // the browser has finished laying out the new DOM, causing a visible jump.
-    if (savedScrollY > 0) requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
 
     // Persist <details> open/close toggle into component state so next render restores it.
     const advEl = this.shadowRoot.querySelector(".sp-advanced");
