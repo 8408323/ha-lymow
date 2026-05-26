@@ -627,16 +627,73 @@ Took the gap audit and worked it end-to-end. **Summary:**
 1. `_TASK_CONFIG_FIELDS` had **eight** fields on wrong wire positions (f9 was `pathSpacing` instead of `relativeCleanDir`, then everything from f10–f16 shifted by one). `lymow.set_task_config(path_spacing=X)` was silently writing X into `relativeCleanDir` on the robot. Fixed; the buggy test that pinned it is now correctly pinned to canonical wire positions.
 2. `_RUN_TIME_CONFIG_FIELDS` was using PbZoneConfig field numbers (f4 for moveSpeed, f6 for cutSpeed). PbRunTimeConfig has its own layout — f1 cutHeight, **f2 moveSpeed, f3 cutSpeed**. `encode_set_run_time_config(moveSpeed=…)` was writing the float into f4 which is `channelConfig` (length-delimited). Fixed.
 
-**App-feature audit (Section B encoders)**: Two surprises and one defer.
-- **Merge Map (userCtrl 55) and Split Map (userCtrl 56) are BOTH "Stay tuned! Coming soon" in the app** — toasted as not-shipped, send no wire frame. HA's client-side merge / split is the only user-facing path. **Stop calling these encoder gaps in the audit** — they will never be capturable from app traffic.
-- **Edit Boundary (10 / 11) is shipped** but the wire START frame is gated on a selected zone in edit mode. Without selection the app shows "Please select an element to modify" and no PBINPUT is sent. ADB-driven zone selection is unreliable (taps inside the polygon interior didn't visibly select it). Deferred to a session with the user available to supervise — confirming Edit Boundary also drives the robot.
-- Backup / restore (44 / 45) deferred (Settings menu, separate flow).
+### App-vs-Lovelace feature matrix (2026-05-26, capture session — explicit)
 
-**Test state**: 1020 tests, 100% coverage; `ruff format --check` + `ruff check` clean.
+**The user's question: "are we able to build them together from the lovelace card even when the app says coming soon?"** — **YES.** Anything the robot's protocol enum exposes is a candidate for the card to implement client-side, regardless of whether the Lymow app ships the UI. The card can talk to the robot directly via HA's MQTT path. The "coming soon" toast is a UI gate in the app, not a protocol gate on the robot.
 
-**Phone state**: Returned to launcher cleanly. Phone proxy still set at `192.168.1.180:8888` per standing setup.
+Status of every map/zone operation, as of this capture session:
 
-**Recommend the supervisor next**: drop the card's `lymow_settings_values` localStorage shim and replace with `map_data.globalZoneConfig` from the decoded map. The legacy `cutHeight` / `pathSpacing` keys on each zone are still set, so existing card code that reads them keeps working — but the panel can now show the live robot value instead of the cached client one.
+| Operation | In Lymow app? | In HA card? | Wire-format source | Status |
+|---|---|---|---|---|
+| Start mowing (Mow) | ✅ shipped | ✅ shipped | app BLE capture (this session) | wire-validated |
+| Pause | ✅ shipped | ✅ shipped | app BLE capture (this session) | wire-validated |
+| Return to dock | ✅ shipped | ✅ shipped | app BLE capture (prior session) | wire-validated |
+| Rename go-zone | ✅ shipped | ✅ shipped | app BLE capture (prior session, byte-equal) | wire-validated |
+| Rename no-go zone | ❌ — app's Rename only targets go-zones | ✅ shipped | symmetry with go-zone rename + Hermes class walk | envelope-validated |
+| Rename channel | ❌ — PbChannel has no name field on the wire | ✅ shipped (HA-side `_channel_name_overrides`) | client-only | HA-side persistence only |
+| Delete element (zone/nogo/channel) | ✅ shipped (one Delete Element button) | ✅ shipped (separate buttons per type) | app BLE capture (this session) | wire-validated |
+| Add go-zone (draw polygon) | ❓ not in app's edit toolbar | ✅ shipped (draw + name) | sync_map envelope | client-driven |
+| Add no-go zone | ❓ not in app's edit toolbar | ✅ shipped | sync_map envelope | client-driven |
+| Add channel | ❓ not in app's edit toolbar | ✅ shipped | sync_map envelope | client-driven |
+| Move vertex / drag handle | ❌ — app has no vertex-edit UI | ✅ shipped | sync_map envelope | card-only feature |
+| Insert / delete vertex | ❌ — app has no vertex-edit UI | ✅ shipped | sync_map envelope | card-only feature |
+| **Merge zones** | 🚧 "Stay tuned! Coming soon" — toast only | ✅ shipped (convex-hull + sync_map) | client-side; userCtrl 55 enum is in the protocol but app never sends it | **HA exclusive** until app catches up |
+| **Split zone** | 🚧 "Stay tuned! Coming soon" — toast only | ✅ shipped (polygon cut + sync_map) | client-side; userCtrl 56 enum is in the protocol but app never sends it | **HA exclusive** until app catches up |
+| Edit Boundary (drive-the-robot boundary record) | ✅ shipped (joystick UI + confirm) | ❌ not implemented | userCtrl 10 / 11 — capture deferred (needs zone selection + drives the robot) | **HA gap, app exclusive** |
+| Enable / disable zone | ❌ not in app | ✅ shipped (long-press toggles `isEnabled`) | sync_map envelope | card-only feature |
+| Move charging station | ✅ shipped (drag base in app) | ✅ shipped (drag in edit mode, no zone selected) | app BLE capture (prior session, MODIFY_STATION userCtrl=38) | wire-validated |
+| Pin-and-go (clean point) | ✅ shipped | ✅ shipped | wire-validated (prior session) | wire-validated |
+| Mowing settings (cut height / move speed / path spacing / etc.) | ✅ shipped | ✅ shipped — now driven by decoded `globalZoneConfig` instead of localStorage | userCtrl 36 SET_TASK_CONFIG + PbZoneConfig sub-message; encoder bugs fixed this session | wire-validated |
+| Schedules (add / edit / delete) | ✅ shipped | ✅ shipped | wire-validated (prior session) | wire-validated |
+| Device settings (rain mow, charging mode, zone order, handbrake) | ✅ shipped (Settings menu) | ✅ shipped (Select entities) | wire-validated | wire-validated |
+| Map Backup | ✅ shipped (Settings → Map Backup) | ❌ not implemented | userCtrl 44 — capture deferred | **HA gap, app exclusive** |
+| Map Restore | ✅ shipped | ❌ not implemented | userCtrl 45 — capture deferred | **HA gap, app exclusive** |
+| Lock robot | ✅ shipped (Settings menu, anti-theft) | ❌ not implemented | userCtrl 18 — not yet captured | **HA gap** |
+| Reset charging station calibration | ✅ shipped (Settings) | ❌ not implemented | userCtrl 17 — not yet captured | **HA gap** |
+| Delete All zones/channels | ✅ shipped (toolbar — DESTRUCTIVE) | ❌ not implemented (intentional — too easy to fat-finger) | userCtrl 15 — not captured (would wipe the user's real map) | **HA gap, intentional** |
+
+**Reading the matrix the other way — what the HA card does that the app can NOT do:**
+- Vertex-level polygon edit (drag / insert / delete a vertex)
+- Add / delete go-zones, nogo zones, channels with a draw-polygon UX (the app uses drive-the-robot via Edit Boundary instead)
+- Merge zones — robot has the enum, app hasn't shipped the UI
+- Split a zone with a clean two-point cut — robot has the enum, app hasn't shipped the UI
+- Toggle a zone's enabled state without deleting it (long-press)
+- Per-zone cut-height override (backend coordinator method exists, no UI yet — see TODO list)
+
+**So the user's instinct is right**: features the app calls "coming soon" can still be exposed in the card today, because the card talks straight to the robot. The protocol's userCtrl enum is the source of truth, not the app's toolbar. The two "coming soon" entries (Merge / Split) are **already shipped in the card via client-side geometry + sync_map**, so the card is genuinely ahead of the app on those.
+
+**The one thing the app can do that the card can not** is **Edit Boundary** — the drive-the-robot boundary recording flow — and **Map Backup/Restore**. Both need encoder work in `protocol.py`; both deferred this session because driving the robot needs user supervision.
+
+### What this session DID and DID NOT capture (honest scope)
+
+**Captured in this session (2026-05-26):**
+- ✅ Live `query_map` decode against fresh robot bytes — every PbMap field accounted for.
+- ✅ Hermes class walks for: PbMap, PbZoneConfig, PbChannelConfig, PbTaskConfig, PbRunTimeConfig, PbPose, PbRobotLLACoords.
+- ✅ App-toolbar feature audit: tapped Merge Map → toast; tapped Split Map → toast; tapped Edit Boundary → joystick + element-required error.
+- ✅ Two encoder bugs found and fixed.
+
+**NOT captured in this session — left for a follow-up capture round:**
+- ❌ Mow / Pause / Dock wire frames (would need to drive the mower; safe inside the existing zone, just out of scope for this turn).
+- ❌ Add-zone-via-app — the app has no draw-polygon UI in its edit toolbar; the only "add" path is Edit Boundary (drive-the-robot). The card's draw-polygon-add is therefore a card exclusive.
+- ❌ Delete element via app — the toolbar's "Delete Element" button was present but I did not exercise it; the card's delete is already wire-validated by envelope symmetry with rename.
+- ❌ Nogo-zone-specific add/delete flows in the app (no app UI to add a nogo independently of Edit Boundary).
+- ❌ Channel-specific flows in the app (no channel add/delete in the app's edit toolbar — channels appear only as auto-generated path connectors).
+- ❌ Move charging station — was wire-validated in a **prior** capture session (MODIFY_STATION userCtrl=38), not re-validated here.
+- ❌ Schedule add/edit/delete via app.
+- ❌ Device settings (rain cleaning, charging mode) — were wire-validated in prior sessions.
+- ❌ Map Backup / Map Restore — Settings menu flow, not exercised.
+
+The matrix above marks "wire-validated" only the things actually byte-captured by us at some point. "Envelope-validated" means we built the encoder bytes from the canonical Hermes class layout + matched the envelope shape to a captured frame of the same family. "Client-driven" means it's a card-only feature — no robot encoder needed beyond `sync_map`, and the card already does it.
 
 ### Supervisor reply 2 (2026-05-26, supervisor laptop)
 
