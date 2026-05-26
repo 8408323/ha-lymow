@@ -464,9 +464,9 @@ def test_set_run_time_config_full_is_byte_stable() -> None:
 def test_decode_task_config_all_fields_synthetic_golden() -> None:
     """PbTaskConfig — the four-field "Device Settings" sub-message:
     f1 chargingMode (int), f2 zoneOrder (int), f3 rainCleaning (bool),
-    f4 disableChargingPark (bool). The two bools are clamped to {0,1};
-    pinning the layout so a refactor can't silently widen them through
-    ``_first(..., 0)`` and start surfacing 2+ as True."""
+    f4 disableChargingPark (bool). The two bool fields are *dropped* (key
+    omitted) if the wire value isn't 0 or 1, not coerced — pinning the
+    layout so a refactor can't silently start surfacing 2+ as True."""
     from lymow.protocol import _field_i32
 
     pb = _field_i32(1, 1) + _field_i32(2, 0) + _field_i32(3, 1) + _field_i32(4, 0)
