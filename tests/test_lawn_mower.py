@@ -46,6 +46,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_set_recharge_resume = AsyncMock()
     coord.async_set_device_settings = AsyncMock()
     coord.async_rename_zone = AsyncMock()
+    coord.async_rename_nogo_zone = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
     coord.async_set_schedules = AsyncMock()
     coord.async_restore_backup_map = AsyncMock()
@@ -241,11 +242,12 @@ async def test_async_setup_entry_registers_services() -> None:
     await async_setup_entry(hass, entry, lambda entities: None)
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
-    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone + 1 clear-schedules
+    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone
+    # + 1 rename-nogo-zone + 1 clear-schedules
     # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
     # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station
     # + 1 resume + 1 set-run-time-config + 1 set-network-priority + 1 set-recharge-resume + 1 set-device-settings.
-    assert hass.services.async_register.call_count == 41
+    assert hass.services.async_register.call_count == 42
 
 
 # ---------------------------------------------------------------------------
@@ -1670,6 +1672,26 @@ async def test_handle_rename_zone_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"zone_hash_id": "z", "name": "X"})
     await handlers["rename_zone"](call)
     coord.async_rename_zone.assert_not_called()
+
+
+async def test_handle_rename_nogo_zone_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"nogo_hash_id": "ngabcdef", "name": "Flower bed"})
+    await handlers["rename_nogo_zone"](call)
+    coord.async_rename_nogo_zone.assert_awaited_once_with("mower-001", "ngabcdef", "Flower bed")
+
+
+async def test_handle_rename_nogo_zone_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.other"], {"nogo_hash_id": "ng", "name": "X"})
+    await handlers["rename_nogo_zone"](call)
+    coord.async_rename_nogo_zone.assert_not_called()
 
 
 async def test_handle_clear_schedules_calls_coordinator() -> None:

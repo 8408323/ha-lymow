@@ -76,6 +76,7 @@ _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
 _SERVICE_RENAME_ZONE = "rename_zone"
+_SERVICE_RENAME_NOGO_ZONE = "rename_nogo_zone"
 _SERVICE_SET_ZONE_ENABLED = "set_zone_enabled"
 _SERVICE_MOVE_CHARGING_STATION = "move_charging_station"
 _ATTR_IS_ENABLED = "is_enabled"
@@ -326,6 +327,13 @@ _RENAME_ZONE_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Required(_ATTR_NAME): cv.string,
+    }
+)
+_RENAME_NOGO_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_NOGO_HASH_ID): cv.string,
         vol.Required(_ATTR_NAME): cv.string,
     }
 )
@@ -734,6 +742,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_rename_zone(entity._thing_name, hash_id, name)
 
+    async def handle_rename_nogo_zone(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
+        name: str = call.data[_ATTR_NAME]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_rename_nogo_zone(entity._thing_name, hash_id, name)
+
     async def handle_set_zone_enabled(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
@@ -1002,6 +1021,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, _SERVICE_RENAME_NOGO_ZONE, handle_rename_nogo_zone, schema=_RENAME_NOGO_ZONE_SCHEMA
+    )
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_ZONE_ENABLED, handle_set_zone_enabled, schema=_SET_ZONE_ENABLED_SCHEMA
     )

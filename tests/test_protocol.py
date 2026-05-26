@@ -2274,6 +2274,21 @@ def test_encode_rename_zone_structure() -> None:
     assert _first(bi, 3).decode() == "wsmjco1T"  # hashId = field 3
 
 
+def test_encode_rename_nogo_zone_uses_nogo_field() -> None:
+    from lymow.protocol import encode_rename_nogo_zone
+
+    pb = encode_rename_nogo_zone("ngabcdef", "Flower bed")
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    pb_map = _decode_fields(_first(f, 12))
+    # nogo lives in PbMap field 2, NOT field 1 — distinguishes from go-zone rename
+    assert _first(pb_map, 1) is None
+    zone = _decode_fields(_first(pb_map, 2))
+    bi = _decode_fields(_first(zone, 1))
+    assert _first(bi, 2).decode() == "Flower bed"
+    assert _first(bi, 3).decode() == "ngabcdef"
+
+
 def test_encode_clear_schedules_is_empty_schedule_field() -> None:
     from lymow.protocol import encode_clear_schedules
 
