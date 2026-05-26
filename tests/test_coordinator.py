@@ -948,6 +948,235 @@ async def test_async_add_zone_rejects_malformed_point() -> None:
 
 
 # ---------------------------------------------------------------------------
+# async_update_nogo_polygon / async_add_nogo_zone / async_add_channel
+# ---------------------------------------------------------------------------
+
+
+_SAMPLE_MAP_WITH_NOGO = {
+    "goZones": [{"hashId": "zone0001", "polygon": [], "isEnabled": True}],
+    "nogoZones": [
+        {
+            "hashId": "nogo0001",
+            "polygon": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 0.5, "y": 1.0}],
+            "isEnabled": True,
+            "parentZoneHashId": "zone0001",
+        }
+    ],
+    "channels": [],
+}
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_replaces_vertices_and_marks_modified() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    new_poly = [{"x": 10.0, "y": 10.0}, {"x": 20.0, "y": 10.0}, {"x": 15.0, "y": 20.0}]
+    await coord.async_update_nogo_polygon(THING, "nogo0001", new_poly)
+
+    target = next(z for z in captured["map"]["nogoZones"] if z["hashId"] == "nogo0001")
+    assert target["polygon"] == new_poly
+    assert "nogo0001" in captured["map"]["modifyHashs"]
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_update_nogo_polygon(THING, "nogo0001", [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_rejects_too_few_vertices() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="3 vertices"):
+        await coord.async_update_nogo_polygon(THING, "nogo0001", [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_update_nogo_polygon(
+            THING, "nogo0001", [{"x": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_raises_for_unknown_hash() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await coord.async_update_nogo_polygon(THING, "missingxx", [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_appends_with_parent_and_fresh_hash() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    poly = [{"x": 5.0, "y": 5.0}, {"x": 6.0, "y": 5.0}, {"x": 5.5, "y": 6.0}]
+    new_id = await coord.async_add_nogo_zone(THING, poly, parent_zone_hash_id="zone0001")
+
+    assert new_id not in {"nogo0001"}
+    added = next(z for z in captured["map"]["nogoZones"] if z["hashId"] == new_id)
+    assert added["parentZoneHashId"] == "zone0001"
+    assert added["isEnabled"] is True
+    assert added["polygon"] == poly
+    assert new_id in captured["map"]["modifyHashs"]
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_avoids_hash_collision() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+
+    async def _noop(thing, map_data):
+        pass
+
+    coord.async_sync_map = _noop  # type: ignore[method-assign]
+
+    from unittest.mock import patch as _patch
+
+    with _patch("secrets.token_hex", side_effect=["nogo0001", "freshn"]):
+        new_id = await coord.async_add_nogo_zone(THING, [{"x": 0.0, "y": 0.0}] * 3)
+    assert new_id == "freshn"
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_add_nogo_zone(THING, [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_rejects_too_few_vertices() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="3 vertices"):
+        await coord.async_add_nogo_zone(THING, [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_add_nogo_zone(THING, [{"x": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_appends_with_zone_links_and_fresh_hash() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    poly = [{"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}]
+    new_id = await coord.async_add_channel(
+        THING, poly, zone1_hash_id="zone0001", zone2_hash_id="zone0002", cut_height_mm=55
+    )
+
+    added = next(c for c in captured["map"]["channels"] if c["hashId"] == new_id)
+    assert added["zone1"] == "zone0001"
+    assert added["zone2"] == "zone0002"
+    assert added["cutHeight"] == 55
+    assert added["isValid"] is True
+    assert added["polygon"] == poly
+    assert new_id in captured["map"]["modifyHashs"]
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_avoids_hash_collision() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+
+    async def _noop(thing, map_data):
+        pass
+
+    coord.async_sync_map = _noop  # type: ignore[method-assign]
+
+    from unittest.mock import patch as _patch
+
+    # First call returns an existing nogo hash, retry returns a fresh one
+    with _patch("secrets.token_hex", side_effect=["nogo0001", "freshch"]):
+        new_id = await coord.async_add_channel(THING, [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+    assert new_id == "freshch"
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_add_channel(THING, [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_rejects_too_few_points() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="2 points"):
+        await coord.async_add_channel(THING, [{"x": 0.0, "y": 0.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_add_channel(THING, [{"x": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+# ---------------------------------------------------------------------------
 # Zone update commands — async_update_zone_enabled
 # ---------------------------------------------------------------------------
 
