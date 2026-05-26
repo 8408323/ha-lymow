@@ -1029,6 +1029,21 @@ def test_encode_sync_map_preserves_task_config() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_encode_delete_zone_matches_pinned_bytes() -> None:
+    """Lock the wire format so accidental encoder churn fails CI.
+
+    These bytes were derived from Hermes bytecode analysis of deleteZonePartition
+    (fn 8972) and round-trip-validated indirectly by the live rename round-trip
+    (same envelope shape, same field numbers — see Task B live confirmation in
+    BRANCH_STATUS.md). A destructive live delete would need to recreate the
+    zone afterwards, so we lock the static bytes instead.
+    """
+    assert encode_delete_zone("wsmjco1T").hex() == "10312808620e0a0c0a0a1a0877736d6a636f3154"
+    from lymow.protocol import encode_delete_nogo_zone
+
+    assert encode_delete_nogo_zone("ngabcdef").hex() == "10312808620e120c0a0a1a08" + b"ngabcdef".hex()
+
+
 def test_encode_delete_zone_has_pb_version() -> None:
     raw = encode_delete_zone("5ilVIZvD")
     top = _decode_fields(raw)
@@ -2287,6 +2302,26 @@ def test_encode_rename_nogo_zone_uses_nogo_field() -> None:
     bi = _decode_fields(_first(zone, 1))
     assert _first(bi, 2).decode() == "Flower bed"
     assert _first(bi, 3).decode() == "ngabcdef"
+
+
+def test_encode_rename_zone_matches_live_confirmed_bytes() -> None:
+    """Pin the wire format against a live round-trip executed on 2026-05-26.
+
+    Bytes below were published to /device/<thing>/pbinput, the robot accepted the
+    rename, and the next QUERY_MAP echoed BasicInfo.f2 == "Front garden RENAMETEST"
+    (and then "Front garden" on the restore). See BRANCH_STATUS.md "Task B — live
+    confirmation" for the round-trip trace.
+    """
+    from lymow.protocol import encode_rename_zone
+
+    assert (
+        encode_rename_zone("wsmjco1T", "Front garden RENAMETEST").hex()
+        == "1031280962270a250a23121746726f6e742067617264656e2052454e414d45544553541a0877736d6a636f3154"
+    )
+    assert (
+        encode_rename_zone("wsmjco1T", "Front garden").hex()
+        == "10312809621c0a1a0a18120c46726f6e742067617264656e1a0877736d6a636f3154"
+    )
 
 
 def test_encode_clear_schedules_is_empty_schedule_field() -> None:
