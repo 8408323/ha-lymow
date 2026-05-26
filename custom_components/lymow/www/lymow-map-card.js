@@ -1711,7 +1711,13 @@ class LymowMapCard extends HTMLElement {
     this._editRename = true;
     this._render();
     // Focus the input after render
-    setTimeout(() => { this.shadowRoot.querySelector('#rename-input')?.focus(); }, 50);
+    setTimeout(() => {
+      const inp = this.shadowRoot.querySelector('#rename-input');
+      if (!inp) return;
+      inp.value = inp.defaultValue; // reset to the rendered default (zone's current name)
+      inp.focus();
+      inp.select();
+    }, 50);
   }
 
   _cancelRename() {
