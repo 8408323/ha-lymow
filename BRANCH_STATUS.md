@@ -80,35 +80,93 @@ When a `test-ready:` commit appears: `git pull`, run the browser test scenario d
 
 ## Outstanding before merge
 
-### Must-have — ALL DONE
-- [x] **Zone vertex move capture** — resolved: app has no vertex-drag UX (Edit Boundary is drive-the-robot mode), card's vertex edit uses `encode_sync_map` validated by envelope symmetry with the live-confirmed rename. See "Supervisor reply 2" below.
-- [x] **Zone name round-trip confirmed** — resolved: direct-MQTT round-trip via `scripts/rename_test.py` + byte-equal BLE frame captured from the app (commit `b950429`). Robot persists name in `BasicInfo.f2`; decoder now reads it back for both go and no-go zones.
-- [x] **Tests at 100% coverage** — `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` → 1006 tests, 100% (after commit `8295778`).
+**PR #199 is DRAFT** — user paused on 2026-05-26 with: "I am not sure we are ready for PR, because all features are not mapped/wired and not understood from the app yet." See "Gap audit" below for what's still missing.
 
-### Wiring gaps — 2026-05-26 supervisor audit
+### Original must-haves (Tasks A/B/C) — done
+- [x] **Zone vertex move capture** — app has no vertex-drag UX (Edit Boundary is drive-the-robot), card's vertex edit uses `encode_sync_map` validated by envelope symmetry with the live-confirmed rename.
+- [x] **Zone name round-trip confirmed at protocol level** — direct-MQTT round-trip + byte-equal BLE frame captured from the app. Robot persists name in `BasicInfo.f2`; decoder now reads it back for go AND nogo zones.
+- [x] **Tests at 100% coverage** — `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` → 1006 tests, 100%.
 
-#### services.yaml missing entries (work fine, just undocumented for external callers)
-Registered in `lawn_mower.py` and called by the card, absent from `services.yaml`:
-`add_nogo_zone`, `add_channel`, `move_charging_station`, `set_zone_enabled`, `update_nogo_polygon`, `sync_map`, `pause`
-- [ ] Add these 7 to `services.yaml`
+### Gap audit (2026-05-26) — what's NOT understood / wired yet
 
-#### Nogo zone name persistence across HA restarts
-The coordinator `_zone_name_overrides` cache covers go-zones only. Nogo rename calls `async_rename_nogo_zone` (which sends the correct MQTT frame and the robot persists the name), but if HA restarts before the next MQTT poll brings the name back, the label shows the hashId fallback.
-- [ ] Extend `_zone_name_overrides` to also cover nogo zones (same dict, same pattern)
+Driven by the user's question: *"Can we edit a zone now and have that mirrored on the map in Lymow app?"* — answer: **partial; see below.**
 
-#### Channel name persistence
-`PbChannel` has no name field (f1=hashId, f2=zone1, f3=zone2 — confirmed from Hermes bytecode). User-assigned channel names cannot be stored on the robot; they need an HA-side store.
-- [ ] Add `_channel_name_overrides` dict in coordinator (or `hass.data`), persisted across restarts; wire Rename button for channels in the card
+#### A. Decoder gaps — fields on the wire we don't read
 
-#### Channel length label
-Channel polygon points (ENU metres) are already in the sensor attribute. Length = sum of segment distances; no backend change needed.
-- [ ] Compute `length` in `_getMapData()` for channels; add a "Length (m)" option to `ch_label_mode` in the Advanced settings panel
+Live query_map response (`scripts/query_map.py` against the real robot today) carries fields our `decode_map_response` ignores:
+
+- **PbMap.f8 taskConfig (per-map mowing settings)** — UNDER-READ. Wire has fields `f4 fixed32 (pathSpacing? 0.6), f5, f6, f7, f9=90, f10=1, f11=1, f12=1, f13=0, f14=0, f17=0`. Our `decode_task_config` only checks f1/f2/f3/f4-varint — returns `{}` for this live frame. **Reason the lovelace card uses localStorage to persist mowing settings is THIS — the robot does echo task config back via MQTT, we just drop it on decode.**
+- **PbMap.f11 globalZoneConfig** — completely unread. Wire has 16 sub-fields (`f1=60, f4=fixed32 0.6, f6=4, f7=1, f8=u64_max bitmask, f9=35, f10=1, f11=2, f12=1, f13=2, f14=1, f15=0, f16=90, f17=1, f18=0, f19=2`). Almost certainly the *real* mowing-settings record (cut height, path spacing, perimeter laps, line follow mode, etc.).
+- **PbMap.f12 globalChannelConfig** — completely unread. Wire has `f1=2, f2=60, f3=0`.
+- **Top-level pb.f6 fixed64** (outside the f23 wrapper) — UNREAD. Probably a map version / timestamp.
+- **PbZone.f8 / PbZone.f9** (inside a go-zone wrapper, beside basicInfo and configBox) — UNREAD. f8 is varint=1 on the first zone only; f9 is bytes[0] on second zone. Likely zone-level flags.
+- **BasicInfo.f8 / BasicInfo.f9** — UNREAD on the first zone only. Likely a per-zone override flag.
+
+**Impact**: HA never surfaces real robot mowing settings (panel is currently driven by localStorage cache). User's question "can we edit and see it mirrored" → partial: zone NAME round-trip is solid, but zone CONFIG (cut height, path spacing, etc.) is not actually pulled from the robot.
+
+#### B. Encoder gaps — userCtrls we don't have
+
+App-emitted commands we lack named encoders for (could be sent via `encode_userctrl(N)` generic but no service / coordinator wiring):
+
+| userCtrl | Name | App action | HA status |
+|---|---|---|---|
+| 10 | MODIFY_ZONE_EDGE_START | Edit Boundary (joystick mode) start | not encoded |
+| 11 | MODIFY_ZONE_EDGE_STOP | Edit Boundary stop | not encoded |
+| 15 | CLEAR_ALL_ZONES_CHANNELS | "Delete All" toolbar button | not encoded |
+| 17 | CHARGING_STATION_RESET | Reset charging station | not encoded |
+| 18 | LOCK | Lock robot | not encoded |
+| 38 | MODIFY_STATION | Move charging station info | not encoded |
+| 44 | FLOOR_BACKUP | Backup map | not encoded |
+| 45 | FLOOR_RESTORE | Restore map from backup | not encoded |
+| 55 | MERGE_ZONE | Merge Map (toolbar) | **HA simulates client-side via convex hull + SYNC_MAP — does not use robot's native merge** |
+| 56 | CUT_ZONE | Split Map (toolbar) | **HA simulates client-side via polygon split + SYNC_MAP — does not use robot's native split** |
+
+Client-side merge/split work functionally, but: (1) robot might preserve child nogo zones / metadata better with its native commands; (2) no live byte-level diff to confirm parity.
+
+#### C. App-side UX behavior — confirmed limitations
+
+- **App's Rename dialog NEVER displays the current zone name.** Verified today by renaming `wsmjco1T` via MQTT to "HA_SUPERVISOR_TEST", opening the app's Rename → tapping the zone's green circle → "Renam" → input field showed placeholder `'zone name'` (empty), not the actual robot name. App maintains its own local label cache invisible at protocol level, never reconciled with `BasicInfo.f2`.
+- HA→robot writes succeed and the robot stores them, but the user cannot SEE the HA-set name from inside the app's edit UI.
+- **Question for next session**: where (if anywhere) does the app display zone labels back to the user — Mowing History rows? Map Backup names? If nowhere, document the limitation; if somewhere, screenshot-prove HA-set names appear there.
+
+#### D. Wiring gaps — frontend↔backend already-decoded items
+
+- **services.yaml missing entries** (work fine, just undocumented for external callers). Registered in `lawn_mower.py` and called by the card but absent from `services.yaml`: `add_nogo_zone`, `add_channel`, `move_charging_station`, `set_zone_enabled`, `update_nogo_polygon`, `sync_map`, `pause`.
+- **Nogo zone name persistence across HA restarts**: coordinator `_zone_name_overrides` covers go-zones only. Nogo rename sends the right frame and the robot persists it, but if HA restarts before the next MQTT poll, the label shows hashId fallback.
+- **Channel name persistence**: `PbChannel` has no name field (f1=hashId, f2=zone1, f3=zone2 — confirmed). Channel rename needs an HA-side `_channel_name_overrides` store.
+- **Channel length label**: channel polygon points (ENU metres) are already in the sensor; length = sum of segment distances. No backend change needed — just card-side compute + a new option in `ch_label_mode`.
+- **Per-zone cut height**: `async_update_zone_cut_height` exists in coordinator, no service or card UI yet.
+
+### Concrete TODOs before un-drafting PR #199
+
+Decoder (critical — wires up real robot settings instead of localStorage):
+- [ ] Extend `decode_task_config` to read all 11 wire fields (currently 4). Validate against live robot response.
+- [ ] Decode `PbMap.f11 globalZoneConfig` (16 fields). Find the Hermes function that produces it (search APK for `globalZoneConfig`).
+- [ ] Decode `PbMap.f12 globalChannelConfig` (3 fields).
+- [ ] Decode top-level `pb.f6 fixed64` (map version/timestamp).
+- [ ] Decode `PbZone.f8/f9` + `BasicInfo.f8/f9` (semantics unknown — search APK).
+- [ ] Once decoder is complete, **drop the lovelace card's localStorage shim** for mowing settings; feed the panel from real robot state.
+
+Encoder (important):
+- [ ] `encode_merge_zones(hash_ids)` for `MERGE_ZONE = 55`. Capture from app first.
+- [ ] `encode_cut_zone(hash_id, p1, p2)` for `CUT_ZONE = 56`. Capture from app first.
+- [ ] `encode_clear_all_zones_channels()` for `CLEAR_ALL_ZONES_CHANNELS = 15` (app's Delete All).
+- [ ] `encode_floor_backup` (44) + `encode_floor_restore` (45) — app's Map Backup & Restore. Likely also needs `encode_query_floor_list` / similar.
+- [ ] `encode_modify_zone_edge_start/stop` (10 / 11) — Edit Boundary drive-the-robot mode (joystick command itself rides existing `encode_ble_drive`).
+
+Wiring (low risk — code already does most of the work):
+- [ ] Add 7 missing service entries to `services.yaml`.
+- [ ] Extend `_zone_name_overrides` to also cover nogo zones.
+- [ ] Add `_channel_name_overrides` + wire Rename button for channels in the card.
+- [ ] Add `length` computation + "Length (m)" option to `ch_label_mode`.
+- [ ] Expose `async_update_zone_cut_height` as a service + card UI.
+
+Manual verification:
+- [ ] Browser re-verify the nogo-rename dispatch (partial-pass on commit `351820e`). Wire-level proof is solid; purely a manual UI confirmation needed.
+- [ ] Investigate where (if anywhere) the app displays zone names back to the user.
 
 ### Nice-to-have / post-merge
-- [ ] Zone name server-side store — **N/A**: no app-side store confirmed. Robot's `BasicInfo.f2` is the single source of truth.
-- [ ] PR review cycle: resolve all Copilot/Codex comments, re-request review, iterate until clean
-- [ ] Browser re-verify the nogo-rename dispatch (partial-pass on commit `351820e`). Wire-level proof is solid; purely a manual UI confirmation needed.
-- [ ] Per-zone cut height — `async_update_zone_cut_height` exists in coordinator, no service or card UI yet
+- [ ] PR review cycle: resolve all Copilot/Codex comments, re-request review, iterate until clean.
 
 ---
 
