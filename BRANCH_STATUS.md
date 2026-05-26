@@ -356,17 +356,16 @@ This means `encode_rename_zone` is **live-correct end-to-end**, `encode_rename_n
 
 The `scripts/rename_test.py` helper that ran this is committed alongside this BRANCH_STATUS — re-run anytime to re-confirm the round-trip after future changes.
 
-### Task C findings (zone delete) — partial
-**Live capture: BLOCKED.** Same reason as Task B.
+### Task C findings (zone delete) — confirmed by envelope symmetry, no destructive live test
 
-**Static encoder bytes**:
+**Static encoder bytes (now pinned in `test_encode_delete_zone_matches_pinned_bytes`):**
 ```
-encode_delete_zone("wsmjco1T")
-→ 10312808620e0a0c0a0a1a0877736d6a636f3154
-encode_delete_nogo_zone("testnogoX")
-→ 10312808620f120d0a0b1a09746573746e6f676f58
+encode_delete_zone("wsmjco1T")        → 10312808620e0a0c0a0a1a0877736d6a636f3154
+encode_delete_nogo_zone("ngabcdef")   → 10312808620e120c0a0a1a086e6761626364656 6
 ```
 Breakdown: `userCtrl=8` CLEAR_ZONE; PbMap with the target zone's `basicInfo.hashId` in goZones (field 1) or nogoZones (field 2). PbZone wrapper present (field 1 inside PbMap.goZones), matching `test_encode_delete_nogo_zone_uses_nogo_field_with_pbzone_wrapper`.
+
+**Why no live delete round-trip:** Task B's live round-trip (rename) used the *same envelope* (PbInput.f12 = PbMap → PbZone → BasicInfo → hashId) and the robot accepted it. Delete only changes userCtrl 9→8 and drops the name field. A destructive live delete would need a follow-up `add_zone` to restore the test zone (with all original polygon vertices), and getting the polygon byte-identical after a round-trip risks corrupting real map data. The pinned-bytes test plus envelope symmetry with the verified rename is the safer evidence.
 
 ### Real bug found and fixed (not from live capture — from coordinator audit)
 **Bug:** `LymowDataUpdateCoordinator.async_delete_zone` did **not** call `async_query_map` after the CLEAR_ZONE publish, while its sibling `async_delete_nogo_zone` and `async_delete_channel` both do. Effect: the lovelace card kept showing the deleted go-zone until the next periodic poll (up to 60 s of stale UI). The `_polyOverrides` mechanism in the card does not auto-clear on delete, so the card relies on the coordinator to refresh map data — but the coordinator never asked the robot for the refresh.
