@@ -152,6 +152,10 @@ class LymowMapCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    // Don't blow away the DOM while the user is actively typing (rename or draw-name).
+    // We still update _hass so the next interaction sees fresh state.
+    const inp = this.shadowRoot?.querySelector('#rename-input, #draw-name-input');
+    if (inp) return;
     this._render();
   }
 
@@ -912,12 +916,14 @@ class LymowMapCard extends HTMLElement {
     this._updateScaleBar();
     this._wireEvents();
 
-    // Restore settings panel scroll and page scroll after full DOM replace.
+    // Restore settings panel scroll position after full DOM replace.
     if (prevScrollTop > 0) {
       const newPanel = this.shadowRoot.querySelector(".settings-panel");
       if (newPanel) newPanel.scrollTop = prevScrollTop;
     }
-    if (savedScrollY > 0) window.scrollTo(0, savedScrollY);
+    // Defer page scroll restore to after reflow — synchronous scrollTo fires before
+    // the browser has finished laying out the new DOM, causing a visible jump.
+    if (savedScrollY > 0) requestAnimationFrame(() => window.scrollTo(0, savedScrollY));
 
     // Persist <details> open/close toggle into component state so next render restores it.
     const advEl = this.shadowRoot.querySelector(".sp-advanced");
