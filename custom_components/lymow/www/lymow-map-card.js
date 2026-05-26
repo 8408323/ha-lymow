@@ -56,14 +56,16 @@ class LymowMapCard extends HTMLElement {
     this._chLabelMode = parseInt(localStorage.getItem("lymow_ch_label_mode") ?? "3", 10);
     this._editing = false;
     this._editHash = null;
-    this._editType = null; // "go" or "nogo"
+    this._editType = null; // "go" | "nogo" | "channel"
     this._editRename = false; // rename mode within edit
     this._workPoly = null;
     this._dragIdx = null;
     this._dragStation = false;
     this._polyOverrides = {};
     this._nogoOverrides = {};
-    this._nameOverrides = {}; // optimistic rename until next MQTT update
+    this._nameOverrides = {}; // optimistic rename for go/nogo until next MQTT update
+    // Channel names have no protobuf field — store client-side keyed by hashId.
+    this._channelNameOverrides = JSON.parse(localStorage.getItem("lymow_channel_names") || "{}");
 
     // Draw new zone/channel state
     this._drawingZone = null; // "go" | "nogo" | "channel" | null
@@ -182,10 +184,21 @@ class LymowMapCard extends HTMLElement {
       if (this._nameOverrides[z.hashId] !== undefined) overrides.name = this._nameOverrides[z.hashId];
       return Object.keys(overrides).length ? { ...z, ...overrides } : z;
     });
+    const channels = (a.channels || []).map((ch) => {
+      const override = this._channelNameOverrides[ch.hashId];
+      const poly = ch.polygon || [];
+      let length = 0;
+      for (let i = 1; i < poly.length; i++) {
+        const dx = poly[i].x - poly[i - 1].x, dy = poly[i].y - poly[i - 1].y;
+        length += Math.sqrt(dx * dx + dy * dy);
+      }
+      const base = override !== undefined ? { ...ch, name: override } : ch;
+      return { ...base, length: Math.round(length) };
+    });
     return {
       goZones,
       nogoZones,
-      channels: a.channels || [],
+      channels,
       gpsOrigin: a.gps_origin || null,
       chargingStation: a.charging_station || null,
       poseEastM: a.poseEastM,
@@ -341,17 +354,27 @@ class LymowMapCard extends HTMLElement {
     const channelPaths = channels.map((ch) => {
       const pts = (ch.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
       const isDocking = ch.isDockingChannel;
-      const color = isDocking ? "#1565c0" : "#6a1b9a";
+      const selected = this._editing && this._editHash === ch.hashId && this._editType === "channel";
+      const color = selected ? "#f57f17" : isDocking ? "#1565c0" : "#6a1b9a";
       const dash = isDocking ? "1,0.6" : "0.8,0.4";
-      return `<polyline points="${pts}" fill="none" stroke="${color}" stroke-width="0.4" stroke-dasharray="${dash}" opacity="0.7"/>`;
+      const cursor = this._editing ? " cursor:pointer" : "";
+      return `<polyline data-hash="${ch.hashId}" data-type="channel" points="${pts}" fill="none" stroke="${color}" stroke-width="${selected ? "0.7" : "0.4"}" stroke-dasharray="${dash}" opacity="${selected ? 1 : 0.7}" style="${cursor}"/>`;
     }).join("\n");
 
     const channelLabels = this._chLabelMode === 3 ? "" : channels.map((ch) => {
       if (!ch.polygon || ch.polygon.length < 2) return "";
       const mid = ch.polygon[Math.floor(ch.polygon.length / 2)];
       const name = ch.name || (ch.isDockingChannel ? "Docking" : "Channel");
-      return `<text x="${sx(mid.x)}" y="${sy(mid.y)}" text-anchor="middle" dominant-baseline="middle"
-        font-size="${(parseFloat(fontSz) * 0.8).toFixed(2)}" fill="#6a1b9a" pointer-events="none">${name}</text>`;
+      const lenStr = `${ch.length ?? 0} m`;
+      const m = this._chLabelMode;
+      const line1 = m === 1 ? lenStr : name;
+      const line2 = m === 2 ? lenStr : null;
+      const fs = (parseFloat(fontSz) * 0.8).toFixed(2);
+      const dy = line2 ? `-${(parseFloat(fs) * 0.6).toFixed(2)}` : "0";
+      return `<text text-anchor="middle" fill="#6a1b9a" pointer-events="none" font-size="${fs}">
+        <tspan x="${sx(mid.x)}" y="${sy(mid.y)}" dy="${dy}">${line1}</tspan>
+        ${line2 ? `<tspan x="${sx(mid.x)}" dy="${(parseFloat(fs) * 1.2).toFixed(2)}">${line2}</tspan>` : ""}
+      </text>`;
     }).join("\n");
 
     // ── Go-zones ──────────────────────────────────────────────────────────────
@@ -556,11 +579,15 @@ class LymowMapCard extends HTMLElement {
     if (this._editing) {
       let editMsg, editActions;
       if (this._editRename && this._editHash) {
-        const zone = goZones.find(z => z.hashId === this._editHash) || nogoZones.find(z => z.hashId === this._editHash);
-        const currentName = zone?.name || "";
-        editMsg = `Rename zone:`;
+        const isChannel = this._editType === "channel";
+        const obj = isChannel
+          ? channels.find(c => c.hashId === this._editHash)
+          : goZones.find(z => z.hashId === this._editHash) || nogoZones.find(z => z.hashId === this._editHash);
+        const currentName = obj?.name || "";
+        const label = isChannel ? "channel" : "zone";
+        editMsg = `Rename ${label}:`;
         editActions = `
-          <input class="rename-input" id="rename-input" type="text" value="${currentName}" placeholder="Zone name" maxlength="40"/>
+          <input class="rename-input" id="rename-input" type="text" value="${currentName}" placeholder="${isChannel ? "Channel" : "Zone"} name" maxlength="40"/>
           <button class="btn save" data-action="save-rename">✓ OK</button>
           <button class="btn cancel" data-action="cancel-rename">✕</button>`;
       } else if (this._drawNameStep) {
@@ -586,15 +613,18 @@ class LymowMapCard extends HTMLElement {
           ${drawPts >= minPts ? `<button class="btn save" data-action="save-draw">💾 Save</button>` : ""}
           <button class="btn cancel" data-action="cancel-draw">✕ Cancel</button>`;
       } else {
+        const isChannel = this._editType === "channel";
         const msg = this._editHash
-          ? `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · + insert · ✕ delete`
-          : `Tap a zone to edit shape · or draw a new zone below`;
+          ? isChannel
+            ? `Channel selected — rename or delete`
+            : `Editing ${this._editType === "nogo" ? "no-go" : "go"} zone — drag handles · + insert · ✕ delete`
+          : `Tap a zone or channel to select · or draw below`;
         editMsg = msg;
         editActions = `
-          ${this._editHash ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
+          ${this._editHash && !isChannel ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
           ${this._editHash ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
           ${this._editHash && this._editType === "go" ? `<button class="btn pin" style="background:#6a1b9a" data-action="start-split" title="Split this zone with a cut line">✂ Split</button>` : ""}
-          ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete this zone permanently">🗑 Delete</button>` : ""}
+          ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete permanently">🗑 Delete</button>` : ""}
           ${!this._editHash ? `<button class="btn pin" data-action="draw-go" title="Draw a new go-zone">＋ Go-zone</button>` : ""}
           ${!this._editHash ? `<button class="btn cancel" data-action="draw-nogo" title="Draw a new no-go zone">＋ No-go</button>` : ""}
           ${!this._editHash ? `<button class="btn pin" style="background:#1565c0" data-action="draw-channel" title="Draw a new channel between zones">＋ Channel</button>` : ""}
@@ -754,6 +784,8 @@ class LymowMapCard extends HTMLElement {
             <label>Channel labels</label>
             <select class="sp-input sp-select" data-field="ch_label_mode" data-type="int">
               <option value="0" ${this._chLabelMode === 0 ? "selected" : ""}>Name</option>
+              <option value="1" ${this._chLabelMode === 1 ? "selected" : ""}>Length (m)</option>
+              <option value="2" ${this._chLabelMode === 2 ? "selected" : ""}>Name + Length</option>
               <option value="3" ${this._chLabelMode === 3 ? "selected" : ""}>None</option>
             </select>
             <span class="sp-val"></span>
@@ -1108,6 +1140,10 @@ class LymowMapCard extends HTMLElement {
       this.shadowRoot.querySelectorAll('polygon[data-type="nogo"]').forEach((el) => {
         el.addEventListener("pointerdown", () => { this._panMoved = false; });
         el.addEventListener("click", () => { if (!this._panMoved && !this._drawingZone) this._chooseEditZone(el.dataset.hash, "nogo"); });
+      });
+      this.shadowRoot.querySelectorAll('polyline[data-type="channel"]').forEach((el) => {
+        el.addEventListener("pointerdown", () => { this._panMoved = false; });
+        el.addEventListener("click", () => { if (!this._panMoved && !this._drawingZone) this._chooseEditZone(el.dataset.hash, "channel"); });
       });
       this.shadowRoot.querySelectorAll(".midpoint").forEach((el) => {
         el.addEventListener("click", (e) => { e.stopPropagation(); this._insertVertex(+el.dataset.edge); });
@@ -1764,11 +1800,23 @@ class LymowMapCard extends HTMLElement {
     }
     const hashId = this._editHash;
     const isNogo = this._editType === "nogo";
+    const isChannel = this._editType === "channel";
     this._editRename = false;
-    this._nameOverrides[hashId] = newName;
+    if (isChannel) {
+      this._channelNameOverrides[hashId] = newName;
+      localStorage.setItem("lymow_channel_names", JSON.stringify(this._channelNameOverrides));
+    } else {
+      this._nameOverrides[hashId] = newName;
+    }
     this._render();
     try {
-      if (isNogo) {
+      if (isChannel) {
+        await this._hass.callService("lymow", "rename_channel", {
+          entity_id: this._config.mower_entity,
+          channel_hash_id: hashId,
+          name: newName,
+        });
+      } else if (isNogo) {
         await this._hass.callService("lymow", "rename_nogo_zone", {
           entity_id: this._config.mower_entity,
           nogo_hash_id: hashId,
@@ -1783,7 +1831,12 @@ class LymowMapCard extends HTMLElement {
       }
     } catch (err) {
       console.warn("lymow-map-card: rename failed", err);
-      delete this._nameOverrides[hashId];
+      if (isChannel) {
+        delete this._channelNameOverrides[hashId];
+        localStorage.setItem("lymow_channel_names", JSON.stringify(this._channelNameOverrides));
+      } else {
+        delete this._nameOverrides[hashId];
+      }
       this._render();
     }
   }
@@ -1809,6 +1862,15 @@ class LymowMapCard extends HTMLElement {
   _chooseEditZone(hashId, type) {
     if (this._editHash === hashId) return;
     const mapData = this._getMapData();
+    if (type === "channel") {
+      const ch = (mapData?.channels || []).find((c) => c.hashId === hashId);
+      if (!ch) return;
+      this._editHash = hashId;
+      this._editType = "channel";
+      this._workPoly = null; // channels have no vertex editor yet
+      this._render();
+      return;
+    }
     const list = type === "nogo" ? (mapData?.nogoZones || []) : (mapData?.goZones || []);
     const zone = list.find((z) => z.hashId === hashId);
     if (!zone || !zone.polygon) return;
@@ -1904,9 +1966,19 @@ class LymowMapCard extends HTMLElement {
     if (!this._hass || !this._editHash || !this._config.mower_entity) return;
     const hashId = this._editHash;
     const isNogo = this._editType === "nogo";
+    const isChannel = this._editType === "channel";
     this._cancelEdit();
+    if (isChannel) {
+      delete this._channelNameOverrides[hashId];
+      localStorage.setItem("lymow_channel_names", JSON.stringify(this._channelNameOverrides));
+    }
     try {
-      if (isNogo) {
+      if (isChannel) {
+        await this._hass.callService("lymow", "delete_channel", {
+          entity_id: this._config.mower_entity,
+          channel_hash_id: hashId,
+        });
+      } else if (isNogo) {
         await this._hass.callService("lymow", "delete_nogo_zone", {
           entity_id: this._config.mower_entity,
           nogo_hash_id: hashId,

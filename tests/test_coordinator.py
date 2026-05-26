@@ -2705,6 +2705,45 @@ async def test_async_rename_nogo_zone_targets_nogo_field_and_updates_cache() -> 
 
 
 @pytest.mark.asyncio
+async def test_async_rename_channel_stores_override_and_updates_cache() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [],
+                "nogoZones": [],
+                "channels": [{"hashId": "a1b2c3d4", "isDockingChannel": False}],
+            },
+        }
+    }
+    await coord.async_rename_channel(THING, "a1b2c3d4", "Back passage")
+    assert coord._channel_name_overrides[THING]["a1b2c3d4"] == "Back passage"
+    assert coord.data[THING]["mapData"]["channels"][0]["name"] == "Back passage"
+
+
+@pytest.mark.asyncio
+async def test_on_mqtt_state_applies_channel_name_overrides_on_map_update() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._channel_name_overrides[THING] = {"a1b2c3d4": "Back passage"}
+    coord.data = {THING: {}}
+    patch = {"mapData": {"channels": [{"hashId": "a1b2c3d4", "isDockingChannel": False}]}}
+    coord.on_mqtt_state(THING, patch)
+    stored = coord.data[THING]["mapData"]["channels"][0]
+    assert stored["name"] == "Back passage"
+
+
+@pytest.mark.asyncio
+async def test_on_mqtt_state_skips_channel_override_when_none_registered() -> None:
+    coord, _, _ = _make_coordinator()
+    # No overrides registered — patch must pass through unchanged.
+    coord.data = {THING: {}}
+    patch = {"mapData": {"channels": [{"hashId": "a1b2c3d4", "isDockingChannel": False}]}}
+    coord.on_mqtt_state(THING, patch)
+    stored = coord.data[THING]["mapData"]["channels"][0]
+    assert "name" not in stored
+
+
+@pytest.mark.asyncio
 async def test_async_clear_schedules_sends_empty_then_queries() -> None:
     coord, mqtt, _ = _make_coordinator()
     await coord.async_clear_schedules(THING)

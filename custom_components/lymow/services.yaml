@@ -666,6 +666,184 @@ pin_and_go:
       selector:
         text:
 
+rename_channel:
+  name: Rename channel
+  description: >
+    Assign a display name to a channel. Channel names have no protobuf field on
+    the robot, so the name is stored HA-side and re-applied on each map update.
+    The map card also persists names in localStorage for browser-side continuity.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    channel_hash_id:
+      name: Channel hash ID
+      description: The 8-character hash ID of the channel to rename.
+      required: true
+      example: "a1b2c3d4"
+      selector:
+        text:
+    name:
+      name: New name
+      description: The display name for the channel.
+      required: true
+      example: "Back passage"
+      selector:
+        text:
+
+add_nogo_zone:
+  name: Add no-go zone
+  description: >
+    Create a new no-go zone from a polygon and push it to the robot's map
+    (USER_CTRL_SYNC_MAP). Points are in the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    polygon:
+      name: Polygon
+      description: Ordered list of at least 3 {x, y} vertices in metres (local ENU frame).
+      required: true
+      example: [{ x: 1.0, y: 1.0 }, { x: 3.0, y: 1.0 }, { x: 3.0, y: 3.0 }]
+      selector:
+        object:
+    parent_zone_hash_id:
+      name: Parent zone hash ID
+      description: Hash ID of the go-zone this no-go zone belongs to. Empty string for top-level.
+      required: false
+      default: ""
+      example: "wsmjco1T"
+      selector:
+        text:
+
+add_channel:
+  name: Add channel
+  description: >
+    Create a new mowing channel connecting two zones and push it to the robot's
+    map (USER_CTRL_SYNC_MAP). The channel is defined by at least 2 path points in
+    the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    polygon:
+      name: Path points
+      description: Ordered list of at least 2 {x, y} points in metres (local ENU frame).
+      required: true
+      example: [{ x: 0.0, y: 5.0 }, { x: 10.0, y: 5.0 }]
+      selector:
+        object:
+    zone1_hash_id:
+      name: Zone 1 hash ID
+      description: Hash ID of the first zone the channel connects. Empty string if not connected.
+      required: false
+      default: ""
+      example: "wsmjco1T"
+      selector:
+        text:
+    zone2_hash_id:
+      name: Zone 2 hash ID
+      description: Hash ID of the second zone the channel connects. Empty string if not connected.
+      required: false
+      default: ""
+      example: "KX1kGyat"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height
+      description: Cutting height for the channel, in millimetres.
+      required: false
+      default: 40
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+
+update_nogo_polygon:
+  name: Update no-go zone polygon
+  description: >
+    Replace a no-go zone's outline with a new polygon (USER_CTRL_SYNC_MAP). Points
+    are in the robot's local ENU frame (metres). Used by the map card's editor.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    nogo_hash_id:
+      name: No-go zone hash ID
+      description: The 8-character hash ID of the no-go zone to reshape.
+      required: true
+      example: "ngabcdef"
+      selector:
+        text:
+    polygon:
+      name: Polygon
+      description: Ordered list of at least 3 {x, y} vertices in metres (local ENU frame).
+      required: true
+      example: [{ x: 1.0, y: 1.0 }, { x: 3.0, y: 1.0 }, { x: 3.0, y: 3.0 }]
+      selector:
+        object:
+
+set_zone_enabled:
+  name: Enable/disable zone
+  description: >
+    Enable or disable a go-zone. Disabled zones are skipped during autonomous
+    mowing but remain on the map (USER_CTRL_SYNC_MAP).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone to enable or disable.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    is_enabled:
+      name: Enabled
+      description: Set to true to enable the zone, false to disable it.
+      required: true
+      example: true
+      selector:
+        boolean:
+
+move_charging_station:
+  name: Move charging station
+  description: >
+    Relocate the charging station marker on the robot's map. Coordinates are in
+    the robot's local ENU frame (metres). Called by the map card's drag-to-relocate
+    feature (USER_CTRL_MOVE_CHARGING_STATION).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    x:
+      name: X
+      description: New X coordinate in metres (local ENU frame).
+      required: true
+      example: 0.5
+      selector:
+        number: { min: -1000, max: 1000, step: 0.01, mode: box }
+    y:
+      name: Y
+      description: New Y coordinate in metres (local ENU frame).
+      required: true
+      example: 1.2
+      selector:
+        number: { min: -1000, max: 1000, step: 0.01, mode: box }
+    theta:
+      name: Heading (radians)
+      description: Optional orientation of the station in radians (0 = East).
+      required: false
+      example: 0.0
+      selector:
+        number: { min: -3.14159, max: 3.14159, step: 0.01, mode: box }
+
 resume:
   name: Resume mowing
   description: >
