@@ -2433,6 +2433,22 @@ async def test_async_rename_zone_publishes_modify_zone_info() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_rename_zone_updates_optimistic_cache_when_present() -> None:
+    """When coordinator already holds the map, rename should update the cached name immediately."""
+    coord, _mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [{"hashId": "wsmjco1T", "name": "Front garden"}],
+                "nogoZones": [],
+            },
+        }
+    }
+    await coord.async_rename_zone(THING, "wsmjco1T", "Front lawn")
+    assert coord.data[THING]["mapData"]["goZones"][0]["name"] == "Front lawn"
+
+
+@pytest.mark.asyncio
 async def test_async_rename_nogo_zone_targets_nogo_field_and_updates_cache() -> None:
     from lymow.protocol import _decode_fields, _first
 
