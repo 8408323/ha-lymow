@@ -57,10 +57,11 @@ When a `test-ready:` commit appears: `git pull`, run the browser test scenario d
 - **Markers**: Charging station, robot pose, RTK base — all scale with zoom (fixed-pixel via `invZf`); sizes bumped ~30% larger (2026-05-26)
 - **Status bar**: Pin-and-go, obstacle avoidance toggle, zone enable/disable feedback
 - **UI polish**: RTK status badge, auto-pause on RTK loss, channel legend, legend SVG symbols, viewport-fixed overlays, fullscreen toggle (⊞ or F), auto-register card + create Lymow dashboard on setup, JS mtime cache-buster
-- **Re-render guard (v=27/v=28)**: `set hass()` skips `_render()` while user is interacting — blocks on active INPUT/SELECT focus (keeps rename input and settings dropdowns alive across HA MQTT updates) and on `_sliderActive` flag (keeps slider value stable during drag)
+- **Re-render guard (v=27+)**: `set hass()` skips `_render()` while user is interacting — blocks on active INPUT/SELECT focus (keeps rename input and settings dropdowns alive across HA MQTT updates) and on `_sliderActive` flag (keeps slider value stable during drag)
+- **Channel edit (v=29)**: clicking a channel in edit mode selects it (highlighted); Rename button assigns a name stored in localStorage + HA-side `_channel_name_overrides`; Delete wired to `lymow.delete_channel`; channel length (sum of polygon segment distances, metres) computed in `_getMapData()`; `ch_label_mode` has Name / Length (m) / Name+Length / None options
 
 ### Integration backend (`custom_components/lymow/`)
-- **New services**: `rename_zone`, `delete_zone`, `delete_nogo_zone`, `sync_map`, `move_charging_station`, `set_device_settings`, `set_recharge_resume`, `set_network_priority`, `set_run_time_config`, `resume`, `query_map` — all documented in `services.yaml`
+- **New services**: `rename_zone`, `rename_nogo_zone`, `rename_channel`, `delete_zone`, `delete_nogo_zone`, `add_zone`, `add_nogo_zone`, `add_channel`, `update_zone_polygon`, `update_nogo_polygon`, `set_zone_enabled`, `move_charging_station`, `sync_map`, `merge_zones`, `split_zone`, `pin_and_go`, `resume`, `query_map`, `set_device_settings`, `set_recharge_resume`, `set_network_priority`, `set_run_time_config` — all documented in `services.yaml`
 - **New entities**:
   - `select`: Device settings (select entities backed by PbTaskConfig)
   - `switch`: Vehicle LED, Auto-dock-on-error, Alerts-only (mobileNotificationSwitch tristate), Prefer 4G
