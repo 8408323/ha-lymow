@@ -80,14 +80,15 @@ When a `test-ready:` commit appears: `git pull`, run the browser test scenario d
 
 ## Outstanding before merge
 
-### Must-have
-- [ ] **Zone vertex move capture** — see "Capture session tasks" below
-- [ ] **Zone name round-trip confirmed** — see "Capture session tasks" below
-- [ ] **Tests at 100% coverage**: `uv run pytest tests/ -v --cov --cov-fail-under=100` must pass with zero failures
+### Must-have — ALL DONE
+- [x] **Zone vertex move capture** — resolved: app has no vertex-drag UX (Edit Boundary is drive-the-robot mode), card's vertex edit uses `encode_sync_map` validated by envelope symmetry with the live-confirmed rename. See "Supervisor reply 2" below.
+- [x] **Zone name round-trip confirmed** — resolved: direct-MQTT round-trip via `scripts/rename_test.py` + byte-equal BLE frame captured from the app (commit `b950429`). Robot persists name in `BasicInfo.f2`; decoder now reads it back for both go and no-go zones.
+- [x] **Tests at 100% coverage** — `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100` → 1006 tests, 100% (after commit `8295778`).
 
 ### Nice-to-have / post-merge
-- [ ] Zone name server-side store — if the Lymow app fetches zone names from S3 map backups or an app-side REST endpoint (not the robot), consider fetching + merging in coordinator
+- [ ] Zone name server-side store — **N/A**: confirmed there is no app-side store. Robot's `BasicInfo.f2` is the single source of truth (see "Task B — live confirmation" + "Supervisor reply 2").
 - [ ] PR review cycle: resolve all Copilot/Codex comments, re-request review, iterate until clean
+- [ ] Browser re-verify the nogo-rename dispatch (partial-pass on commit `351820e`, supervisor blocked by go-zone polygon under the nogo icon). Wire-level proof is solid (encoder + dispatch + decoder all unit-tested); this is purely a manual UI confirmation.
 
 ---
 
