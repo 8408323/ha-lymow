@@ -331,7 +331,27 @@ Breakdown: `userCtrl=8` CLEAR_ZONE; PbMap with the target zone's `basicInfo.hash
 ### Real bug found and fixed (not from live capture — from coordinator audit)
 **Bug:** `LymowDataUpdateCoordinator.async_delete_zone` did **not** call `async_query_map` after the CLEAR_ZONE publish, while its sibling `async_delete_nogo_zone` and `async_delete_channel` both do. Effect: the lovelace card kept showing the deleted go-zone until the next periodic poll (up to 60 s of stale UI). The `_polyOverrides` mechanism in the card does not auto-clear on delete, so the card relies on the coordinator to refresh map data — but the coordinator never asked the robot for the refresh.
 
-**Fix:** added `await self.async_query_map(thing_name)` after the delete publish so map data refreshes immediately (commit forthcoming). Existing test `test_async_delete_zone_publishes_command` was tightened into `test_async_delete_zone_sends_command_then_queries_map` asserting two publishes (delete + query-map) and the userCtrl field on each.
+**Fix:** added `await self.async_query_map(thing_name)` after the delete publish so map data refreshes immediately (commit `be49df7`). Existing test `test_async_delete_zone_publishes_command` was tightened into `test_async_delete_zone_sends_command_then_queries_map` asserting two publishes (delete + query-map) and the userCtrl field on each.
+
+### Second bug found and fixed (also from audit, not live capture) — rename for no-go zones
+**Bug:** Renaming a no-go zone through the lovelace map card called `lymow.rename_zone`. That service always encoded into `PbMap.goZones` (field 1) regardless of whether the hash belonged to a go-zone or a nogo. Three downstream effects:
+1. The robot received a `MODIFY_ZONE_INFO` targeting a non-existent go-zone (silently rejected device-side).
+2. `async_rename_zone`'s optimistic update only walked `goZones`, so the cache never reflected the new name.
+3. The card's `_getMapData` applied `_nameOverrides` to `goZones` only — so even the local UI label did not update for a nogo rename.
+
+**Fix** (commit `0356b58`):
+- New encoder `encode_rename_nogo_zone(hash_id, name)` targeting `PbMap.nogoZones` (field 2) — mirrors `encode_delete_nogo_zone`.
+- New coordinator method `async_rename_nogo_zone` with the same optimistic-cache pattern as the go-zone variant, but operating on `nogoZones`.
+- New `lymow.rename_nogo_zone` service with its own schema (`nogo_hash_id`, `name`); documented in `services.yaml`.
+- Card dispatches rename to `rename_zone` or `rename_nogo_zone` based on `_editType`.
+- Card applies `_nameOverrides` to `nogoZones` too.
+- Tests: byte-shape (PbMap.field=2, not 1), optimistic-cache path, and dispatch (happy + unknown-entity skip).
+
+**Static encoder bytes** for the new nogo rename:
+```
+encode_rename_nogo_zone("ngabcdef", "Flower bed")
+→ 10312809621c12 ... (PbMap.field=2 wrapper distinguishes this from the go-zone variant)
+```
 
 ### Mower-control card — out-of-scope tracking issue
 Filed as **#197** so the second-card work (Mow/Pause/Dock/Resume + live status + signal bars + camera thumbnail) doesn't get lost while we finish `feat/map-lovelace-card`. Mirrors what the Lymow app's main device screen does. **Not** in this branch.
@@ -382,6 +402,11 @@ Filed as **#197** so the second-card work (Mow/Pause/Dock/Resume + live status +
 ### Hand-off note to supervisor
 - `test-ready:` not pushed for this round — the fix is backend-only (coordinator) and is covered by unit tests, so browser testing isn't strictly needed to merge it. If you want a sanity check anyway, scenario to run: in the lovelace card, delete a go-zone with the 🗑 button; expect it to disappear within ~1 s (used to wait up to ~60 s for the next poll).
 - Phone proxy is **still active** on `192.168.1.180:8888` — leaving it on so the capture stays available for the next session. Last session noted to clear before overnight (E29 dock-fail risk).
+
+### Hand-off note 2 to supervisor (after the nogo-rename fix, commit `0356b58`)
+- **`test-ready:` worth pushing** for this one — there's now a real lovelace-card behaviour change (rename of no-go zone uses a new service and the local label updates immediately). Scenario to run: in edit mode, tap a no-go zone, tap 🏷 Rename, type a new name, OK. Expect: the label updates immediately, no console error, no `lymow.rename_zone` call (the new `lymow.rename_nogo_zone` is invoked instead — observable in Developer Tools → Network or `homeassistant.log`).
+- 974 tests pass, ruff format + lint clean. Coverage will need a top-up for the new lines if you're enforcing 100% in CI; the existing 97% gap was already in coordinator/lawn_mower before this branch.
+- Sendevent-based pinch-zoom from ADB now confirmed to deliver well-formed Type-B multitouch frames to `/dev/input/event4` (verified via `getevent -l`). The Lymow app's Skia/React-Native canvas still does not respond — synthetic events probably miss pressure/tool-type fields it expects. **Option 1 from your reply (manual one-shot pinch) remains the unblock path.**
 
 ### Supervisor reply (2026-05-26)
 Good work on the coordinator bug and the static encoder breakdown — that's solid progress without live capture.
