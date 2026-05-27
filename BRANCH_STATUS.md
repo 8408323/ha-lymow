@@ -1654,3 +1654,150 @@ the app, then probe — the response shape should reveal the field).
 **Final test count**: 1064 passing, 100% coverage, ruff clean. Robot
 still docked at 96% (no mow started this session — purely backend
 plumbing and read-only diagnostic queries).
+
+---
+
+## 🗺 MASTER APP-FEATURE INVENTORY (2026-05-27 late evening tour)
+
+Complete walk of every screen in the Lymow Android app (v3.0.6 build 351).
+Screenshots + UI dumps at `/tmp/lymow-app-tour/*.png|*.xml`. Map edits
+(create/edit/delete zones/channels) **deferred per user instruction** —
+they need supervised manual capture later.
+
+### 0. Imperial / Metric toggle (Me → Unit) — **frontend-only, confirmed**
+
+Tested by toggling Imperial and reading the device-main map area: switched
+from `1489.02 m²` (metric, wire) to `16027.67 ft²` (Imperial, app-side
+conversion: 1489 × 10.7639 = 16027.5 ✓). Robot wire data is **always
+metric** (mm, m/s, m²). HA already serves metric — no backend change needed.
+
+### Decoded vs missing — full matrix
+
+**Legend**: ✅ shipped · 🟡 partial · ❌ missing · 🚫 out of scope ·
+🔒 PR-blocking
+
+| # | App screen / control | What it does | HA backend status | Notes |
+|---|---|---|---|---|
+| 1 | **Home — robot tile (battery / state)** | Live status | ✅ existing sensors | |
+| 2 | **Home — Notification bell** | Error event history list | 🟡 current-error sensor exists; history list NOT exposed | Separate REST endpoint not yet mapped. Low priority — `error_code` sensor surfaces what users actually need. |
+| 3 | **Home — Camera widget** | Live video | ✅ local RTSP works; ❌ remote (KVS) = #97 | Explicitly excluded from PR-undraft gate. |
+| 4 | **Home — Add Task** | Schedule create | 🟡 `set_schedules` (bulk) works; granular add not pinned | User said schedules are done manually. |
+| 5 | **Home — ⋮ → Add Device** | Pair new device | 🚫 | App-side pairing — not HA scope. |
+| 6 | **Home — ⋮ → Rename Device** | Cloud display-name PATCH | ✅ `lymow.set_device_name` | |
+| 7 | **Home — ⋮ → Share Device** | (NOT IMPLEMENTED — "Coming soon" toast in app) | 🚫 | App-side feature doesn't exist yet. Not a real gap. |
+| 8 | **Home — ⋮ → Delete Device** | Unbind device from account | ❌ endpoint unknown | Confirmation dialog "Are you sure you want to unbind?". Mitmproxy + actual click needed. **Low priority** — user manages devices in app. |
+| 9 | **Me → Account** | Email, OAuth provider, change-pw, delete-account, logout | 🚫 | Account mgmt is app-only. |
+| 10 | **Me → Language** | UI language picker | 🚫 | Frontend. |
+| 11 | **Me → Unit** | Metric / Imperial | 🚫 | Frontend-only (proven). |
+| 12 | **Me → Help Center / Report Logs / About Us** | Zendesk pages, bug reporter, marketing | 🚫 | Not HA scope. |
+| 13 | **Device main — Mow All Zones header** | Tap to pick zones for next mow | ✅ `lymow.start_zone` | |
+| 14 | **Device main — Sliders icon (≡)** | Opens Mowing Settings | (see Mowing Settings rows) | |
+| 15 | **Device main — Camera icon** | Live camera | ✅ local RTSP (see #3) | |
+| 16 | **Device main — Right-rail 🗺** | Map Backup & Restore shortcut | ✅ backend complete | UI panel pending (supervisor card session). |
+| 17 | **Device main — Right-rail 👁** | Centre map on robot | 🚫 | Pure UI camera-follow. |
+| 18 | **Device main — Right-rail ✏ (Edit)** | Landscape edit toolbar | 🟡 see Edit Mode rows below | Map edits postponed per user. |
+| 19 | **Device main — Right-rail 🎮 (Joystick)** | BLE drive + Adjust Charging | ✅ `lymow.ble_drive` + `SetChargingStationHereButton` | |
+| 20 | **Device main — Mow / Dock buttons** | Start mow / return to dock | ✅ existing | Dock confirmation dialog wired via `DockAndForgetProgressButton` |
+| 21 | **Joystick "+" → Adjust Charging** | userCtrl=38 MODIFY_STATION | ✅ shipped | |
+| 22 | **Joystick "+" → Add Zone / Nogo / Channel** | App drives robot to record boundary (Edit Boundary path) | ❌ userCtrl=10/11 not encoded | Postponed per user (map edits). |
+| 23 | **Edit toolbar → Merge Map / Split Map** | "Coming soon" in app | ✅ HA card has client-side merge/split via sync_map | HA is ahead of app. |
+| 24 | **Edit toolbar → Edit Boundary** | Drive-the-robot boundary record | ❌ userCtrl=10/11 not encoded | Postponed. |
+| 25 | **Edit toolbar → Rename / Delete / Delete All** | Single-zone rename/delete + clear-all | ✅ all shipped | |
+| 26 | **Mowing Settings → Global → Basic** | moveSpeed, cutHeight, blade-speed (Eco/Standard/Power/Turbo) | ✅ `set_task_config` covers all | |
+| 27 | **Mowing Settings → Global → Advanced** | path_spacing, stripe_angle, mowing_order, zone/perimeter/channel obs detection, perimeter_mow_dir, no_go_mow_laps, zone_perimeter_mow_laps, turn_off_outer_motor, safe_margin_mode, channel_deck_height, raise_omni_wheels_on_channel | 🟡 most fields covered; **Safe-margin mode + Raise-omni-wheels-on-channel** not in `_TASK_CONFIG_FIELDS` yet | Likely 2 new bool fields in PbZoneConfig — needs capture. |
+| 28 | **Mowing Settings → Customize → zoneN** | Per-zone overrides | ✅ `lymow.set_zone_config` (userCtrl=9 path) | |
+| 29 | **Mowing Settings → Customize → channelN** | Per-channel overrides (Channel Obs Detection + Channel Deck Height) | ✅ `lymow.update_channel_settings` (sync_map path) | Channel Obs Detection (Smart/Touch-Only) wire field within PbChannel still untested — assumed `detectMode`. |
+| 30 | **Settings → Cancel Task** | userCtrl=28 FORCE_REINIT | ✅ `ForceReinitButton` | |
+| 31 | **Settings → Device Settings → Recharge & Resume** | PbRobotConfig.rrConfig (f18) | ✅ `lymow.set_recharge_resume` | |
+| 32 | **Settings → Device Settings → Headlight Mode** | **SCHEDULED auto-on/off** (toggle + start/end time) — NOT brightness | ❌ wire format unknown | **Surprise finding**: not the `vehLedStatus` 5-state brightness we assumed. Similar shape to rrConfig; likely a PbRobotConfig sub-message at an unmapped field number. Needs capture. |
+| 33 | **Settings → Device Settings → Vehicle LED** | Manual on/off | ✅ `VehicleLedSwitch` (signal=10/11) | |
+| 34 | **Settings → Device Settings → Rainy Mowing / Charging Handbrake** | PbTaskConfig f3/f4 | ✅ `lymow.set_device_settings` | |
+| 35 | **Settings → Device Settings → Timezone "Sync with Phone"** | PbRobotConfig.timezoneOffset (f21) | ✅ `SyncTimezoneButton` | |
+| 36 | **Settings → Device Settings → Return to Dock** | PbTaskConfig.chargingMode (Direct/Perimeter) | ✅ `lymow.set_device_settings` (charging_mode) | |
+| 37 | **Settings → Schedules** | Add / edit / delete / toggle | 🟡 bulk `set_schedules` works | User does these manually — granular wire not pinned. |
+| 38 | **Settings → Mowing History** | Total area / time / per-session list with detail | ✅ sensors (last entry) + `lymow.get_clean_history` (full list) | |
+| 39 | **Settings → Map Backup & Restore** | List / create / restore / delete / rename | ✅ all REST endpoints wired | UI panel pending. |
+| 40 | **Settings → Notifications** | Device-notifications + Alerts-Only tristate | ✅ `MobileNotificationSwitch` + `AlertsOnlySwitch` | |
+| 41 | **Settings → Network Settings → WiFi SSID/password + Reconnect** | Push new WiFi creds to robot | ❌ wire unknown | Risky to capture (mistyped password disconnects robot). |
+| 42 | **Settings → Network Settings → Network Priority (4G/WiFi)** | PbRobotConfig.metric_4g (f11) | ✅ `Prefer4gSwitch` + `lymow.set_network_priority` | |
+| 43 | **Settings → RTK Diagnostic** | RTK Status, Location Precision, GNSS sat count, L1/L2/L5 sat counts + SNRs, Base Station online, Data Error Rate, Advanced (Differential Age, Lora Bandwidth, HW DC Voltage, CW Interference, Antenna Gain — all per-band) | 🟡 raw rtkL1/rtkL2 fields decoded as `f1..f13`; **labels now correlated (see below)** — sensor labels still pending in code | |
+| 44 | **Settings → Bind RTK** | RTK base SN input + Scan/Bind | ❌ endpoint/wire unknown | Mitmproxy capture needed; risky (could unbind existing base). |
+| 45 | **Settings → Find My Robot** | Map + reverse-geocoded address + enable toggle + Play Sound button | ✅ `FindRobotSwitch` + `FindMyRobotPlaySoundButton` | |
+| 46 | **Settings → PIN Code** | 4-digit LCD-screen unlock PIN; default 0000 | ❌ wire unknown | Mitmproxy capture needed; do not log captured value. |
+| 47 | **Settings → Anti-theft** | **MULTI-region** geofence (< > arrows + dot indicators) + enable toggle + radius slider | 🟡 `lymow.set_geofence` handles **first region only** | **NEW GAP**: app supports multiple geofence regions. Coordinator needs `index` parameter. |
+| 48 | **Settings → Lock-device** | userCtrl=18 LOCK | ✅ `LockRobotButton` | |
+| 49 | **Settings → Device Info** | SN, IP, MAC, Software Version, MCU Version | ✅ all 5 fields exposed as sensors | |
+| 50 | **Settings → OTA Update** | Current version + Update button + (PIN code 0000 hint shown) | ✅ `update` entity | |
+| 51 | **Settings → Factory Reset** | userCtrl=37 RESTORE_FACTORY_DEFAULTS | ✅ `RestoreFactoryDefaultsButton` | |
+| 52 | **Settings → Report Logs** (per-device) | Send tech-support log | 🚫 | App-only |
+
+### 🆕 RTK per-band label correlation (LIVE CAPTURE 2026-05-27 23:14)
+
+UI values cross-referenced to live `rtkL1` / `rtkL2` dicts from a synchronous probe:
+
+```
+PbOutput.f35 (rtkL1, populated by USER_CTRL_QUERY_RTK_DIAGNOSTIC_L1=57):
+  f1  = subMsgVersion (2)
+  f2  = locationPrecisionM    (float, "Location Precision: 0.010 m")
+  f3  = gnssSatellites         (int, "GNSS Satellites: 23")
+  f4  = l1SatCount             (int, "L1 Band: 16")
+  f5  = l2SatCount             (int, "L2 Band: 16")
+  f6  = l5SatCount             (int, "L5 Band: 13")
+  f7  = l1SnrMedian            (int, "L1 SNR: 38")
+  f8  = l2SnrMedian            (int, "L2 SNR: 34")
+  f9  = l5SnrMedian            (int, "L5 SNR: 36")
+  f10 = dataErrorRatePct       (int, "Data Error Rate: 0.0%")
+  f11 = (float, always 0.0 observed — unmapped)
+
+PbOutput.f36 (rtkL2, populated by USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2=58):
+  f1  = differentialAgeSec     (float, "Differential Age: 2.00 s")
+  f2  = loraBandwidthL1Bps     (int, "Lora Bandwidth L1: 268 bps")
+  f3  = loraBandwidthL2Bps     (int, "...L2: 389 bps")
+  f4  = loraBandwidthL5Bps     (int, "...L5: 680 bps")
+  f5  = hwDcVoltageL1V         (float, "Hardware DC Voltage L1: 0.89 V")
+  f6  = hwDcVoltageL2V         (float, "...L2: 1.00 V")
+  f7  = hwDcVoltageL5V         (float, "...L5: 1.79 V")
+  f8  = cwInterferenceL1       (int, "CW Interference L1: 60")
+  f9  = cwInterferenceL2       (int, "...L2: 94")
+  f10 = cwInterferenceL5       (int, "...L5: 36")
+  f11 = antennaGainL1          (int, "Primary Antenna Gain L1: 38")
+  f12 = antennaGainL2          (int, "...L2: 71")
+  f13 = antennaGainL5          (int, "...L5: 53")
+
+Base Station Status (Online / Offline) — observed but not yet pinned to a field
+(f10 of rtkL1 always 0 in idle; needs base-offline test).
+```
+
+Next backend commit will rename the decoder keys + ship 13+ labeled sensors
+behind `entity_registry_enabled_default=False`.
+
+### ✋ True gaps left to close before PR un-drafts
+
+In priority order (skipping out-of-scope and the user-deferred map edits):
+
+1. **RTK per-band labeled sensors** — wire format now decoded; just need
+   to rename keys + add 13 sensors. Ship-ready, no further capture needed.
+2. **Multi-region anti-theft geofence** — `lymow.set_geofence` needs
+   `index` parameter; coordinator merges into the right list entry.
+3. **Safe-margin mode + Raise-omni-wheels-on-channel** — 2 missing
+   PbZoneConfig (or PbChannelConfig) bool fields. Captures pending.
+4. **Channel Obstacle Detection per-channel** — verify wire field
+   (assumed `detectMode` in PbChannel sub-message).
+5. **Headlight Mode SCHEDULED frame** — PbRobotConfig sub-message at
+   unmapped field number; same shape as rrConfig (enable + startTime
+   + endTime).
+6. **Network Settings WiFi credentials write** — Reconnect tap wire format.
+7. **Bind RTK SN write** — REST or BLE unknown.
+8. **PIN Code update** — 4-digit write; field 9 of PbRobotConfig
+   (lcdPinCode) likely.
+9. **Notification list endpoint** — for showing app-style event history.
+
+### 🚫 Permanently excluded from PR-undraft gate
+
+- **Remote camera (KVS)** — issue #97, explicitly excluded by user.
+- **Share Device** — feature doesn't exist in app ("Coming soon" toast).
+- **Delete Device, Add Device** — account-level, HA has its own device mgmt.
+- **Me-tab settings** (Account, Language, Help Center, About Us, Report
+  Logs, Imperial/Metric toggle) — app-only / frontend / out of scope.
+- **Map edits** (create/edit/delete zones/channels via Edit Boundary) —
+  user said postpone to a manual-supervision session.

@@ -779,41 +779,74 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if net:
             state["networkInfo"] = net
 
-    # ---- RTK diagnostic L1 (PbOutput field 35) — populated by
-    # USER_CTRL_QUERY_RTK_DIAGNOSTIC_L1 (#57). Live capture 2026-05-27:
-    # 9 integer fields after a leading varint=2; values look like per-band sat
-    # counts + ratios. Without an app-UI cross-reference we surface them as
-    # ``rtkL1{f1..f10}`` so downstream tooling can correlate them once a future
-    # capture pairs the numbers with their app labels.
+    # ---- RTK diagnostic L1 (PbOutput field 35) — populated by USER_CTRL_
+    # QUERY_RTK_DIAGNOSTIC_L1 (#57). Field labels cross-referenced live
+    # 2026-05-27 against the app's Settings → RTK Diagnostic UI.
     l1_raw = _first(fields, 35)
     if isinstance(l1_raw, bytes):
         lf = _decode_fields(l1_raw)
         l1: dict[str, Any] = {}
         for fno, _wt, v in lf:
+            label = _RTK_L1_LABELS.get(fno)
+            if label is None:
+                continue
             if _wt == 5 and isinstance(v, int):
-                l1[f"f{fno}"] = _decode_f32(v)
+                l1[label] = round(_decode_f32(v), 4)
             elif isinstance(v, int):
-                l1[f"f{fno}"] = _signed32(v)
+                l1[label] = _signed32(v)
         if l1:
             state["rtkL1"] = l1
 
-    # ---- RTK diagnostic L2 (PbOutput field 36) — populated by
-    # USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2 (#58). Live capture 2026-05-27:
-    # mix of varints + float32s (location precision figures: 0.89 / 1.00 / 1.79).
-    # Surface as ``rtkL2{f1..f13}`` pending app-UI label correlation.
+    # ---- RTK diagnostic L2 (PbOutput field 36) — populated by USER_CTRL_
+    # QUERY_RTK_DIAGNOSTIC_L2 (#58). Labels per the same live correlation.
     l2_raw = _first(fields, 36)
     if isinstance(l2_raw, bytes):
         lf = _decode_fields(l2_raw)
         l2: dict[str, Any] = {}
         for fno, _wt, v in lf:
+            label = _RTK_L2_LABELS.get(fno)
+            if label is None:
+                continue
             if _wt == 5 and isinstance(v, int):
-                l2[f"f{fno}"] = _decode_f32(v)
+                l2[label] = round(_decode_f32(v), 4)
             elif isinstance(v, int):
-                l2[f"f{fno}"] = _signed32(v)
+                l2[label] = _signed32(v)
         if l2:
             state["rtkL2"] = l2
 
     return state
+
+
+# RTK diagnostic field labels — correlated live 2026-05-27 against the app's
+# Settings → RTK Diagnostic page (basic + Advanced Diagnostics). Field
+# numbers come from the wire capture; semantic names come from the UI labels
+# that displayed the same values seconds before/after the capture.
+_RTK_L1_LABELS: dict[int, str] = {
+    2: "locationPrecisionM",
+    3: "gnssSatellites",
+    4: "l1SatCount",
+    5: "l2SatCount",
+    6: "l5SatCount",
+    7: "l1SnrMedian",
+    8: "l2SnrMedian",
+    9: "l5SnrMedian",
+    10: "dataErrorRatePct",
+}
+_RTK_L2_LABELS: dict[int, str] = {
+    1: "differentialAgeSec",
+    2: "loraBandwidthL1Bps",
+    3: "loraBandwidthL2Bps",
+    4: "loraBandwidthL5Bps",
+    5: "hwDcVoltageL1V",
+    6: "hwDcVoltageL2V",
+    7: "hwDcVoltageL5V",
+    8: "cwInterferenceL1",
+    9: "cwInterferenceL2",
+    10: "cwInterferenceL5",
+    11: "antennaGainL1",
+    12: "antennaGainL2",
+    13: "antennaGainL5",
+}
 
 
 def decode_robot_config(data: bytes) -> dict[str, Any]:
