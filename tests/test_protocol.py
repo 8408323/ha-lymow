@@ -2351,6 +2351,32 @@ def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
         encode_set_task_config(nonsense=1)
 
 
+def test_encode_find_my_robot_play_sound_matches_captured_frame() -> None:
+    """Wire frame captured live 2026-05-27 from the app's Settings → Find My
+    Robot → Play Sound tap. The frame is `PbInput { f2:49 (version),
+    f13(robotConfig):{f6:100 audioVolume}, f16:1 (play-sound trigger) }`.
+    """
+    from lymow.protocol import encode_find_my_robot_play_sound
+
+    pb = encode_find_my_robot_play_sound()
+    # Byte-exact match against the captured ATT payload (base64 EDEoeq= →
+    # actually base64 of these bytes is "EDFqAjBkgAEB").
+    assert pb.hex() == "10316a023064800101"
+
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # PB_VERSION
+    assert _first(f, 5) is None  # no userCtrl — robot dispatches by f16 trigger
+    cfg = _decode_fields(_first(f, 13))
+    assert _first(cfg, 6) == 100  # audioVolume default
+    assert _first(f, 16) == 1  # play-sound trigger
+
+    # Custom volume parameter still emits f16=1
+    pb_quiet = encode_find_my_robot_play_sound(volume=30)
+    cfg_quiet = _decode_fields(_first(_decode_fields(pb_quiet), 13))
+    assert _first(cfg_quiet, 6) == 30
+    assert _first(_decode_fields(pb_quiet), 16) == 1
+
+
 def test_encode_set_robot_config_no_userctrl_just_submessage() -> None:
     from lymow.protocol import encode_set_robot_config
 

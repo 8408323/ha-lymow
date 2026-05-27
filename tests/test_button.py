@@ -12,6 +12,7 @@ from lymow.button import (
     CompleteZonePartitionButton,
     DockAndForgetProgressButton,
     ExitRemoteControlButton,
+    FindMyRobotPlaySoundButton,
     ForceReinitButton,
     LockRobotButton,
     RestoreFactoryDefaultsButton,
@@ -133,6 +134,20 @@ async def test_dock_and_forget_progress_press_sends_user_ctrl_dock() -> None:
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_DOCK)
 
 
+def test_find_my_robot_play_sound_button_metadata() -> None:
+    coord = _make_coord()
+    e = FindMyRobotPlaySoundButton(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_find_my_robot_play_sound"
+    assert e._attr_name == "Find my robot (play sound)"
+
+
+async def test_find_my_robot_play_sound_press_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.async_find_my_robot_play_sound = AsyncMock()
+    await FindMyRobotPlaySoundButton(coord, DEVICE).async_press()
+    coord.async_find_my_robot_play_sound.assert_awaited_once_with(THING)
+
+
 async def test_button_device_name_fallback_to_sn() -> None:
     coord = _make_coord()
     e = LockRobotButton(coord, {"deviceThingName": THING, "sn": "SN42"})
@@ -165,6 +180,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "ToggleLteAirplaneButton",
         "BackupMapButton",
         "DockAndForgetProgressButton",
+        "FindMyRobotPlaySoundButton",
         "SyncTimezoneButton",
     }
 

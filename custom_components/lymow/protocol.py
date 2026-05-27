@@ -960,6 +960,21 @@ def encode_set_recharge_resume(
     return pb
 
 
+def encode_find_my_robot_play_sound(volume: int = 100) -> bytes:
+    """Encode the app's "Find My Robot → Play Sound" frame.
+
+    Captured live 2026-05-27 from the app: ``PbInput {f2:49, f13(robotConfig):
+    {f6:volume audioVolume}, f16:1}``. f16 is a one-shot trigger (no encoder
+    mapping previously) — set to 1 to fire the beacon. Volume defaults to 100
+    (max) to match the app.
+    """
+    cfg = _field_i32(6, int(volume))  # audioVolume
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    pb += _field_i32(16, 1)  # PbInput.f16 = 1 → play find-my-robot sound
+    return pb
+
+
 def encode_set_robot_config(**fields: Any) -> bytes:
     """Encode a PbInput carrying only a PbRobotConfig sub-message.
 

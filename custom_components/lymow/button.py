@@ -54,6 +54,7 @@ async def async_setup_entry(
                 ToggleLteAirplaneButton(coordinator, device),
                 BackupMapButton(coordinator, device),
                 DockAndForgetProgressButton(coordinator, device),
+                FindMyRobotPlaySoundButton(coordinator, device),
                 SyncTimezoneButton(coordinator, device, hass),
             ]
         )
@@ -268,6 +269,28 @@ class BackupMapButton(_UserCtrlButton):
         # Route through the coordinator so the backup-map cache is invalidated
         # and the backup sensors reflect the new snapshot on the next poll.
         await self.coordinator.async_backup_map(self._thing_name)
+
+
+class FindMyRobotPlaySoundButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
+    """Trigger the app's "Find My Robot → Play Sound" beacon.
+
+    Sends a one-shot wire frame (`PbInput {f13.audioVolume=100, f16=1}`) that
+    makes the robot beep so the owner can locate it. Captured live 2026-05-27
+    from the app's Settings → Find My Robot → Play Sound flow.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:bullhorn"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Find my robot (play sound)"
+        self._attr_unique_id = f"{self._thing_name}_find_my_robot_play_sound"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_find_my_robot_play_sound(self._thing_name)
 
 
 class DockAndForgetProgressButton(_UserCtrlButton):

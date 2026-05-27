@@ -816,6 +816,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_set_robot_config(**fields))
 
+    async def async_find_my_robot_play_sound(self, thing_name: str, volume: int = 100) -> None:
+        """Trigger the app's "Find My Robot → Play Sound" beacon.
+
+        Sends ``PbInput {f13.audioVolume=volume, f16=1}`` — the f16 trigger fires
+        a one-shot locate beep on the robot. Volume defaults to 100 (max) to
+        match the app. Wire format captured live 2026-05-27.
+        """
+        from .protocol import encode_find_my_robot_play_sound
+
+        await self._mqtt.async_publish_command(thing_name, encode_find_my_robot_play_sound(volume))
+
     async def async_sync_timezone(self, thing_name: str, offset_seconds: int) -> None:
         """Push a timezone offset (seconds east of UTC) to the robot.
 
