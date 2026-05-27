@@ -944,6 +944,31 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_set_zone_config(updates))
         await self.async_query_map(thing_name)
 
+    async def async_get_clean_history(
+        self,
+        thing_name: str,
+        *,
+        page: int = 0,
+        page_size: int = 15,
+    ) -> list[dict[str, Any]]:
+        """Return the cleaning-history list (most-recent first) for templating.
+
+        The HA sensors only surface the *last* session's fields — automations
+        that want to walk the full history (e.g. "alert me if my last 3 mows
+        failed") need the raw list. Hits the same /get-clean-history-collect
+        REST endpoint as the periodic refresh.
+        """
+        try:
+            history = await self._client.get_clean_history(thing_name, page=page, page_size=page_size)
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(f"get_clean_history failed: {err}") from err
+        if not isinstance(history, dict):
+            return []
+        entries = history.get("clean_history")
+        if not isinstance(entries, list):
+            return []
+        return [e for e in entries if isinstance(e, dict)]
+
     async def async_update_channel_settings(
         self,
         thing_name: str,

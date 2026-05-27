@@ -444,6 +444,52 @@ async def test_async_update_channel_settings_no_map_data_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_get_clean_history_returns_list_of_entries() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history = AsyncMock(
+        return_value={
+            "clean_history": [
+                {"clean_area": 100.0, "clean_time": 10, "date": 1779020649},
+                {"clean_area": 200.0, "clean_time": 20, "date": 1779017649},
+            ]
+        }
+    )
+    out = await coord.async_get_clean_history(THING)
+    assert len(out) == 2
+    assert out[0]["clean_area"] == 100.0
+    api.get_clean_history.assert_awaited_once_with(THING, page=0, page_size=15)
+
+
+@pytest.mark.asyncio
+async def test_async_get_clean_history_filters_non_dict_entries() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history = AsyncMock(
+        return_value={"clean_history": [{"clean_area": 1.0}, "garbage", None, {"clean_area": 2.0}]}
+    )
+    out = await coord.async_get_clean_history(THING)
+    assert [e["clean_area"] for e in out] == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_async_get_clean_history_returns_empty_for_bad_envelope() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history = AsyncMock(return_value=None)
+    assert await coord.async_get_clean_history(THING) == []
+    api.get_clean_history = AsyncMock(return_value={"clean_history": "not-a-list"})
+    assert await coord.async_get_clean_history(THING) == []
+
+
+@pytest.mark.asyncio
+async def test_async_get_clean_history_wraps_underlying_errors() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    api.get_clean_history = AsyncMock(side_effect=RuntimeError("network down"))
+    with pytest.raises(HomeAssistantError, match="get_clean_history failed"):
+        await coord.async_get_clean_history(THING)
+
+
+@pytest.mark.asyncio
 async def test_async_set_recharge_resume_round_trip() -> None:
     from lymow.protocol import _decode_fields, _first
 

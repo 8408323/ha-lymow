@@ -73,6 +73,7 @@ _SERVICE_UPDATE_ZONE_CUT_HEIGHT = "update_zone_cut_height"
 _SERVICE_SET_ZONE_CONFIG = "set_zone_config"
 _SERVICE_SET_GEOFENCE = "set_geofence"
 _SERVICE_UPDATE_CHANNEL_SETTINGS = "update_channel_settings"
+_SERVICE_GET_CLEAN_HISTORY = "get_clean_history"
 _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_ADD_NOGO_ZONE = "add_nogo_zone"
 _SERVICE_ADD_CHANNEL = "add_channel"
@@ -299,6 +300,13 @@ _UPDATE_ZONE_CUT_HEIGHT_SCHEMA = vol.Schema(
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
         vol.Required(_ATTR_CUT_HEIGHT_MM): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+_GET_CLEAN_HISTORY_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Optional("page", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        vol.Optional("page_size", default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
     }
 )
 _UPDATE_CHANNEL_SETTINGS_SCHEMA = vol.Schema(
@@ -638,6 +646,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             await coordinator.async_update_zone_cut_height(entity._thing_name, hash_id, mm)
+
+    async def handle_get_clean_history(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        page: int = call.data["page"]
+        page_size: int = call.data["page_size"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        result: dict[str, list[dict[str, Any]]] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            result[eid] = await coordinator.async_get_clean_history(entity._thing_name, page=page, page_size=page_size)
+        return {"history": result}
 
     async def handle_update_channel_settings(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
@@ -1092,6 +1113,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _SERVICE_UPDATE_CHANNEL_SETTINGS,
         handle_update_channel_settings,
         schema=_UPDATE_CHANNEL_SETTINGS_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_GET_CLEAN_HISTORY,
+        handle_get_clean_history,
+        schema=_GET_CLEAN_HISTORY_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
     )
     hass.services.async_register(
         DOMAIN,
