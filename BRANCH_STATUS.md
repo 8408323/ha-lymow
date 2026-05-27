@@ -1311,6 +1311,172 @@ No third frame. The app's complete Adjust Charging sequence is just **MODIFY_STA
 
 No further work needed on this feature. Moving on to the next gap.
 
+### 🏠 Dock command — verified (2026-05-27 15:26 CEST, supervisor laptop)
+
+Drove the robot back to dock via app's Dock button (robot was idle, not mowing). Captured wire frame:
+
+```
+13:26:14.091 UTC  ATT b64: "EDEoAg=="
+                  pb hex:  10 31 28 02
+                  = PbInput { version=49, userCtrl=2 USER_CTRL_DOCK }
+```
+
+Confirms BRANCH_STATUS.md prior table: when robot is idle/docked (no confirmation dialog shown), Dock sends userCtrl=2 directly. We just shipped `DockAndForgetProgressButton` exposing this exact frame. Robot ack: `state=docked` per HA REST within a few seconds.
+
+### 🧰 Capture pipeline reference — full reproduction recipe (for session resilience)
+
+A fresh agent or session can reproduce everything below from scratch with these commands and no setup beyond `adb`, `tshark` (optional), and Python 3.
+
+**1. Connect to phone over WiFi (skip if `adb devices` already shows `192.168.1.45:5555 device`):**
+```bash
+adb connect 192.168.1.45:5555
+adb devices  # confirm "device" state
+```
+
+**2. UI exploration helper** — recreate at `/tmp/lymow-ui/dump.sh` if missing:
+```bash
+mkdir -p /tmp/lymow-ui
+cat > /tmp/lymow-ui/dump.sh << 'EOF'
+#!/bin/bash
+ID=$1
+adb -s 192.168.1.45:5555 shell uiautomator dump >/dev/null 2>&1
+adb -s 192.168.1.45:5555 shell cat /sdcard/window_dump.xml > /tmp/lymow-ui/screen_$ID.xml
+python3 << 'PY'
+import os, re
+xml = open(f"/tmp/lymow-ui/screen_{os.environ.get('ID','')}.xml").read()
+print(f"--- visible text ---")
+for t in dict.fromkeys(re.findall(r'text="([^"]+)"', xml)):
+    print(f"  {t!r}")
+print("--- clickable elements ---")
+for m in re.finditer(r'<node[^>]*?clickable="true"[^>]*?>', xml):
+    n = m.group(0)
+    text = re.search(r'text="([^"]*)"', n)
+    desc = re.search(r'content-desc="([^"]*)"', n)
+    bounds = re.search(r'bounds="([^"]+)"', n)
+    label = (text and text.group(1)) or (desc and desc.group(1)) or ""
+    if label.strip():
+        b = bounds.group(1) if bounds else ""
+        bm = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', b)
+        if bm:
+            cx = (int(bm.group(1))+int(bm.group(3)))//2
+            cy = (int(bm.group(2))+int(bm.group(4)))//2
+            print(f"  tap {cx:>4} {cy:>4}  {label!r}")
+PY
+EOF
+chmod +x /tmp/lymow-ui/dump.sh
+ID=home /tmp/lymow-ui/dump.sh home   # example usage
+```
+
+**3. Screenshot any screen** (then Read the PNG):
+```bash
+adb -s 192.168.1.45:5555 exec-out screencap -p > /tmp/lymow-ui/<label>.png
+```
+
+**4. Wire-format capture per app action:**
+```bash
+# (a) baseline
+SNOOP=$(adb -s 192.168.1.45:5555 shell su -c 'ls -t /data/misc/bluetooth/logs/hci_snoop*.cfa | head -1')
+SIZE0=$(adb -s 192.168.1.45:5555 shell su -c "stat -c %s $SNOOP")
+TIME0=$(date +%H:%M:%S.%3N)
+
+# (b) do the action
+adb -s 192.168.1.45:5555 shell input tap <x> <y>
+sleep 6
+
+# (c) pull + decode
+adb -s 192.168.1.45:5555 shell su -c "cp $SNOOP /sdcard/sg.cfa && chmod 666 /sdcard/sg.cfa"
+adb -s 192.168.1.45:5555 pull /sdcard/sg.cfa /tmp/lymow-ui/snoop.cfa
+cd /home/mint-laptop-4/private_projects/ha-lymow-lovelace
+uv run python scripts/parse_btsnoop.py /tmp/lymow-ui/snoop.cfa
+```
+
+`scripts/parse_btsnoop.py` is committed in this branch — it walks every record (where `tshark` gives up on the first malformed packet), filters to ATT WRITE_CMD on handle 0x0014, and prints each frame as ASCII-b64 + decoded protobuf hex.
+
+**5. Decode a raw protobuf frame:**
+```bash
+uv run python -c '
+import base64, sys
+sys.path.insert(0, "custom_components/lymow")
+from protocol import _decode_fields
+raw = base64.b64decode("<paste b64 here>")
+print(_decode_fields(raw))
+'
+```
+
+**Heartbeat noise to ignore in snoop output** — these all repeat every 1–60 s:
+
+| ASCII b64 | pb hex | Meaning |
+|---|---|---|
+| `EDEoFA==` | `10 31 28 14` | `query_schedules` poll (userCtrl=20) |
+| `EDFKAlgB` | `10 31 4a 02 58 01` | sub-message poll |
+| `EDFKAlAB` | `10 31 4a 02 50 01` | variant poll |
+| `ugEECCYgAQ==` | `ba 01 04 08 26 20 01` | sub-message poll (f23) |
+| `OALaASVPTk…` (long) | `38 02 da 01 25 ...` | phone device-ID keepalive |
+
+Everything else is a candidate user-action frame — find one near your tap timestamp.
+
+**Snoop epoch (verified 2026-05-27):** standard btsnoop epoch (0000-01-01 UTC), offset `62_168_256_000` s from Unix. `parse_btsnoop.py` uses this offset. *(Capture reply 4 noted "245 seconds short of standard" — that turned out to be wrong; live re-measurement against a known-time Dock tap gave exact match at standard offset.)*
+
+### 📋 Full forward plan (read top-to-bottom; pick up where the prior session stopped)
+
+This section is the **work queue** for the user's stated goal of full app→HA parity. Strike through items as they're done.
+
+#### Phase 1 — Capture remaining wire formats from supervisor laptop (no manual help needed)
+
+For each: navigate via the helper above, capture the wire frame, cross-reference against `const.py` / `protocol.py`, document in this file.
+
+| # | App location | What to capture | Status |
+|---|---|---|---|
+| 1.1 | Settings → Cancel Task | tap the row | ⬜ |
+| 1.2 | Settings → Notifications | tap row, observe toggles | ⬜ |
+| 1.3 | Settings → RTK Diagnostic | tap row, scroll | ⬜ |
+| 1.4 | Settings → Network Settings | tap row | ⬜ |
+| 1.5 | Settings → Bind RTK | tap row | ⬜ |
+| 1.6 | Settings → Find My Robot | tap row → activate | ⬜ |
+| 1.7 | Settings → PIN Code | tap row → set | ⬜ |
+| 1.8 | Settings → Anti-theft | tap row → toggle | ⬜ |
+| 1.9 | Settings → Device Info | read-only | ⬜ |
+| 1.10 | Settings → Device Settings (sub) | toggle each | ⬜ |
+| 1.11 | Settings → Mowing History | tap row | ⬜ |
+| 1.12 | Top-right ⋮ → Rename Device | rename + save | ⬜ |
+| 1.13 | Top-right ⋮ → Share Device | full flow | ⬜ |
+| 1.14 | Top-right ⋮ → Delete Device | 🚫 SKIP on primary device |
+| 1.15 | Device-screen top sliders icon | open + each slider | ⬜ |
+| 1.16 | Device-screen camera icon | tap (live view) | ⬜ |
+| 1.17 | Right rail map / focus icons | tap each | ⬜ |
+| 1.18 | Schedule create flow | full create | ⬜ (user has indicated they'll do these manually but a single test from app is fine) |
+| 1.19 | Schedule edit existing | change time, save | ⬜ (user is doing) |
+| 1.20 | Schedule delete one | swipe / 🗑 | ⬜ (user is doing) |
+| 1.21 | Mowing settings (top-middle ≡) — global tab | each slider | ⬜ |
+| 1.22 | Mowing settings — per-zone tab | per-zone overrides | ⬜ |
+| 1.23 | Mowing settings — per-channel tab | per-channel overrides | ⬜ |
+
+#### Phase 2 — Backend gaps surfaced by Phase 1
+
+(Refine after Phase 1 results — likely candidates already documented above as "NEW gaps surfaced".) Each gap gets:
+1. Encoder in `protocol.py` (if new opcode) or REST in `api.py`
+2. Coordinator method
+3. Service registration in `lawn_mower.py` + `services.yaml` entry
+4. Optionally entity (switch/button/sensor)
+5. Tests
+6. Commit + push
+
+#### Phase 3 — Card UI surfaces
+
+- 📦 Backup-management panel (list/restore/rename/delete) — backend ready today
+- Per-zone settings panel (extend the cut-height row with moveSpeed + pathSpacing)
+- Per-channel settings panel (channels are first-class per user)
+- Schedule create/edit/delete UI
+- Find My Robot button
+- Drop localStorage shim for mowing settings (already partially done; needs follow-through once docked-state echo is consistent)
+
+#### Phase 4 — Pre-existing tech debt
+
+- 11 failing `tests/test_protocol.py` cases from prior decoder refactor — see "Pre-existing test breakage" section. Without this, coverage gate fails and blocks any branch.
+- 2 commits behind `origin/feat/map-lovelace-card` before this session — pull before resuming.
+
+---
+
 ### Update to existing issues based on this audit
 
 - **Issue #97 (KVS WebRTC remote camera)**: confirmed live camera works via LOCAL RTSP (the AprilTag dock view we just streamed via the app over WiFi); remote access is still the gap. No new info to add.
