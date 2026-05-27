@@ -1568,3 +1568,53 @@ HA status:
   - Anti-theft toggle
   - Share Device REST endpoint
   - Delete Device REST endpoint
+
+---
+
+### 🛠 Supervisor session — 2026-05-27 evening iteration (this laptop)
+
+Picked up the branch with 11 failing tests + a partial-revert regression
+(`355dd1f`) and worked through the priority queue. **6 commits, +1053 →
+no regressions, 100% coverage throughout.** Commits, oldest first:
+
+| Commit | What |
+|---|---|
+| `bfb37bc` | fix(protocol): restore canonical PbZoneConfig layout + `decode_zone_config`. Undid the 355dd1f partial revert that had broken 11 tests AND silently empty-ed sensor.py's `mowing_settings` / `channel_config` attributes in production. Re-canonical Hermes #9432 layout (f9 relativeCleanDir / f10 pathSpacing) + restored `decode_zone_config` 19-field decoder + `decode_channel_config` {detectMode, cutHeight, channelLift} + `globalZoneConfig` / `globalChannelConfig` / `enuBasePoint` / `diagonalCoords` / `chargingStation.z` keys + per-zone `zoneConfig` dict + `_encode_go_zone` re-emits all 19 PbZoneConfig fields on sync_map round-trip + `_RUN_TIME_CONFIG_FIELDS` back to PbRunTimeConfig canonical (f1/f2/f3). |
+| `cc887cf` | feat: per-zone PbZoneConfig via `userCtrl=9` (app's Customize-tab path). New `encode_set_zone_config(updates)`, `async_set_zone_config(thing, updates)`, `lymow.set_zone_config` service. Bandwidth-efficient alternative to `update_zone_cut_height` / sync_map — single-zone configBox write byte-equal to the app's BLE write. |
+| `4a7913b` | feat: anti-theft full geofence setter (`async_set_geofence` + `lymow.set_geofence` service: lat/lon/radius/name optional, seeds defaults if no record) + MAC address sensor. Previous `set_geofence_radius` only mutated radius and required the centre to already be set in the Lymow app. |
+| `5e59b8d` | feat: live-decoded RTK diagnostic + network info from `userCtrl=57`/`58` pboutput responses (PbOutput.f34/f35/f36). New sensors: `wifi_ssid`, `cellular_ip`, `mac_address` (all disabled by default for noise). Card-side `value_key` now walks dotted paths like `networkInfo.wifiSsid`. RTK per-band fields stored as `rtkL1{f1..f11}` / `rtkL2{f1..f13}` pending app-UI label correlation. Capture script `scripts/query_all_diagnostics.py` shipped for future re-capture work. |
+
+**Backend gaps still open** (mostly needing live captures we can't do
+without ADB + phone-side BLE access from this laptop):
+
+| Feature | Why it's still open | Unblock path |
+|---|---|---|
+| Headlight Mode multi-state (vehLedStatus 0–4) | `PbRobotConfig.vehLedStatus` field number is not in the Hermes #9506 map we documented. `const.LED_LEVELS` shows the enum, but the wire field hasn't been captured. | BLE capture of Settings → Device Settings → Headlight Mode dropdown change. |
+| PIN Code set/clear | `PbRobotConfig.f9 lcdPinCode` is mentioned in the decoder docstring but its sub-message layout isn't pinned (kept out of the decoder for safety — PINs shouldn't be read back through HA's logs anyway). | BLE capture of Settings → PIN Code → Update. |
+| WiFi SSID/password write | App's Network Settings → Reconnect → SSID/password — wire format unknown. | BLE capture of the reconnect flow. |
+| Bind RTK | Settings → Bind RTK — REST or BLE unknown. | Try `update_device_feature` first with `rtkSn` field; if the API rejects it, BLE-capture the app's flow. |
+| Per-band RTK labels | `rtkL1`/`rtkL2` dicts decoded but key labels are `f1..f13` instead of `l1VisibleSats` / `l2Snr` etc. | App screenshot of Settings → RTK Diagnostic with all numbers visible, then correlate by running `query_rtk_diagnostic_*` immediately after. |
+| Share / Delete Device REST endpoints | Top-right ⋮ menu — REST paths unknown. | Mitmproxy capture of the app while sharing / unlinking the device. |
+| Schedule add/edit/delete granular wire | Bulk `set_schedules` works; granular per-row write isn't pinned. | User said they'd do these manually. |
+| Remote camera (KVS WebRTC) | Local RTSP works (`camera.lymow_*` entity). Remote = issue #97 — robot only acts as WebRTC master for the app's cloud session. | **Explicitly excluded from the "no-PR-undraft-until-app-parity" gate per user instruction.** |
+
+**Note for the supervisor session driving the Lovelace card**: every
+backend change above is already wired through the service layer + sensor
+layer. The card can plug in directly:
+
+- Per-zone settings panel: call `lymow.set_zone_config` (zone_hash_id +
+  per-field args; same field names as `set_task_config`).
+- Anti-theft full config: call `lymow.set_geofence` (lat/lon/radius/name
+  optional; will seed a sensible default if no record exists).
+- Network info display: read `sensor.<device>_wifi_ssid`,
+  `sensor.<device>_cellular_ip`, `sensor.<device>_mac_address` — all
+  disabled-by-default; user enables them if they want them visible.
+
+**Robot interaction this session**: read-only MQTT queries only (cleaning
+summary, robot config, run-time config, RTK L1/L2, etc.). No mowing,
+docking, charging-station moves, or destructive writes. Robot is docked
+at 96% battery, idle.
+
+**Test suite at session end**: 1053 passing, 100% coverage, ruff clean
+on both `format --check` and `check`. Branch is 4 commits ahead of
+`origin/feat/map-lovelace-card` — push when ready.
