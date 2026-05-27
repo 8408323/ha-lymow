@@ -1468,6 +1468,68 @@ def test_decode_pboutput_mow_strip_count() -> None:
     assert state["mowStripCount"] == 17
 
 
+def test_decode_pboutput_network_info_field_34() -> None:
+    """PbOutput.f34 networkInfo (populated by query_rtk_diagnostic_l1).
+
+    Live capture 2026-05-27: f2 wifiSsid, f3 ipAddress, f4 wifiRssiDbm, f6
+    cellularIp, f7 lteRssiDbm, f10 simId. We surface the user-facing fields;
+    the connection-state varints are stored as signed ints.
+    """
+    net = (
+        _field_i32(1, 1)
+        + _field_str(2, "Haraldsson")
+        + _field_str(3, "192.168.1.85")
+        + _field_i32(4, (1 << 32) - 59)  # -59 dBm as two's-complement varint
+        + _field_i32(5, 1)
+        + _field_str(6, "100.116.126.140")
+        + _field_i32(7, (1 << 32) - 73)
+        + _field_i32(8, 1)
+        + _field_str(10, " 89320420000094505458")
+    )
+    pb = _field_bytes(34, net)
+    state = decode_pboutput(pb)
+    assert state["networkInfo"]["wifiSsid"] == "Haraldsson"
+    assert state["networkInfo"]["ipAddress"] == "192.168.1.85"
+    assert state["networkInfo"]["cellularIp"] == "100.116.126.140"
+    assert state["networkInfo"]["wifiRssiDbm"] == -59
+    assert state["networkInfo"]["lteRssiDbm"] == -73
+    # simId is stripped of leading/trailing whitespace
+    assert state["networkInfo"]["simId"] == "89320420000094505458"
+
+
+def test_decode_pboutput_no_network_info_when_field_34_absent() -> None:
+    pb = _build_pboutput()
+    state = decode_pboutput(pb)
+    assert "networkInfo" not in state
+
+
+def test_decode_pboutput_rtk_diagnostic_l1_field_35() -> None:
+    """PbOutput.f35 rtkL1 — populated by query_rtk_diagnostic_l1.
+
+    Live frame had 8 varints + 1 float32 + 1 i32-float = stored as
+    ``rtkL1{f1..f11}``. Awaiting app-UI label correlation; for now we just
+    pin the round-trip so the values reach the sensor layer.
+    """
+    l1 = _field_i32(1, 2) + _field_f32(2, 0.01135) + _field_i32(3, 23) + _field_i32(4, 23)
+    pb = _field_bytes(35, l1)
+    state = decode_pboutput(pb)
+    assert state["rtkL1"]["f1"] == 2
+    assert state["rtkL1"]["f3"] == 23
+    assert state["rtkL1"]["f4"] == 23
+    assert state["rtkL1"]["f2"] == pytest.approx(0.01135, rel=1e-4)
+
+
+def test_decode_pboutput_rtk_diagnostic_l2_field_36() -> None:
+    """PbOutput.f36 rtkL2 carries location-precision floats + per-band SNR ints."""
+    l2 = _field_f32(1, 2.0) + _field_i32(2, 307) + _field_f32(5, 0.891) + _field_i32(8, 42)
+    pb = _field_bytes(36, l2)
+    state = decode_pboutput(pb)
+    assert state["rtkL2"]["f1"] == pytest.approx(2.0, rel=1e-4)
+    assert state["rtkL2"]["f2"] == 307
+    assert state["rtkL2"]["f5"] == pytest.approx(0.891, rel=1e-4)
+    assert state["rtkL2"]["f8"] == 42
+
+
 def test_decode_pboutput_mow_progress() -> None:
     """f12.f5 → mowProgress decoded as float 0–1 * 100."""
     pb = _build_pboutput_with_extras(mow_progress=0.526)
