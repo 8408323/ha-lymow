@@ -1158,27 +1158,13 @@ Per the user's 2026-05-27 message, the **zone editing** captures (save/update/cr
 - **DockAndForgetProgressButton** (`button.py`): new disabled-by-default button entity sending `USER_CTRL_DOCK = 2` (destructive: cancels in-progress task). Standard HA dock action continues to use userCtrl=33 (preserve progress). Exposes the app's "After docking, should the mower forget its progress?" Yes-path explicitly instead of building a modal dialog in the card.
 - **Capture scripts** under `scripts/` (dev tooling, not shipped to HA): `dock_realign_capture.py`, `backup_lifecycle_capture.py`, `_one_off.py`. Output `.log` files alongside them — add to gitignore if not already covered.
 
-## Pre-existing test breakage left by previous commits (CAPTURE SESSION TO FIX)
+## Pre-existing test breakage — RESOLVED 2026-05-27 (commit `bfb37bc`)
 
-The protocol-decoder refactor in commits `49a7ac6`, `355dd1f`, and `4302610` shipped without updating `tests/test_protocol.py`. After my import-alias fix (so the test file even collects), **11 tests still fail** because expected values don't match the new decoder output:
+The 11 failing tests came from commit `355dd1f` which partially reverted `49a7ac6` — renaming `decode_zone_config` / `decode_channel_config`, flipping the canonical PbZoneConfig wire layout back to a buggy one, and dropping the rich decoder output (`globalZoneConfig` / `globalChannelConfig` / `enuBasePoint` / `diagonalCoords` / `chargingStation.z` / per-zone `zoneConfig`). The reverts also desynchronised the decoder from sensor.py (which still looked for `globalZoneConfig` — silently empty in production) and from `_encode_go_zone` (which was dropping 17 of 19 PbZoneConfig fields on every sync_map round-trip).
 
-```
-test_decode_map_response_go_zone_config             KeyError: 'pathSpacing'
-test_decode_zone_config_canonical_19_fields         KeyError: 'raiseCutHeight'
-test_decode_channel_config_three_fields             channelMode/channelLiftHeight vs detectMode/channelLift
-test_decode_map_response_global_zone_and_channel_config   KeyError: 'globalZoneConfig'
-test_decode_map_response_charging_station_with_z_and_enu_altitude   KeyError: 'z'
-test_decode_map_response_diagonal_coords            KeyError: 'diagonalCoords'
-test_decode_map_response_per_zone_config_surfaces_full_dict   KeyError: 'zoneConfig'
-test_encode_go_zone_zoneconfig_emits_full_pbzoneconfig    AssertionError
-test_encode_set_task_config_wraps_in_pbinput        AssertionError
-test_encode_set_run_time_config_wraps_in_pbinput_map    AssertionError
-test_encode_set_run_time_config_skips_none_and_rejects_unknown    AssertionError
-```
+Fixed by restoring 49a7ac6's protocol.py + re-layering `encode_find_my_robot_play_sound` from `a4608bf`. Result: 1031 tests pass, 100% coverage, ruff clean. The "canonical Hermes #9432" layout (f9 relativeCleanDir / f10 pathSpacing / f11 perimeterMowLaps / f15 pathOrder / f16 startProgress) is now the single source of truth shared by encoder + decoder + tests.
 
-All stem from renames (`decode_zone_config → decode_global_zone_config`, PbZoneConfig field renames like `detectMode → channelMode`, `channelLift → channelLiftHeight`) plus new top-level keys (`globalZoneConfig`, `diagonalCoords`, `enuBasePoint`, `z`, `zoneConfig`) that the old assertions don't yet include.
-
-**Capture session action:** please update these tests to match the canonical field names you decided on. Without this fix CI cannot reach 100% coverage and any new branch will trip the gate.
+**Note for future capture work:** reply 4's "live BLE capture" interpretation (f9 pathSpacing / f16 relativeCleanDir) contradicts this canonical layout. The captured *bytes* don't independently identify which field number maps to which name — that came from the field map being applied to the bytes. The canonical Hermes #9432 layout is what the tests pin and what the integration produced before the regression; if a future hardware check shows the robot actually interprets f9 as pathSpacing, we'll need to re-investigate the APK bytecode, not the captured bytes.
 
 ---
 
@@ -1472,7 +1458,7 @@ For each: navigate via the helper above, capture the wire frame, cross-reference
 
 #### Phase 4 — Pre-existing tech debt
 
-- 11 failing `tests/test_protocol.py` cases from prior decoder refactor — see "Pre-existing test breakage" section. Without this, coverage gate fails and blocks any branch.
+- ~~11 failing `tests/test_protocol.py` cases from prior decoder refactor~~ — **fixed 2026-05-27 (commit `bfb37bc`)**. Cause was a partial revert in `355dd1f` that desynchronised the decoder from sensor.py / tests / lovelace card. Restored 49a7ac6's canonical PbZoneConfig layout (Hermes #9432); re-layered `encode_find_my_robot_play_sound`. 1031 tests, 100% coverage, ruff clean.
 - 2 commits behind `origin/feat/map-lovelace-card` before this session — pull before resuming.
 
 ---

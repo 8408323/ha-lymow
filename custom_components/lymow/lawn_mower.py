@@ -70,6 +70,7 @@ _SERVICE_START_VIDEO_SESSION = "start_video_session"
 _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
 _SERVICE_UPDATE_NOGO_POLYGON = "update_nogo_polygon"
 _SERVICE_UPDATE_ZONE_CUT_HEIGHT = "update_zone_cut_height"
+_SERVICE_SET_ZONE_CONFIG = "set_zone_config"
 _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_ADD_NOGO_ZONE = "add_nogo_zone"
 _SERVICE_ADD_CHANNEL = "add_channel"
@@ -296,6 +297,28 @@ _UPDATE_ZONE_CUT_HEIGHT_SCHEMA = vol.Schema(
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
         vol.Required(_ATTR_CUT_HEIGHT_MM): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+# set_zone_config supports the same PbZoneConfig fields as set_task_config, but
+# scoped to one zone (or many) and using the app's userCtrl=9 wire path instead
+# of full sync_map. The cut_height field is shared with _TASK_CONFIG_SERVICE_FIELDS
+# semantically but encoded separately (field 1 of PbZoneConfig vs f9/f10/etc).
+_SET_ZONE_CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Optional(_ATTR_IS_ENABLED): cv.boolean,
+        vol.Optional("cut_height"): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+        **{
+            vol.Optional(k): (
+                vol.Coerce(float)
+                if k in _TASK_CONFIG_FLOAT_FIELDS
+                else cv.boolean
+                if k in _TASK_CONFIG_BOOL_FIELDS
+                else vol.Coerce(int)
+            )
+            for k in _TASK_CONFIG_SERVICE_FIELDS
+        },
     }
 )
 _ADD_ZONE_SCHEMA = vol.Schema(
@@ -596,6 +619,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             await coordinator.async_update_zone_cut_height(entity._thing_name, hash_id, mm)
+
+    async def handle_set_zone_config(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
+        update: dict[str, Any] = {"hashId": hash_id}
+        if _ATTR_IS_ENABLED in call.data:
+            update["isEnabled"] = call.data[_ATTR_IS_ENABLED]
+        if "cut_height" in call.data:
+            update["cutHeight"] = call.data["cut_height"]
+        for svc_key, proto_key in _TASK_CONFIG_SERVICE_FIELDS.items():
+            if svc_key in call.data:
+                update[proto_key] = call.data[svc_key]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_zone_config(entity._thing_name, [update])
 
     async def handle_add_zone(call: ServiceCall) -> dict[str, Any]:
         entity_ids: list[str] = call.data["entity_id"]
@@ -986,6 +1027,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _SERVICE_UPDATE_ZONE_CUT_HEIGHT,
         handle_update_zone_cut_height,
         schema=_UPDATE_ZONE_CUT_HEIGHT_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_SET_ZONE_CONFIG,
+        handle_set_zone_config,
+        schema=_SET_ZONE_CONFIG_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

@@ -1512,6 +1512,83 @@ def encode_rename_nogo_zone(hash_id: str, name: str) -> bytes:
     return pb
 
 
+def _encode_zone_config_submessage(cfg: dict[str, Any]) -> bytes:
+    """Encode a PbZoneConfig sub-message from a dict of named fields.
+
+    Field name → wire layout from _TASK_CONFIG_FIELDS (Hermes #9432). ``cutHeight``
+    is at field 1 (not in _TASK_CONFIG_FIELDS because it's also the first field of
+    PbRunTimeConfig and PbChannel); everything else routes through the map.
+    """
+    out = b""
+    if cfg.get("cutHeight") is not None:
+        out += _field_i32(1, int(cfg["cutHeight"]))
+    for name, (field_no, kind) in _TASK_CONFIG_FIELDS.items():
+        if name not in cfg:
+            continue
+        value = cfg[name]
+        if value is None:
+            continue
+        if kind == "bool":
+            out += _field_i32(field_no, 1 if value else 0)
+        elif kind == "float":
+            out += _field_f32(field_no, float(value))
+        else:
+            out += _field_i32(field_no, int(value))
+    return out
+
+
+def encode_set_zone_config(updates: list[dict[str, Any]]) -> bytes:
+    """Encode a per-zone PbZoneConfig override via USER_CTRL_MODIFY_ZONE_INFO.
+
+    Wire layout captured live 2026-05-27 from the app's Mowing Settings →
+    Customize tab (BLE ATT WRITE_CMD handle 0x0014). Same envelope as
+    ``encode_rename_zone`` but carries ``configBox`` instead of a name:
+
+      PbInput {
+        f2  version = 49
+        f5  userCtrl = 9 (USER_CTRL_MODIFY_ZONE_INFO)
+        f12 PbMap {
+          goZones[*] = PbZone {
+            f1 basicInfo = PbZoneBasicInfo {hashId, isEnabled}
+            f2 configBox = PbZoneConfig {...PbZoneConfig fields...}
+          }
+        }
+      }
+
+    Each ``updates`` entry: ``{"hashId": str, "isEnabled": bool=True,
+    ...PbZoneConfig fields}`` where the config fields use ``_TASK_CONFIG_FIELDS``
+    naming (``cutHeight``, ``moveSpeed``, ``pathSpacing``, …). Multiple entries
+    are sent in one frame, matching the app's bulk-update behaviour.
+
+    Distinct from ``encode_rename_zone`` (which carries ``name`` in basicInfo)
+    and from ``async_update_zone_cut_height``'s sync_map path (which re-sends
+    the full map — slower but works on older robots). This is the targeted,
+    bandwidth-efficient per-zone path the app itself uses.
+    """
+    from .const import USER_CTRL_MODIFY_ZONE_INFO
+
+    if not updates:
+        raise ValueError("encode_set_zone_config: at least one update required")
+
+    pb_map = b""
+    for entry in updates:
+        hash_id = entry.get("hashId")
+        if not hash_id:
+            raise ValueError("encode_set_zone_config: every update needs a hashId")
+        is_enabled = 1 if entry.get("isEnabled", True) else 0
+        basic_info = _field_str(3, hash_id) + _field_i32(4, is_enabled)
+        cfg_bytes = _encode_zone_config_submessage(entry)
+        zone = _field_bytes(1, basic_info)
+        if cfg_bytes:
+            zone += _field_bytes(2, cfg_bytes)
+        pb_map += _field_bytes(1, zone)  # PbMap.goZones (repeated)
+
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO)
+    pb += _field_bytes(12, pb_map)
+    return pb
+
+
 def delete_zone(map_data: dict, hash_id: str) -> dict:
     """Return a deep copy of map_data with the given zone (and its child no-go zones) removed.
 
