@@ -71,6 +71,7 @@ _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
 _SERVICE_UPDATE_NOGO_POLYGON = "update_nogo_polygon"
 _SERVICE_UPDATE_ZONE_CUT_HEIGHT = "update_zone_cut_height"
 _SERVICE_SET_ZONE_CONFIG = "set_zone_config"
+_SERVICE_SET_GEOFENCE = "set_geofence"
 _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_ADD_NOGO_ZONE = "add_nogo_zone"
 _SERVICE_ADD_CHANNEL = "add_channel"
@@ -297,6 +298,15 @@ _UPDATE_ZONE_CUT_HEIGHT_SCHEMA = vol.Schema(
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
         vol.Required(_ATTR_CUT_HEIGHT_MM): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+_SET_GEOFENCE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Optional("latitude"): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
+        vol.Optional("longitude"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
+        vol.Optional("radius_m"): vol.All(vol.Coerce(int), vol.Range(min=10, max=500)),
+        vol.Optional("name"): cv.string,
     }
 )
 # set_zone_config supports the same PbZoneConfig fields as set_task_config, but
@@ -619,6 +629,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             await coordinator.async_update_zone_cut_height(entity._thing_name, hash_id, mm)
+
+    async def handle_set_geofence(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        kwargs: dict[str, Any] = {}
+        for k in ("latitude", "longitude", "radius_m", "name"):
+            if k in call.data:
+                kwargs[k] = call.data[k]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_geofence(entity._thing_name, **kwargs)
 
     async def handle_set_zone_config(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
@@ -1033,6 +1056,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _SERVICE_SET_ZONE_CONFIG,
         handle_set_zone_config,
         schema=_SET_ZONE_CONFIG_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_SET_GEOFENCE,
+        handle_set_geofence,
+        schema=_SET_GEOFENCE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

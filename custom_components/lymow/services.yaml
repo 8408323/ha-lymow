@@ -515,6 +515,48 @@ update_zone_polygon:
       selector:
         object:
 
+set_geofence:
+  name: Set anti-theft geofence
+  description: >
+    Set the anti-theft geofence centre, radius, and optional name in one
+    PATCH /update-device-feature call. Mirrors the Lymow app's Settings →
+    Anti-theft page (centre + radius slider + Save). Each parameter is
+    optional; omitted ones keep their existing value, so the same service
+    can move the centre, resize the circle, or rename it independently.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    latitude:
+      name: Centre latitude
+      description: WGS-84 latitude of the geofence centre.
+      required: false
+      example: 59.6824
+      selector:
+        number: { min: -90, max: 90, step: 0.000001, mode: box }
+    longitude:
+      name: Centre longitude
+      description: WGS-84 longitude of the geofence centre.
+      required: false
+      example: 16.7591
+      selector:
+        number: { min: -180, max: 180, step: 0.000001, mode: box }
+    radius_m:
+      name: Radius (m)
+      description: Geofence radius in metres (10–500).
+      required: false
+      example: 150
+      selector:
+        number: { min: 10, max: 500, step: 5, unit_of_measurement: "m" }
+    name:
+      name: Name
+      description: Optional display name for the geofence.
+      required: false
+      example: "Backyard"
+      selector:
+        text:
+
 set_zone_config:
   name: Set per-zone mowing config
   description: >

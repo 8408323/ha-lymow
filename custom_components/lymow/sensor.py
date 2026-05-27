@@ -97,6 +97,13 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:ip-network",
         entity_registry_enabled_default=False,
     ),
+    LymowSensorDescription(
+        key="mac_address",
+        name="MAC address",
+        value_key="macAddress",
+        icon="mdi:network",
+        entity_registry_enabled_default=False,
+    ),
     # Live MQTT sensors decoded from additional pboutput fields
     LymowSensorDescription(
         key="rtk_satellites",

@@ -1794,6 +1794,67 @@ async def test_async_set_geofence_radius_raises_when_first_entry_not_dict() -> N
 
 
 @pytest.mark.asyncio
+async def test_async_set_geofence_writes_all_provided_fields() -> None:
+    """The full setter accepts lat/lon/radius/name in one PATCH."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Old", "latitude": 10.0, "longitude": 20.0, "radius": 100},
+            ]
+        }
+    }
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, latitude=59.68, longitude=16.76, radius_m=200, name="Home")
+    api.update_device_feature.assert_awaited_once()
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"][0]
+    assert sent["latitude"] == 59.68
+    assert sent["longitude"] == 16.76
+    assert sent["radius"] == 200
+    assert sent["name"] == "Home"
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_seeds_default_when_no_existing_record() -> None:
+    """Allow configuring a fresh device without first opening the Lymow app."""
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {}}
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, latitude=59.68, longitude=16.76, radius_m=150)
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"][0]
+    assert sent["latitude"] == 59.68
+    assert sent["longitude"] == 16.76
+    assert sent["radius"] == 150
+    assert sent["name"] == ""
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_preserves_unspecified_fields() -> None:
+    """A radius-only update keeps the existing centre coords + name."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Yard", "latitude": 10.0, "longitude": 20.0, "radius": 100},
+            ]
+        }
+    }
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, radius_m=250)
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"][0]
+    assert sent["latitude"] == 10.0
+    assert sent["longitude"] == 20.0
+    assert sent["radius"] == 250
+    assert sent["name"] == "Yard"
+
+
+@pytest.mark.asyncio
 async def test_async_send_user_ctrl_publishes_command() -> None:
     from lymow.const import USER_CTRL_LOCK
     from lymow.protocol import _decode_fields
