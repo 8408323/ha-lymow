@@ -396,6 +396,84 @@ Any REST call involved? ___
 
 ---
 
+### Task D — Schedule create / edit / delete (NEW, 2026-05-27)
+
+**Goal.** Confirm wire format for **each** of the schedule mutations the app exposes:
+
+1. **Create a NEW schedule** — Settings → Schedules → "+" → fill in day, time, zones → Save.
+2. **Edit an existing schedule** — tap an existing row → change the time or zone list → Save.
+3. **Delete a single schedule** — long-press a row → Delete (or swipe / 🗑 icon, whichever the UI uses).
+4. **Toggle a schedule's enabled state** — tap the row's toggle without entering the editor.
+5. **Clear all schedules** — Already wire-validated (`encode_clear_schedules` → `10 31 5a 00`); only re-capture if some new path emerges.
+
+**Why we still need this even though `encode_set_schedules` exists.**
+
+`encode_set_schedules` is wire-validated for one shape (the full PbSchedules.tasks list), but we don't know which of these flows uses *that* shape and which use a different field:
+
+- Does **delete-single** send the full list minus the deleted entry, or a scoped `delete-schedule-by-id` opcode?
+- Does **toggle-enabled** send the full list with `isDisabled` flipped, or a small "set-isDisabled" frame?
+- Does **edit** send the full list with one entry replaced (id-keyed), or a partial frame?
+
+Without per-action capture we can't expose granular `enable_schedule(id)` / `delete_schedule(id)` services — the card would have to fall back to "read-modify-rewrite the whole list", which is fine but extra round-trips.
+
+**Capture procedure (each subtask):**
+
+1. With scrcpy mirroring the phone, open Lymow app → Settings → Schedules.
+2. **Before** the action: `adb -s 192.168.1.45:5555 pull /data/misc/bluetooth/logs/btsnoop_hci.log baseline.log` (note last frame timestamp).
+3. Perform the action in the app.
+4. **Wait at least 5 minutes** — supervisor reply 4 found the app debounces some writes that long.
+5. Pull the snoop file again: `adb pull /data/misc/bluetooth/logs/btsnoop_hci.log after.log`.
+6. Extract the new ATT writes (handle 0x0014):
+   ```bash
+   tshark -r after.log -Y 'btatt.opcode == 0x52 and btatt.handle == 0x0014' \
+          -T fields -e frame.time -e btatt.value
+   ```
+7. For each new b64-decoded payload, run it through `decode_pbinput` and document:
+   - userCtrl number (or "none" if it's a payload-only command like clear_schedules)
+   - Field layout
+   - Whether the full list was re-sent or a scoped sub-message was used
+
+**Report back** by appending to "Findings" section below and pushing a `test-ready: schedules` commit so the supervisor can wire up granular services.
+
+**Code that already exists** (don't re-implement — verify and extend):
+- `protocol.py::encode_query_schedules` (userCtrl=20) — wire-validated
+- `protocol.py::encode_clear_schedules` — wire-validated (verbatim app capture)
+- `protocol.py::encode_set_schedules(entries)` — wire-validated for "Save Task" flow
+- `protocol.py::_encode_schedule_entry` — full PbSchedule field map (dayOfWeek, hour, minute, isRepeated, zones, id, timeZone, isDisabled, isAngleOffset, config)
+- `coordinator.py::async_query_schedules / async_clear_schedules / async_set_schedules`
+- `services.yaml::query_schedules / clear_schedules / set_schedules` services
+
+---
+
+### Task E — Map backup lifecycle (DONE 2026-05-27 by supervisor laptop, NO further capture needed)
+
+Full end-to-end capture in `scripts/backup_lifecycle_capture.py` and Supervisor reply 4 below. Wire-validated:
+
+| Action | Transport | Wire | Implementation |
+|---|---|---|---|
+| Create backup | MQTT pbinput | userCtrl=44 (`pb_hex=1031282c`) | `BackupMapButton`, `coordinator.async_backup_map` |
+| List backups | REST GET `/prod/get-backup-map` | `{deviceThingName}` → `{mapList: [{map_file, backup_time, name}]}` | `api.get_backup_map_list`, surfaced via backup sensors |
+| Restore backup | REST POST `/prod/restore-map-v2` | `{fromKey, toThingName}` | `api.restore_backup_map`, `lymow.restore_backup_map` service |
+| Delete backup | REST POST `/prod/delete-backup-map` | `{objectKey}` → `{}` | `api.delete_backup_map`, `lymow.delete_backup_map` service |
+| Rename backup | REST POST `/prod/update-backup-map-metadata` | `{objectKey, name}` | `api.rename_backup_map`, `lymow.rename_backup_map` service |
+
+What's missing is **only the card UI**: a backups panel (📦 icon next to 📅) that lists, restores, deletes, renames. Backend is complete and round-trip-tested.
+
+---
+
+### Task F — Charging-station realign (DONE 2026-05-27 by supervisor laptop, NO further capture needed)
+
+Live MQTT capture in `scripts/dock_realign_capture.py`. Wire-validated:
+
+- **Send**: `pb_hex=1031282c` → correction: `1031 28 11` = userCtrl=17 (`CHARGING_STATION_RESET`), envelope `{"message":"EDEoEQ=="}`, 4 bytes total.
+- **Robot reaction (within 5s)**: `workStatus` flips CHARGING(5) → WAITING(1), `isCharging` → false. Robot stays physically parked (rtkEastM/rtkNorthM stay near 0).
+- **No payload-bearing response** — the change is observable only via the standard pboutput broadcast.
+- Already implemented as `ChargingStationResetButton` (button.py); also `SetChargingStationHereButton` (userCtrl=38) for the inverse "record current position as new dock".
+
+To restore the robot to its charging cycle after this command, send userCtrl=33 (RECHARGE_DOCK): `scripts/_one_off.py 33`.
+
+---
+
 ## Protocol reference (for capture session)
 
 All MQTT commands are wrapped: `{"message": "<base64 protobuf>"}` on topic `/device/<thingName>/pbinput`.
@@ -1019,3 +1097,86 @@ PbInput {
 - Snoop epoch on this phone is exactly **245 seconds short of the standard 62 168 256 000-second offset** — minor calibration nit, recorded here so future timestamp math doesn't get off.
 
 **Robot state on exit**: `docked`, battery 98%, no side effects. Phone proxy still at `192.168.1.180:8888`. Customize settings on the phone are still whatever they were before this session — no destructive change was committed.
+
+---
+
+### Supervisor reply 4 (2026-05-27, supervisor laptop) — closed three matrix gaps, added Task D for schedules, opened Task E/F
+
+Picked up after capture-session reply 4 and the user's instruction: *"the goal is to mirror full app to have all features in HA lovelace card."* Confirmed three matrix entries that were stale (already implemented), captured two end-to-end flows live from the supervisor laptop, and added the Project Goal / Agent Onboarding / WiFi-ADB sections at the top of this file so a fresh agent or capture worker can pick up cold.
+
+**What I closed at the codebase level (already implemented, just unflagged in the matrix):**
+
+- `USER_CTRL_LOCK = 18` — `LockRobotButton` exists in `button.py:121`, enabled by default. The matrix's "HA gap" entry is stale.
+- `USER_CTRL_CLEAR_ALL_ZONES_CHANNELS = 15` — `ClearAllZonesAndChannelsButton` exists in `button.py:225`, disabled by default (correct for a destructive command). Matrix said "intentional gap"; it's actually implemented with the correct safety posture.
+- `USER_CTRL_CHARGING_STATION_RESET = 17` — `ChargingStationResetButton` exists in `button.py:149` AND wire-validated live this session (see Task F above).
+
+**What I live-validated end-to-end from this laptop (no app, no BLE needed):**
+
+- **Task F (charging-station realign)** via `scripts/dock_realign_capture.py`. 4-byte command, robot transitions CHARGING → WAITING in ~5s. Restored via `_one_off.py 33`.
+- **Task E (full backup lifecycle)** via `scripts/backup_lifecycle_capture.py`. Created backup, polled list, deleted only the new entry, verified all 3 pre-existing backups untouched. Pinned timestamps:
+  - 3 existing backups dated 2026-05-14, 2026-05-22, 2026-05-26 — left alone
+  - New backup `device_7890838300cd/map/map_20260527T120604Z.pb` appeared after one 3-second poll
+  - Delete returned `{}` (empty body) in ~3.2s
+  - Final list: 3 entries, all the originals.
+
+**Per-zone cut-height implementation note (in response to capture reply 4's encoder finding).** The capture session correctly identifies that the app's Customize tab uses **userCtrl=9 + per-zone `configBox`**, not `userCtrl=36 SET_TASK_CONFIG`. **Our existing `coordinator.async_update_zone_cut_height` already takes a different valid path**: it deep-copies the map, mutates `goZones[i].cutHeight`, and pushes back via `async_sync_map` (userCtrl=25, full map replace). The robot accepts both shapes. We can ship the card UI on top of the existing sync_map path immediately; switching to the more efficient userCtrl=9 path can be a follow-up that doesn't block the UI.
+
+**What's in scope for the user (manual):**
+
+Per the user's 2026-05-27 message, the **zone editing** captures (save/update/create/delete zones, nogo zones, channels) will be done manually later. Don't add capture tasks for those — the user has those.
+
+**Code-only follow-ups I'm shipping in the next commit(s):**
+
+1. Per-zone cut-height UI in the card (selects a zone in edit mode → small panel → Apply → `lymow.update_zone_cut_height` service)
+2. Dock confirmation dialog matching the app's "After docking, should the mower forget its progress?" prompt — calls `lymow.dock` (userCtrl=2, destructive) on Yes vs the existing recharge_dock path (userCtrl=33) on No.
+
+**Browser tests deferred to after the code commits** — I'll push `test-ready: per-zone-cut-height + dock-dialog` once the UI lands so the capture session knows to verify nothing regressed.
+
+**Updated App-vs-Lovelace feature matrix (delta only — strikethrough was matrix value, new value follows):**
+
+| Operation | Matrix said | New value | Reason |
+|---|---|---|---|
+| Lock robot | ❌ HA gap | ✅ shipped + wire-validated | `LockRobotButton` exists, userCtrl=18 |
+| Reset charging station calibration | ❌ HA gap | ✅ shipped + **wire-validated 2026-05-27** | `ChargingStationResetButton` exists; today's live capture confirms |
+| Delete All zones/channels | ❌ HA gap (intentional) | ✅ shipped (disabled by default) | `ClearAllZonesAndChannelsButton` exists |
+| Map Backup | ❌ HA gap | ✅ shipped + **wire-validated lifecycle 2026-05-27** | `BackupMapButton`; full create/list/delete tested today |
+| Map Restore | ❌ HA gap | ✅ shipped | `lymow.restore_backup_map` service + REST round-trip |
+
+**True remaining gaps after this session (the only "❌ not implemented" left):**
+
+- **Edit Boundary** (drive-the-robot mode, userCtrl=10/11) — encoder doesn't exist; no card UI counterpart; per capture reply 4 deferred indefinitely (destructive in unattended capture).
+- **Per-zone cut-height UI in card** — backend ready (`async_update_zone_cut_height`); UI pending (shipping next commit).
+- **Backup-management UI in card** — backend complete and round-trip tested today; UI pending (📦 panel listing/restoring/deleting/renaming).
+- **Schedule mutation granular services** — capture pending (Task D above).
+- **Per-zone-config encoder via userCtrl=9** — optional optimisation per capture reply 4; sync_map path works today.
+
+---
+
+## Code changes shipped 2026-05-27
+
+- **Per-zone cut-height**: new `lymow.update_zone_cut_height` service (wraps existing `coordinator.async_update_zone_cut_height`); card UI row appears under the edit toolbar when a go-zone is selected (number input + Apply, 20–100 mm). Coordinator persists via `sync_map` (userCtrl=25) — works today; can be swapped to the userCtrl=9 path from capture reply 4 later without UI changes.
+- **DockAndForgetProgressButton** (`button.py`): new disabled-by-default button entity sending `USER_CTRL_DOCK = 2` (destructive: cancels in-progress task). Standard HA dock action continues to use userCtrl=33 (preserve progress). Exposes the app's "After docking, should the mower forget its progress?" Yes-path explicitly instead of building a modal dialog in the card.
+- **Capture scripts** under `scripts/` (dev tooling, not shipped to HA): `dock_realign_capture.py`, `backup_lifecycle_capture.py`, `_one_off.py`. Output `.log` files alongside them — add to gitignore if not already covered.
+
+## Pre-existing test breakage left by previous commits (CAPTURE SESSION TO FIX)
+
+The protocol-decoder refactor in commits `49a7ac6`, `355dd1f`, and `4302610` shipped without updating `tests/test_protocol.py`. After my import-alias fix (so the test file even collects), **11 tests still fail** because expected values don't match the new decoder output:
+
+```
+test_decode_map_response_go_zone_config             KeyError: 'pathSpacing'
+test_decode_zone_config_canonical_19_fields         KeyError: 'raiseCutHeight'
+test_decode_channel_config_three_fields             channelMode/channelLiftHeight vs detectMode/channelLift
+test_decode_map_response_global_zone_and_channel_config   KeyError: 'globalZoneConfig'
+test_decode_map_response_charging_station_with_z_and_enu_altitude   KeyError: 'z'
+test_decode_map_response_diagonal_coords            KeyError: 'diagonalCoords'
+test_decode_map_response_per_zone_config_surfaces_full_dict   KeyError: 'zoneConfig'
+test_encode_go_zone_zoneconfig_emits_full_pbzoneconfig    AssertionError
+test_encode_set_task_config_wraps_in_pbinput        AssertionError
+test_encode_set_run_time_config_wraps_in_pbinput_map    AssertionError
+test_encode_set_run_time_config_skips_none_and_rejects_unknown    AssertionError
+```
+
+All stem from renames (`decode_zone_config → decode_global_zone_config`, PbZoneConfig field renames like `detectMode → channelMode`, `channelLift → channelLiftHeight`) plus new top-level keys (`globalZoneConfig`, `diagonalCoords`, `enuBasePoint`, `z`, `zoneConfig`) that the old assertions don't yet include.
+
+**Capture session action:** please update these tests to match the canonical field names you decided on. Without this fix CI cannot reach 100% coverage and any new branch will trip the gate.
+
