@@ -1618,3 +1618,39 @@ at 96% battery, idle.
 **Test suite at session end**: 1053 passing, 100% coverage, ruff clean
 on both `format --check` and `check`. Branch is 4 commits ahead of
 `origin/feat/map-lovelace-card` — push when ready.
+
+### Continuation, 2026-05-27 late evening (same supervisor session)
+
+User asked to keep iterating. Three more commits shipped on the
+backend-only / no-app-capture-needed track:
+
+| Commit | What |
+|---|---|
+| `56be3fa` | feat: per-channel settings (cut_height + channel_lift via sync_map). Channels carry settings directly on PbChannel (f9 cutHeight, f10 channelLift) — no configBox sub-message like zones, so the userCtrl=9 path doesn't apply. `async_update_channel_settings(thing, hash_id, cut_height_mm, channel_lift)` mutates the local cache and resyncs via sync_map. New `lymow.update_channel_settings` service. |
+| `fa05be4` | feat: `lymow.get_clean_history` service — returns the full paged cleaning-history list as a response object (`SupportsResponse.ONLY`). Each entry has clean_area / clean_time / date / error_list / map_total_area / percent / soc_version / start_type / status_times / used_battery / history_file / hash_id. The existing per-entry sensors only surface the latest mow; this service is the bulk-read complement for automations that walk historical mows ("alert me if my last 3 mows failed"). |
+| _next push_ | docs: this section + close out PbRobotConfig field-probe attempt (inconclusive — see below). |
+
+**PbRobotConfig field-probe attempt (inconclusive)**: tried to discover
+unmapped `PbRobotConfig` fields like `vehLedStatus` by sending
+`USER_CTRL_QUERY_ROBOT_CONFIG=52` and dumping every field number the
+robot returns at `PbOutput.f17`. Live result: the robot's response
+returned an empty `f15(0B)` + empty `f16(0B)`, no `f17` at all. Either
+the robot doesn't echo robotConfig back in the docked-idle state, or
+the response carries it at a different field number than the
+`PbOutput.encode tag 138 = (17<<3)|2` derivation suggests. Probe script
+shipped as `scripts/probe_robot_config.py` so a future capture session
+can re-run it while toggling app-side state (e.g. flip Vehicle LED in
+the app, then probe — the response shape should reveal the field).
+
+**Backend gaps now closed in this session** (recap, post-this-extension):
+
+- ✅ Per-zone settings via app's userCtrl=9 path (cc887cf)
+- ✅ Per-channel settings via sync_map (56be3fa)
+- ✅ Anti-theft full geofence config — lat/lon/radius/name (4a7913b)
+- ✅ Mowing History list as a service (fa05be4)
+- ✅ Network info — wifi_ssid / cellular_ip / mac_address sensors (5e59b8d, 4a7913b)
+- ✅ RTK diagnostic L1/L2 raw fields surfaced (5e59b8d) — labels still pending
+
+**Final test count**: 1064 passing, 100% coverage, ruff clean. Robot
+still docked at 96% (no mow started this session — purely backend
+plumbing and read-only diagnostic queries).
