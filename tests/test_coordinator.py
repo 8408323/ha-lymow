@@ -406,6 +406,25 @@ async def test_async_set_robot_config_publishes_metric_4g_without_userctrl() -> 
 
 
 @pytest.mark.asyncio
+async def test_async_find_my_robot_play_sound_publishes_captured_wire() -> None:
+    """Wire frame captured live from the app — fires the find-my-robot beacon
+    via PbInput {f13.audioVolume=100, f16=1} with no userCtrl."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_find_my_robot_play_sound(THING)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    assert pb.hex() == "10316a023064800101"
+    f = _decode_fields(pb)
+    assert _first(f, 5) is None  # no userCtrl
+    assert _first(f, 16) == 1  # play-sound trigger
+    cfg = _decode_fields(_first(f, 13))
+    assert _first(cfg, 6) == 100  # audioVolume max (default)
+
+
+@pytest.mark.asyncio
 async def test_async_sync_timezone_publishes_offset_on_field_21() -> None:
     """Mirrors what the app's setTimezone (#9036) writes — seconds east of UTC
     on PbRobotConfig.f21, via the no-userCtrl robotConfig path."""
