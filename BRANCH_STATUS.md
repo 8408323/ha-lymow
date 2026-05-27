@@ -1427,21 +1427,21 @@ For each: navigate via the helper above, capture the wire frame, cross-reference
 
 | # | App location | What to capture | Status |
 |---|---|---|---|
-| 1.1 | Settings → Cancel Task | tap the row | ⬜ |
-| 1.2 | Settings → Notifications | tap row, observe toggles | ⬜ |
-| 1.3 | Settings → RTK Diagnostic | tap row, scroll | ⬜ |
-| 1.4 | Settings → Network Settings | tap row | ⬜ |
-| 1.5 | Settings → Bind RTK | tap row | ⬜ |
-| 1.6 | Settings → Find My Robot | tap row → activate | ⬜ |
-| 1.7 | Settings → PIN Code | tap row → set | ⬜ |
-| 1.8 | Settings → Anti-theft | tap row → toggle | ⬜ |
-| 1.9 | Settings → Device Info | read-only | ⬜ |
-| 1.10 | Settings → Device Settings (sub) | toggle each | ⬜ |
-| 1.11 | Settings → Mowing History | tap row | ⬜ |
-| 1.12 | Top-right ⋮ → Rename Device | rename + save | ⬜ |
-| 1.13 | Top-right ⋮ → Share Device | full flow | ⬜ |
+| 1.1 | Settings → Cancel Task | tap the row | ✅ userCtrl=28 = ForceReinitButton |
+| 1.2 | Settings → Notifications | tap row, observe toggles | ✅ REST tristate; already MobileNotificationSwitch + AlertsOnlySwitch |
+| 1.3 | Settings → RTK Diagnostic | tap row, scroll | ✅ userCtrl=57+58 query services exist; per-band SNR/sat-count/error-rate sensors missing |
+| 1.4 | Settings → Network Settings | tap row | ⚠️ 4G priority shipped; **WiFi SSID/password write missing** |
+| 1.5 | Settings → Bind RTK | tap row | ❌ MISSING — `lymow.bind_rtk(sn)` service |
+| 1.6 | Settings → Find My Robot | tap row → activate | ✅ NEW: FindMyRobotPlaySoundButton shipped today (wire `10316a023064800101`) |
+| 1.7 | Settings → PIN Code | tap row → set | ❌ MISSING — LCD-screen PIN service |
+| 1.8 | Settings → Anti-theft | tap row → toggle | ⚠️ toggle shipped (TheftDetectionSwitch); **geofence center+radius config missing** |
+| 1.9 | Settings → Device Info | read-only | ✅ partial — SN+firmware as sensors; IP+MAC missing |
+| 1.10 | Settings → Device Settings (sub) | toggle each | ✅ mostly; **Headlight Mode is multi-state (vehLedStatus 0–4) but we only have boolean Vehicle LED** |
+| 1.11 | Settings → Mowing History | tap row | ⚠️ userCtrl=34 already decoded; **session-list sensor/service to surface it is missing** |
+| 1.12 | Top-right ⋮ → Rename Device | rename + save | ✅ already shipped — `lymow.set_device_name` via PATCH /prod/device-update |
+| 1.13 | Top-right ⋮ → Share Device | full flow | ❌ MISSING — REST endpoint to share with another account |
 | 1.14 | Top-right ⋮ → Delete Device | 🚫 SKIP on primary device |
-| 1.15 | Device-screen top sliders icon | open + each slider | ⬜ |
+| 1.15 | Device-screen top sliders icon | open + each slider | ✅ Global tab covered; Customize tab needs full per-zone+per-channel writers (capture reply 4) |
 | 1.16 | Device-screen camera icon | tap (live view) | ⬜ |
 | 1.17 | Right rail map / focus icons | tap each | ⬜ |
 | 1.18 | Schedule create flow | full create | ⬜ (user has indicated they'll do these manually but a single test from app is fine) |
@@ -1557,6 +1557,18 @@ HA status:
 11. **Stripe Angle / Safe-margin mode / Channel Deck Height / etc. global settings** — add fields to `set_task_config` if currently missing.
 12. **Device IP / MAC sensors** — minor, low priority.
 13. **Share / Delete Device REST endpoints** — only if user needs them.
+
+### 🆕 Iteration 2 findings (2026-05-27 16:00 CEST, supervisor laptop)
+
+**Mowing History — confirmed sub-screen layout** (the timeout cleared on retry). Top stats: Total Area (e.g. 698 m²), Duration (128 min), Total Times (count). Then a scrollable list of sessions. Each row: timestamp + mode ("All" or "Selected") + area mowed + duration. Icon colour distinguishes successful (green) from failed/aborted (red, 0–1 min duration). Tapping a row drills into per-session detail (Method/Mode/Duration/Area). We have `query_cleaning_summary` (userCtrl=34) already decoded but **no sensor/service surfaces this list**. Concrete impl: `sensor.lymow_history_last_session` (latest summary) + `sensor.lymow_history_total_area_m2` / `_total_duration_min` / `_total_sessions`, OR a `lymow.get_mowing_history` service that returns the raw list (good for automations).
+
+**Headlight Mode — multi-state confirmed**. `const.LED_LEVELS` already defines NONE/LOW/MEDIUM/HIGH/OFF (0–4) for `vehLedStatus`/`camLedStatus`. Our existing `Vehicle LED` switch is boolean only; we drop the brightness levels. Concrete impl: add `select.lymow_headlight_mode` entity backed by `PbRobotConfig.vehLedStatus` field (need to add to `_ROBOT_CONFIG_FIELDS`).
+
+**Joystick BLE drive — wire-validated**. The follow-up frame in the Adjust Charging retry capture was `encode_ble_drive(0, 0)` (stop). Same encoder. No new work needed — `lymow.ble_drive` service + `coordinator.async_ble_drive` already exist for driving the robot.
+
+**Camera — current implementation correct**. Local RTSP (`rtsp://<robot_ip>:10022/h264ESVideoTest`, 640×480) is what we use for the HA camera entity; this works for any LAN-connected HA. Remote/WAN access via AWS KVS WebRTC is the unsolved bit (issue #97) — the robot only acts as WebRTC master for the app's authenticated cloud session, so we can't trivially replicate that flow. **No new info to add to #97 — confirmed the gap remains the same.**
+
+**App-side load failures** — the Lymow app frequently shows "Request Timeout: Failed to retrieve device settings" when entering sub-screens (Device Settings → Headlight Mode, Mowing History, etc.). Retries usually succeed within 1–2 attempts. **Capture session takeaway:** don't read a single timeout as "feature unavailable"; always retry at least twice before recording a finding.
 
 ### Update to existing issues based on this audit
 
