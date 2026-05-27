@@ -72,6 +72,7 @@ _SERVICE_UPDATE_NOGO_POLYGON = "update_nogo_polygon"
 _SERVICE_UPDATE_ZONE_CUT_HEIGHT = "update_zone_cut_height"
 _SERVICE_SET_ZONE_CONFIG = "set_zone_config"
 _SERVICE_SET_GEOFENCE = "set_geofence"
+_SERVICE_UPDATE_CHANNEL_SETTINGS = "update_channel_settings"
 _SERVICE_ADD_ZONE = "add_zone"
 _SERVICE_ADD_NOGO_ZONE = "add_nogo_zone"
 _SERVICE_ADD_CHANNEL = "add_channel"
@@ -298,6 +299,14 @@ _UPDATE_ZONE_CUT_HEIGHT_SCHEMA = vol.Schema(
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
         vol.Required(_ATTR_CUT_HEIGHT_MM): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+_UPDATE_CHANNEL_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_CHANNEL_HASH_ID): cv.string,
+        vol.Optional(_ATTR_CUT_HEIGHT_MM): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+        vol.Optional("channel_lift"): vol.All(vol.Coerce(int), vol.Range(min=0, max=2)),
     }
 )
 _SET_GEOFENCE_SCHEMA = vol.Schema(
@@ -629,6 +638,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             await coordinator.async_update_zone_cut_height(entity._thing_name, hash_id, mm)
+
+    async def handle_update_channel_settings(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_CHANNEL_HASH_ID]
+        kwargs: dict[str, Any] = {}
+        if _ATTR_CUT_HEIGHT_MM in call.data:
+            kwargs["cut_height_mm"] = call.data[_ATTR_CUT_HEIGHT_MM]
+        if "channel_lift" in call.data:
+            kwargs["channel_lift"] = call.data["channel_lift"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_update_channel_settings(entity._thing_name, hash_id, **kwargs)
 
     async def handle_set_geofence(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
@@ -1062,6 +1086,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         _SERVICE_SET_GEOFENCE,
         handle_set_geofence,
         schema=_SET_GEOFENCE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_UPDATE_CHANNEL_SETTINGS,
+        handle_update_channel_settings,
+        schema=_UPDATE_CHANNEL_SETTINGS_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,

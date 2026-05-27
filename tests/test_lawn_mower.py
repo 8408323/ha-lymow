@@ -44,6 +44,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_set_run_time_config = AsyncMock()
     coord.async_set_zone_config = AsyncMock()
     coord.async_set_geofence = AsyncMock()
+    coord.async_update_channel_settings = AsyncMock()
     coord.async_set_robot_config = AsyncMock()
     coord.async_set_recharge_resume = AsyncMock()
     coord.async_set_device_settings = AsyncMock()
@@ -250,8 +251,9 @@ async def test_async_setup_entry_registers_services() -> None:
     # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
     # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station
     # + 1 resume + 1 set-run-time-config + 1 set-network-priority + 1 set-recharge-resume + 1 set-device-settings
-    # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence.
-    assert hass.services.async_register.call_count == 46
+    # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence
+    # + 1 update-channel-settings.
+    assert hass.services.async_register.call_count == 47
 
 
 # ---------------------------------------------------------------------------
@@ -965,6 +967,48 @@ async def test_handle_set_geofence_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.unknown"], {"radius_m": 100})
     await handlers["set_geofence"](call)
     coord.async_set_geofence.assert_not_awaited()
+
+
+async def test_handle_update_channel_settings_passes_named_fields() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"channel_hash_id": "ch000001", "cut_height_mm": 60, "channel_lift": 1},
+    )
+    await handlers["update_channel_settings"](call)
+    coord.async_update_channel_settings.assert_awaited_once_with(THING, "ch000001", cut_height_mm=60, channel_lift=1)
+
+
+async def test_handle_update_channel_settings_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"channel_hash_id": "ch000001", "cut_height_mm": 50})
+    await handlers["update_channel_settings"](call)
+    coord.async_update_channel_settings.assert_not_awaited()
 
 
 async def test_handle_add_zone_returns_new_hash_ids() -> None:

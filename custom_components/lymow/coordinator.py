@@ -944,6 +944,41 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_set_zone_config(updates))
         await self.async_query_map(thing_name)
 
+    async def async_update_channel_settings(
+        self,
+        thing_name: str,
+        hash_id: str,
+        *,
+        cut_height_mm: int | None = None,
+        channel_lift: int | None = None,
+    ) -> None:
+        """Override mowing settings for a single channel and resync the map.
+
+        Channels carry their settings directly on the PbChannel record
+        (``cutHeight`` at f9, ``channelLift`` at f10) — there's no separate
+        configBox sub-message as there is for zones. We mutate the local
+        cache and resync via sync_map (userCtrl=25) — same proven path
+        ``async_update_zone_cut_height`` uses for zones.
+        """
+        import copy
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        updated = copy.deepcopy(map_data)
+        target = None
+        for ch in updated.get("channels", []):
+            if ch.get("hashId") == hash_id:
+                target = ch
+                break
+        if target is None:
+            raise HomeAssistantError(f"Channel {hash_id!r} not found in current map data")
+        if cut_height_mm is not None:
+            target["cutHeight"] = int(cut_height_mm)
+        if channel_lift is not None:
+            target["channelLift"] = int(channel_lift)
+        await self.async_sync_map(thing_name, updated)
+
     async def async_update_zone_polygon(self, thing_name: str, hash_id: str, polygon: list[dict]) -> None:
         """Replace a go-zone's polygon with the caller-supplied vertices and SYNC_MAP.
 
