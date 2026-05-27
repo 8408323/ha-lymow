@@ -374,6 +374,31 @@ async def test_async_set_device_settings_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_zone_config_publishes_userctrl_9_and_queries_map() -> None:
+    """async_set_zone_config publishes a userCtrl=9 frame then re-queries the map."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_zone_config(THING, [{"hashId": "wsmjco1T", "cutHeight": 40}])
+    # Two publishes: the set_zone_config frame + the follow-up query_map.
+    assert mqtt.async_publish_command.await_count == 2
+    first_call = mqtt.async_publish_command.await_args_list[0]
+    second_call = mqtt.async_publish_command.await_args_list[1]
+    assert first_call.args[0] == THING
+    assert _first(_decode_fields(first_call.args[1]), 5) == 9  # MODIFY_ZONE_INFO
+    assert _first(_decode_fields(second_call.args[1]), 5) == 19  # QUERY_MAP
+
+
+@pytest.mark.asyncio
+async def test_async_set_zone_config_empty_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    with pytest.raises(HomeAssistantError):
+        await coord.async_set_zone_config(THING, [])
+
+
+@pytest.mark.asyncio
 async def test_async_set_recharge_resume_round_trip() -> None:
     from lymow.protocol import _decode_fields, _first
 

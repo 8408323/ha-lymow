@@ -2624,6 +2624,111 @@ def test_encode_rename_nogo_zone_uses_nogo_field() -> None:
     assert _first(bi, 3).decode() == "ngabcdef"
 
 
+def test_encode_set_zone_config_single_zone_carries_configbox() -> None:
+    """Per-zone PbZoneConfig override via userCtrl=9 (app's Customize-tab path).
+
+    Wire layout captured live 2026-05-27 (BRANCH_STATUS reply 4): PbInput with
+    userCtrl=9, PbMap.goZones[*] each carrying basicInfo (hashId + isEnabled)
+    and configBox (PbZoneConfig). Distinguishes itself from a rename frame by
+    omitting BasicInfo.name (f2) and including the configBox at PbZone.f2.
+    """
+    from lymow.protocol import encode_set_zone_config
+
+    pb = encode_set_zone_config(
+        [
+            {
+                "hashId": "wsmjco1T",
+                "isEnabled": True,
+                "cutHeight": 40,
+                "moveSpeed": 0.8,
+                "pathSpacing": 25,
+            }
+        ]
+    )
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # PB_VERSION
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    pb_map = _decode_fields(_first(f, 12))
+    zone = _decode_fields(_first(pb_map, 1))  # goZones[0]
+    bi = _decode_fields(_first(zone, 1))
+    # No name field — config-only write
+    assert _first(bi, 2) is None
+    assert _first(bi, 3).decode() == "wsmjco1T"
+    assert _first(bi, 4) == 1  # isEnabled
+    cfg = _decode_fields(_first(zone, 2))  # configBox
+    assert _first(cfg, 1) == 40  # cutHeight
+    # moveSpeed is float32 stored in a varint slot
+    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.8, rel=1e-5)
+    # Canonical PbZoneConfig (Hermes #9432): pathSpacing is at f10
+    assert _first(cfg, 10) == 25
+
+
+def test_encode_set_zone_config_multiple_zones_in_one_frame() -> None:
+    """The app re-sends every zone in a single bulk write — mirror that shape."""
+    from lymow.protocol import encode_set_zone_config
+
+    pb = encode_set_zone_config(
+        [
+            {"hashId": "wsmjco1T", "cutHeight": 40, "isEnabled": True},
+            {"hashId": "KX1kGyat", "cutHeight": 50, "isEnabled": False},
+        ]
+    )
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    zones = _all(pb_map, 1)
+    assert len(zones) == 2
+    bi0 = _decode_fields(_first(_decode_fields(zones[0]), 1))
+    bi1 = _decode_fields(_first(_decode_fields(zones[1]), 1))
+    assert _first(bi0, 3).decode() == "wsmjco1T"
+    assert _first(bi0, 4) == 1
+    assert _first(bi1, 3).decode() == "KX1kGyat"
+    assert _first(bi1, 4) == 0
+
+
+def test_encode_set_zone_config_empty_config_only_basic_info() -> None:
+    """A bare ``{hashId, isEnabled}`` update emits no configBox — useful for
+    flipping a zone's enabled state via the userCtrl=9 path without changing
+    other settings."""
+    from lymow.protocol import encode_set_zone_config
+
+    pb = encode_set_zone_config([{"hashId": "wsmjco1T", "isEnabled": False}])
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    zone = _decode_fields(_first(pb_map, 1))
+    # basicInfo present, configBox absent
+    assert _first(zone, 1) is not None
+    assert _first(zone, 2) is None
+
+
+def test_encode_set_zone_config_rejects_empty_list_and_missing_hash() -> None:
+    from lymow.protocol import encode_set_zone_config
+
+    with pytest.raises(ValueError, match="at least one update required"):
+        encode_set_zone_config([])
+    with pytest.raises(ValueError, match="needs a hashId"):
+        encode_set_zone_config([{"cutHeight": 40}])
+
+
+def test_encode_set_zone_config_emits_bool_and_skips_none() -> None:
+    """Bool fields encode as varint 0/1; explicit None values are skipped so
+    callers can pass through a sparse update without touching unset fields."""
+    from lymow.protocol import encode_set_zone_config
+
+    pb = encode_set_zone_config(
+        [
+            {
+                "hashId": "wsmjco1T",
+                "lineFollowMode": True,
+                "pathOrder": False,
+                "cutSpeed": None,  # explicit None — skipped
+            }
+        ]
+    )
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    cfg = _decode_fields(_first(_decode_fields(_first(pb_map, 1)), 2))
+    assert _first(cfg, 17) == 1  # lineFollowMode true
+    assert _first(cfg, 15) == 0  # pathOrder false
+    assert _first(cfg, 6) is None  # cutSpeed None → omitted
+
+
 def test_encode_rename_zone_matches_live_confirmed_bytes() -> None:
     """Pin the wire format against a live round-trip executed on 2026-05-26.
 

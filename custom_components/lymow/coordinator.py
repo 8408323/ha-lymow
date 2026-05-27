@@ -925,6 +925,25 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 break
         await self.async_sync_map(thing_name, updated)
 
+    async def async_set_zone_config(self, thing_name: str, updates: list[dict[str, Any]]) -> None:
+        """Set per-zone PbZoneConfig overrides via userCtrl=9 (app's path).
+
+        Bandwidth-efficient alternative to ``async_update_zone_cut_height`` /
+        ``async_sync_map``: only the named zones + only the named config fields
+        are sent. Wire format byte-equal to the app's Mowing Settings →
+        Customize tab (BLE capture 2026-05-27, see BRANCH_STATUS reply 4).
+
+        Each ``updates`` entry: ``{"hashId": str, "isEnabled": bool=True,
+        ...PbZoneConfig fields}``. Re-queries the map after publish so the
+        local cache reflects the new values within one round-trip.
+        """
+        from .protocol import encode_set_zone_config
+
+        if not updates:
+            raise HomeAssistantError("set_zone_config: at least one zone update is required")
+        await self._mqtt.async_publish_command(thing_name, encode_set_zone_config(updates))
+        await self.async_query_map(thing_name)
+
     async def async_update_zone_polygon(self, thing_name: str, hash_id: str, polygon: list[dict]) -> None:
         """Replace a go-zone's polygon with the caller-supplied vertices and SYNC_MAP.
 

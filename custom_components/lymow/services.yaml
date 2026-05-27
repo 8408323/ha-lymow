@@ -515,6 +515,133 @@ update_zone_polygon:
       selector:
         object:
 
+set_zone_config:
+  name: Set per-zone mowing config
+  description: >
+    Override mowing settings for a single zone (USER_CTRL_MODIFY_ZONE_INFO with
+    a per-zone PbZoneConfig — the app's Mowing Settings → Customize tab path).
+    Only the parameters you provide are sent. Bandwidth-efficient alternative
+    to lymow.update_zone_cut_height (which re-sends the whole map). Cut height
+    is millimetres; move speed is m/s; other values are robot units. Wire
+    format byte-equal to the app's BLE write (live capture 2026-05-27).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone to update.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    is_enabled:
+      name: Is enabled
+      description: Optional — set the zone's enabled flag in the same write.
+      required: false
+      example: true
+      selector:
+        boolean:
+    cut_height:
+      name: Cut height (mm)
+      description: Blade height for this zone (20–100 mm).
+      required: false
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 5, unit_of_measurement: "mm" }
+    move_speed:
+      name: Move speed (m/s)
+      description: Robot drive speed within this zone.
+      required: false
+      example: 0.6
+      selector:
+        number: { min: 0.1, max: 1.5, step: 0.05 }
+    path_spacing:
+      name: Path spacing
+      description: Spacing between mowing passes (robot units).
+      required: false
+      example: 25
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+    perimeter_mow_laps:
+      name: Perimeter laps
+      description: Number of perimeter (edge) mowing laps for this zone.
+      required: false
+      example: 1
+      selector:
+        number: { min: 0, max: 5, step: 1, mode: box }
+    perimeter_mow_dir:
+      name: Perimeter direction
+      description: Perimeter mowing direction code.
+      required: false
+      example: 0
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    nogo_mow_laps:
+      name: No-go laps
+      description: Number of laps around no-go zones inside this zone.
+      required: false
+      example: 1
+      selector:
+        number: { min: 0, max: 5, step: 1, mode: box }
+    cut_speed:
+      name: Cut speed
+      description: Cutting blade speed (robot units).
+      required: false
+      example: 100
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+    brush_speed:
+      name: Brush speed
+      description: Brush motor speed (robot units).
+      required: false
+      example: 100
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+    obs_dec_mode:
+      name: Obstacle detection mode
+      description: 0=off, 1=slow, 2=detour.
+      required: false
+      example: 2
+      selector:
+        number: { min: 0, max: 2, step: 1, mode: box }
+    clean_mode:
+      name: Clean mode
+      description: 0=parallel, 1=spiral, 2=random (robot interprets).
+      required: false
+      example: 0
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    path_order:
+      name: Path order (reverse)
+      description: false = normal, true = reverse path direction.
+      required: false
+      example: false
+      selector:
+        boolean:
+    line_follow_mode:
+      name: Line follow mode
+      description: When true, edges follow the boundary line precisely.
+      required: false
+      example: false
+      selector:
+        boolean:
+    raise_cut_height:
+      name: Raise cut height (trigger)
+      description: Pulse trigger to raise the cut height incrementally.
+      required: false
+      example: false
+      selector:
+        boolean:
+    lower_cut_height:
+      name: Lower cut height (trigger)
+      description: Pulse trigger to lower the cut height incrementally.
+      required: false
+      example: false
+      selector:
+        boolean:
+
 update_zone_cut_height:
   name: Update zone cut height
   description: >
