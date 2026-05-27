@@ -515,6 +515,36 @@ update_zone_polygon:
       selector:
         object:
 
+update_zone_cut_height:
+  name: Update zone cut height
+  description: >
+    Change one go-zone's cut height (mm) and push the updated map back to the
+    robot (USER_CTRL_SYNC_MAP). Other zones, polygons, and global settings are
+    left untouched.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone whose cut height to change.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height (mm)
+      description: Blade height in millimetres (20–100).
+      required: true
+      example: 40
+      selector:
+        number:
+          min: 20
+          max: 100
+          step: 5
+          unit_of_measurement: "mm"
+
 add_zone:
   name: Add zone
   description: >

@@ -20,12 +20,10 @@ from lymow.protocol import (
     _field_str,
     _first,
     _signed32,
-    decode_channel_config,
     decode_map_response,
     decode_pboutput,
     decode_schedule_entry,
     decode_task_config,
-    decode_zone_config,
     delete_zone,
     encode_ble_drive,
     encode_delete_zone,
@@ -34,6 +32,12 @@ from lymow.protocol import (
     encode_userctrl,
     unwrap_envelope,
     wrap_envelope,
+)
+from lymow.protocol import (
+    decode_global_channel_config as decode_channel_config,
+)
+from lymow.protocol import (
+    decode_global_zone_config as decode_zone_config,
 )
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ from lymow.button import (
     ChargingStationResetButton,
     ClearAllZonesAndChannelsButton,
     CompleteZonePartitionButton,
+    DockAndForgetProgressButton,
     ExitRemoteControlButton,
     ForceReinitButton,
     LockRobotButton,
@@ -25,6 +26,7 @@ from lymow.const import (
     USER_CTRL_CHARGING_STATION_RESET,
     USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
     USER_CTRL_COMPLETE_ZONE_PARTITION,
+    USER_CTRL_DOCK,
     USER_CTRL_EXIT_REMOTE,
     USER_CTRL_FORCE_REINIT,
     USER_CTRL_LOCK,
@@ -118,6 +120,19 @@ async def test_set_charging_station_here_press_sends_user_ctrl() -> None:
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_MODIFY_STATION)
 
 
+def test_dock_and_forget_progress_button_disabled_by_default() -> None:
+    coord = _make_coord()
+    e = DockAndForgetProgressButton(coord, DEVICE)
+    assert e._attr_entity_registry_enabled_default is False
+    assert e._attr_unique_id == f"{THING}_dock_and_forget_progress"
+
+
+async def test_dock_and_forget_progress_press_sends_user_ctrl_dock() -> None:
+    coord = _make_coord()
+    await DockAndForgetProgressButton(coord, DEVICE).async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_DOCK)
+
+
 async def test_button_device_name_fallback_to_sn() -> None:
     coord = _make_coord()
     e = LockRobotButton(coord, {"deviceThingName": THING, "sn": "SN42"})
@@ -149,6 +164,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "ClearAllZonesAndChannelsButton",
         "ToggleLteAirplaneButton",
         "BackupMapButton",
+        "DockAndForgetProgressButton",
         "SyncTimezoneButton",
     }
 

@@ -631,9 +631,32 @@ class LymowMapCard extends HTMLElement {
           ${!this._editHash ? `<button class="btn pin" style="background:#1565c0" data-action="draw-channel" title="Draw a new channel between zones">＋ Channel</button>` : ""}
           <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
       }
+      // Per-zone cut-height row — only when a go-zone is selected and not in
+      // rename / draw / split sub-modes (those replace editActions above).
+      let extraRow = "";
+      if (
+        this._editHash &&
+        this._editType === "go" &&
+        !this._editRename &&
+        !this._drawNameStep &&
+        !this._splitMode &&
+        !this._drawingZone
+      ) {
+        const z = goZones.find(g => g.hashId === this._editHash);
+        const current = z?.cutHeight ?? 40;
+        extraRow = `
+          <div class="btn-row" style="margin-top:4px;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="font-size:0.8em;color:var(--secondary-text-color)">Cut height (mm):</span>
+            <input id="zone-cut-height" type="number" min="20" max="100" step="5" value="${current}"
+                   style="width:60px;padding:2px 4px;font-size:0.85em" />
+            <button class="btn save" data-action="apply-zone-cut-height">✓ Apply</button>
+            <span class="zone-ch-status" style="font-size:0.78em;color:var(--secondary-text-color)"></span>
+          </div>`;
+      }
       toolbar = `
         <div class="edit-bar">${editMsg}</div>
-        <div class="btn-row">${editActions}</div>`;
+        <div class="btn-row">${editActions}</div>
+        ${extraRow}`;
     } else {
       const hasSel = this._selectedZones.size > 0;
       const canMow = hasSel && !!this._config.mower_entity;
@@ -1117,6 +1140,7 @@ class LymowMapCard extends HTMLElement {
           case "start-split":       this._startSplit(); break;
           case "cancel-split":      this._cancelSplit(); break;
           case "merge":             this._mergeSelected(); break;
+          case "apply-zone-cut-height": this._applyZoneCutHeight(); break;
         }
       });
     });
@@ -1595,6 +1619,29 @@ class LymowMapCard extends HTMLElement {
         ...(raise ? { raise_cut_height: true } : { lower_cut_height: true }),
       });
       if (status) status.textContent = `✓ Cut height ${raise ? "raised" : "lowered"}`;
+      setTimeout(() => { if (status) status.textContent = ""; }, 3000);
+    } catch (err) {
+      if (status) status.textContent = `⚠️ ${err?.message || err}`;
+    }
+  }
+
+  async _applyZoneCutHeight() {
+    if (!this._hass || !this._config.mower_entity || !this._editHash || this._editType !== "go") return;
+    const input = this.shadowRoot.getElementById("zone-cut-height");
+    const status = this.shadowRoot.querySelector(".zone-ch-status");
+    const mm = parseInt(input?.value, 10);
+    if (!Number.isFinite(mm) || mm < 20 || mm > 100) {
+      if (status) status.textContent = "⚠️ 20–100 mm";
+      return;
+    }
+    if (status) status.textContent = "Sending…";
+    try {
+      await this._hass.callService("lymow", "update_zone_cut_height", {
+        entity_id: this._config.mower_entity,
+        zone_hash_id: this._editHash,
+        cut_height_mm: mm,
+      });
+      if (status) status.textContent = `✓ ${mm} mm`;
       setTimeout(() => { if (status) status.textContent = ""; }, 3000);
     } catch (err) {
       if (status) status.textContent = `⚠️ ${err?.message || err}`;
