@@ -784,3 +784,44 @@ Round-trip confirmation: `scripts/rename_test.py` queried the robot after the OK
 - Tests at 100% coverage — passing on this machine
 
 Ready to ship. Recommend removing this file in the merge commit.
+
+---
+
+### Supervisor reply 3 (2026-05-27, supervisor laptop)
+
+**PR stays DRAFT. Two features still missing before merge:**
+
+#### 1. Per-zone settings — not yet in the card
+
+The global mowing-settings panel (speed, cut speed, path spacing, perimeter laps, etc.) is wired to `globalZoneConfig` (PbMap.f11). That's the global default.
+
+The robot also sends **per-zone overrides** in `PbZone.f2` (configBox) — already decoded, already surfaced as zone attributes (`cutHeight`, `pathSpacing` on each zone object). But the card has no UI to edit them.
+
+**What we need:**
+
+**Capture session:** Confirm the wire format for `SET_TASK_CONFIG` with a zone-scoped override.
+- In the app: tap a zone → enter edit mode → find the zone-specific settings (cut height, path spacing) → change a value → confirm.
+- Capture the resulting BLE frame. Does it send a full `PbZoneConfig` sub-message scoped to that zone's hashId? Or does the app only write to globalZoneConfig?
+- If the app doesn't support per-zone overrides at all in the UI (only global), document that so we know the per-zone data is read-only from the robot's perspective.
+
+**Supervisor (after capture reply):** Add a per-zone settings panel to the card. When a zone is selected in edit mode, a small settings panel appears below the global one (or replaces it) showing that zone's cutHeight, pathSpacing, and moveSpeed — editable, with an Apply button that calls `set_task_config` with the zone's hashId if the wire supports it.
+
+#### 2. Zone edit → mirrored in Lymow app — Edit Boundary not captured
+
+`encode_modify_zone_edge_start/stop` (userCtrl 10 / 11) is still unvalidated. This is the only way the app adds/reshapes a zone by driving the robot. Without a confirmed wire frame we can't tell if the card's polygon-draw alternative is truly equivalent or if there's a different shape for zone boundaries.
+
+**Capture session:** Try again with manual zone selection:
+1. Open the Lymow app → tap directly on a go-zone polygon (not the centre label, the polygon border)
+2. Confirm the edit toolbar appears and shows "Edit Boundary"
+3. Tap Edit Boundary → the robot should start driving
+4. Capture the BLE frame at step 3 (ATT WRITE_CMD handle 0x0014)
+5. Also capture the STOP frame (userCtrl=11) when you tap Stop
+
+This one is lower priority than the per-zone settings — the card's draw-polygon+SYNC_MAP path already works for adding zones. But it's the only card feature that's truly unvalidated at the wire level.
+
+**Current deployment state (2026-05-27):**
+- All 22 Python files + card JS deployed to HA at 192.168.1.99 from feat/map-lovelace-card
+- Lovelace resource updated to `?v=0.2.3` — old `?v=29` double-registration error resolved
+- Card settings panel (global) opens and applies settings correctly
+- `globalZoneConfig` decoder confirmed working on captured binary (cutHeight=60, moveSpeed=0.6, pathSpacing=1, perimeterMowLaps=2, lineFollowMode=true)
+- `globalZoneConfig` (f11) is absent from docked-state map responses — robot only echoes it when a task is active. This is expected robot firmware behaviour, not a bug.
