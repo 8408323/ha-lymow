@@ -515,6 +515,36 @@ def test_sim_id_sensor_reads_value() -> None:
     assert sensor.native_value == "89320420000094505458"
 
 
+def test_wifi_ssid_sensor_reads_dotted_path() -> None:
+    """``value_key="networkInfo.wifiSsid"`` walks the nested networkInfo dict."""
+    coord = _make_coord({"networkInfo": {"wifiSsid": "Haraldsson"}})
+    desc = next(s for s in SENSORS if s.key == "wifi_ssid")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "Haraldsson"
+
+
+def test_wifi_ssid_sensor_returns_none_when_network_info_missing() -> None:
+    """Defensive: a stale state with no networkInfo dict must not raise."""
+    coord = _make_coord({"battery": 80})
+    desc = next(s for s in SENSORS if s.key == "wifi_ssid")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value is None
+
+
+def test_cellular_ip_sensor_reads_dotted_path() -> None:
+    coord = _make_coord({"networkInfo": {"cellularIp": "100.116.126.140"}})
+    desc = next(s for s in SENSORS if s.key == "cellular_ip")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "100.116.126.140"
+
+
+def test_mac_address_sensor_reads_value() -> None:
+    coord = _make_coord({"macAddress": "F8:3D:C6:82:56:C1"})
+    desc = next(s for s in SENSORS if s.key == "mac_address")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "F8:3D:C6:82:56:C1"
+
+
 def test_firmware_minimum_sensor_reads_value() -> None:
     coord = _make_coord({"fwMinVersion": "v2.1.43"})
     desc = next(s for s in SENSORS if s.key == "firmware_minimum")

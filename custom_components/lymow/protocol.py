@@ -746,6 +746,73 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     if isinstance(robot_config_raw, bytes):
         state["robotConfig"] = decode_robot_config(robot_config_raw)
 
+    # ---- Network info (PbOutput field 34) — populated by USER_CTRL_QUERY_RTK_
+    # DIAGNOSTIC_L1 (#57). Live capture 2026-05-27 against docked robot:
+    #   f1 connState   varint
+    #   f2 wifiSsid    bytes (UTF-8)
+    #   f3 ipAddress   bytes ("192.168.1.85")
+    #   f4 wifiRssiDbm varint (negative)
+    #   f5 wifiState   varint
+    #   f6 cellularIp  bytes ("100.116.126.140")  — Tailscale / 4G-NAT'd IPv4
+    #   f7 lteRssiDbm  varint (negative)
+    #   f8 cellularState varint
+    #   f9 ?           varint (1)
+    #   f10 simId      bytes (e.g. " 89320420000094505458")
+    net_raw = _first(fields, 34)
+    if isinstance(net_raw, bytes):
+        nf = _decode_fields(net_raw)
+        net: dict[str, Any] = {}
+        for fno, key in ((2, "wifiSsid"), (3, "ipAddress"), (6, "cellularIp"), (10, "simId")):
+            v = _first(nf, fno)
+            if isinstance(v, bytes):
+                net[key] = v.decode("utf-8", errors="replace").strip()
+        for fno, key in (
+            (4, "wifiRssiDbm"),
+            (7, "lteRssiDbm"),
+            (1, "connState"),
+            (5, "wifiState"),
+            (8, "cellularState"),
+        ):
+            v = _first(nf, fno)
+            if v is not None:
+                net[key] = _signed32(v)
+        if net:
+            state["networkInfo"] = net
+
+    # ---- RTK diagnostic L1 (PbOutput field 35) — populated by
+    # USER_CTRL_QUERY_RTK_DIAGNOSTIC_L1 (#57). Live capture 2026-05-27:
+    # 9 integer fields after a leading varint=2; values look like per-band sat
+    # counts + ratios. Without an app-UI cross-reference we surface them as
+    # ``rtkL1{f1..f10}`` so downstream tooling can correlate them once a future
+    # capture pairs the numbers with their app labels.
+    l1_raw = _first(fields, 35)
+    if isinstance(l1_raw, bytes):
+        lf = _decode_fields(l1_raw)
+        l1: dict[str, Any] = {}
+        for fno, _wt, v in lf:
+            if _wt == 5 and isinstance(v, int):
+                l1[f"f{fno}"] = _decode_f32(v)
+            elif isinstance(v, int):
+                l1[f"f{fno}"] = _signed32(v)
+        if l1:
+            state["rtkL1"] = l1
+
+    # ---- RTK diagnostic L2 (PbOutput field 36) — populated by
+    # USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2 (#58). Live capture 2026-05-27:
+    # mix of varints + float32s (location precision figures: 0.89 / 1.00 / 1.79).
+    # Surface as ``rtkL2{f1..f13}`` pending app-UI label correlation.
+    l2_raw = _first(fields, 36)
+    if isinstance(l2_raw, bytes):
+        lf = _decode_fields(l2_raw)
+        l2: dict[str, Any] = {}
+        for fno, _wt, v in lf:
+            if _wt == 5 and isinstance(v, int):
+                l2[f"f{fno}"] = _decode_f32(v)
+            elif isinstance(v, int):
+                l2[f"f{fno}"] = _signed32(v)
+        if l2:
+            state["rtkL2"] = l2
+
     return state
 
 

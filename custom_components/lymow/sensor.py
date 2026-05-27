@@ -104,6 +104,20 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:network",
         entity_registry_enabled_default=False,
     ),
+    LymowSensorDescription(
+        key="wifi_ssid",
+        name="Wi-Fi SSID",
+        value_key="networkInfo.wifiSsid",
+        icon="mdi:wifi",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="cellular_ip",
+        name="Cellular IP",
+        value_key="networkInfo.cellularIp",
+        icon="mdi:signal-cellular-3",
+        entity_registry_enabled_default=False,
+    ),
     # Live MQTT sensors decoded from additional pboutput fields
     LymowSensorDescription(
         key="rtk_satellites",
@@ -328,7 +342,14 @@ class LymowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> Any:
-        return self.coordinator.data.get(self._thing_name, {}).get(self.entity_description.value_key)
+        data = self.coordinator.data.get(self._thing_name, {})
+        # Dotted ``value_key`` (e.g. ``networkInfo.wifiSsid``) walks nested dicts;
+        # plain keys still read directly so existing descriptions keep working.
+        for part in self.entity_description.value_key.split("."):
+            if not isinstance(data, dict):
+                return None
+            data = data.get(part)
+        return data
 
 
 class LymowErrorSensor(LymowSensor):
