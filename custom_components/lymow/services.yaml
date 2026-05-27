@@ -515,6 +515,43 @@ update_zone_polygon:
       selector:
         object:
 
+update_channel_settings:
+  name: Update channel settings
+  description: >
+    Override mowing settings for one channel (cut height, channel lift) and
+    resync the map. Channels carry their settings directly on the PbChannel
+    record — no configBox sub-message — so only ``cut_height_mm`` and
+    ``channel_lift`` are exposed here. Resync is via sync_map (userCtrl=25).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    channel_hash_id:
+      name: Channel hash ID
+      description: The 8-character hash ID of the channel to update.
+      required: true
+      example: "ch000001"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height (mm)
+      description: Blade height while the robot traverses this channel.
+      required: false
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 5, unit_of_measurement: "mm" }
+    channel_lift:
+      name: Channel lift mode
+      description: >
+        Raise the omni-wheels on this channel? Per the app's Channel Deck
+        Height setting. 0=auto, 1=off, 2=on (values inferred from the wire
+        capture; refine after live correlation).
+      required: false
+      example: 0
+      selector:
+        number: { min: 0, max: 2, step: 1, mode: box }
+
 set_geofence:
   name: Set anti-theft geofence
   description: >

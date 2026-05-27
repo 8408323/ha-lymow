@@ -399,6 +399,51 @@ async def test_async_set_zone_config_empty_raises() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_update_channel_settings_mutates_cache_then_syncs() -> None:
+    """Verify channel cut_height + channel_lift are written through sync_map."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [],
+                "nogoZones": [],
+                "channels": [
+                    {"hashId": "ch000001", "cutHeight": 40, "channelLift": 0},
+                ],
+            }
+        }
+    }
+    await coord.async_update_channel_settings(THING, "ch000001", cut_height_mm=55, channel_lift=2)
+    # First call is the sync_map publish, second is the follow-up query_map.
+    assert mqtt.async_publish_command.await_count >= 1
+    first_call = mqtt.async_publish_command.await_args_list[0]
+    pb = first_call.args[1]
+    assert _first(_decode_fields(pb), 5) == 25  # USER_CTRL_SYNC_MAP
+
+
+@pytest.mark.asyncio
+async def test_async_update_channel_settings_unknown_channel_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"channels": [{"hashId": "other"}]}}}
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await coord.async_update_channel_settings(THING, "ch000001", cut_height_mm=50)
+
+
+@pytest.mark.asyncio
+async def test_async_update_channel_settings_no_map_data_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="not yet loaded"):
+        await coord.async_update_channel_settings(THING, "ch000001", cut_height_mm=50)
+
+
+@pytest.mark.asyncio
 async def test_async_set_recharge_resume_round_trip() -> None:
     from lymow.protocol import _decode_fields, _first
 
