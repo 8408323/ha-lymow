@@ -1477,6 +1477,87 @@ For each: navigate via the helper above, capture the wire frame, cross-reference
 
 ---
 
+### 🔬 Full Settings exploration findings (2026-05-27 15:37–15:48 CEST, supervisor laptop)
+
+Drove through every Settings → sub-screen via WiFi-ADB, captured wire frames where the action mutates state. The Lymow app turned out to be **far more covered by HA than the matrix suggested** — most "gaps" are stale, but a few real gaps surfaced.
+
+#### Wire frames captured + decoded
+
+| Action | Wire (pb hex) | Decoded | HA status |
+|---|---|---|---|
+| Cancel Task | `10 31 28 1c` | userCtrl=28 FORCE_REINIT | ✅ shipped as `ForceReinitButton` (named "Force stop" — cosmetic rename for parity) |
+| Dock (from idle) | `10 31 28 02` | userCtrl=2 DOCK | ✅ shipped today as `DockAndForgetProgressButton` |
+| Adjust Charging | `10 31 28 26` + `10 31 38 02 52 0a …` | userCtrl=38 + ble_drive(0,0) | ✅ shipped as `SetChargingStationHereButton` |
+| **Find My Robot → Play Sound** | `10 31 6a 02 30 64 80 01 01` | **PbInput.f13{f6:100 audioVolume} + f16:1 (NEW)** | ❌ **MISSING** — need PbInput.f16 encoder |
+| RTK Diagnostic entry | `10 31 28 39` + `10 31 28 3a` | userCtrl=57 QUERY_RTK_DIAGNOSTIC_L1 + userCtrl=58 _L2 | ✅ shipped as services |
+| Network Settings entry | `10 31 28 35` + `8a 01 02 18 01` | userCtrl=53 QUERY_NET_DETAIL + (probable notif/feature read) | ✅ query service shipped |
+| Notifications toggle | (none on BLE — REST `/update-device-feature`) | `mobileNotificationSwitch` tristate | ✅ shipped as `MobileNotificationSwitch` + `AlertsOnlySwitch` |
+
+#### Sub-screen layout findings — what each shows + HA coverage
+
+| Settings item | App contents | HA coverage |
+|---|---|---|
+| Cancel Task | (no sub-screen — immediate userCtrl=28) | ✅ |
+| Device Settings | Recharge & Resume, Headlight Mode, Vehicle LED, Rainy Mowing, Charging Handbrake, Timezone (Sync with Phone), Return to Dock (Follow Perimeter / Direct Route) | ✅ mostly — **Headlight Mode is a multi-mode picker (off/auto/on?) we may have only as on/off toggle** |
+| Schedules | (couldn't enter due to repeated app timeouts) | ✅ partial — granular add/edit/delete capture deferred to user-manual session |
+| Mowing History | (timeout) | ⚠️ — we have `query_cleaning_summary` (userCtrl=34) decoded but **no sensor/service to surface the data** |
+| Map Backup & Restore | list + restore + (long-press) rename/delete + Back up button | ✅ backend wire-validated today (Task E); **card UI still missing — 📦 panel needed** |
+| Notifications | Device Notifications (master) + Alerts Only (nested) | ✅ tristate switch |
+| Network Settings | SSID dropdown, password input, Reconnect button, Network Priority (4G Preferred toggle) | ⚠️ — we have `prefer_4g` switch but **SSID/password write is not in HA** |
+| RTK Diagnostic | RTK status (Fixed/Fix), Location precision, GNSS sat count, L1/L2/L5 sat counts + SNR, Base station status, Data error rate, Advanced Diagnostics expander | ⚠️ — query services exist but **per-band sat counts + SNR + base-station-online + error rate not surfaced as sensors** |
+| Bind RTK | RTK SN field + Scan/Bind buttons | ❌ **MISSING** — no service to swap/bind a fresh RTK base |
+| Find My Robot | Map view with lat/lon + reverse-geocoded address + **Play Sound** button | ⚠️ — we have `FindRobotSwitch` (REST enable/disable) but **the BLE Play Sound trigger is NEW** (see wire above) |
+| PIN Code | 4-digit PIN entry + Update button. Default 0000. Locks the mower's body LCD screen | ❌ **MISSING** — no service to set/clear the PIN |
+| Anti-theft | Map with **geofence center pin + radius slider (currently 150 m)** + Enable toggle + Save | ⚠️ — we have `TheftDetectionSwitch` + `TheftLockSwitch` (REST switches), but **geofence center + radius are not configurable from HA** |
+| Lock-device | (toggle / button — couldn't drill in this session) | ✅ `LockRobotButton` |
+| Device Info | SN, IP, MAC address, Software Version, MCU Version (all read-only) | ✅ partial — SN + Software Version surfaced; **IP and MAC not surfaced as sensors today** |
+| OTA Update | (didn't drill — assume sub-screen) | ✅ update entity |
+| Factory Reset | (didn't drill — assume confirm dialog) | ✅ `RestoreFactoryDefaultsButton` |
+| Report Logs | Sends logs to Lymow support (app-only) | 🚫 out of scope |
+
+#### Mowing Settings panel (top-middle sliders icon) — confirmed two-tab layout
+
+**Global Settings tab** — applies to all zones:
+- Basic: Moving Speed (0.3–1 m/s), Cutting Height (30–100 mm), Blade Speed (Standard/Eco/Power/Turbo)
+- Advanced: Path Spacing (25–35 cm), Stripe Angle (Optimized + dropdown), Mowing Order (Main Area First / Perimeter First), Zone Obstacle Detection (Smart/Touch-Only), Perimeter Obstacle Detection, Perimeter Mowing Direction (Random/CW/CCW), No-Go Zone Mowing Laps (0–3), Zone Perimeter Mowing Laps (0–3), Turn Off Outer Mowing Motor toggle, Safe-margin mode (Offset Edge / Precise Edge), Channel Obstacle Detection, Channel Deck Height, Raise The Omni Wheels On Channel toggle
+
+**Customize Settings tab** — per-entity overrides:
+- Sub-tabs: zone0, zone1, channel0, channel1
+- "Delete All" button (removes all customizations)
+- Each sub-tab: Name field + same Basic/Advanced controls as Global
+- Wire format: per capture reply 4, uses userCtrl=9 + PbMap.goZones[*].configBox
+
+HA status:
+- ✅ Global path: `lymow.set_task_config` + `set_run_time_config` cover most controls (sync_map for path_spacing/perimeter_mow_laps via PbZoneConfig)
+- ⚠️ Per-zone path: `async_update_zone_cut_height` exists (we wired it today); **moveSpeed + pathSpacing + bladeSpeed per-zone are NOT exposed as services yet**
+- ⚠️ Per-channel path: **completely missing** — no `update_channel_*` services
+- ❌ Several Advanced fields not surfaced: Stripe Angle, Safe-margin mode, Turn Off Outer Mowing Motor toggle, Channel Deck Height (raise/lower omni-wheels-on-channel)
+
+#### Naming inconsistencies (cosmetic — same wire, different label)
+
+| App label | HA entity / service | Recommendation |
+|---|---|---|
+| Adjust Charging | "Set charging station here" button | Add `name="Adjust Charging"` alias for app parity |
+| Cancel Task | "Force stop" button (`ForceReinitButton`) | Rename to "Cancel task" |
+| Lock-device | "Lock robot" button | Already close — fine as-is |
+| Headlight Mode | (probably only Vehicle LED on/off switch) | Investigate — may be a multi-mode select we have as boolean |
+
+#### Concrete new gaps requiring implementation (in priority order)
+
+1. **Find My Robot Play Sound** — new encoder `encode_find_my_robot()` writing `PbInput { f13:{f6:100}, f16:1 }`. Add `FindMyRobotPlaySoundButton` entity.
+2. **Mowing History sensor/service** — `query_cleaning_summary` (userCtrl=34) is already decoded; surface as `sensor.lymow_history_*` with last-N sessions, or as a `lymow.get_mowing_history` service that returns the data.
+3. **Per-zone settings full** — extend `lymow.update_zone_cut_height` to `lymow.update_zone_config(moveSpeed, pathSpacing, bladeSpeed, ...)` matching capture reply 4's `encode_set_zone_configs` finding.
+4. **Per-channel settings** — equivalent for channels.
+5. **Anti-theft geofence config** — `lymow.set_anti_theft_geofence(center_lat, center_lon, radius_m)` + sensor for current geofence.
+6. **PIN Code service** — `lymow.set_lcd_pin(pin)` + `lymow.clear_lcd_pin()`.
+7. **WiFi SSID/password write** — `lymow.set_wifi(ssid, password)` (be careful — wrong password disconnects the robot).
+8. **Bind RTK** — `lymow.bind_rtk(sn)` to swap to a new base station SN.
+9. **Per-band RTK sensors** — surface L1/L2/L5 sat counts + SNR + base-station online + data error rate as separate sensors.
+10. **Headlight Mode multi-state** — confirm app shows more than on/off; add select entity if so.
+11. **Stripe Angle / Safe-margin mode / Channel Deck Height / etc. global settings** — add fields to `set_task_config` if currently missing.
+12. **Device IP / MAC sensors** — minor, low priority.
+13. **Share / Delete Device REST endpoints** — only if user needs them.
+
 ### Update to existing issues based on this audit
 
 - **Issue #97 (KVS WebRTC remote camera)**: confirmed live camera works via LOCAL RTSP (the AprilTag dock view we just streamed via the app over WiFi); remote access is still the gap. No new info to add.
