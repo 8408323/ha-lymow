@@ -1506,28 +1506,86 @@ def test_decode_pboutput_no_network_info_when_field_34_absent() -> None:
 def test_decode_pboutput_rtk_diagnostic_l1_field_35() -> None:
     """PbOutput.f35 rtkL1 — populated by query_rtk_diagnostic_l1.
 
-    Live frame had 8 varints + 1 float32 + 1 i32-float = stored as
-    ``rtkL1{f1..f11}``. Awaiting app-UI label correlation; for now we just
-    pin the round-trip so the values reach the sensor layer.
+    Field labels cross-referenced 2026-05-27 against the app's Settings → RTK
+    Diagnostic page. f2 is the Location Precision float, f3-f9 are per-band
+    counts/SNRs, f10 is the data-error-rate percent. f1 (subMsgVersion=2)
+    is intentionally not surfaced — it's a wire marker, not a user signal.
     """
-    l1 = _field_i32(1, 2) + _field_f32(2, 0.01135) + _field_i32(3, 23) + _field_i32(4, 23)
+    l1 = (
+        _field_i32(1, 2)
+        + _field_f32(2, 0.01135)
+        + _field_i32(3, 23)
+        + _field_i32(4, 16)
+        + _field_i32(5, 16)
+        + _field_i32(6, 13)
+        + _field_i32(7, 38)
+        + _field_i32(8, 34)
+        + _field_i32(9, 36)
+        + _field_i32(10, 0)
+    )
     pb = _field_bytes(35, l1)
     state = decode_pboutput(pb)
-    assert state["rtkL1"]["f1"] == 2
-    assert state["rtkL1"]["f3"] == 23
-    assert state["rtkL1"]["f4"] == 23
-    assert state["rtkL1"]["f2"] == pytest.approx(0.01135, rel=1e-4)
+    rtk = state["rtkL1"]
+    # Rounded to 4 decimals at decode time.
+    assert rtk["locationPrecisionM"] == pytest.approx(0.0114, abs=1e-4)
+    assert rtk["gnssSatellites"] == 23
+    assert rtk["l1SatCount"] == 16
+    assert rtk["l2SatCount"] == 16
+    assert rtk["l5SatCount"] == 13
+    assert rtk["l1SnrMedian"] == 38
+    assert rtk["l2SnrMedian"] == 34
+    assert rtk["l5SnrMedian"] == 36
+    assert rtk["dataErrorRatePct"] == 0
+    # f1 (subMsgVersion) is intentionally dropped — not a user-facing signal.
+    assert "subMsgVersion" not in rtk and "f1" not in rtk
 
 
 def test_decode_pboutput_rtk_diagnostic_l2_field_36() -> None:
-    """PbOutput.f36 rtkL2 carries location-precision floats + per-band SNR ints."""
-    l2 = _field_f32(1, 2.0) + _field_i32(2, 307) + _field_f32(5, 0.891) + _field_i32(8, 42)
+    """PbOutput.f36 rtkL2 — Advanced Diagnostics. Float fields are
+    differentialAge + per-band HW DC Voltage; ints are per-band Lora
+    Bandwidth, CW Interference, and Primary Antenna Gain.
+    """
+    l2 = (
+        _field_f32(1, 2.0)
+        + _field_i32(2, 268)
+        + _field_i32(3, 389)
+        + _field_i32(4, 680)
+        + _field_f32(5, 0.891)
+        + _field_f32(6, 1.002)
+        + _field_f32(7, 1.793)
+        + _field_i32(8, 60)
+        + _field_i32(9, 94)
+        + _field_i32(10, 36)
+        + _field_i32(11, 38)
+        + _field_i32(12, 71)
+        + _field_i32(13, 53)
+    )
     pb = _field_bytes(36, l2)
     state = decode_pboutput(pb)
-    assert state["rtkL2"]["f1"] == pytest.approx(2.0, rel=1e-4)
-    assert state["rtkL2"]["f2"] == 307
-    assert state["rtkL2"]["f5"] == pytest.approx(0.891, rel=1e-4)
-    assert state["rtkL2"]["f8"] == 42
+    rtk = state["rtkL2"]
+    assert rtk["differentialAgeSec"] == pytest.approx(2.0, rel=1e-4)
+    assert rtk["loraBandwidthL1Bps"] == 268
+    assert rtk["loraBandwidthL2Bps"] == 389
+    assert rtk["loraBandwidthL5Bps"] == 680
+    assert rtk["hwDcVoltageL1V"] == pytest.approx(0.891, rel=1e-3)
+    assert rtk["hwDcVoltageL2V"] == pytest.approx(1.002, rel=1e-3)
+    assert rtk["hwDcVoltageL5V"] == pytest.approx(1.793, rel=1e-3)
+    assert rtk["cwInterferenceL1"] == 60
+    assert rtk["cwInterferenceL2"] == 94
+    assert rtk["cwInterferenceL5"] == 36
+    assert rtk["antennaGainL1"] == 38
+    assert rtk["antennaGainL2"] == 71
+    assert rtk["antennaGainL5"] == 53
+
+
+def test_decode_pboutput_rtk_l2_unknown_field_ignored() -> None:
+    """If the robot adds an unmapped field number to rtkL2, the decoder must
+    silently skip it — we'd rather drop one field than crash the coordinator."""
+    l2 = _field_f32(1, 2.0) + _field_i32(99, 12345)  # f99 not in label map
+    pb = _field_bytes(36, l2)
+    state = decode_pboutput(pb)
+    assert state["rtkL2"] == {"differentialAgeSec": pytest.approx(2.0, rel=1e-4)}
+    assert "f99" not in state["rtkL2"]
 
 
 def test_decode_pboutput_mow_progress() -> None:
