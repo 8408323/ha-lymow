@@ -1180,3 +1180,146 @@ All stem from renames (`decode_zone_config → decode_global_zone_config`, PbZon
 
 **Capture session action:** please update these tests to match the canonical field names you decided on. Without this fix CI cannot reach 100% coverage and any new branch will trip the gate.
 
+---
+
+## 🔎 App-vs-HA feature audit via live WiFi-ADB exploration (2026-05-27 14:40, supervisor laptop)
+
+Connected from this laptop directly to the phone (`adb connect 192.168.1.45:5555`) and dumped every screen of the Lymow app via `uiautomator dump`. Helper script at `/tmp/lymow-ui/dump.sh`. **The capture session does NOT need to redo this exploration** — full menu structure is enumerated below.
+
+### Home screen anatomy
+
+| UI element | Coords (1080×2160) | Routes to | HA status |
+|---|---|---|---|
+| 🔔 Notifications bell (top right #1) | tap (895, 115) | Notification list with current alerts (e.g. "Weak RTK Signal E15") | ❓ partial — we surface error codes; not a dedicated notif feed |
+| ⋮ 3-dot device menu (top right #2) | tap (1000, 115) | Add / Rename / Share / Delete Device | partial (see below) |
+| 🔋 Battery widget (right rail) | (right side, ~y=400) | (no action) | ✅ battery sensor |
+| 📹 Camera widget (right rail) | (right side, ~y=600) | Opens **live onboard camera** (sees the AprilTag dock tags) | ✅ camera entity / RTSP (remote KVS tracked in issue #97) |
+| ＋ Add Task | (346, 1398) | Schedule create flow → Settings → Schedules | partial — see Task D |
+| **Go to Device** | (540, 1634) | Main device-control screen | ✅ all primary controls |
+
+### Top-right ⋮ menu: device-account operations (cloud-side)
+
+| Item | HA status |
+|---|---|
+| Add Device | app-only (pairing flow) — **not in HA scope** |
+| Rename Device | ✅ `lymow.set_device_name` (PATCH /prod/device-update) |
+| **Share Device** | ❌ NOT IN HA — share device with another account |
+| **Delete Device** | ❌ NOT IN HA — unlink device from account |
+
+### Device-control screen (after "Go to Device" tap)
+
+Right rail icons (top-to-bottom):
+- 🗺 Map view toggle
+- 👁 Focus / locate robot
+- ✏ **Edit Map** ← user-priority: charging-station reposition lives here
+- 🎮 Joystick / remote control
+
+Top middle icons:
+- ⚙ Settings gear (top right)
+- 🔔 Notifications
+- 📹 Camera
+- ≡ Mowing-settings sliders (top-middle, next to "Mow All Zones" card)
+
+Bottom sheet (collapsible): signal strengths + Mow/Dock action buttons.
+
+### Settings menu (⚙ gear) — complete enumeration
+
+| # | Group | Item | HA status | Notes |
+|---|---|---|---|---|
+| 1 | Device Settings | **Cancel Task** | ❓ | likely userCtrl=2 (USER_CTRL_DOCK destructive) or userCtrl=28 (USER_CTRL_FORCE_REINIT) — needs capture |
+| 2 | Device Settings | Device Settings (sub-screen) | ✅ partial | toggles we already have: rain, charging mode, zone order, handbrake, LED, alerts-only — capture session reply 4 confirmed wire formats |
+| 3 | Device Settings | Schedules (sub-screen) | partial | `set_schedules` works; granular add/edit/delete capture pending (Task D) |
+| 4 | Device Settings | **Mowing History** | ❌ NOT IMPLEMENTED | likely REST endpoint or `query_cleaning_summary` (userCtrl=34) — partially decoded but no UI |
+| 5 | Device Settings | Map Backup & Restore | ✅ backend complete | full lifecycle wire-validated (Task E); UI panel in card still pending |
+| 6 | Device Settings | Notifications | ✅ partial | mobileNotificationSwitch tristate switch — covers ON/Alerts-only/OFF |
+| 7 | Connection | **Network Settings** | ❌ NOT IMPLEMENTED | 4G + WiFi config; we surface `prefer_4g` switch only |
+| 8 | Connection | RTK Diagnostic | ✅ | `query_rtk_diagnostic_l1` / `_l2` services |
+| 9 | Connection | **Bind RTK** | ❌ NOT IMPLEMENTED | RTK base-station binding flow (pair a new base to the robot) |
+| 10 | Safety | **Find My Robot** | ❌ NOT IMPLEMENTED | almost certainly plays a sound on the robot; could be a userCtrl we haven't mapped |
+| 11 | Safety | **PIN Code** | ❌ NOT IMPLEMENTED | set/change anti-theft PIN |
+| 12 | Safety | **Anti-theft** | ❌ NOT IMPLEMENTED | likely a toggle for theft-protection state |
+| 13 | Safety | Lock-device | ✅ | `LockRobotButton` (userCtrl=18) |
+| 14 | Maintenance | Device Info | ✅ | firmware/serial sensors |
+| 15 | Maintenance | OTA Update | ✅ | `update` entity |
+| 16 | Maintenance | Factory Reset | ✅ | `RestoreFactoryDefaultsButton` (userCtrl=37) |
+| 17 | Maintenance | Report Logs | app-only | sends logs to Lymow support — not in HA scope |
+
+### NEW gaps surfaced by this audit (not previously catalogued)
+
+1. **Share Device** (cloud REST) — share robot with another Lymow account
+2. **Delete Device** (cloud REST) — unlink from account
+3. **Mowing History** — per-session cleaning history (userCtrl=34 `query_cleaning_summary` already decoded, just no UI/service surface)
+4. **Network Settings** — change 4G APN / WiFi SSID/PSK on the robot
+5. **Bind RTK** — pair a fresh RTK base station to the robot
+6. **Find My Robot** — sound-beacon to locate a lost robot
+7. **PIN Code** — set/change the 4-digit anti-theft PIN
+8. **Anti-theft** — toggle (separate from Lock-device) for theft-protection state
+9. **Cancel Task** — top-level Settings entry; needs capture to confirm whether it's userCtrl=2 (DOCK destructive) or userCtrl=28 (FORCE_REINIT)
+
+### Plan for closing these gaps
+
+For each item with a known userCtrl mapping, we can implement now via `_UserCtrlButton`-style entities + capture from this laptop (no app needed). For items that require capture from the app (PIN flows, Bind RTK, Find My Robot), the capture session can run them via scrcpy + BLE snoop.
+
+I'll iterate: capture/implement one at a time, commit after each, and update this section's status column.
+
+### User-priority queue (per 2026-05-27 message)
+
+1. ~~Charging-station reposition (Edit Map)~~ — **DONE, already implemented** (see 🚗 below)
+2. Per-zone settings (go-zone + channel) — already partially understood from capture reply 4; needs UI
+3. Manual zone create/edit/delete captures — user is doing these manually
+
+### 🚗 Charging-station reposition — wire-captured live this turn (2026-05-27 14:48 UTC)
+
+**Where it lives in the app:** Device screen → 🎮 joystick (right rail) → ➕ (top right) → **Adjust Charging** → Confirm. **Not** under the pencil/Edit-Map toolbar as initially assumed.
+
+**App description (verbatim):** "This feature is for minor charging position adjustments only. 1. Position the robot 50–100 cm directly in front of the charging station … 2. The new position will be saved automatically once the robot detects the charging tag. ⚠️ Major position change? If your charging station has been moved, create a new docking channel using 'Add Channel'."
+
+**BLE capture (2026-05-27 14:48:52.388):**
+```
+ATT WRITE_CMD, handle 0x0014, payload (ASCII): "EDEoJg=="   (base64)
+Decoded protobuf bytes: 10 31 28 26   (4 bytes)
+  = PbInput { version=49, userCtrl=38 (USER_CTRL_MODIFY_STATION) }
+```
+
+**Robot response:** the robot rejected this particular attempt with **W15 ("Location service not initialized. Drive forward/backward ~2 m in an open area to activate it.")** because RTK was uninitialised. The command was sent regardless — the rejection happened robot-side after receiving the userCtrl, so the wire format is captured cleanly.
+
+**HA status: ✅ already shipped** — `SetChargingStationHereButton` (`button.py:160`) sends the exact same `userCtrl=38` bytes via `_UserCtrlButton._UserCtrlButton.async_press → coordinator.async_send_user_ctrl → encode_userctrl(38)`. The button is enabled-by-default and labelled "Set charging station here" (the app calls the same operation "Adjust Charging" — we should consider renaming the HA entity for parity, or leave both names since they describe the same op).
+
+**Retry capture (2026-05-27 14:57:28 UTC), robot ~50 cm in front of dock:**
+Same userCtrl=38 frame at Confirm tap, plus a **follow-up frame ~3.5 s later**:
+
+```
+14:57:28.790  ATT b64: "EDEoJg=="
+              pb hex:  10 31 28 26
+              = PbInput { version=49, userCtrl=38 MODIFY_STATION }
+              → trigger the realignment
+
+14:57:32.298  ATT b64: "EDE4AlIKDQAAAAAVAAAAAA=="
+              pb hex:  10 31 38 02 52 0a 0d 00 00 00 00 15 00 00 00 00
+              = encode_ble_drive(linear=0.0, angular=0.0)
+              → stop-motors safety frame (protocol.py:1471)
+```
+
+No third frame. The app's complete Adjust Charging sequence is just **MODIFY_STATION → stop**. Both encoders are shipped (`encode_userctrl(38)` and `encode_ble_drive`). The HA card could mirror this UX by calling `lymow.ble_drive` with `linear=0, angular=0` after the user presses "Set charging station here", but the explicit stop is optional safety — the robot is already self-managed at this point.
+
+**Companion finding from earlier today:** the *other* charging-station op — `ChargingStationResetButton` (userCtrl=17) — does something different (resets the recorded position; robot drops out of CHARGING into WAITING). Both are now live-wire-validated. We have:
+
+| App label | HA entity | userCtrl | Effect |
+|---|---|---|---|
+| Adjust Charging (joystick → +) | `SetChargingStationHereButton` | 38 | save current robot position as the dock |
+| (no app UI exposes this directly) | `ChargingStationResetButton` | 17 | clear stored dock position (robot exits charging cycle) |
+
+No further work needed on this feature. Moving on to the next gap.
+
+### Update to existing issues based on this audit
+
+- **Issue #97 (KVS WebRTC remote camera)**: confirmed live camera works via LOCAL RTSP (the AprilTag dock view we just streamed via the app over WiFi); remote access is still the gap. No new info to add.
+- **New issues to open** (after I capture wire formats / confirm whether app uses MQTT, BLE, or REST for each):
+  - "Mowing History" UI + service
+  - "Network Settings" — change WiFi/4G credentials from HA
+  - "Bind RTK" flow
+  - "Find My Robot" (sound beacon)
+  - PIN Code set/clear
+  - Anti-theft toggle
+  - Share Device REST endpoint
+  - Delete Device REST endpoint
