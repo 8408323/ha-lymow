@@ -1188,6 +1188,40 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         updated = [{**first, "radius": int(radius_m)}, *current[1:]]
         await self.async_set_device_feature(thing_name, geoFence=updated)
 
+    async def async_set_geofence(
+        self,
+        thing_name: str,
+        *,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_m: int | None = None,
+        name: str | None = None,
+    ) -> None:
+        """Set the anti-theft geofence centre, radius, and optional name in one PATCH.
+
+        Mirrors the app's Settings → Anti-theft page (the geofence centre + radius
+        sliders + Save). Empty/unset existing records are seeded with sensible
+        defaults so callers can configure a fresh device without first opening
+        the Lymow app — the previous radius-only setter required the centre to
+        already exist.
+        """
+        current = (self.data or {}).get(thing_name, {}).get("geoFence") or []
+        if isinstance(current, list) and current and isinstance(current[0], dict):
+            first = current[0]
+        else:
+            first = {"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 150}
+        merged = {**first}
+        if latitude is not None:
+            merged["latitude"] = float(latitude)
+        if longitude is not None:
+            merged["longitude"] = float(longitude)
+        if radius_m is not None:
+            merged["radius"] = int(radius_m)
+        if name is not None:
+            merged["name"] = str(name)
+        updated = [merged, *(current[1:] if isinstance(current, list) else [])]
+        await self.async_set_device_feature(thing_name, geoFence=updated)
+
     async def async_set_device_feature(self, thing_name: str, **fields: Any) -> None:
         """PATCH device feature settings (theft, find-robot, mobile-notification, etc.)
         and optimistically merge the change into coordinator data so entities
