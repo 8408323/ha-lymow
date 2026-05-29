@@ -1657,6 +1657,39 @@ plumbing and read-only diagnostic queries).
 
 ---
 
+## 🛑 DISCIPLINE: NO ASSUMPTIONS (2026-05-27, user instruction)
+
+> "We need to confirm all, we cannot assume information."
+
+For every wire format documented in this file, the source of truth is a
+**live capture** — either mitmproxy on a REST/MQTT call or BTSnoop on a
+BLE write, with the exact bytes archived. Inference from class numbers,
+field-name proximity, or "looks like the previous opcode" is **not
+acceptable** for shipping production encoders.
+
+Concrete rules:
+
+1. **A wire format is "confirmed" only if it has bytes attached** — paste
+   the captured hex into the section. If we only have a guess, mark it
+   "❓ UNCONFIRMED" so future readers don't trust it.
+2. **Encoders without a confirmed capture are NOT shipped.** They can
+   exist as drafts in branch notes, but not in `protocol.py`.
+3. **Decoders may be soft-shipped** with all unknown fields stored under
+   raw field numbers (`f1..fN`) — never with labels we haven't validated.
+4. **If a labeled name doesn't match a UI value we saw with our own eyes,
+   relabel it as `f<n>`**. (We did this — and got burned — with
+   `vehLedStatus`: the const enum suggested a brightness picker, but the
+   live UI tour proved Headlight Mode is a scheduled on/off window.)
+5. **Every "out of scope" decision needs a reason** (user instruction,
+   tracked in #97, app feature doesn't exist, etc.) — not "we'll probably
+   never need it".
+
+When the priority queue says a feature needs a "capture" — that means a
+**live wire frame** with bytes archived alongside the decoded fields.
+Anything short of that is a hypothesis, not progress.
+
+---
+
 ## 🗺 MASTER APP-FEATURE INVENTORY (2026-05-27 late evening tour)
 
 Complete walk of every screen in the Lymow Android app (v3.0.6 build 351).
@@ -1775,10 +1808,12 @@ behind `entity_registry_enabled_default=False`.
 
 In priority order (skipping out-of-scope and the user-deferred map edits):
 
-1. **RTK per-band labeled sensors** — wire format now decoded; just need
-   to rename keys + add 13 sensors. Ship-ready, no further capture needed.
-2. **Multi-region anti-theft geofence** — `lymow.set_geofence` needs
-   `index` parameter; coordinator merges into the right list entry.
+1. ~~**RTK per-band labeled sensors**~~ — **DONE** (`2043f89` basic 10 +
+   `9056564` advanced 12). All 22 rtkL1/rtkL2 fields decoded with
+   live-correlated labels and surfaced as disabled-by-default sensors.
+2. ~~**Multi-region anti-theft geofence**~~ — **DONE** (`e850b25`).
+   `lymow.set_geofence` now takes `index` (0 = first; `index == len`
+   appends a region; out-of-range/negative raise `HomeAssistantError`).
 3. **Safe-margin mode + Raise-omni-wheels-on-channel** — 2 missing
    PbZoneConfig (or PbChannelConfig) bool fields. Captures pending.
 4. **Channel Obstacle Detection per-channel** — verify wire field
@@ -1792,6 +1827,15 @@ In priority order (skipping out-of-scope and the user-deferred map edits):
    (lcdPinCode) likely.
 9. **Notification list endpoint** — for showing app-style event history.
 
+Gaps 3–9 each need a **live wire capture** before any encoder ships (the
+"NO ASSUMPTIONS" discipline above). The ready-to-run playbook for those
+captures is in the next section — follow it top to bottom, paste the
+bytes, then the implementation checklist under each gap can be done
+directly. **User decisions on file (2026-05-29):** capture session is
+*paused* (don't drive the app live yet); when it resumes, **all tiers are
+in scope including the risky WiFi-write and Bind-RTK captures** (user is
+to be physically near the robot for those two).
+
 ### 🚫 Permanently excluded from PR-undraft gate
 
 - **Remote camera (KVS)** — issue #97, explicitly excluded by user.
@@ -1801,3 +1845,141 @@ In priority order (skipping out-of-scope and the user-deferred map edits):
   Logs, Imperial/Metric toggle) — app-only / frontend / out of scope.
 - **Map edits** (create/edit/delete zones/channels via Edit Boundary) —
   user said postpone to a manual-supervision session.
+
+---
+
+## 📓 READY-TO-RUN CAPTURE PLAYBOOK (remaining backend gaps 3–9)
+
+> **Status (2026-05-29):** capture session **paused** by user — *do not
+> drive the app live yet*. This section is the standing recipe so the
+> capture can run end-to-end the moment it resumes. Gaps 1 & 2 are already
+> shipped (see above); 3–9 below.
+
+### 🔐 Sensitive-data rule for ALL captures (user instruction 2026-05-29)
+
+> "Do not store sensitive data online. Just for you to understand and decode."
+
+Capture artifacts (`*.cfa`, `*.pcap`, `*.har`, `tools/capture-lymow.txt`,
+`/tmp/lymow-*`) are **live secrets** — already gitignored; never `git add`
+them, never paste their raw contents into this file, a commit, an issue,
+or a PR. Decode them **locally** to learn the field layout, then record
+**only the redacted structure** here:
+
+- **PIN code** (gap 8): record the field number + wire type only — e.g.
+  `PbRobotConfig.f9 = <4-digit string>`. Never write the actual digits.
+- **WiFi password** (gap 6): record `field N = <password string>`; never
+  the value. SSID is borderline — redact to `<ssid>`.
+- **GPS** (geofence/find-my-robot): lat/lon are PII — record
+  `field N = <lat>/<lon> (float)`, not real coordinates.
+- **Tokens / identity IDs**: never appear in BLE frames, but if a REST
+  capture (gaps 7/9) carries `Authorization` / Cognito IDs, redact them.
+
+Non-sensitive captures (headlight schedule, safe-margin toggle, channel
+obstacle detection) have no secret payload — their bytes are fine to paste.
+
+### Pre-flight (run once when resuming)
+
+```bash
+cd /home/mint-laptop-4/private_projects/ha-lymow-lovelace
+adb devices                        # expect: fc7d1e36  device  (USB)
+adb -s fc7d1e36 shell settings get secure bluetooth_hci_log   # expect 1 (full)
+# Capture-per-action loop = the recipe in "🧰 Capture pipeline reference"
+# above (baseline size → tap → wait ≥5 min for debounce → pull → parse).
+# Decoder:  uv run python scripts/parse_btsnoop.py /tmp/lymow-ui/snoop.cfa
+```
+
+`parse_btsnoop.py` already filters to ATT WRITE_CMD on handle 0x0014 and
+prints b64 + decoded pb hex. Ignore the heartbeat frames listed in the
+"Heartbeat noise" table above. **Wait ≥5 min after the trigger** — capture
+reply 4 proved the app debounces config writes that long.
+
+### Per-gap recipe + implementation checklist
+
+Each gap: **(A)** where in the app, **(B)** transport + what to look for,
+**(C)** decode → record redacted structure, **(D)** the code that follows
+once bytes are in hand. Do NOT write the (D) encoder until (C) has bytes.
+
+---
+
+**Gap 3 — Safe-margin mode + Raise-omni-wheels-on-channel** *(non-sensitive)*
+- **A:** Mowing Settings (top-middle ≡) → Global → Advanced. Toggle
+  "Safe-margin mode" (Offset Edge ↔ Precise Edge) and the "Raise the omni
+  wheels on channel" switch — one at a time, separate captures.
+- **B:** BLE handle 0x0014. Expect `userCtrl=36 SET_TASK_CONFIG` (PbInput.f26
+  PbTaskConfig) **or** the global `userCtrl=9` PbZoneConfig path (PbMap.f11).
+  Diff the new frame against a baseline global-settings write to isolate the
+  one changed field number.
+- **C:** Record `PbZoneConfig.fN = 0/1` for each toggle. Likely two new
+  bool fields beyond the 19 already in `_ZONE_CONFIG_FIELDS`.
+- **D:** add the 2 fields to `_ZONE_CONFIG_FIELDS` (protocol.py) + decoder
+  map; expose via `lymow.set_task_config` / `set_zone_config` extra kwargs;
+  services.yaml entries; tests (encode pins + decode round-trip).
+
+**Gap 4 — Channel Obstacle Detection (per-channel)** *(non-sensitive)*
+- **A:** Mowing Settings → Customize → channelN tab → Channel Obstacle
+  Detection (Smart ↔ Touch-Only).
+- **B:** BLE 0x0014. Per capture reply 4, channel settings ride PbChannel
+  (not a configBox). Confirm whether obstacle-detect is a new PbChannel
+  field (assumed `detectMode`) vs a configBox after all.
+- **C:** Record `PbChannel.fN = <enum>`; map enum to Smart/Touch-Only.
+- **D:** extend `async_update_channel_settings` + `lymow.update_channel_settings`
+  with `detect_mode`; protocol channel encoder; services.yaml; tests.
+
+**Gap 5 — Headlight Mode (scheduled auto on/off)** *(non-sensitive)*
+- **A:** Settings → Device Settings → Headlight Mode. Set enable + a
+  start time + end time, Save. (Confirmed NOT a brightness picker — it's a
+  scheduled window; see master inventory row 32.)
+- **B:** BLE 0x0014. Expect a PbRobotConfig sub-message (`userCtrl`-less,
+  `PbInput.f13` robotConfig path like the Vehicle LED frame `10316a02…`),
+  shape similar to rrConfig: `{enable, startTime, endTime}`.
+- **C:** Record the f13 sub-field number + the 3 inner fields. Times are
+  minutes-since-midnight or HH:MM — note which.
+- **D:** add the field to `_ROBOT_CONFIG_FIELDS`/decoder; new
+  `lymow.set_headlight_schedule(enable, start, end)`; coordinator method;
+  services.yaml; tests. (Don't conflate with the existing on/off
+  `VehicleLedSwitch` — separate control.)
+
+**Gap 9 — Notification list endpoint** *(REST; redact tokens)*
+- **A:** Home → 🔔 bell.
+- **B:** This is cloud, not BLE — run mitmproxy (`tools/capture.py`)
+  instead of BTSnoop, or watch `adb logcat` for the REST URL. Look for a
+  `GET /prod/…notification…` or `…event…` call.
+- **C:** Record method + path + response JSON **shape** (keys only).
+  Redact any `Authorization` header / identity IDs from the capture.
+- **D:** `api.get_notifications()` REST client method; coordinator cache;
+  expose as a `lymow.get_notifications` response-service (mirror
+  `get_clean_history`); tests with a synthetic (non-secret) fixture.
+
+**Gap 8 — PIN Code set/clear** *(⚠️ SENSITIVE — never log/commit the PIN)*
+- **A:** Settings → PIN Code → enter 4 digits → Update.
+- **B:** BLE 0x0014, likely PbRobotConfig.f9 `lcdPinCode`. Decode locally
+  ONLY.
+- **C:** Record `PbRobotConfig.f9 = <4-digit string>` — **digits redacted**.
+- **D:** `lymow.set_lcd_pin(pin)` + `clear_lcd_pin()`; coordinator must
+  NOT log the value; decoder must NOT read the PIN back into state (keep
+  it write-only per security.md); tests use a placeholder like `"0000"`
+  documented as a fixture, not a real PIN.
+
+**Gap 6 — WiFi SSID/password write** *(⚠️ RISKY + SENSITIVE — user nearby)*
+- **A:** Settings → Network Settings → pick SSID + password → Reconnect.
+  **Wrong creds disconnect the robot** — only run with the user present.
+- **B:** BLE 0x0014 or REST. Record transport, field layout.
+- **C:** `field N = <ssid>`, `field M = <password>` — **values redacted.**
+- **D:** `lymow.set_wifi(ssid, password)`; password never logged; tests
+  with placeholder creds.
+
+**Gap 7 — Bind RTK SN** *(⚠️ RISKY — could unbind live base; user nearby)*
+- **A:** Settings → Bind RTK → enter base SN → Bind.
+- **B:** Try REST first (`update_device_feature` with an `rtkSn`-like
+  field) via mitmproxy; fall back to BLE if nothing on the wire.
+- **C:** Record endpoint/field. SN is device-identifying — redact to `<sn>`.
+- **D:** `lymow.bind_rtk(sn)`; coordinator + api; tests.
+
+### After every capture
+
+1. Paste **redacted** structure into the matching gap above + the master
+   inventory row.
+2. Implement (D); run `uv run pytest tests/ --cov=custom_components/lymow
+   --cov-fail-under=100` + `ruff format --check .` + `ruff check .`.
+3. Commit per-gap; **never** `git add` the `.cfa`/capture file.
+4. Strike the gap in the "True gaps" list.
