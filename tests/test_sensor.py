@@ -538,6 +538,25 @@ def test_cellular_ip_sensor_reads_dotted_path() -> None:
     assert sensor.native_value == "100.116.126.140"
 
 
+def test_rtk_advanced_sensors_read_dotted_l2_fields() -> None:
+    """The Advanced Diagnostics sensors walk the nested rtkL2 dict."""
+    coord = _make_coord(
+        {
+            "rtkL2": {
+                "loraBandwidthL1Bps": 268,
+                "hwDcVoltageL5V": 1.79,
+                "cwInterferenceL2": 94,
+                "antennaGainL5": 53,
+            }
+        }
+    )
+    by_key = {s.key: s for s in SENSORS}
+    assert LymowSensor(coord, DEVICE, by_key["rtk_lora_bandwidth_l1"]).native_value == 268
+    assert LymowSensor(coord, DEVICE, by_key["rtk_dc_voltage_l5"]).native_value == 1.79
+    assert LymowSensor(coord, DEVICE, by_key["rtk_cw_interference_l2"]).native_value == 94
+    assert LymowSensor(coord, DEVICE, by_key["rtk_antenna_gain_l5"]).native_value == 53
+
+
 def test_mac_address_sensor_reads_value() -> None:
     coord = _make_coord({"macAddress": "F8:3D:C6:82:56:C1"})
     desc = next(s for s in SENSORS if s.key == "mac_address")
