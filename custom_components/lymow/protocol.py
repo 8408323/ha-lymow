@@ -605,6 +605,14 @@ def decode_channel(data: bytes) -> dict[str, Any]:
     lift = _first(f, 10)
     if lift is not None:
         chan["channelLift"] = lift
+    # NOTE: f8 appears only on channels that carry per-channel overrides (next
+    # to cutHeight/channelLift) and its value mirrors globalChannelConfig
+    # detectMode in our captured frame — strong candidate for per-channel
+    # Channel Obstacle Detection (gap 4). Surfaced raw (unlabeled) per the
+    # NO-ASSUMPTIONS rule until a toggle capture confirms the semantics.
+    f8 = _first(f, 8)
+    if f8 is not None:
+        chan["f8"] = f8
     return chan
 
 

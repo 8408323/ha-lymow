@@ -20,6 +20,7 @@ from lymow.protocol import (
     _field_str,
     _first,
     _signed32,
+    decode_channel,
     decode_channel_config,
     decode_map_response,
     decode_pboutput,
@@ -866,6 +867,19 @@ def test_decode_channel_config_three_fields() -> None:
     # Missing fields are absent (not zero-filled).
     assert decode_channel_config(b"") == {}
     assert decode_channel_config(_field_i32(2, 35)) == {"cutHeight": 35}
+
+
+def test_decode_channel_surfaces_raw_f8_when_present() -> None:
+    """PbChannel.f8 (per-channel obstacle-detect candidate, gap 4) is surfaced
+    raw/unlabeled when present, and absent otherwise — observed on channels
+    carrying per-channel cutHeight/channelLift overrides in the live frame."""
+    with_f8 = _field_str(1, "ch01") + _field_i32(6, 1) + _field_i32(8, 2) + _field_i32(9, 96) + _field_i32(10, 1)
+    decoded = decode_channel(with_f8)
+    assert decoded["f8"] == 2
+    assert decoded["cutHeight"] == 96
+    assert decoded["channelLift"] == 1
+    # A channel without per-channel overrides omits f8 entirely.
+    assert "f8" not in decode_channel(_field_str(1, "ch02") + _field_i32(6, 0))
 
 
 def test_decode_map_response_global_zone_and_channel_config() -> None:
