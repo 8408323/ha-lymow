@@ -970,6 +970,33 @@ async def test_handle_set_geofence_unknown_entity_skips() -> None:
     coord.async_set_geofence.assert_not_awaited()
 
 
+async def test_handle_set_geofence_plumbs_index_to_coordinator() -> None:
+    """`index` selects which geofence region the coordinator mutates."""
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"], {"radius_m": 220, "index": 1})
+    await handlers["set_geofence"](call)
+    coord.async_set_geofence.assert_awaited_once_with(THING, radius_m=220, index=1)
+
+
 async def test_handle_update_channel_settings_passes_named_fields() -> None:
     coord = _make_coord()
     coord.devices = [DEVICE]

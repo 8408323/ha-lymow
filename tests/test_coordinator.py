@@ -1946,6 +1946,89 @@ async def test_async_set_geofence_preserves_unspecified_fields() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_geofence_index_mutates_only_that_region() -> None:
+    """`index=1` updates the second region; other regions are kept intact."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100},
+                {"name": "Back", "latitude": 3.0, "longitude": 4.0, "radius": 150},
+                {"name": "Side", "latitude": 5.0, "longitude": 6.0, "radius": 200},
+            ]
+        }
+    }
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, radius_m=250, name="Renamed Back", index=1)
+
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"]
+    assert len(sent) == 3
+    assert sent[0] == {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100}
+    assert sent[1] == {"name": "Renamed Back", "latitude": 3.0, "longitude": 4.0, "radius": 250}
+    assert sent[2] == {"name": "Side", "latitude": 5.0, "longitude": 6.0, "radius": 200}
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_index_at_len_appends_new_region() -> None:
+    """`index == len(current)` appends a new region with defaults + provided fields."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100},
+            ]
+        }
+    }
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, latitude=10.0, longitude=20.0, radius_m=180, name="Back", index=1)
+
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"]
+    assert len(sent) == 2
+    assert sent[0] == {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100}
+    assert sent[1] == {"name": "Back", "latitude": 10.0, "longitude": 20.0, "radius": 180}
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_index_out_of_range_raises() -> None:
+    """Skipping past the end of the list is an error, not a silent extend."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100},
+            ]
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="index 5 is out of range"):
+        await coord.async_set_geofence(THING, radius_m=250, index=5)
+    api.update_device_feature.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_negative_index_raises() -> None:
+    """Negative indexes would silently mutate the last entry — reject them."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100},
+            ]
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="index -1 is out of range"):
+        await coord.async_set_geofence(THING, radius_m=250, index=-1)
+    api.update_device_feature.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_async_send_user_ctrl_publishes_command() -> None:
     from lymow.const import USER_CTRL_LOCK
     from lymow.protocol import _decode_fields

@@ -1256,21 +1256,29 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         longitude: float | None = None,
         radius_m: int | None = None,
         name: str | None = None,
+        index: int = 0,
     ) -> None:
-        """Set the anti-theft geofence centre, radius, and optional name in one PATCH.
+        """Set one anti-theft geofence region's centre, radius, and optional name in one PATCH.
 
-        Mirrors the app's Settings → Anti-theft page (the geofence centre + radius
-        sliders + Save). Empty/unset existing records are seeded with sensible
-        defaults so callers can configure a fresh device without first opening
-        the Lymow app — the previous radius-only setter required the centre to
-        already exist.
+        Mirrors the app's Settings → Anti-theft page (centre + radius slider +
+        Save). The app navigates between regions with `< >` arrows; `index`
+        selects which region to mutate (0 = first). Pass `index == len(current)`
+        to append a new region. Empty/unset existing records are seeded with
+        sensible defaults so callers can configure a fresh device without first
+        opening the Lymow app.
         """
-        current = (self.data or {}).get(thing_name, {}).get("geoFence") or []
-        if isinstance(current, list) and current and isinstance(current[0], dict):
-            first = current[0]
+        raw = (self.data or {}).get(thing_name, {}).get("geoFence") or []
+        current: list[Any] = list(raw) if isinstance(raw, list) else []
+        if index < 0 or index > len(current):
+            raise HomeAssistantError(
+                f"Geofence index {index} is out of range (have {len(current)} region(s); "
+                "pass index == len to append a new region)."
+            )
+        if index < len(current) and isinstance(current[index], dict):
+            existing = current[index]
         else:
-            first = {"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 150}
-        merged = {**first}
+            existing = {"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 150}
+        merged = {**existing}
         if latitude is not None:
             merged["latitude"] = float(latitude)
         if longitude is not None:
@@ -1279,7 +1287,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             merged["radius"] = int(radius_m)
         if name is not None:
             merged["name"] = str(name)
-        updated = [merged, *(current[1:] if isinstance(current, list) else [])]
+        if index == len(current):
+            updated = [*current, merged]
+        else:
+            updated = [*current[:index], merged, *current[index + 1 :]]
         await self.async_set_device_feature(thing_name, geoFence=updated)
 
     async def async_set_device_feature(self, thing_name: str, **fields: Any) -> None:
