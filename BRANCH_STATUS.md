@@ -1848,6 +1848,80 @@ to be physically near the robot for those two).
 
 ---
 
+## 🔎 CAPTURE-CORRECTNESS AUDIT (2026-05-30, backend session)
+
+User asked: *"all existing captures correct? have we captured all the
+mowing settings and all the other settings? what about backup? schedules?"*
+Audit method: re-decode every documented byte-frame against the current
+encoders/decoders + a fresh read-only `query_map` (no movement). Results:
+
+### ✅ Confirmed correct (encoder output == documented capture bytes)
+- **State machine** (all 11): Mow=`10312801`, Dock=`10312802`,
+  Pause=`10312803`, Resume=`10312804`, PauseDock=`10312815`,
+  ResumeDock=`10312816`, RechargeDock=`10312821`, CancelTask/Reinit=
+  `1031281c`, ChargeReset=`10312811`, AdjustCharging=`10312826`,
+  Backup=`1031282c`. `encode_userctrl(n)` reproduces each exactly.
+- **Device settings** (PbTaskConfig f26 under userCtrl=36): Rainy Mowing,
+  Charging Handbrake, Return-to-Dock direct route all decode to the
+  documented `{chargingMode, rainCleaning, disableChargingPark}`.
+- **Vehicle LED** signal=10/11; **Find My Robot** play-sound;
+  **RTK diag** 57/58; **Cancel Task** 28 — all match.
+- **Backup lifecycle** — COMPLETE: create (MQTT userCtrl=44) + list /
+  restore / delete / rename (REST) all wire-validated (Task E). Backend
+  done; only the card 📦 UI is pending (supervisor side).
+- **Rename zone** — byte-equal to app BLE capture (supervisor reply 2).
+
+### ⚠️ ONE REAL CORRECTNESS QUESTION — PbZoneConfig field labeling
+The mowing-settings sub-message (PbZoneConfig: global at PbMap.f11,
+per-zone at PbZone.f2, and the `set_task_config`/`set_zone_config`
+encoders) has an **unresolved field-number↔name mapping**. Fresh live
+`query_map` (2026-05-30, docked) per-zone configBox:
+```
+f1=60  f4=0.6  f6=5  f7=1  f9=25  f10=2  f11=2  f16=90  f17=1  f19=2
+```
+- Shipped code (canonical Hermes #9432, pinned by commit bfb37bc):
+  `f9=relativeCleanDir, f10=pathSpacing, f16=startProgress`.
+- But the **values** say otherwise: `f9=25` sits exactly in the app's
+  documented Path Spacing range (25–35 cm); `f16=90` is a clean angle
+  (stripe angle / relative clean dir); `f10=2` is nonsensical as a
+  path-spacing in cm. This matches capture-reply-4's interpretation
+  (`f9=pathSpacing, f16=relativeCleanDir`), NOT the shipped labels.
+- **Impact if the shipped labels are wrong:** `lymow.set_task_config` /
+  `set_zone_config` write Path Spacing into f10 and Stripe Angle into f9,
+  i.e. the robot stores them in the wrong slots. Decode mislabels the same.
+- **NOT changed on a guess** — this exact mapping already caused a
+  revert-war (49a7ac6 → 355dd1f → bfb37bc). Bytes alone cannot decide it.
+  **Definitive resolution = read the app's *labeled* Mowing Settings
+  screen** (Path Spacing / Stripe Angle shown with units) and match the
+  number to the field, OR a controlled write-one-distinctive-value-and-
+  re-query test. **BLOCKED 2026-05-30:** the phone's Lymow app is logged
+  OUT — confirming needs an account login (password/MFA = user action).
+
+### ❓ Mowing settings — NOT all captured/confirmed
+- **Safe-margin mode** + **Raise-omni-wheels-on-channel** (gap 3) — never
+  captured; not in the field map.
+- **Per-channel Channel Obstacle Detection** (gap 4) — PbChannel.f8 found
+  in the live frame (value 2 = global detectMode), now decoded raw; needs
+  a toggle capture to confirm the label (commit 4b46767).
+- **Stripe Angle** — present on the wire (f16, see above) but blocked on
+  the same labeling question.
+
+### ⚠️ Schedules — PARTIAL
+- `encode_set_schedules` (bulk "Save Task"), `encode_clear_schedules`
+  (`10315a00`), `encode_query_schedules` — wire-validated + serviced.
+- **Granular add / edit / delete-one / toggle-enabled NOT captured**
+  (Task D). The card would have to read-modify-rewrite the whole list.
+  Capturable now (no movement) once the app is logged in.
+
+### Bottom line
+Backup = done. State machine + device settings + rename = confirmed.
+Mowing settings = mostly captured but carry **one unresolved labeling
+risk (path-spacing/stripe-angle) that can silently mis-write settings** —
+resolve before relying on `set_task_config`. Schedules = bulk only.
+All remaining confirmations need the **app logged in** (currently not).
+
+---
+
 ## 📓 READY-TO-RUN CAPTURE PLAYBOOK (remaining backend gaps 3–9)
 
 > **Status (2026-05-29):** capture session **paused** by user — *do not
