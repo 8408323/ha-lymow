@@ -324,6 +324,7 @@ _SET_GEOFENCE_SCHEMA = vol.Schema(
         vol.Optional("longitude"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
         vol.Optional("radius_m"): vol.All(vol.Coerce(int), vol.Range(min=10, max=500)),
         vol.Optional("name"): cv.string,
+        vol.Optional("index"): vol.All(vol.Coerce(int), vol.Range(min=0)),
     }
 )
 # set_zone_config supports the same PbZoneConfig fields as set_task_config, but
@@ -678,7 +679,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_set_geofence(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         kwargs: dict[str, Any] = {}
-        for k in ("latitude", "longitude", "radius_m", "name"):
+        for k in ("latitude", "longitude", "radius_m", "name", "index"):
             if k in call.data:
                 kwargs[k] = call.data[k]
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}

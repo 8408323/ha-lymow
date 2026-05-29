@@ -586,11 +586,12 @@ update_channel_settings:
 set_geofence:
   name: Set anti-theft geofence
   description: >
-    Set the anti-theft geofence centre, radius, and optional name in one
-    PATCH /update-device-feature call. Mirrors the Lymow app's Settings →
-    Anti-theft page (centre + radius slider + Save). Each parameter is
-    optional; omitted ones keep their existing value, so the same service
-    can move the centre, resize the circle, or rename it independently.
+    Set one anti-theft geofence region's centre, radius, and optional name in
+    one PATCH /update-device-feature call. Mirrors the Lymow app's Settings →
+    Anti-theft page (centre + radius slider + Save). The app supports multiple
+    regions navigated by `< >` arrows — pass `index` to pick which one. Each
+    parameter is optional; omitted ones keep their existing value, so the same
+    service can move the centre, resize the circle, or rename it independently.
   target:
     entity:
       integration: lymow
@@ -624,6 +625,15 @@ set_geofence:
       example: "Backyard"
       selector:
         text:
+    index:
+      name: Region index
+      description: >
+        Which geofence region to mutate (0 = first; defaults to 0). Pass an
+        index equal to the current region count to append a new region.
+      required: false
+      example: 0
+      selector:
+        number: { min: 0, max: 9, step: 1, mode: box }
 
 set_zone_config:
   name: Set per-zone mowing config
