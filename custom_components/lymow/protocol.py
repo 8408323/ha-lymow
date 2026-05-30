@@ -687,6 +687,36 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             if isinstance(val, bytes):
                 state[key] = val.decode("utf-8", errors="replace")
 
+    # Advanced RTK / localization diagnostic (field 8): {f1: type, f2: JSON}.
+    # LIVE-CONFIRMED 2026-05-30 — the "Advanced Diagnostics (Technical Support)"
+    # blob. The RTK base sends corrections over LoRa, so the most actionable
+    # fields are the fix quality, differential-correction age, position precision
+    # and the error reason (e.g. ERTK_LORA_DATA_ERROR_RATE — a noisy LoRa link is
+    # what degrades accuracy). The per-error positions (x/y/z) are not surfaced.
+    diag_raw = _first(fields, 8)
+    if isinstance(diag_raw, bytes) and diag_raw:
+        js = _first(_decode_fields(diag_raw), 2)
+        if isinstance(js, bytes):
+            try:
+                d = json.loads(js.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                d = None
+            if isinstance(d, dict):
+                adv: dict[str, Any] = {}
+                if isinstance(d.get("precision"), (int, float)):
+                    adv["precisionM"] = round(float(d["precision"]), 4)
+                if isinstance(d.get("quality"), int):
+                    adv["quality"] = d["quality"]
+                if isinstance(d.get("diff_age"), (int, float)):
+                    adv["diffAgeS"] = float(d["diff_age"])
+                if d.get("primary_error_desc"):
+                    adv["primaryError"] = str(d["primary_error_desc"])
+                errs = d.get("error_desc_list")
+                if isinstance(errs, list) and errs:
+                    adv["errors"] = [str(e) for e in errs]
+                if adv:
+                    state["rtkDiagnostic"] = adv
+
     # GPS / RTK (field 6 of outer PbOutput):
     #   f1=satellites(int), f2=eastM(float32), f3=northM(float32), f4=rtkStatus(int)
     rtk_raw = _first(fields, 6)

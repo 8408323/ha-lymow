@@ -1493,6 +1493,41 @@ def test_decode_pboutput_mission_time() -> None:
     assert state["missionTimeMin"] == 17
 
 
+def test_decode_pboutput_rtk_advanced_diagnostic() -> None:
+    """f8 JSON 'Advanced Diagnostics' → rtkDiagnostic (precision/quality/diffAge/
+    error). Live-confirmed 2026-05-30: RTK base over LoRa; ERTK_LORA_DATA_ERROR_RATE."""
+    import json as _json
+
+    from lymow.protocol import PB_VERSION
+
+    blob = _json.dumps(
+        {
+            "precision": 0.0136,
+            "quality": 4,
+            "diff_age": 2.0,
+            "primary_error_desc": "ERTK_LORA_DATA_ERROR_RATE",
+            "error_desc_list": ["ERTK_LORA_DATA_ERROR_RATE"],
+            "error_position_list": [{"x": -3.1, "y": -18.0, "z": -0.6}],
+        }
+    )
+    f8 = _field_i32(1, 3) + _field_str(2, blob)
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(8, f8)
+    d = decode_pboutput(pb)["rtkDiagnostic"]
+    assert d["precisionM"] == 0.0136
+    assert d["quality"] == 4
+    assert d["diffAgeS"] == 2.0
+    assert d["primaryError"] == "ERTK_LORA_DATA_ERROR_RATE"
+    assert d["errors"] == ["ERTK_LORA_DATA_ERROR_RATE"]
+    assert "error_position_list" not in str(d)  # per-error coords not surfaced
+
+
+def test_decode_pboutput_rtk_diagnostic_ignores_non_json_f8() -> None:
+    from lymow.protocol import PB_VERSION
+
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(8, _field_i32(1, 3) + _field_str(2, "not json"))
+    assert "rtkDiagnostic" not in decode_pboutput(pb)
+
+
 def test_decode_pboutput_current_task_zone() -> None:
     """f12.f3 (PbZoneBasicInfo) → currentTaskZoneHashId (which zone is mowing now).
     Live-confirmed 2026-05-30 in the QUERY_PATH reply during an active task."""
