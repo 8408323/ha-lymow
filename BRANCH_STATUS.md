@@ -1878,6 +1878,25 @@ turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
   safe_margin_mode/turn_off_outer_motor/stripe_angle controls, plus a Blade
   Speed select (cutSpeed Eco=3/Standard=4/Power=5/Turbo=6).
 
+## ⚠️ 2026-05-30: MQTT backend live-validated; Wi-Fi BLE-only (#200); RTK-rebind caution
+
+Live test publishing app→robot frames to `/device/{thing}/pbinput` from a
+throwaway MQTT client (`_publish_hex.py`, unique client id, alongside the app):
+- **`start_zones` (userCtrl=1) and `set_zone_config` (userCtrl=9) WORK over
+  MQTT** — set the big zone to cut60/speed0.6/perim2/nogo2 then started it; the
+  robot went to "Mowing". End-to-end confirms the command path + envelope.
+- **`set_wifi` does NOT work over MQTT** (BLE-only) — a wrong-password frame
+  (with and without the `1031` version prefix) drew no reaction while the above
+  commands did. → issue #200; `async_set_wifi` now raises (commit e4d8bb2).
+- **CAUTION: the mow hit `E71 Navigation Internal Error` at 0%.** Likely the
+  RTK fix was disturbed by the earlier `bind_rtk` re-bind (same base). Cancelled
+  task + docked. **Don't casually re-bind RTK on a working unit — it can drop
+  the fix and block navigation (E71).** Retry the mow only after RTK re-fixes
+  (check Settings → RTK Diagnostic).
+- MQTT publishes from a 3rd client need a UNIQUE client id (the app holds the
+  single per-identity connection; duplicate ids get kicked — that's why
+  `sniff_pbinput` subscribe failed earlier, but `_publish_hex` works).
+
 ## ✅ DECODED 2026-05-30: PIN / Wi-Fi / Bind-RTK provisioning (sensitive — structure only)
 
 All captured live; **no real values are recorded here or in git** (the real
