@@ -936,6 +936,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_set_pin(pin))
 
+    async def async_bind_rtk(self, thing_name: str, base_id: str) -> None:
+        """Bind the mower to an RTK base station by id (PbRobotConfig.rtkBind)."""
+        from .protocol import encode_bind_rtk
+
+        await self._mqtt.async_publish_command(thing_name, encode_bind_rtk(base_id))
+
     async def async_set_wifi(self, thing_name: str, ssid: str, password: str) -> None:
         """Provision the mower's Wi-Fi (PbInput.wifiConfig). Creds never logged.
 

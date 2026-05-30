@@ -2673,6 +2673,27 @@ def test_encode_set_recharge_resume_partial_skips_unset() -> None:
         assert _first(rr, fno) is None
 
 
+def test_encode_bind_rtk_structure_with_placeholder() -> None:
+    """Layout (PbInput.f13.f17.f1 = baseId) confirmed live 2026-05-30; asserted
+    with a placeholder base id, never the real one."""
+    from lymow.protocol import encode_bind_rtk
+
+    pb = encode_bind_rtk("LK000PLACEHOLD00")
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49
+    cfg = _decode_fields(_first(f, 13))  # robotConfig
+    inner = _decode_fields(_first(cfg, 17))  # rtkBind
+    assert _first(inner, 1) == b"LK000PLACEHOLD00"
+    assert _first(f, 5) is None  # no userCtrl
+
+
+def test_encode_bind_rtk_rejects_empty() -> None:
+    from lymow.protocol import encode_bind_rtk
+
+    with pytest.raises(ValueError, match="base_id must not be empty"):
+        encode_bind_rtk("")
+
+
 def test_encode_set_wifi_structure_with_placeholder() -> None:
     """Layout (PbInput.f17{f1 ssid, f2 password, f5:3}) confirmed live 2026-05-30;
     asserted with placeholder ssid/password, never real credentials."""
