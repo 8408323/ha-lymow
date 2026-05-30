@@ -17,7 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ERROR_DESCRIPTIONS, WARNING_DESCRIPTIONS
+from .const import DOMAIN, ERROR_DESCRIPTIONS, ERROR_REMEDIATION, WARNING_DESCRIPTIONS
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
@@ -565,6 +565,9 @@ class LymowErrorSensor(LymowSensor):
         attrs: dict[str, Any] = {
             "description": ERROR_DESCRIPTIONS.get(int(code), f"Unknown ({code})"),
         }
+        remediation = ERROR_REMEDIATION.get(int(code))
+        if remediation is not None:
+            attrs["remediation"] = remediation
         warning_codes = data.get("warningCodes")
         if warning_codes is not None:
             attrs["warning_codes"] = warning_codes

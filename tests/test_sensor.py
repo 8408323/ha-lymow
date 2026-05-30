@@ -135,6 +135,26 @@ def test_error_sensor_unknown_code_has_unknown_description() -> None:
     sensor = LymowErrorSensor(coord, DEVICE, desc)
     attrs = sensor.extra_state_attributes
     assert "Unknown" in attrs["description"]
+    assert "remediation" not in attrs
+
+
+def test_error_sensor_surfaced_code_includes_remediation() -> None:
+    from lymow.const import ERROR_REMEDIATION
+
+    coord = _make_coord({"errorCode": 71})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert attrs["description"] == "Navigation Internal Error"
+    assert attrs["remediation"] == ERROR_REMEDIATION[71]
+
+
+def test_error_sensor_internal_code_omits_remediation() -> None:
+    coord = _make_coord({"errorCode": 4})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert "remediation" not in attrs
 
 
 def test_error_sensor_warning_codes_included_when_present() -> None:
