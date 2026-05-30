@@ -1211,6 +1211,21 @@ def encode_set_headlight_schedule(
     return pb
 
 
+def encode_set_wifi(ssid: str, password: str) -> bytes:
+    """Encode a Wi-Fi provisioning command (PbInput.wifiConfig, field 17).
+
+    Wire format captured live 2026-05-30 over BLE (re-provisioning the mower's
+    Wi-Fi): ``PbInput {f17:{f1: ssid, f2: password, f5: 3}}`` — no version
+    prefix; f5=3 is a constant the app always sends (connect/auth mode). The
+    robot reconnects to the named network on receipt. SECURITY: ssid/password
+    are sensitive and are never logged here.
+    """
+    if not ssid:
+        raise ValueError("ssid must not be empty")
+    inner = _field_str(1, ssid) + _field_str(2, password) + _field_i32(5, 3)
+    return _field_bytes(17, inner)  # PbInput.wifiConfig
+
+
 def encode_set_pin(pin: str) -> bytes:
     """Encode an LCD-screen PIN write (PbRobotConfig.lcdPinCode).
 

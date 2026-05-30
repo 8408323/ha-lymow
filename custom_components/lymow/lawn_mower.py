@@ -97,6 +97,7 @@ _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
 _SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
 _SERVICE_SET_HEADLIGHT_SCHEDULE = "set_headlight_schedule"
 _SERVICE_SET_PIN = "set_pin"
+_SERVICE_SET_WIFI = "set_wifi"
 _SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
@@ -509,6 +510,13 @@ _SET_PIN_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required("pin"): vol.All(cv.string, vol.Match(r"^\d{4}$", msg="pin must be exactly 4 digits")),
+    }
+)
+_SET_WIFI_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("ssid"): vol.All(cv.string, vol.Length(min=1)),
+        vol.Optional("password", default=""): cv.string,
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -1108,6 +1116,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_pin(entity._thing_name, pin)
 
+    async def handle_set_wifi(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        ssid: str = call.data["ssid"]
+        password: str = call.data["password"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_wifi(entity._thing_name, ssid, password)
+
     async def handle_set_device_settings(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         cm = call.data.get(_ATTR_DS_CHARGING_MODE)
@@ -1329,6 +1348,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         schema=_SET_HEADLIGHT_SCHEDULE_SCHEMA,
     )
     hass.services.async_register(DOMAIN, _SERVICE_SET_PIN, handle_set_pin, schema=_SET_PIN_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_SET_WIFI, handle_set_wifi, schema=_SET_WIFI_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
     )

@@ -2673,6 +2673,26 @@ def test_encode_set_recharge_resume_partial_skips_unset() -> None:
         assert _first(rr, fno) is None
 
 
+def test_encode_set_wifi_structure_with_placeholder() -> None:
+    """Layout (PbInput.f17{f1 ssid, f2 password, f5:3}) confirmed live 2026-05-30;
+    asserted with placeholder ssid/password, never real credentials."""
+    from lymow.protocol import encode_set_wifi
+
+    pb = encode_set_wifi("TestNet", "testpass12")
+    assert pb.hex().startswith("8a01")  # field 17, no version prefix (as captured)
+    inner = _decode_fields(_first(_decode_fields(pb), 17))
+    assert _first(inner, 1) == b"TestNet"
+    assert _first(inner, 2) == b"testpass12"
+    assert _first(inner, 5) == 3
+
+
+def test_encode_set_wifi_rejects_empty_ssid() -> None:
+    from lymow.protocol import encode_set_wifi
+
+    with pytest.raises(ValueError, match="ssid must not be empty"):
+        encode_set_wifi("", "testpass12")
+
+
 def test_encode_set_pin_structure_with_placeholder() -> None:
     """Structure (PbInput.f13.f9.f1 = digit bytes) confirmed live 2026-05-30;
     asserted with a placeholder PIN, never the real value."""

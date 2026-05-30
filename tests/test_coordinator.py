@@ -491,6 +491,16 @@ async def test_async_get_clean_history_wraps_underlying_errors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_wifi_publishes_encoded_command() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_wifi(THING, "TestNet", "testpass12")  # placeholder creds
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    assert pb.hex() == "8a01170a07546573744e6574120a746573747061737331322803"
+
+
+@pytest.mark.asyncio
 async def test_async_set_pin_publishes_encoded_command() -> None:
     coord, mqtt, _ = _make_coordinator()
     await coord.async_set_pin(THING, "1234")  # placeholder PIN
