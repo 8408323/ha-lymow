@@ -2033,8 +2033,41 @@ Robot config RESTORED + verified. No movement commands this session.
   service; keep `set_zone_config` (per-zone userCtrl=9) for overrides.
 - Rewrite the pinned PbZoneConfig tests to the verified layout.
 
+### J. Remap scoping — why it can't safely ship yet (2026-05-30)
+`_TASK_CONFIG_FIELDS` is the SINGLE shared PbZoneConfig field map used by
+THREE encoders (`encode_set_task_config` userCtrl=36, `encode_set_zone_config`
+userCtrl=9, `_encode_go_zone`/sync_map) plus the decoder mirror
+(`_ZONE_CONFIG_INT_NAMES`/`_BOOL_NAMES`). Renumbering it touches all of them
++ pinned tests in test_protocol/test_coordinator/test_lawn_mower/test_sensor.
+
+Laying the confirmed layout over the current (wrong) map:
+- **CONFIRMED corrections:** pathSpacing 10→9, perimeterMowLaps 11→10,
+  perimeterMowDir 12→11, noGoMowLaps 13→12, safeMargin = 17 (new),
+  turnOffOuterMotor = 18 (rename of disableOuterDischarge). f1/f4/f6/f7/f19
+  already correct.
+- **DEFINITELY WRONG in current code, but true home NOT yet known:**
+  `cleanDir@8` (f8 is enabledZoneMask), `startProgress@16` (f16 is the
+  angle = relativeCleanDir), `lineFollowMode@17` (f17 is safeMargin),
+  `pathOrder@15`/`obsDecMode@14` (shift to 14/13 = mowingOrder/zoneObstacle),
+  and unconfirmed `raiseCutHeight@2`, `lowerCutHeight@3`, `brushSpeed@5`,
+  `f15`. Where cleanDir/startProgress/lineFollowMode actually live (if they
+  exist in PbZoneConfig at all) is unknown.
+
+⇒ A full field-map rewrite now would **guess** those fields — the exact
+NO-ASSUMPTIONS violation behind the 49a7ac6→355dd1f→bfb37bc revert-war.
+**Two safe options:**
+1. **Conservative fix:** correct ONLY the confirmed fields, drop/raw the
+   unconfirmed ones (changes the service param set the card uses — needs a
+   card-side check too). Fixes the real pathSpacing bug; lower coverage.
+2. **Finish RE first:** confirm f2/f3/f5/f8/f15/f16 + the homes of
+   cleanDir/startProgress/lineFollowMode via more distinctive Saves (app
+   taps are flaky; MQTT write-probe can set a field and the app screen
+   reveals its label), THEN one clean complete remap.
+
 ### Still to capture (other gaps)
-- Final enum toggles (f11/f13/f14/f15/f16) — one multi-enum distinctive Save.
+- f2/f3/f5/f8/f15/f16 + cleanDir/startProgress/lineFollowMode homes (for remap).
+- Final enum toggles (f11/f13/f14) — app radio taps flaky; retry or MQTT-probe.
+- gap 5 headlight schedule, granular schedules, PIN, WiFi-write, Bind-RTK.
 - Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor — needs a
   Save that transmits; this session's didn't).
 - Gap 4 enum values (toggle Channel Obstacle Detection, re-query).
