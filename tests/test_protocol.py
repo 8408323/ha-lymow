@@ -1528,6 +1528,17 @@ def test_decode_pboutput_rtk_diagnostic_ignores_non_json_f8() -> None:
     assert "rtkDiagnostic" not in decode_pboutput(pb)
 
 
+def test_decode_pboutput_camera_diagnostics() -> None:
+    """f37 heatedLensTimes / f38 aeRangeLevel — names from the APK PbOutput.encode
+    disassembly (Hermes v96, 2026-05-30). f37 is the formerly-mystery 'f37=15'."""
+    from lymow.protocol import PB_VERSION
+
+    pb = _field_i32(2, PB_VERSION) + _field_i32(37, 15) + _field_i32(38, 3)
+    state = decode_pboutput(pb)
+    assert state["heatedLensTimes"] == 15
+    assert state["aeRangeLevel"] == 3
+
+
 def test_decode_pboutput_current_task_zone() -> None:
     """f12.f3 (PbZoneBasicInfo) → currentTaskZoneHashId (which zone is mowing now).
     Live-confirmed 2026-05-30 in the QUERY_PATH reply during an active task."""

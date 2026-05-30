@@ -687,7 +687,8 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             if isinstance(val, bytes):
                 state[key] = val.decode("utf-8", errors="replace")
 
-    # Advanced RTK / localization diagnostic (field 8): {f1: type, f2: JSON}.
+    # Advanced RTK / localization diagnostic — carried in iotCmd (field 8, per
+    # the APK PbOutput map): {f1: type, f2: JSON}.
     # LIVE-CONFIRMED 2026-05-30 — the "Advanced Diagnostics (Technical Support)"
     # blob. The RTK base sends corrections over LoRa, so the most actionable
     # fields are the fix quality, differential-correction age, position precision
@@ -765,6 +766,15 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             hash_raw = _first(_decode_fields(task_zone_raw), 2)
             if isinstance(hash_raw, bytes):
                 state["currentTaskZoneHashId"] = hash_raw.decode("utf-8", errors="replace")
+
+    # Camera diagnostics — field names from the APK PbOutput.encode disassembly
+    # (Hermes v96, verified 2026-05-30): f37 heatedLensTimes (varint — count of
+    # camera-lens defog/de-ice heater activations; the earlier "intermittent
+    # f37=15" mystery), f38 aeRangeLevel (varint — camera auto-exposure level).
+    for field_no, key in ((37, "heatedLensTimes"), (38, "aeRangeLevel")):
+        v = _first(fields, field_no)
+        if v is not None:
+            state[key] = _signed32(v)
 
     # Wi-Fi sub-message (field 22): f6=rssiDbm (UTF-8 string like "-77")
     wifi22_raw = _first(fields, 22)
