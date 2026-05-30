@@ -2454,8 +2454,11 @@ def test_encode_set_task_config_wraps_in_pbinput() -> None:
     )
     f = _decode_fields(pb)
     assert _first(f, 2) == 49  # version
-    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
-    cfg = _decode_fields(_first(f, 26))  # PbZoneConfig submessage
+    assert _first(f, 5) == 49  # USER_CTRL_GLOBAL_SETTING_N (Keep Custom) — LIVE-CONFIRMED 2026-05-30
+    # Envelope: PbInput.f12 (PbMap) → f11 globalZoneConfig (NOT the old f26 PbTaskConfig).
+    pb_map = _decode_fields(_first(f, 12))
+    cfg = _decode_fields(_first(pb_map, 11))  # PbMap.globalZoneConfig
+    assert _first(f, 26) is None  # old PbTaskConfig envelope no longer used
     # Wire field numbers LIVE-CONFIRMED 2026-05-30 (BRANCH_STATUS C/I/K/M).
     assert _first(cfg, 1) == 60  # cutHeight
     assert _first(cfg, 9) == 200  # pathSpacing (confirmed f9)
@@ -2470,7 +2473,8 @@ def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     from lymow.protocol import encode_set_task_config
 
     pb = encode_set_task_config(cutSpeed=None, perimeterMowLaps=2)
-    cfg = _decode_fields(_first(_decode_fields(pb), 26))
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    cfg = _decode_fields(_first(pb_map, 11))  # PbMap.globalZoneConfig
     assert _first(cfg, 10) == 2  # perimeterMowLaps (field 10) present
     assert _first(cfg, 6) is None  # cutSpeed (field 6) skipped (None)
     with pytest.raises(ValueError, match="unknown task-config field"):

@@ -336,8 +336,9 @@ async def test_async_set_task_config_publishes_encoded_command() -> None:
     thing, pb = mqtt.async_publish_command.await_args.args
     assert thing == THING
     f = _decode_fields(pb)
-    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
-    cfg = _decode_fields(_first(f, 26))
+    assert _first(f, 5) == 49  # USER_CTRL_GLOBAL_SETTING_N (Keep Custom) — LIVE-CONFIRMED 2026-05-30
+    pb_map = _decode_fields(_first(f, 12))
+    cfg = _decode_fields(_first(pb_map, 11))  # PbMap.globalZoneConfig
     assert _first(cfg, 9) == 250  # pathSpacing — confirmed PbZoneConfig field f9 (2026-05-30)
 
 
