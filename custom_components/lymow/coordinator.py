@@ -936,6 +936,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_set_pin(pin))
 
+    async def async_set_wifi(self, thing_name: str, ssid: str, password: str) -> None:
+        """Provision the mower's Wi-Fi (PbInput.wifiConfig). Creds never logged.
+
+        Wire format captured over BLE; the same protobuf is published over MQTT
+        here (the mower must be reachable — typically via 4G — to receive it).
+        """
+        from .protocol import encode_set_wifi
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_wifi(ssid, password))
+
     async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
         """Set PbRobotConfig fields on the robot — currently just network priority.
 

@@ -439,6 +439,33 @@ set_pin:
         text:
           type: password
 
+set_wifi:
+  name: Set Wi-Fi network
+  description: >
+    Provision the mower's Wi-Fi (PbInput.wifiConfig). The robot reconnects to
+    the named network. It must be reachable (typically via 4G) to receive the
+    command. Note: the password is sensitive — it is sent to the robot but never
+    logged by the integration.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    ssid:
+      name: SSID
+      description: Wi-Fi network name.
+      required: true
+      example: "MyNetwork"
+      selector:
+        text:
+    password:
+      name: Password
+      description: Wi-Fi password (8-63 chars, or leave empty for an open network).
+      example: "wifi-password"
+      selector:
+        text:
+          type: password
+
 set_network_priority:
   name: Set network priority
   description: >
