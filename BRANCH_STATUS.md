@@ -1848,6 +1848,93 @@ to be physically near the robot for those two).
 
 ---
 
+## 🛰️ LIVE CAPTURE SESSION 2026-05-30 (app logged in, mitmproxy on .180)
+
+This machine **is** the capture host `192.168.1.180`. mitmproxy was just
+not running — starting `mitmdump -s tools/capture.py --listen-port 8888
+--ssl-insecure` restored the phone's connectivity (a stale WiFi proxy to
+the dead :8888 was why the app was logged out) AND decrypts HTTPS (Magisk
+CA still trusted). Logged in via **Google sign-in** (no password typed in
+the end). Robot docked/charging 98% — **no movement commands issued.**
+
+### A. Google sign-in = AWS Cognito Hosted UI + PKCE (captured)
+```
+GET  eu-auth.lymow.com/oauth2/authorize?identity_provider=Google
+       &response_type=code&client_id=3h1sqv3hishjiofbv8giskjgb0
+       &scope=openid+aws.cognito.signin.user.admin
+       &redirect_uri=myapp://callback/&code_challenge_method=S256
+  → accounts.google.com → eu-auth.lymow.com/oauth2/idpresponse?code=…
+POST eu-auth.lymow.com/oauth2/token        (code → Cognito tokens)
+POST cognito-identity.eu-west-1.amazonaws.com   (→ AWS creds)
+  → device-list-query / check-update / IoT-MQTT presign (existing path)
+```
+**HA support assessment:** feasible but awkward. Email/password (SRP)
+already works and stays the primary path. Google would need an OAuth2
+authcode+PKCE config flow; the redirect_uri is a mobile scheme
+(`myapp://callback/`) registered to the app's Cognito client, which HA
+can't receive — so the realistic HA option is a manual "paste the
+callback URL" config-flow step. Optional, not a blocker. (Tokens/identity
+IDs from the capture are NOT recorded here — sensitive.)
+
+### B. App REST architecture (3 API-Gateway stages, eu-west-1)
+Endpoints observed = a subset; all feature endpoints we use are already in
+`api.py`. The only **un-implemented** ones seen are app-infrastructure,
+**not HA features** — so no action:
+- `POST /prod/check-app-force-update` (app version gate)
+- `POST /prod/sns-registration` (mobile push token — HA gets MQTT, N/A)
+
+### C. PbZoneConfig — COMPLETE confirmed layout (resolves the bug above)
+Read the app's labeled Global + per-zone Mowing Settings and correlated to
+live wire (global config / query_map). Confirmed values:
+| App (Global) | value | wire |
+|---|---|---|
+| Cutting Height | 60 mm | f1 |
+| Moving Speed | 0.6 m/s | f4 (f32) |
+| Path Spacing | 35 cm | **f9** |
+| Zone Perimeter Mowing Laps | 1 | **f10** |
+| No-Go Zone Mowing Laps | 1 | **f12** |
+| Perimeter Mowing Direction | (enum) | f11 |
+Confirmed full PbZoneConfig: `f1 cutHeight · f4 moveSpeed · f6 cutSpeed ·
+f7 cleanMode · f8 enabledZoneMask · f9 pathSpacing · f10 perimeterMowLaps ·
+f11 perimeterMowDir · f12 noGoMowLaps · f13 zoneObstacleDetect · f14
+mowingOrder · f15 safeMarginMode(Offset=0/Precise=1) · f16 relativeCleanDir
+(stripeAngle) · f17 lineFollowMode · f18 turnOffOuterMotor · f19
+followDetectMode`. (Shipped code is +1-shifted from f9 — see the fix scope
+in the audit section.) **This also closes gap 3:** safe-margin = f15,
+turn-off-outer-motor = f18 (both bool; need a toggle+re-query to pin the
+on/off value, but their field numbers are now correlated).
+
+### D. PbChannel — gap 4 resolved by correlation
+Customize → channel0 shows **Channel Obstacle Detection (Smart/Touch-Only)**,
+**Channel Deck Height 100 mm**, **Raise Omni Wheels On Channel (ON)**. These
+map to the per-channel wire we already see: `f8` (the raw field this session
+started surfacing) = **Channel Obstacle Detection mode**, `f9` = cutHeight
+(Channel Deck Height), `f10` = channelLift (Raise Omni Wheels). f8 value 2 ==
+globalChannelConfig.detectMode 2. A Smart↔Touch toggle+re-query would pin the
+enum values; field identity is confirmed.
+
+### E. Notifications (bell) — no REST call
+The bell list ("Weak RTK Signal (E15)", 2026/05/27) fired no new REST
+endpoint — sourced from MQTT warning codes we already decode. Gap 9 is
+effectively a UI concern (history list), not a missing backend endpoint.
+
+### Still to capture (needs per-screen nav / BTSnoop / toggle+re-query)
+- **PbZoneConfig remap FIX** (code) — highest priority, fully specced above.
+- Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor, re-query).
+- Gap 4 enum values (toggle Channel Obstacle Detection, re-query).
+- Gap 5 Headlight Mode schedule frame (BTSnoop on a schedule set).
+- Granular schedules add/edit/delete/toggle (BTSnoop).
+- PIN code, WiFi-write, Bind RTK (mitmproxy/BTSnoop; risky ones with user near).
+
+### Session housekeeping
+mitmproxy left RUNNING on :8888 with the phone proxy pointed at it (so the
+app stays online for continued capture). **When done: stop mitmdump or
+`adb shell settings delete global http_proxy`** — else the app goes offline
+again / E29 dock-fail risk. Capture artifacts (`tools/capture-lymow.txt`,
+`/tmp/lymow-ui/*`) are local/gitignored and contain tokens — never commit.
+
+---
+
 ## 🔎 CAPTURE-CORRECTNESS AUDIT (2026-05-30, backend session)
 
 User asked: *"all existing captures correct? have we captured all the
