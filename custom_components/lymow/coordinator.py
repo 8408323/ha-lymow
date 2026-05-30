@@ -115,6 +115,45 @@ def build_schedule_entries(
     return entries
 
 
+def _wire_entries_from_cached(schedules: list[dict[str, Any]], map_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Rebuild ``encode_set_schedules`` wire entries from cached decoded schedules.
+
+    The decoded ``schedules`` already hold UTC ``hour``/``minute``, ``id`` and
+    ``timeZone``; only the per-zone point/name (dropped on decode) is re-looked-up
+    from cached map data. Used by the granular add/delete/toggle ops, which must
+    re-send the full list (schedule writes are full-list replacements) without
+    re-running the local->UTC conversion on the entries that aren't changing.
+    """
+    zones_by_id = {z.get("hashId"): z for z in map_data.get("goZones", [])}
+    entries: list[dict[str, Any]] = []
+    for s in schedules:
+        zinfos: list[dict[str, Any]] = []
+        for hid in s.get("zones", []):
+            zone = zones_by_id.get(hid, {})
+            point = zone.get("innerPoint") or zone.get("boundMin") or {"x": 0.0, "y": 0.0}
+            zinfos.append(
+                {
+                    "hashId": hid,
+                    "name": zone.get("name", ""),
+                    "point": {"x": point.get("x", 0.0), "y": point.get("y", 0.0)},
+                }
+            )
+        entry: dict[str, Any] = {
+            "dayOfWeek": list(s.get("dayOfWeek", [])),
+            "hour": int(s.get("hour", 0)),
+            "minute": int(s.get("minute", 0)),
+            "isRepeated": bool(s.get("isRepeated")),
+            "isDisabled": bool(s.get("isDisabled")),
+            "zones": zinfos,
+        }
+        if s.get("id") is not None:
+            entry["id"] = int(s["id"])
+        if s.get("timeZone") is not None:
+            entry["timeZone"] = int(s["timeZone"])
+        entries.append(entry)
+    return entries
+
+
 # /get-backup-map is fetched on a longer interval than the main coordinator poll
 # (default 30 s) because both backup-map sensors are disabled-by-default and
 # backups themselves are written infrequently.
@@ -762,6 +801,73 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         now_local = datetime.now(ZoneInfo(tz_name))
         map_data = (self.data or {}).get(thing_name, {}).get("mapData") or {}
         entries = build_schedule_entries(specs, map_data, now_local)
+        await self._mqtt.async_publish_command(thing_name, encode_set_schedules(entries))
+        await self.async_query_schedules(thing_name)
+
+    def _cached_schedules(self, thing_name: str) -> list[dict[str, Any]]:
+        return (self.data or {}).get(thing_name, {}).get("schedules") or []
+
+    async def async_add_schedule(
+        self,
+        thing_name: str,
+        *,
+        hour: int,
+        minute: int,
+        day_of_week: list[int],
+        zones: list[str],
+        is_repeated: bool = True,
+        is_disabled: bool = False,
+    ) -> None:
+        """Append one schedule, preserving the existing ones (full-list re-send).
+
+        ``hour``/``minute`` are local; the new entry is converted to UTC via
+        :func:`build_schedule_entries` while existing entries keep their cached
+        UTC values.
+        """
+        from .protocol import encode_set_schedules
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData") or {}
+        existing = _wire_entries_from_cached(self._cached_schedules(thing_name), map_data)
+        tz_name = getattr(self.hass.config, "time_zone", None) or "UTC"
+        now_local = datetime.now(ZoneInfo(tz_name))
+        new_spec = {
+            "hour": hour,
+            "minute": minute,
+            "dayOfWeek": day_of_week,
+            "zones": zones,
+            "isRepeated": is_repeated,
+            "isDisabled": is_disabled,
+        }
+        new_entries = build_schedule_entries([new_spec], map_data, now_local)
+        await self._mqtt.async_publish_command(thing_name, encode_set_schedules(existing + new_entries))
+        await self.async_query_schedules(thing_name)
+
+    async def async_delete_schedule(self, thing_name: str, schedule_id: int) -> None:
+        """Delete one schedule by id (re-sends the remaining list)."""
+        from .protocol import encode_clear_schedules, encode_set_schedules
+
+        cached = self._cached_schedules(thing_name)
+        remaining = [s for s in cached if s.get("id") != schedule_id]
+        if len(remaining) == len(cached):
+            raise HomeAssistantError(f"No schedule with id {schedule_id} to delete")
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData") or {}
+        entries = _wire_entries_from_cached(remaining, map_data)
+        pb = encode_set_schedules(entries) if entries else encode_clear_schedules()
+        await self._mqtt.async_publish_command(thing_name, pb)
+        await self.async_query_schedules(thing_name)
+
+    async def async_toggle_schedule(self, thing_name: str, schedule_id: int, *, disabled: bool) -> None:
+        """Enable/disable one schedule by id (re-sends the full list)."""
+        from .protocol import encode_set_schedules
+
+        cached = self._cached_schedules(thing_name)
+        if not any(s.get("id") == schedule_id for s in cached):
+            raise HomeAssistantError(f"No schedule with id {schedule_id} to toggle")
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData") or {}
+        entries = _wire_entries_from_cached(cached, map_data)
+        for entry, sched in zip(entries, cached):
+            if sched.get("id") == schedule_id:
+                entry["isDisabled"] = disabled
         await self._mqtt.async_publish_command(thing_name, encode_set_schedules(entries))
         await self.async_query_schedules(thing_name)
 

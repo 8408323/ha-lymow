@@ -88,6 +88,9 @@ _SERVICE_MOVE_CHARGING_STATION = "move_charging_station"
 _ATTR_IS_ENABLED = "is_enabled"
 _SERVICE_CLEAR_SCHEDULES = "clear_schedules"
 _SERVICE_SET_SCHEDULES = "set_schedules"
+_SERVICE_ADD_SCHEDULE = "add_schedule"
+_SERVICE_DELETE_SCHEDULE = "delete_schedule"
+_SERVICE_TOGGLE_SCHEDULE = "toggle_schedule"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
@@ -517,6 +520,30 @@ _SET_SCHEDULES_SCHEMA = vol.Schema(
         vol.Required(_ATTR_SCHEDULES): vol.All(cv.ensure_list, [_SCHEDULE_ENTRY_SCHEMA]),
     }
 )
+_ADD_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+        vol.Required("minute"): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
+        vol.Optional("day_of_week", default=list): vol.All(cv.ensure_list, [_to_day_int]),
+        vol.Optional("zones", default=list): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("repeated", default=True): cv.boolean,
+        vol.Optional("disabled", default=False): cv.boolean,
+    }
+)
+_DELETE_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("id"): vol.Coerce(int),
+    }
+)
+_TOGGLE_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("id"): vol.Coerce(int),
+        vol.Required("disabled"): cv.boolean,
+    }
+)
 _SET_DEVICE_NAME_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_NAME): cv.string})
 _RESTORE_BACKUP_MAP_SCHEMA = vol.Schema(
     {vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_OBJECT_KEY): cv.string}
@@ -898,6 +925,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_schedules(entity._thing_name, entries)
 
+    async def handle_add_schedule(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_add_schedule(
+                entity._thing_name,
+                hour=call.data["hour"],
+                minute=call.data["minute"],
+                day_of_week=call.data["day_of_week"],
+                zones=call.data["zones"],
+                is_repeated=call.data["repeated"],
+                is_disabled=call.data["disabled"],
+            )
+
+    async def handle_delete_schedule(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        schedule_id: int = call.data["id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_delete_schedule(entity._thing_name, schedule_id)
+
+    async def handle_toggle_schedule(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        schedule_id: int = call.data["id"]
+        disabled: bool = call.data["disabled"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_toggle_schedule(entity._thing_name, schedule_id, disabled=disabled)
+
     async def handle_rename_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
@@ -1262,6 +1327,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_SET_SCHEDULES, handle_set_schedules, schema=_SET_SCHEDULES_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_ADD_SCHEDULE, handle_add_schedule, schema=_ADD_SCHEDULE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, _SERVICE_DELETE_SCHEDULE, handle_delete_schedule, schema=_DELETE_SCHEDULE_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_TOGGLE_SCHEDULE, handle_toggle_schedule, schema=_TOGGLE_SCHEDULE_SCHEMA
+    )
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):

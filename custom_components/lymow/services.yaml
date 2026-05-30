@@ -557,6 +557,99 @@ set_schedules:
       selector:
         object:
 
+add_schedule:
+  name: Add schedule
+  description: >
+    Add one mowing schedule, keeping the existing ones. The robot stores the
+    full list, so this re-sends every schedule plus the new entry (the existing
+    ones are preserved from cached state).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    hour:
+      name: Hour
+      description: Local hour (0-23) the mow should start.
+      required: true
+      example: 9
+      selector:
+        number: { min: 0, max: 23, step: 1, mode: box }
+    minute:
+      name: Minute
+      description: Local minute (0-59).
+      required: true
+      example: 30
+      selector:
+        number: { min: 0, max: 59, step: 1, mode: box }
+    day_of_week:
+      name: Days
+      description: Days to run (0-6 Sun-Sat, or names). Empty = every day.
+      example: [mon, wed, fri]
+      selector:
+        object:
+    zones:
+      name: Zones
+      description: List of go-zone hash IDs to mow.
+      example: ["wsmjco1T"]
+      selector:
+        object:
+    repeated:
+      name: Repeat weekly
+      description: Whether the schedule repeats every week (default true).
+      example: true
+      selector:
+        boolean:
+    disabled:
+      name: Start disabled
+      description: Create the schedule in the disabled state (default false).
+      example: false
+      selector:
+        boolean:
+
+delete_schedule:
+  name: Delete schedule
+  description: >
+    Delete one mowing schedule by its id (re-sends the remaining list). The id
+    is the value exposed in the Mow schedules sensor's attributes.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    id:
+      name: Schedule id
+      description: The id of the schedule to delete (from the schedules sensor).
+      required: true
+      example: 481098222
+      selector:
+        number: { min: 0, mode: box }
+
+toggle_schedule:
+  name: Enable/disable schedule
+  description: >
+    Enable or disable one mowing schedule by its id without deleting it
+    (re-sends the full list with that entry's disabled flag changed).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    id:
+      name: Schedule id
+      description: The id of the schedule to toggle (from the schedules sensor).
+      required: true
+      example: 481098222
+      selector:
+        number: { min: 0, mode: box }
+    disabled:
+      name: Disabled
+      description: true = disable the schedule, false = enable it.
+      required: true
+      example: true
+      selector:
+        boolean:
+
 update_zone_polygon:
   name: Update zone polygon
   description: >

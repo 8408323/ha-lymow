@@ -3043,6 +3043,134 @@ async def test_async_clear_schedules_sends_empty_then_queries() -> None:
     assert mqtt.async_publish_command.await_count == 2  # clear + query
 
 
+def test_wire_entries_from_cached_preserves_utc_and_refills_point() -> None:
+    from lymow.coordinator import _wire_entries_from_cached
+
+    cached = [
+        {
+            "dayOfWeek": [6],
+            "hour": 13,
+            "minute": 16,
+            "isRepeated": True,
+            "isDisabled": False,
+            "zones": ["z1"],
+            "id": 42,
+            "timeZone": 2,
+        }
+    ]
+    map_data = {"goZones": [{"hashId": "z1", "name": "Lawn", "innerPoint": {"x": 1.5, "y": 2.5}}]}
+    [entry] = _wire_entries_from_cached(cached, map_data)
+    assert entry["hour"] == 13 and entry["minute"] == 16  # UTC preserved, no re-conversion
+    assert entry["id"] == 42 and entry["timeZone"] == 2
+    assert entry["zones"][0] == {"hashId": "z1", "name": "Lawn", "point": {"x": 1.5, "y": 2.5}}
+
+
+@pytest.mark.asyncio
+async def test_async_add_schedule_appends_and_preserves_existing() -> None:
+    from lymow.protocol import _all, _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.hass.config.time_zone = "UTC"
+    coord.data = {
+        THING: {
+            "schedules": [
+                {
+                    "dayOfWeek": [6],
+                    "hour": 13,
+                    "minute": 16,
+                    "isDisabled": False,
+                    "zones": ["z1"],
+                    "id": 42,
+                    "timeZone": 0,
+                }
+            ],
+            "mapData": {"goZones": [{"hashId": "z1", "name": "L", "innerPoint": {"x": 0.0, "y": 0.0}}]},
+        }
+    }
+    await coord.async_add_schedule(
+        THING, hour=8, minute=5, day_of_week=[1], zones=["z1"], is_repeated=True, is_disabled=False
+    )
+    pb = mqtt.async_publish_command.await_args_list[0].args[1]
+    tasks = _all(_decode_fields(_first(_decode_fields(pb), 11)), 1)
+    assert len(tasks) == 2  # existing + new
+    # new entry (second) carries the new time; UTC tz => hour unchanged
+    new = _decode_fields(tasks[1])
+    assert _first(new, 2) == 8 and _first(new, 3) == 5
+
+
+@pytest.mark.asyncio
+async def test_async_delete_schedule_drops_one_keeps_rest() -> None:
+    from lymow.protocol import _all, _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "schedules": [
+                {"hour": 7, "minute": 0, "zones": [], "id": 1},
+                {"hour": 8, "minute": 0, "zones": [], "id": 2},
+            ],
+            "mapData": {},
+        }
+    }
+    await coord.async_delete_schedule(THING, 1)
+    pb = mqtt.async_publish_command.await_args_list[0].args[1]
+    tasks = _all(_decode_fields(_first(_decode_fields(pb), 11)), 1)
+    assert len(tasks) == 1
+    assert _first(_decode_fields(tasks[0]), 6) == 2  # id 2 survives
+
+
+@pytest.mark.asyncio
+async def test_async_delete_last_schedule_sends_clear() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"schedules": [{"hour": 7, "minute": 0, "zones": [], "id": 1}], "mapData": {}}}
+    await coord.async_delete_schedule(THING, 1)
+    assert mqtt.async_publish_command.await_args_list[0].args[1].hex() == "10315a00"  # clear
+
+
+@pytest.mark.asyncio
+async def test_async_delete_schedule_unknown_id_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"schedules": [{"hour": 7, "minute": 0, "zones": [], "id": 1}], "mapData": {}}}
+    with pytest.raises(HomeAssistantError, match="No schedule with id 9"):
+        await coord.async_delete_schedule(THING, 9)
+    mqtt.async_publish_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_toggle_schedule_sets_disabled_flag() -> None:
+    from lymow.protocol import _all, _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "schedules": [
+                {"hour": 7, "minute": 0, "zones": [], "id": 1, "isDisabled": False},
+                {"hour": 8, "minute": 0, "zones": [], "id": 2, "isDisabled": False},
+            ],
+            "mapData": {},
+        }
+    }
+    await coord.async_toggle_schedule(THING, 2, disabled=True)
+    pb = mqtt.async_publish_command.await_args_list[0].args[1]
+    tasks = _all(_decode_fields(_first(_decode_fields(pb), 11)), 1)
+    by_id = {_first(_decode_fields(t), 6): _decode_fields(t) for t in tasks}
+    assert _first(by_id[2], 8) == 1  # id 2 isDisabled set
+    assert _first(by_id[1], 8) is None  # id 1 still enabled (f8 omitted)
+
+
+@pytest.mark.asyncio
+async def test_async_toggle_schedule_unknown_id_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"schedules": [{"hour": 7, "minute": 0, "zones": [], "id": 1}], "mapData": {}}}
+    with pytest.raises(HomeAssistantError, match="No schedule with id 5"):
+        await coord.async_toggle_schedule(THING, 5, disabled=True)
+    mqtt.async_publish_command.assert_not_awaited()
+
+
 def test_build_schedule_entries_converts_utc_and_fills_zone() -> None:
     from datetime import datetime
     from zoneinfo import ZoneInfo
