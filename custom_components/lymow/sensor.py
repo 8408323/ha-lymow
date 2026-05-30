@@ -579,10 +579,10 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     _attr_has_entity_name = True
 
     _RTK_LABELS = {
-        0: "Not ready",
-        1: "Float fix (~40 cm)",
-        2: "Fixed (~2 cm)",
-        3: "RTK fixed (~2 cm)",
+        0: "No fix",
+        1: "Float fix",
+        2: "Fixed",
+        3: "RTK fixed",
     }
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
@@ -669,6 +669,11 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             val = data.get(key)
             if val is not None:
                 attrs[key] = val
+        # Also expose the human-readable RTK label so the card doesn't need to map integers
+        rtk_raw = data.get("rtkStatus")
+        if rtk_raw is not None:
+            _RTK_LABELS = {0: "No fix", 1: "Float fix", 2: "Fixed", 3: "RTK fixed"}
+            attrs["rtkLabel"] = _RTK_LABELS.get(int(rtk_raw), f"Unknown ({rtk_raw})")
         return attrs
 
 
