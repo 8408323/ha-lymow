@@ -668,11 +668,21 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if lte_sig is not None:
             state["lteSignalQuality"] = _signed32(lte_sig)
 
-    # PbDeviceProfile (field 10)
+    # PbDeviceProfile (field 10). f3 softwareVersion ("v2.1.48.1") live-confirmed
+    # 2026-05-30 (matches REST get-device-info.softwareVersion). f4 wifiSsid,
+    # f8 rtkBaseId, f9 simIccid are also present here but deliberately NOT
+    # surfaced — they are sensitive identifiers (see security rules).
     profile_raw = _first(fields, 10)
     if isinstance(profile_raw, bytes):
         dp = _decode_fields(profile_raw)
-        for field_no, key in ((1, "fwVersion"), (2, "mcuVersion"), (5, "ipAddress"), (6, "macAddress"), (7, "sn")):
+        for field_no, key in (
+            (1, "fwVersion"),
+            (2, "mcuVersion"),
+            (3, "softwareVersion"),
+            (5, "ipAddress"),
+            (6, "macAddress"),
+            (7, "sn"),
+        ):
             val = _first(dp, field_no)
             if isinstance(val, bytes):
                 state[key] = val.decode("utf-8", errors="replace")
@@ -697,7 +707,12 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
 
     # Area / progress info (field 12):
     #   f1=mowStripCount(int), f2=totalTaskArea(float32, the current task's
-    #   total area — denominator for mowProgress), f5=mowProgress(float32 0–1)
+    #   total area — denominator for mowProgress), f3=currentTaskZone
+    #   (PbZoneBasicInfo, hashId=f2 — which go-zone is being mowed now; present in
+    #   the QUERY_PATH reply during an active task), f5=mowProgress(float32 0–1).
+    #   NOTE: there is no geometric coverage-path polyline — QUERY_PATH returns
+    #   this task/progress summary, not point geometry; the live trail is built
+    #   from the robot pose (field 14) accumulated over time.
     area_raw = _first(fields, 12)
     if isinstance(area_raw, bytes):
         area_fields = _decode_fields(area_raw)
@@ -710,6 +725,11 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         progress_raw = _first(area_fields, 5)
         if progress_raw is not None:
             state["mowProgress"] = round(_decode_f32(progress_raw) * 100, 1)
+        task_zone_raw = _first(area_fields, 3)
+        if isinstance(task_zone_raw, bytes):
+            hash_raw = _first(_decode_fields(task_zone_raw), 2)
+            if isinstance(hash_raw, bytes):
+                state["currentTaskZoneHashId"] = hash_raw.decode("utf-8", errors="replace")
 
     # Wi-Fi sub-message (field 22): f6=rssiDbm (UTF-8 string like "-77")
     wifi22_raw = _first(fields, 22)

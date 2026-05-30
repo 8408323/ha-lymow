@@ -298,6 +298,7 @@ def _build_pboutput(
     warning_codes: list[int] | None = None,
     fw_version: str | None = None,
     mcu_version: str | None = None,
+    software_version: str | None = None,
 ) -> bytes:
     """Hand-build a minimal PbOutput blob for testing."""
     from lymow.protocol import PB_VERSION
@@ -320,6 +321,8 @@ def _build_pboutput(
         profile += _field_str(1, fw_version)
     if mcu_version is not None:
         profile += _field_str(2, mcu_version)
+    if software_version is not None:
+        profile += _field_str(3, software_version)
 
     # Top-level PbOutput
     out = _field_i32(2, PB_VERSION)
@@ -412,6 +415,13 @@ def test_decode_pboutput_mcu_version() -> None:
     pb = _build_pboutput(mcu_version="2.3.0")
     state = decode_pboutput(pb)
     assert state["mcuVersion"] == "2.3.0"
+
+
+def test_decode_pboutput_software_version() -> None:
+    """f10.f3 → softwareVersion (live-confirmed 2026-05-30; was previously unmapped)."""
+    pb = _build_pboutput(software_version="v2.1.48.1")
+    state = decode_pboutput(pb)
+    assert state["softwareVersion"] == "v2.1.48.1"
 
 
 def test_decode_pboutput_empty_bytes() -> None:
@@ -1380,6 +1390,7 @@ def _build_pboutput_with_extras(
     total_area_m2: float | None = None,
     mow_strip_count: int | None = None,
     mow_progress: float | None = None,
+    current_task_zone: str | None = None,
     pose_east_m: float | None = None,
     pose_north_m: float | None = None,
     pose_theta_rad: float | None = None,
@@ -1403,12 +1414,14 @@ def _build_pboutput_with_extras(
         out += _field_bytes(6, rtk)
 
     # Area info (field 12): f1=mowStripCount, f2=totalAreaM2, f5=mowProgress
-    if any(v is not None for v in (total_area_m2, mow_strip_count, mow_progress)):
+    if any(v is not None for v in (total_area_m2, mow_strip_count, mow_progress, current_task_zone)):
         area = b""
         if mow_strip_count is not None:
             area += _field_i32(1, mow_strip_count)
         if total_area_m2 is not None:
             area += _field_f32(2, total_area_m2)
+        if current_task_zone is not None:
+            area += _field_bytes(3, _field_i32(1, 1) + _field_str(2, current_task_zone))
         if mow_progress is not None:
             area += _field_f32(5, mow_progress)
         out += _field_bytes(12, area)
@@ -1476,6 +1489,19 @@ def test_decode_pboutput_mow_strip_count() -> None:
     pb = _build_pboutput_with_extras(mow_strip_count=17)
     state = decode_pboutput(pb)
     assert state["mowStripCount"] == 17
+
+
+def test_decode_pboutput_current_task_zone() -> None:
+    """f12.f3 (PbZoneBasicInfo) → currentTaskZoneHashId (which zone is mowing now).
+    Live-confirmed 2026-05-30 in the QUERY_PATH reply during an active task."""
+    pb = _build_pboutput_with_extras(current_task_zone="KX1kGyat")
+    state = decode_pboutput(pb)
+    assert state["currentTaskZoneHashId"] == "KX1kGyat"
+
+
+def test_decode_pboutput_no_current_task_zone_when_absent() -> None:
+    pb = _build_pboutput_with_extras(mow_strip_count=3)
+    assert "currentTaskZoneHashId" not in decode_pboutput(pb)
 
 
 def test_decode_pboutput_network_info_field_34() -> None:
