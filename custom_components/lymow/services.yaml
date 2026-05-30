@@ -387,6 +387,38 @@ set_recharge_resume:
       selector:
         number: { min: 0, max: 100, step: 1, unit_of_measurement: "%", mode: box }
 
+set_headlight_schedule:
+  name: Set Headlight schedule
+  description: >
+    Configure the mower's Headlight Mode auto on/off window (PbRobotConfig
+    f14/f15). Mirrors the app's Device Settings → Headlight Mode page. Times
+    are in UTC, hour/minute (the app converts the local picker value before
+    sending). enable=true requires both start and end. enable=false turns the
+    schedule off; start/end are then ignored.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    enable:
+      name: Enable
+      description: Master on/off for the headlight auto schedule.
+      example: true
+      selector:
+        boolean:
+    start:
+      name: On time (HH:MM, UTC)
+      description: Time of day the headlights turn on. Required when enable=true.
+      example: "21:00"
+      selector:
+        text:
+    end:
+      name: Off time (HH:MM, UTC)
+      description: Time of day the headlights turn off. Required when enable=true.
+      example: "05:00"
+      selector:
+        text:
+
 set_network_priority:
   name: Set network priority
   description: >

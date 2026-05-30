@@ -804,6 +804,26 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             ),
         )
 
+    async def async_set_headlight_schedule(
+        self,
+        thing_name: str,
+        *,
+        enable: bool,
+        start: tuple[int, int] | None = None,
+        end: tuple[int, int] | None = None,
+    ) -> None:
+        """Publish a Headlight Mode schedule write (PbRobotConfig f14/f15).
+
+        See :func:`protocol.encode_set_headlight_schedule`. ``start`` / ``end``
+        are (hour, minute) in UTC; both are required when ``enable`` is true.
+        """
+        from .protocol import encode_set_headlight_schedule
+
+        await self._mqtt.async_publish_command(
+            thing_name,
+            encode_set_headlight_schedule(enable=enable, start=start, end=end),
+        )
+
     async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
         """Set PbRobotConfig fields on the robot — currently just network priority.
 

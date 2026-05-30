@@ -2669,6 +2669,50 @@ def test_encode_set_recharge_resume_partial_skips_unset() -> None:
         assert _first(rr, fno) is None
 
 
+def test_encode_set_headlight_schedule_enable_matches_capture() -> None:
+    """Byte-exact against the live BLE frame captured 2026-05-30 (start 03:17,
+    end 04:23 UTC). PbInput {f2:49, f9:{f10:1}, f13:{f14 start, f15 end}}."""
+    from lymow.protocol import encode_set_headlight_schedule
+
+    pb = encode_set_headlight_schedule(enable=True, start=(3, 17), end=(4, 23))
+    assert pb.hex() == "10314a0250016a0c7204080310117a0408041017"
+
+
+def test_encode_set_headlight_schedule_disable_matches_capture() -> None:
+    """Byte-exact against the live disable frame: signal=7 plus zeroed times."""
+    from lymow.protocol import encode_set_headlight_schedule
+
+    pb = encode_set_headlight_schedule(enable=False)
+    assert pb.hex() == "10314a0250016a0e40077204080010007a0408001000"
+
+
+def test_encode_set_headlight_schedule_enable_requires_both_times() -> None:
+    from lymow.protocol import encode_set_headlight_schedule
+
+    with pytest.raises(ValueError, match="requires start and end"):
+        encode_set_headlight_schedule(enable=True, start=(3, 17))
+
+
+def test_decode_robot_config_surfaces_headlight_window() -> None:
+    from lymow.protocol import decode_robot_config
+
+    start = _field_i32(1, 3) + _field_i32(2, 17)
+    end = _field_i32(1, 4) + _field_i32(2, 23)
+    out = decode_robot_config(_field_bytes(14, start) + _field_bytes(15, end))
+    assert out == {
+        "headlightStart": {"hour": 3, "minute": 17},
+        "headlightEnd": {"hour": 4, "minute": 23},
+    }
+
+
+def test_decode_robot_config_drops_out_of_range_headlight_window() -> None:
+    """A hostile/garbage time sub-message is dropped, not surfaced as state."""
+    from lymow.protocol import decode_robot_config
+
+    bad = _field_i32(1, 99) + _field_i32(2, 17)  # hour out of range
+    assert "headlightStart" not in decode_robot_config(_field_bytes(14, bad))
+
+
 def test_encode_set_robot_config_signal_field_for_vehicle_led() -> None:
     """Vehicle LED writes go via the signal field (one-shot), not isOpenLed."""
     from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT, encode_set_robot_config

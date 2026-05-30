@@ -92,6 +92,7 @@ _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
 _SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
+_SERVICE_SET_HEADLIGHT_SCHEDULE = "set_headlight_schedule"
 _SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
@@ -100,6 +101,9 @@ _ATTR_RR_PERIOD_START = "period_start"
 _ATTR_RR_PERIOD_END = "period_end"
 _ATTR_RR_RECHARGE_BAT = "recharge_bat"
 _ATTR_RR_RESUME_BAT = "resume_bat"
+_ATTR_HL_ENABLE = "enable"
+_ATTR_HL_START = "start"
+_ATTR_HL_END = "end"
 _ATTR_DS_CHARGING_MODE = "charging_mode"
 _ATTR_DS_ZONE_ORDER = "zone_order"
 _ATTR_DS_RAINY_MOWING = "rainy_mowing"
@@ -487,6 +491,14 @@ _SET_RECHARGE_RESUME_SCHEMA = vol.Schema(
         vol.Optional(_ATTR_RR_PERIOD_END): _to_hour_minute,
         vol.Optional(_ATTR_RR_RECHARGE_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
         vol.Optional(_ATTR_RR_RESUME_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
+    }
+)
+_SET_HEADLIGHT_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_HL_ENABLE): cv.boolean,
+        vol.Optional(_ATTR_HL_START): _to_hour_minute,
+        vol.Optional(_ATTR_HL_END): _to_hour_minute,
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -1000,6 +1012,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_recharge_resume(entity._thing_name, **rr_kwargs)
 
+    async def handle_set_headlight_schedule(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        enable: bool = call.data[_ATTR_HL_ENABLE]
+        start = call.data.get(_ATTR_HL_START)
+        end = call.data.get(_ATTR_HL_END)
+        if enable and (start is None or end is None):
+            raise ServiceValidationError("set_headlight_schedule: enabling requires both start and end.")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_headlight_schedule(entity._thing_name, enable=enable, start=start, end=end)
+
     async def handle_set_device_settings(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         cm = call.data.get(_ATTR_DS_CHARGING_MODE)
@@ -1213,6 +1239,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_RECHARGE_RESUME, handle_set_recharge_resume, schema=_SET_RECHARGE_RESUME_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_SET_HEADLIGHT_SCHEDULE,
+        handle_set_headlight_schedule,
+        schema=_SET_HEADLIGHT_SCHEDULE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA

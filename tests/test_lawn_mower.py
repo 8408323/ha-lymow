@@ -48,6 +48,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_get_clean_history = AsyncMock(return_value=[])
     coord.async_set_robot_config = AsyncMock()
     coord.async_set_recharge_resume = AsyncMock()
+    coord.async_set_headlight_schedule = AsyncMock()
     coord.async_set_device_settings = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_rename_nogo_zone = AsyncMock()
@@ -252,9 +253,10 @@ async def test_async_setup_entry_registers_services() -> None:
     # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
     # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station
     # + 1 resume + 1 set-run-time-config + 1 set-network-priority + 1 set-recharge-resume + 1 set-device-settings
+    # + 1 set-headlight-schedule
     # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence
     # + 1 update-channel-settings + 1 get-clean-history.
-    assert hass.services.async_register.call_count == 48
+    assert hass.services.async_register.call_count == 49
 
 
 # ---------------------------------------------------------------------------
@@ -1829,6 +1831,54 @@ async def test_handle_set_recharge_resume_unknown_entity_skips() -> None:
 
     await handlers["set_recharge_resume"](_make_call(["lawn_mower.other"], {"enable": True}))
     coord.async_set_recharge_resume.assert_not_awaited()
+
+
+async def test_handle_set_headlight_schedule_forwards_kwargs() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"enable": True, "start": (3, 17), "end": (4, 23)})
+    await handlers["set_headlight_schedule"](call)
+    coord.async_set_headlight_schedule.assert_awaited_once_with("mower-001", enable=True, start=(3, 17), end=(4, 23))
+
+
+async def test_handle_set_headlight_schedule_enable_without_times_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_headlight_schedule"](_make_call(["lawn_mower.mower_1"], {"enable": True}))
+    coord.async_set_headlight_schedule.assert_not_awaited()
+
+
+async def test_handle_set_headlight_schedule_disable_needs_no_times() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_headlight_schedule"](_make_call(["lawn_mower.mower_1"], {"enable": False}))
+    coord.async_set_headlight_schedule.assert_awaited_once_with("mower-001", enable=False, start=None, end=None)
+
+
+async def test_handle_set_headlight_schedule_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_headlight_schedule"](
+        _make_call(["lawn_mower.other"], {"enable": True, "start": (3, 17), "end": (4, 23)})
+    )
+    coord.async_set_headlight_schedule.assert_not_awaited()
 
 
 def test_set_recharge_resume_schema_parses_time_strings_and_bounds() -> None:

@@ -490,6 +490,16 @@ async def test_async_get_clean_history_wraps_underlying_errors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_headlight_schedule_publishes_encoded_command() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_headlight_schedule(THING, enable=True, start=(3, 17), end=(4, 23))
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    assert pb.hex() == "10314a0250016a0c7204080310117a0408041017"
+
+
+@pytest.mark.asyncio
 async def test_async_set_recharge_resume_round_trip() -> None:
     from lymow.protocol import _decode_fields, _first
 

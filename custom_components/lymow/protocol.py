@@ -862,7 +862,9 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
     f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
     f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
     f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
-    f10 cmdCellularSwitch bool, f11 metric_4g bool, f18 rrConfig PbRRConfig,
+    f10 cmdCellularSwitch bool, f11 metric_4g bool,
+    f14 headlightStart / f15 headlightEnd PbTimeZone {hour, minute} UTC,
+    f18 rrConfig PbRRConfig,
     f21 timezoneOffset int (seconds east of UTC, what setTimezone #9036 writes),
     f22 dockOnError bool.
 
@@ -890,6 +892,14 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         v = _first(f, field_no)
         if v is not None:
             out[name] = bool(v)
+    for field_no, name in ((14, "headlightStart"), (15, "headlightEnd")):
+        raw = _first(f, field_no)
+        if isinstance(raw, bytes):
+            sub = _decode_fields(raw)
+            hour = _first(sub, 1)
+            minute = _first(sub, 2)
+            if isinstance(hour, int) and isinstance(minute, int) and 0 <= hour <= 23 and 0 <= minute <= 59:
+                out[name] = {"hour": hour, "minute": minute}
     rr_raw = _first(f, 18)
     if isinstance(rr_raw, bytes):
         rr = decode_rr_config(rr_raw)
@@ -1067,6 +1077,10 @@ _ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
 # values come from the SocSignal enum in the APK (Hermes string-id 40889).
 SIGNAL_TURN_ON_VEHICLE_LIGHT = 10
 SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11
+# Emitted by the app on the robotConfig.signal field when the headlight auto
+# schedule is turned OFF — captured live 2026-05-30 alongside zeroed start/end
+# times. (The ON path sends the times with no signal.)
+SIGNAL_DISABLE_HEADLIGHT_SCHEDULE = 7
 
 
 def _encode_pb_timezone(hour: int, minute: int) -> bytes:
@@ -1149,6 +1163,41 @@ def encode_set_robot_config(**fields: Any) -> bytes:
             # Guard against silent mis-encoding if a new kind ever lands in the map.
             raise ValueError(f"unsupported robot-config kind: {kind!r}")
     pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
+def encode_set_headlight_schedule(
+    *,
+    enable: bool,
+    start: tuple[int, int] | None = None,
+    end: tuple[int, int] | None = None,
+) -> bytes:
+    """Encode the app's Device Settings → Headlight Mode "Save" frame.
+
+    Captured live 2026-05-30 (three saves, ON twice + OFF). The headlight auto
+    on/off window lives on PbRobotConfig (PbInput.f13) as two PbTimeZone
+    sub-messages — f14 startTime, f15 endTime — with hour/minute stored in
+    **UTC** (the app converts the local picker value before sending). Every
+    headlight save also carries a constant PbInput.f9 = {f10:1} marker that
+    does not appear on other robotConfig writes (rrConfig / find-my-robot).
+
+    enable=True requires both ``start`` and ``end`` (the app always sends the
+    pair). enable=False reproduces the disable frame: signal=7 plus zeroed
+    times; ``start`` / ``end`` are ignored.
+    """
+    marker = _field_bytes(9, _field_i32(10, 1))  # PbInput.f9 = {f10:1}
+    if enable:
+        if start is None or end is None:
+            raise ValueError("enabling the headlight schedule requires start and end")
+        cfg = _field_bytes(14, _encode_pb_timezone(*start))
+        cfg += _field_bytes(15, _encode_pb_timezone(*end))
+    else:
+        cfg = _field_i32(8, SIGNAL_DISABLE_HEADLIGHT_SCHEDULE)  # PbRobotConfig.signal
+        cfg += _field_bytes(14, _encode_pb_timezone(0, 0))
+        cfg += _field_bytes(15, _encode_pb_timezone(0, 0))
+    pb = _field_i32(2, PB_VERSION)
+    pb += marker
     pb += _field_bytes(13, cfg)  # PbInput.robotConfig
     return pb
 
