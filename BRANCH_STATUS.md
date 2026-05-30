@@ -1848,6 +1848,29 @@ to be physically near the robot for those two).
 
 ---
 
+## 🧪 RELIABLE TECHNIQUES (learned 2026-05-30 — use these, the app taps are flaky)
+
+1. **MQTT write-probe (most reliable for config RE).** Build a global write
+   frame and publish it with `scripts/_publish_hex.py <hex>` — the robot
+   applies it (userCtrl=49 + PbMap.f11/f12), then `query_map.py` reads it
+   back. To map an unknown field: set a distinctive value, open the app
+   screen to read its label, then republish the ORIGINAL frame to restore.
+   Build frames with `protocol._field_f32/_field_bytes/_encode_varint`
+   (see the original-frame builder in commit history / section K).
+2. **ALWAYS rescale screenshots before reading** (the API rejects >~1MB /
+   large dims):
+   ```bash
+   adb -s fc7d1e36 exec-out screencap -p > /tmp/s.png
+   convert /tmp/s.png -resize 480x /tmp/s_small.png   # then Read /tmp/s_small.png
+   ```
+3. **App Save is gated on an "Override / Keep Custom" dialog** — the BLE/MQTT
+   write only fires after you tap one (Keep Custom = userCtrl=49). Sliders
+   are SeekBars (drag, don't tap digits). Settings rows near the screen edge
+   don't register taps — scroll them to mid-screen first and verify the
+   `checked` state in the uiautomator dump before Save.
+4. **Restore is deterministic via MQTT** — don't fight the app to undo a
+   change; just republish the known-original frame (section K has it).
+
 ## 🛰️ LIVE CAPTURE SESSION 2026-05-30 (app logged in, mitmproxy on .180)
 
 This machine **is** the capture host `192.168.1.180`. mitmproxy was just
@@ -2065,9 +2088,43 @@ NO-ASSUMPTIONS violation behind the 49a7ac6→355dd1f→bfb37bc revert-war.
    reveals its label), THEN one clean complete remap.
 
 ### Still to capture (other gaps)
-- f2/f3/f5/f8/f15/f16 + cleanDir/startProgress/lineFollowMode homes (for remap).
-- Final enum toggles (f11/f13/f14) — app radio taps flaky; retry or MQTT-probe.
 - gap 5 headlight schedule, granular schedules, PIN, WiFi-write, Bind-RTK.
+
+### K. FINAL PbZoneConfig layout decision (2026-05-30) — basis for the remap
+MQTT write-probe (set distinctive values, read app, restore — all via
+`_publish_hex.py`, reliable) + the earlier toggles settle it. The real
+PbZoneConfig only ever carries fields [1,4,6–19] on the wire (no f2/f3/f5),
+so raiseCutHeight/lowerCutHeight/brushSpeed are NOT steady-state fields
+(raise/lower are momentary +/- commands the card sends; keep as write-only).
+
+**Layout to ship (encoder `_TASK_CONFIG_FIELDS` + decoder
+`_ZONE_CONFIG_*_NAMES`):**
+| f | name | basis |
+|---|---|---|
+| 1 | cutHeight | confirmed (app 60mm) |
+| 4 | moveSpeed (f32) | confirmed (app 0.6) |
+| 6 | cutSpeed | anchored (Blade Speed may actually be a separate enum — f6=1 showed "-2"; keep cutSpeed, low-risk) |
+| 7 | cleanMode | anchored |
+| 8 | enabledZoneMask (uint64) | confirmed (all-ones); NOT a settable param — decode-only |
+| 9 | pathSpacing | **CONFIRMED** (app 35cm=f9) |
+| 10 | perimeterMowLaps | **CONFIRMED** (app Zone-Perimeter=f10) |
+| 11 | perimeterMowDir | anchored |
+| 12 | noGoMowLaps | **CONFIRMED** (app No-Go=f12) |
+| 13 | zoneObstacleDetect | anchored (was obsDecMode) |
+| 14 | mowingOrder | anchored (was pathOrder, bool) |
+| 15 | (unknown, =0) | LEAVE RAW — no confirmed meaning |
+| 16 | relativeCleanDir (stripe angle) | anchored (=90, an angle) |
+| 17 | safeMarginMode (Offset=1/Precise=0) | **CONFIRMED** (toggle) |
+| 18 | turnOffOuterMotor (ON=1) | **CONFIRMED** (toggle); was disableOuterDischarge |
+| 19 | followDetectMode | anchored |
+
+**DROP (current code wrong, no confirmed home):** cleanDir@8,
+startProgress@16, lineFollowMode@17. **Global write opcode:** userCtrl=49
+(GLOBAL_SETTING_N) + PbMap.f11 globalZoneConfig — proven via MQTT.
+
+Remap = rewrite both maps to the above, add `encode_set_global_zone_config`
+(userCtrl=49), keep per-zone userCtrl=9, fix the card-facing service params
+(drop line_follow_mode, add safe_margin_mode), update pinned tests.
 - Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor — needs a
   Save that transmits; this session's didn't).
 - Gap 4 enum values (toggle Channel Obstacle Detection, re-query).
