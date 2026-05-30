@@ -641,18 +641,38 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             return None
         return len(map_data.get("goZones", []))
 
+    @staticmethod
+    def _trim_poly(points: list[dict]) -> list[dict]:
+        """Round polygon coordinates to 4 decimal places (~1 cm precision in ENU metres).
+
+        Full float64 precision uses ~18 chars per coordinate; 4 dp uses ~7 chars,
+        cutting polygon size by ~60% and keeping the map sensor under HA's 16 kB
+        attribute limit even for large multi-zone maps.
+        """
+        return [{"x": round(p["x"], 4), "y": round(p["y"], 4)} for p in points]
+
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Full map data for the Lovelace card."""
         map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
         data = self.coordinator.data.get(self._thing_name) or {}
         attrs: dict[str, Any] = {}
+
         if "goZones" in map_data:
-            attrs["go_zones"] = map_data["goZones"]
+            attrs["go_zones"] = [
+                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z
+                for z in map_data["goZones"]
+            ]
         if "nogoZones" in map_data:
-            attrs["nogo_zones"] = map_data["nogoZones"]
+            attrs["nogo_zones"] = [
+                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z
+                for z in map_data["nogoZones"]
+            ]
         if "channels" in map_data:
-            attrs["channels"] = map_data["channels"]
+            attrs["channels"] = [
+                {**ch, "polygon": self._trim_poly(ch["polygon"])} if "polygon" in ch else ch
+                for ch in map_data["channels"]
+            ]
         if "gpsOrigin" in map_data:
             attrs["gps_origin"] = map_data["gpsOrigin"]
         if "chargingStation" in map_data:
@@ -661,15 +681,22 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["mowing_settings"] = map_data["globalZoneConfig"]
         if "globalChannelConfig" in map_data:
             attrs["channel_config"] = map_data["globalChannelConfig"]
+
         path_data = (self.coordinator.data.get(self._thing_name) or {}).get("pathData")
         if path_data:
-            attrs["mow_path"] = path_data
-        # Include live robot + RTK position and fix quality so the card updates without a separate entity
+            # Also trim mow-path track points to 4 dp
+            trimmed_zones = [
+                {**gz, "trackPoints": self._trim_poly(gz.get("trackPoints", []))}
+                for gz in path_data.get("goZones", [])
+            ]
+            attrs["mow_path"] = {"goZones": trimmed_zones}
+
+        # Live robot + RTK position and fix quality
         for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM", "rtkStatus", "workStatus"):
             val = data.get(key)
             if val is not None:
                 attrs[key] = val
-        # Also expose the human-readable RTK label so the card doesn't need to map integers
+
         rtk_raw = data.get("rtkStatus")
         if rtk_raw is not None:
             _RTK_LABELS = {0: "No fix", 1: "Float fix", 2: "Fixed", 3: "RTK fixed"}
