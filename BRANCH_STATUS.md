@@ -1766,6 +1766,77 @@ distinct answers, don't conflate them:
      but disabled/experimental. The 4G-away-from-HA case is not achievable from
      the client side on current evidence.** `tools/_apk/` is gitignored (`_*`).
 
+   **⚡ BREAKTHROUGH (supersedes the verdict above) — #97 IS ACHIEVABLE; it's an
+   SDP-shaping problem, NOT identity/registration.** User corrected me: the robot
+   is **multi-viewer** (two phones, same owner account, stream simultaneously).
+   So our failures = our *viewer* was rejected, not the robot refusing extras.
+   Decisive test: with the capture tool's KVS-WSS truncation lifted (1400→8000 in
+   `tools/capture.py`), captured the app's **complete** SDP offer (3623 chars),
+   then **replayed it verbatim** from our own viewer connection (our clientId,
+   owner tokens) → **robot returned `ICE_CANDIDATE` + `SDP_ANSWER`.** So the robot
+   answers an app-shaped offer from us. The gate is purely the **offer SDP**.
+   - Robot's answer selects **H.264 PT-equiv, `profile-level-id=42e01f`,
+     `packetization-mode=1`** (Constrained Baseline 3.1). The robot's camera is
+     **H.264 video-only** (app offer has ONE m-line, `BUNDLE 0`, no audio).
+   - Why our `aiortc` offers are ignored (structural deltas vs the app's, found by
+     diffing): aiortc emits **video+audio** (extra `m=audio`); H264 present but
+     after VP8; missing `transport-cc`/`ccm fir` feedback; only 3 header
+     extensions vs the app's 11; **`a=ssrc`/`a=msid` on a recvonly m-line** (app
+     has none); no `extmap-allow-mixed`/`rtcp-rsize`/`ice-options:trickle`; and on
+     this dev box a **20+ candidate explosion** from docker interfaces vs the
+     app's 1 host + 2 relay.
+   - Attempts so far (all concurrent with a confirmed-live app stream = robot is
+     master): force-H264, video-only, and a munge adding transport-cc/fir/extmap/
+     rtcp-rsize/extmap-allow-mixed + stripping ssrc/msid — **none answered yet.**
+     Incremental munging is the wrong tactic (too many deltas at once).
+   - **Test harness** (`scripts/camera_feed_test.py`, env-gated, off by default):
+     `LYMOW_ACCESS_TOKEN`/`LYMOW_ID_TOKEN` (use owner tokens, skip login),
+     `LYMOW_KVS_CLIENT_PREFIX`, `LYMOW_FORCE_H264`, `LYMOW_VIDEO_ONLY`,
+     `LYMOW_MUNGE_OFFER` (+ `_munge_offer()`). Owner tokens pulled from app
+     `RKStorage` via `adb su`, kept in subprocess env only.
+   - **Next (methodical):** bisect — start from the app's verbatim offer (known to
+     answer) and swap in OUR ufrag/pwd/fingerprint/candidates/ssrc piece by piece
+     until it breaks, to find the exact sensitive field; OR generate the offer with
+     a native-shaped stack (Pion / GStreamer `webrtcbin` / libwebrtc) instead of
+     aiortc; OR hand-build a recvonly H264 offer string with our crypto + the
+     app's attribute set and matching PT numbers. Once an answer→frame is proven,
+     wire it into a `camera.py` Cloud(KVS) mode behind a LAN/Cloud selector.
+   - **The earlier "not achievable client-side" verdict is WRONG — remote KVS
+     streaming for HA is achievable; remaining work is SDP convergence.**
+
+   **⚡⚡ THE KEY FIELD FOUND + FULL WEBRTC CONNECT ACHIEVED (2026-05-30 night).**
+   Signaling-level **bisection** (raw WS, mutate the app's known-good offer one
+   axis at a time, check for SDP_ANSWER) gave a clean verdict:
+   | mutation of app offer | answered? |
+   |---|---|
+   | verbatim (control) | ✅ |
+   | our ICE ufrag/pwd | ✅ (we can use our own ICE creds) |
+   | strip all `a=extmap` | ✅ (extmaps not required) |
+   | strip `a=rtcp-fb` | ✅ |
+   | single H264 codec only | ✅ |
+   | **strip `a=ice-options`** | ❌ **NO ANSWER** |
+   → **The robot REQUIRES `a=ice-options:trickle renomination` in the offer, and
+   `aiortc` never emits it (no trickle).** That one missing line was the entire
+   blocker the whole time. Added it via `_munge_offer` (`LYMOW_MUNGE_OFFER`).
+   - With it, the full aiortc viewer run (video-only + H264 + munge, owner tokens,
+     concurrent with a live app stream): **`recv SDP_ANSWER` → ICE `completed` →
+     `PC state: connected`.** The WebRTC peer connection to the robot **fully
+     establishes over the cloud.** This is the hard part — DONE & PROVEN.
+   - **Final mile remaining: no decoded video frame yet.** `track.recv()` hangs
+     120s → no RTP video reaching the decoder despite PC connected. Leading
+     hypotheses (in order): (a) **PT mismatch** — robot likely sends H264 as PT 98
+     (its preference) while aiortc negotiated PT 101 for 42e01f, so packets get
+     dropped; force our offer's 42e01f to PT 98, or remap. (b) **candidate noise**
+     — this dev box emits 20+ host candidates from docker/veth interfaces and NO
+     TURN-relay candidate; a real HA box (clean net) likely "just works", and we
+     should add the KVS TURN servers so a relay candidate is offered. (c) keyframe
+     (PLI) not requested. Next session: log the robot's answer SDP (PT + a=sendonly
+     dir), and an RTP-arrival counter, to pick between (a)/(b).
+   - Env harness now also has `LYMOW_VIDEO_ONLY`, `LYMOW_FORCE_H264`,
+     `LYMOW_MUNGE_OFFER` (+ `_munge_offer` adds `ice-options`, transport-cc/fir,
+     extmap, rtcp-rsize, extmap-allow-mixed, strips ssrc/msid). capture.py
+     KVS-WSS truncation raised 1400→8000 to capture full offers.
+
 ### Continuation, 2026-05-27 late evening (same supervisor session)
 
 User asked to keep iterating. Three more commits shipped on the
@@ -2062,22 +2133,30 @@ UI-vs-proto names (f17/f18 by choice; wifi f5=secret; zone f8/f9), all benign.
 **Enums / error tables (2026-05-30):** workStatus enum already complete in
 const.py; setting-value enums (cutSpeed 3–6, obsDecMode/followDetectMode 1/2,
 perimeterMowDir) verified live earlier. **Error/warning code tables now
-AUTHORITATIVE (commit 713f1cc):** the localized description *text* is remote
-i18n (`warnings.code_15`…, `errors.unknown_error` fetched via `remote_config.*`),
-but the **PbErrorCode (90 codes) and PbWarningCode (63 codes) enums — symbolic
-names + their numeric values — ARE in the bytecode.** Extracted by reading each
-enum member's LoadConst register (declaration order is non-sequential, e.g.
-WARNING_BLADE_STUCK=32 sits between 13 and 14, so positions were NOT assumed).
-This REPLACED the old 10-entry hand-curated `ERROR_DESCRIPTIONS`, which had
-codes 51/52 wrong — those were *warning* codes (no-RTK-base / RTK-bind-fail), not
-error codes (real error 51/52 = dock-signal-lost / dock-path-not-found).
-`WARNING_DESCRIPTIONS` is new; the error sensor now also exposes
-`warning_descriptions`. Descriptions are humanized from the symbolic names
-(codes 18/71 use the app's exact wording). Verified live: E18=ROBOT_INCLINE
-(tilt ✓), E71=ACTION_TIMEOUT ✓. Symbolic audio-error categories also found:
+AUTHORITATIVE (commits 713f1cc → 573c8b1):** two layers, both from the bytecode.
+(1) The **PbErrorCode (90) and PbWarningCode (63) enums** — symbolic names + numeric
+values — extracted by reading each enum member's LoadConst register (declaration
+order is non-sequential, e.g. WARNING_BLADE_STUCK=32 between 13 and 14, so positions
+were NOT assumed). (2) **The official user-facing text IS bundled too** — earlier
+"remote i18n only" note was WRONG: the i18next EN (+fr/de/es…) resource ships in the
+bundle as `NewObjectWithBufferLong` literals (`errors`/`warnings` namespaces), keyed
+by `code_<enumvalue>` (grouped, e.g. `code_50_53_67_68_69_70_71`). So:
+- `ERROR_DESCRIPTIONS` = official titles for the 54 user-surfaced codes (groups
+  expanded) + humanized enum-name fallback for internal codes. Matches the app
+  exactly (E71="Navigation Internal Error", E18="Excessive Tilt Detected").
+- `ERROR_REMEDIATION` (new) = official step-by-step fix text (`*_detail` keys),
+  surfaced by the error sensor as a `remediation` attribute.
+- `WARNING_DESCRIPTIONS` = official text for the 31 surfaced warning codes +
+  humanized fallback. Error sensor also exposes `warning_descriptions`.
+This REPLACED the old 10-entry hand-curated table, which had codes 51/52 wrong
+(those were *warning* codes, not error codes). The remote `remote_config.*` fetch
+only swaps text for the *active* device language at runtime; the EN catalog is
+the bundled fallback. Phone AsyncStorage (`@robot_errors`) also caches each fired
+error as `{message,code:"(E15)",detail}` — confirms display "E<n>" uses the enum
+value (E15 ↔ error 15 "Weak RTK Signal"). Symbolic audio-error categories also found:
 AUDIO_ERROR_{BATTERY_LOW, BLADE_STUCK, CLIFF, DOCK_FAIL, INI_FAIL, ROBOT_SLIP, SLOPE}.
-**Bytecode decoding is COMPLETE** — every message/field is verified; the only
-non-extractable piece (error-description text) is remote i18n, not in the binary.
+**Bytecode decoding is COMPLETE** — every message/field verified, and now the
+human-facing error/warning text + remediation are extracted too (not just codes).
 
 **NEW fields now named & available for future HA features (numbers verified):**
 `vehLedStatus`/`camLedStatus` (robotConfig f13/f12, LED brightness 0–4 → a
