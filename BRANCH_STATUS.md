@@ -1918,9 +1918,38 @@ The bell list ("Weak RTK Signal (E15)", 2026/05/27) fired no new REST
 endpoint — sourced from MQTT warning codes we already decode. Gap 9 is
 effectively a UI concern (history list), not a missing backend endpoint.
 
-### Still to capture (needs per-screen nav / BTSnoop / toggle+re-query)
-- **PbZoneConfig remap FIX** (code) — highest priority, fully specced above.
-- Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor, re-query).
+### F. Toggle-confirm experiment (2026-05-30) — INCONCLUSIVE (Save didn't transmit)
+Tried to pin gap-3 fields by toggling **Turn-Off-Outer-Motor → ON** and
+**Safe-margin → Precise** in Global Advanced, then re-querying. Result:
+globalZoneConfig came back **byte-identical** (f15=0, f18=0 unchanged), and
+**neither BTSnoop (handle 0x14) nor MQTT pbinput showed any write frame**
+during the window — only heartbeats. Conclusion: **the app's Save did not
+transmit** (tap likely missed / dirty-state not triggered), so the robot
+config was never changed (nothing to restore) and the experiment proves
+nothing about f15/f18. **Gap-3 field numbers remain UNCONFIRMED** — do NOT
+label f15/f18 as safeMargin/turnOffOuterMotor without a real capture.
+
+### G. PbZoneConfig remap — readiness (IMPORTANT before coding the fix)
+**Provably wrong & safe to assert:** f9 = pathSpacing (app 35cm = wire f9),
+f10 = perimeterMowLaps (app "Zone Perimeter Laps" 1 = f10), f12 =
+noGoMowLaps (app 1 = f12). The shipped `f9 relativeCleanDir / f10
+pathSpacing` is definitely mislabeled. **Corroborated but NOT independently
+byte-confirmed:** f11 perimeterMowDir, f13 zoneObstacleDetect, f14
+mowingOrder, f16 relativeCleanDir (reply-4 + value-plausibility only).
+**Decision:** the remap must be self-consistent across ALL 19 fields
+(encoder+decoder+robot share one layout), so it should NOT ship on
+partially-inferred labels. **Prerequisite for the remap = one clean
+capture of the app's GLOBAL "Save" write frame** (shows every field with a
+known app value in one shot → definitive full layout). That capture needs
+the app Save to actually transmit — best done in a session where the app
+UI is watched to confirm the Save registers (the ADB tap missed this time).
+Until then: the bug is documented, f9/f10/f12 are proven, but the field-map
+rewrite is deliberately deferred (NO-ASSUMPTIONS + revert-war history).
+
+### Still to capture (needs per-screen nav / BTSnoop / verified-Save)
+- **Global "Save" write frame** — unblocks the PbZoneConfig remap (above).
+- Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor — needs a
+  Save that transmits; this session's didn't).
 - Gap 4 enum values (toggle Channel Obstacle Detection, re-query).
 - Gap 5 Headlight Mode schedule frame (BTSnoop on a schedule set).
 - Granular schedules add/edit/delete/toggle (BTSnoop).
