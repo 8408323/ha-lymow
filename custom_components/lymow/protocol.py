@@ -710,9 +710,11 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     #   total area — denominator for mowProgress), f3=currentTaskZone
     #   (PbZoneBasicInfo, hashId=f2 — which go-zone is being mowed now; present in
     #   the QUERY_PATH reply during an active task), f5=mowProgress(float32 0–1).
-    #   NOTE: there is no geometric coverage-path polyline — QUERY_PATH returns
-    #   this task/progress summary, not point geometry; the live trail is built
-    #   from the robot pose (field 14) accumulated over time.
+    #   NOTE: the QUERY_PATH reply we captured carried only this task/progress
+    #   summary. The coverage-path geometry DOES exist as PbOutput.path
+    #   (PbPath = {poses[], cleanFinishedZones[]}, per APK) but wasn't populated
+    #   in our reply — decoding it is an open gap. The live trail can also be
+    #   built from the robot pose (field 14) accumulated over time.
     area_raw = _first(fields, 12)
     if isinstance(area_raw, bytes):
         area_fields = _decode_fields(area_raw)

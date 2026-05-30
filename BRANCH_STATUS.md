@@ -1878,6 +1878,49 @@ turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
   safe_margin_mode/turn_off_outer_motor/stripe_angle controls, plus a Blade
   Speed select (cutSpeed Eco=3/Standard=4/Power=5/Turbo=6).
 
+## 📋 2026-05-30: AUTHORITATIVE undecoded-gaps list (from APK proto schema)
+
+Source: `tools/apk/assets/index.android.bundle` (protobufjs schema strings
+`pb.PbInput.*` / `pb.PbOutput.*` / `pb.Pb<Msg>.<field>`). Cross-referenced vs the
+integration's encoders/decoders. (Captured #1–4 of the "next" list this session:
+currentTaskZoneHashId + softwareVersion decode shipped; pause/resume already
+wired; clean-history is REST. The rest are blocked on live capture — phone USB
+dropped mid-session.)
+
+**Command gaps — PbInput fields with NO encoder:**
+- `theftSetting` → **anti-theft + device-lock** (PbTheftSetting = geoFencing[covered]
+  + antiTheft + deviceLock; LOCK=userCtrl 18). NOT implemented.
+- `floorData` → **multi-floor / multi-map** (PbFloor{floors}; FLOOR_SWITCH/ADD/
+  DELETE/MODIFY = userCtrl 40–43; BACKUP/RESTORE 44/45 are covered). NOT implemented.
+- `remoteControl` → **manual remote drive over MQTT** (PbRemoteControl). Only BLE
+  drive (`ble_drive`) exists; the MQTT remoteControl path is undecoded.
+- `cutZone` → **split a zone by a cut line** (PbCutZone; CUT_ZONE=56). merge is
+  covered; cut/split-by-line is not confirmed.
+- `debugSetting` → debug settings (low value). `btMap`/`algoLocInput`/
+  `algoSegInput`/`baseInput`/`wirelessStatus` → internal/algorithm (not user features).
+
+**Telemetry gaps — PbOutput fields NOT decoded:**
+- `path` → **coverage-path geometry** — PbPath = {poses[], cleanFinishedZones[]}.
+  HIGH value for the map card (draw mowed path + finished zones). Exists but our
+  QUERY_PATH reply didn't populate it; needs the right query trigger. **Top gap.**
+- `promptInfo` → **operation result codes** — PbPromptInfo = {mutateRet,
+  selfCheckingRet, zoneRet}. Confirms command success/failure + self-check result.
+- `cleanReport` → **detailed per-session report** — PbCleanReport = {cleanInfo,
+  errorList, statusTimes}. Richer than the REST history we use.
+- `cleanInfo.areaInfo.cleanZoneIds` → which zones were cleaned (area/progress is
+  decoded; cleanZoneIds is not).
+- `wifiConfigRes` → Wi-Fi set result (and set_wifi is BLE-only — see #200).
+- `localizationInfo`, `iotCmd`, `btMap`, `algo*`, `baseOutput` → internal/minor.
+
+**Likely NOT a robot wire command (cloud/app-side):**
+- **Notifications** (the per-notification tristate toggles) — there is no PbInput
+  notification field; these are app/cloud push preferences (REST), not a robot
+  protobuf command. Capture via mitmproxy REST when the phone is back.
+
+**Known userCtrl, intentionally not wired (low value / risky):** SELF_CHECKING(16),
+CHARGING_STATION_RESET(17), FORCE_REINIT(28), RECORDING start/stop(30/31),
+RESTORE_FACTORY(37), RESET_INIT(47), SWITCH_LTE_AIRPLANE(54), modify-zone-edge(10/11).
+
 ## ⚠️ 2026-05-30: MQTT backend live-validated; Wi-Fi BLE-only (#200); RTK-rebind caution
 
 Live test publishing app→robot frames to `/device/{thing}/pbinput` from a
