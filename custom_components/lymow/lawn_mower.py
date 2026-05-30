@@ -98,6 +98,7 @@ _SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
 _SERVICE_SET_HEADLIGHT_SCHEDULE = "set_headlight_schedule"
 _SERVICE_SET_PIN = "set_pin"
 _SERVICE_SET_WIFI = "set_wifi"
+_SERVICE_BIND_RTK = "bind_rtk"
 _SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
@@ -517,6 +518,12 @@ _SET_WIFI_SCHEMA = vol.Schema(
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required("ssid"): vol.All(cv.string, vol.Length(min=1)),
         vol.Optional("password", default=""): cv.string,
+    }
+)
+_BIND_RTK_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("base_id"): vol.All(cv.string, vol.Length(min=1)),
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -1116,6 +1123,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_pin(entity._thing_name, pin)
 
+    async def handle_bind_rtk(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        base_id: str = call.data["base_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_bind_rtk(entity._thing_name, base_id)
+
     async def handle_set_wifi(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         ssid: str = call.data["ssid"]
@@ -1349,6 +1366,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     )
     hass.services.async_register(DOMAIN, _SERVICE_SET_PIN, handle_set_pin, schema=_SET_PIN_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_SET_WIFI, handle_set_wifi, schema=_SET_WIFI_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_BIND_RTK, handle_bind_rtk, schema=_BIND_RTK_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
     )

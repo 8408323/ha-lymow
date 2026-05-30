@@ -1226,6 +1226,22 @@ def encode_set_wifi(ssid: str, password: str) -> bytes:
     return _field_bytes(17, inner)  # PbInput.wifiConfig
 
 
+def encode_bind_rtk(base_id: str) -> bytes:
+    """Encode an RTK-base bind command (PbRobotConfig.rtkBind, field 17).
+
+    Captured live 2026-05-30 (re-binding the current base): ``PbInput {f2:49,
+    f13(robotConfig):{f17:{f1: baseId}}}`` — no userCtrl (robotConfig dispatch).
+    Binds the mower to the RTK base station with the given ID. (Distinct from the
+    Wi-Fi command, which carries f17 at the PbInput top level, not in robotConfig.)
+    """
+    if not base_id:
+        raise ValueError("base_id must not be empty")
+    cfg = _field_bytes(17, _field_str(1, base_id))  # PbRobotConfig.rtkBind
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
 def encode_set_pin(pin: str) -> bytes:
     """Encode an LCD-screen PIN write (PbRobotConfig.lcdPinCode).
 

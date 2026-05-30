@@ -466,6 +466,26 @@ set_wifi:
         text:
           type: password
 
+bind_rtk:
+  name: Bind RTK base
+  description: >
+    Bind the mower to an RTK base station by its id (PbRobotConfig.rtkBind).
+    The id is printed on the base and shown on the app's Bind RTK screen.
+    Re-binding the current base is harmless; binding a different base changes
+    the positioning reference.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    base_id:
+      name: RTK base id
+      description: The RTK base station identifier (e.g. starts with "LK").
+      required: true
+      example: "LK000000000000"
+      selector:
+        text:
+
 set_network_priority:
   name: Set network priority
   description: >

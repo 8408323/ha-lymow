@@ -491,6 +491,19 @@ async def test_async_get_clean_history_wraps_underlying_errors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_bind_rtk_publishes_encoded_command() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_bind_rtk(THING, "LK000PLACEHOLD00")  # placeholder base id
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(_decode_fields(_first(cfg, 17)), 1) == b"LK000PLACEHOLD00"
+
+
+@pytest.mark.asyncio
 async def test_async_set_wifi_publishes_encoded_command() -> None:
     coord, mqtt, _ = _make_coordinator()
     await coord.async_set_wifi(THING, "TestNet", "testpass12")  # placeholder creds
