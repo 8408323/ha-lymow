@@ -456,7 +456,8 @@ class LymowMapCard extends HTMLElement {
     let liveTrail = "";
     if (isMowingNow && this._mowTrail.length >= 2) {
       const pts = this._mowTrail.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
-      liveTrail = `<polyline points="${pts}" fill="none" stroke="#b9f6ca" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" pointer-events="none"/>`;
+      // Bright vivid green trail — clearly visible against the zone fills
+      liveTrail = `<polyline points="${pts}" fill="none" stroke="#00e676" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.95" pointer-events="none"/>`;
     }
 
     // ── Go-zones ──────────────────────────────────────────────────────────────
@@ -467,18 +468,17 @@ class LymowMapCard extends HTMLElement {
       const enabled = z.isEnabled !== false;
       const mowed = mowedByZone[z.hashId];
 
-      // When mow data is present, zone base fill is dimmer ("remaining" area).
+      // Zone base fill is always medium green — the mowed overlay sits on top.
       const baseFill = beingEdited ? "#fff3e0"
         : selected ? "#1b5e20"
         : !enabled ? "#e0e0e0"
-        : hasMowData ? "#2e7d32"   // dark green = remaining (unmowed)
-        : "#43a047";               // normal green
+        : "#43a047";               // always medium green background
       const stroke = beingEdited ? "#ef6c00" : selected ? "#a5d6a7" : enabled ? "#2e7d32" : "#9e9e9e";
       const dash = enabled ? "" : `stroke-dasharray="2,1"`;
 
-      // Mowed-area overlay: convex hull of track points clipped to the zone polygon.
-      // Convex hull avoids the self-intersecting shape you'd get from connecting
-      // recording-order GPS fixes directly as a polygon.
+      // Mowed-area overlay: convex hull of track points, clipped to zone polygon,
+      // filled with dark forest green. Convex hull covers the full swept area
+      // without the self-intersections you'd get from raw recording-order GPS fixes.
       let mowedOverlay = "";
       if (mowed && !beingEdited) {
         const hull = _convexHull(mowed.trackPoints);
@@ -487,7 +487,7 @@ class LymowMapCard extends HTMLElement {
           const clipId = `mow-clip-${z.hashId}`;
           mowedOverlay = `
             <defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>
-            <polygon points="${hpts}" fill="#69f0ae" fill-opacity="0.55" stroke="none"
+            <polygon points="${hpts}" fill="#1b5e20" fill-opacity="0.72" stroke="none"
               clip-path="url(#${clipId})" pointer-events="none"/>`;
         }
       }
@@ -827,7 +827,7 @@ class LymowMapCard extends HTMLElement {
           ? _li(`<rect x="1" y="1" width="7" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/><rect x="8" y="1" width="7" height="10" fill="#a5d6a7" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Mowed / Left")
           : _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
       isMowingNow && this._mowTrail.length >= 2
-        ? _li(`<polyline points="1,11 6,7 11,4 19,2" fill="none" stroke="#b9f6ca" stroke-width="2" stroke-linecap="round"/>`, "0 0 20 12", "Mow trail")
+        ? _li(`<polyline points="1,11 6,7 11,4 19,2" fill="none" stroke="#00e676" stroke-width="2" stroke-linecap="round"/>`, "0 0 20 12", "Mow trail")
         : "",
       nogoZones.length ? _li(`<rect x="1" y="1" width="14" height="10" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="1.5" rx="1" stroke-dasharray="3,2"/>`, "0 0 16 12", "No-go") : "",
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
