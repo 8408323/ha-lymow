@@ -661,6 +661,9 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["mowing_settings"] = map_data["globalZoneConfig"]
         if "globalChannelConfig" in map_data:
             attrs["channel_config"] = map_data["globalChannelConfig"]
+        path_data = (self.coordinator.data.get(self._thing_name) or {}).get("pathData")
+        if path_data:
+            attrs["mow_path"] = path_data
         # Include live robot + RTK position and fix quality so the card updates without a separate entity
         for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM", "rtkStatus", "workStatus"):
             val = data.get(key)
