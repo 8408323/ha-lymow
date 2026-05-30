@@ -1998,6 +1998,20 @@ followDetectMode19. → DECISION NEEDED: align f17/f18 to the proto names
 boustrophedon/wallFollowing/chess/curPose/cleanStartTime/usedBattery/errorList —
 not user-facing; useful end-of-run bits are cleanStartTime, usedBattery.)
 
+**PbRobotInfo (PbOutput f5 — core status):** robotStatus=1, battery=2,
+wifiSignalQuality=3, lteSignalQuality=4, **btSignalQuality=5**, workStatus=6,
+isRecharging=7, isCharging=8, **wifiWorking=9, lteWorking=10**. → all our
+decodes ✓. **PbAreaInfo:** areaOrGlobal=1, cleanZoneIds=2. RTK-diag structured
+msg (= rtkDiagnosticL1/L2 f35/f36, matches the f8 JSON): diffAge=1, loraBps0-2=
+2-4, hwDc0-2=5-7, cwRatio0-2=8-10, antValue0-2=11-13.
+
+**NEW fields now named & available for future HA features (numbers verified):**
+`vehLedStatus`/`camLedStatus` (robotConfig f13/f12, LED brightness 0–4 → a
+brightness select), `mowAngle` (schedule f10, per-task stripe angle),
+`btSignalQuality`/`wifiWorking`/`lteWorking` (robotInfo f5/f9/f10), `scheduleId`
+(robotConfig f19). All decoder/encoder field NUMBERS across PbInput, PbOutput,
+PbRobotInfo, PbRobotConfig, PbZoneConfig, PbSchedule are APK-CONFIRMED correct.
+
 ---
 
 ## ✅ DONE 2026-05-30: PbZoneConfig remap SHIPPED (commit 246c639)
