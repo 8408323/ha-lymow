@@ -501,13 +501,13 @@ def _build_map_response(
         if pp:
             zone_pb += _field_bytes(3, pp)
         if zone.get("cutHeight") is not None or zone.get("pathSpacing") is not None:
-            # PbZoneConfig wire layout (Hermes #9432): f1 cutHeight (int),
-            # f10 pathSpacing (int).
+            # PbZoneConfig wire layout (live-confirmed 2026-05-30): f1 cutHeight,
+            # f9 pathSpacing.
             cfg = b""
             if zone.get("cutHeight") is not None:
                 cfg += _field_i32(1, zone["cutHeight"])
             if zone.get("pathSpacing") is not None:
-                cfg += _field_i32(10, int(zone["pathSpacing"]))
+                cfg += _field_i32(9, int(zone["pathSpacing"]))
             zone_pb += _field_bytes(2, cfg)
 
         content += _field_bytes(1, zone_pb)
@@ -784,56 +784,52 @@ def test_decode_task_config_drops_non_boolean_bool_fields() -> None:
     assert decode_task_config(pb) == {"chargingMode": 1, "disableChargingPark": True}
 
 
-def test_decode_zone_config_canonical_19_fields() -> None:
-    """PbZoneConfig wire layout — pinned to Hermes class #9432.
+def test_decode_zone_config_canonical_fields() -> None:
+    """PbZoneConfig wire layout — field numbers LIVE-CONFIRMED 2026-05-30.
 
-    Field numbers and types come straight from the app's bytecode (see
-    BRANCH_STATUS gap audit, section A): an earlier mapping had several
-    fields off-by-one between f9 and f16, which the live capture revealed.
+    Confirmed by correlating the app's labeled Mowing Settings to the wire +
+    toggle/re-query (BRANCH_STATUS C/I/K/M): pathSpacing=f9, perimeterMowLaps
+    =f10, noGoMowLaps=f12, safeMarginMode=f17, turnOffOuterMotor=f18. The prior
+    map had a +1 shift (f9 mislabelled relativeCleanDir / f10 pathSpacing);
+    cleanDir@8 / startProgress@16 / lineFollowMode@17 had no real home.
     """
 
-    # Exercise every supported field at its canonical wire position.
+    # Exercise every supported field at its confirmed wire position.
     pb = (
         _field_i32(1, 60)  # cutHeight
-        + _field_i32(2, 1)  # raiseCutHeight (bool=1)
-        + _field_i32(3, 0)  # lowerCutHeight (bool=0)
         + _field_f32(4, 0.6)  # moveSpeed (float)
-        + _field_i32(5, 90)  # brushSpeed
         + _field_i32(6, 4)  # cutSpeed
         + _field_i32(7, 1)  # cleanMode
-        + _field_i32(8, 2)  # cleanDir
-        + _field_i32(9, 35)  # relativeCleanDir  ← was wrongly labelled pathSpacing
-        + _field_i32(10, 25)  # pathSpacing       ← was wrongly labelled perimeterMowLaps
-        + _field_i32(11, 2)  # perimeterMowLaps   ← was wrongly labelled perimeterMowDir
-        + _field_i32(12, 1)  # perimeterMowDir
-        + _field_i32(13, 1)  # noGoMowLaps
-        + _field_i32(14, 2)  # obsDecMode
-        + _field_i32(15, 1)  # pathOrder (bool=1)
-        + _field_i32(16, 0)  # startProgress
-        + _field_i32(17, 1)  # lineFollowMode (bool=1)
-        + _field_i32(18, 0)  # disableOuterDischarge (bool=0)
+        + _field_i32(9, 35)  # pathSpacing (cm) — CONFIRMED app 35cm
+        + _field_i32(10, 2)  # perimeterMowLaps
+        + _field_i32(11, 1)  # perimeterMowDir
+        + _field_i32(12, 3)  # noGoMowLaps
+        + _field_i32(13, 2)  # obsDecMode (zone obstacle)
+        + _field_i32(14, 1)  # pathOrder/mowingOrder (bool=1)
+        + _field_i32(16, 90)  # relativeCleanDir (stripe angle)
+        + _field_i32(17, 0)  # safeMarginMode (bool, Precise=0)
+        + _field_i32(18, 1)  # turnOffOuterMotor (bool=1)
         + _field_i32(19, 2)  # followDetectMode
     )
     out = decode_zone_config(pb)
     assert out["cutHeight"] == 60
-    assert out["raiseCutHeight"] is True
-    assert out["lowerCutHeight"] is False
     assert pytest.approx(out["moveSpeed"], abs=1e-4) == 0.6
-    assert out["brushSpeed"] == 90
     assert out["cutSpeed"] == 4
     assert out["cleanMode"] == 1
-    assert out["cleanDir"] == 2
-    assert out["relativeCleanDir"] == 35
-    assert out["pathSpacing"] == 25
+    assert out["pathSpacing"] == 35
     assert out["perimeterMowLaps"] == 2
     assert out["perimeterMowDir"] == 1
-    assert out["noGoMowLaps"] == 1
+    assert out["noGoMowLaps"] == 3
     assert out["obsDecMode"] == 2
     assert out["pathOrder"] is True
-    assert out["startProgress"] == 0
-    assert out["lineFollowMode"] is True
-    assert out["disableOuterDischarge"] is False
+    assert out["relativeCleanDir"] == 90
+    assert out["safeMarginMode"] is False
+    assert out["turnOffOuterMotor"] is True
     assert out["followDetectMode"] == 2
+    # Dropped/never-homed labels must not appear.
+    assert "lineFollowMode" not in out
+    assert "startProgress" not in out
+    assert "cleanDir" not in out
 
 
 def test_decode_zone_config_empty_and_partial() -> None:
@@ -851,8 +847,8 @@ def test_decode_zone_config_drops_non_boolean_bool_fields() -> None:
     unknown.
     """
 
-    assert decode_zone_config(_field_i32(2, 7)) == {}  # raiseCutHeight=7 → dropped
-    assert decode_zone_config(_field_i32(15, 9)) == {}  # pathOrder=9 → dropped
+    assert decode_zone_config(_field_i32(17, 7)) == {}  # safeMarginMode=7 → dropped
+    assert decode_zone_config(_field_i32(14, 9)) == {}  # pathOrder=9 → dropped
 
 
 def test_decode_channel_config_three_fields() -> None:
@@ -888,7 +884,7 @@ def test_decode_map_response_global_zone_and_channel_config() -> None:
         11,
         _field_i32(1, 60)  # cutHeight
         + _field_f32(4, 0.6)  # moveSpeed
-        + _field_i32(10, 25),  # pathSpacing
+        + _field_i32(9, 25),  # pathSpacing (confirmed f9)
     )
     extra += _field_bytes(12, _field_i32(1, 2) + _field_i32(2, 60))
     pb = _build_map_response_with_raw_extra(extra)
@@ -1936,7 +1932,7 @@ def test_encode_go_zone_zoneconfig_emits_full_pbzoneconfig() -> None:
                     "cutHeight": 40,
                     "moveSpeed": 0.8,
                     "pathSpacing": 25,
-                    "lineFollowMode": True,
+                    "safeMarginMode": True,
                     "followDetectMode": None,  # None is skipped
                 },
             }
@@ -1952,7 +1948,7 @@ def test_encode_go_zone_zoneconfig_emits_full_pbzoneconfig() -> None:
     assert cfg["cutHeight"] == 40
     assert pytest.approx(cfg["moveSpeed"], abs=1e-3) == 0.8
     assert cfg["pathSpacing"] == 25
-    assert cfg["lineFollowMode"] is True
+    assert cfg["safeMarginMode"] is True
     assert "followDetectMode" not in cfg  # None skipped
 
 
@@ -2460,12 +2456,12 @@ def test_encode_set_task_config_wraps_in_pbinput() -> None:
     assert _first(f, 2) == 49  # version
     assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
     cfg = _decode_fields(_first(f, 26))  # PbZoneConfig submessage
-    # Wire field numbers pinned to canonical PbZoneConfig (Hermes #9432).
+    # Wire field numbers LIVE-CONFIRMED 2026-05-30 (BRANCH_STATUS C/I/K/M).
     assert _first(cfg, 1) == 60  # cutHeight
-    assert _first(cfg, 9) == 35  # relativeCleanDir
-    assert _first(cfg, 10) == 200  # pathSpacing
-    assert _first(cfg, 11) == 2  # perimeterMowLaps
-    assert _first(cfg, 15) == 1  # pathOrder (bool -> 1)
+    assert _first(cfg, 9) == 200  # pathSpacing (confirmed f9)
+    assert _first(cfg, 10) == 2  # perimeterMowLaps (confirmed f10)
+    assert _first(cfg, 14) == 1  # pathOrder (bool -> 1)
+    assert _first(cfg, 16) == 35  # relativeCleanDir (stripe angle)
     # moveSpeed is a float32 (wire type 5)
     assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.5, rel=1e-5)
 
@@ -2473,9 +2469,9 @@ def test_encode_set_task_config_wraps_in_pbinput() -> None:
 def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     from lymow.protocol import encode_set_task_config
 
-    pb = encode_set_task_config(cutSpeed=None, brushSpeed=100)
+    pb = encode_set_task_config(cutSpeed=None, perimeterMowLaps=2)
     cfg = _decode_fields(_first(_decode_fields(pb), 26))
-    assert _first(cfg, 5) == 100  # brushSpeed (field 5) present
+    assert _first(cfg, 10) == 2  # perimeterMowLaps (field 10) present
     assert _first(cfg, 6) is None  # cutSpeed (field 6) skipped (None)
     with pytest.raises(ValueError, match="unknown task-config field"):
         encode_set_task_config(nonsense=1)
@@ -2793,8 +2789,8 @@ def test_encode_set_zone_config_single_zone_carries_configbox() -> None:
     assert _first(cfg, 1) == 40  # cutHeight
     # moveSpeed is float32 stored in a varint slot
     assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.8, rel=1e-5)
-    # Canonical PbZoneConfig (Hermes #9432): pathSpacing is at f10
-    assert _first(cfg, 10) == 25
+    # PbZoneConfig pathSpacing is at f9 (live-confirmed 2026-05-30)
+    assert _first(cfg, 9) == 25
 
 
 def test_encode_set_zone_config_multiple_zones_in_one_frame() -> None:
@@ -2850,7 +2846,7 @@ def test_encode_set_zone_config_emits_bool_and_skips_none() -> None:
         [
             {
                 "hashId": "wsmjco1T",
-                "lineFollowMode": True,
+                "safeMarginMode": True,
                 "pathOrder": False,
                 "cutSpeed": None,  # explicit None — skipped
             }
@@ -2858,8 +2854,8 @@ def test_encode_set_zone_config_emits_bool_and_skips_none() -> None:
     )
     pb_map = _decode_fields(_first(_decode_fields(pb), 12))
     cfg = _decode_fields(_first(_decode_fields(_first(pb_map, 1)), 2))
-    assert _first(cfg, 17) == 1  # lineFollowMode true
-    assert _first(cfg, 15) == 0  # pathOrder false
+    assert _first(cfg, 17) == 1  # safeMarginMode true (confirmed f17)
+    assert _first(cfg, 14) == 0  # pathOrder false (confirmed f14)
     assert _first(cfg, 6) is None  # cutSpeed None → omitted
 
 

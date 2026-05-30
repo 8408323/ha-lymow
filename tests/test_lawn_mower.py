@@ -1639,6 +1639,23 @@ async def test_handle_set_task_config_maps_and_calls() -> None:
     coord.async_set_task_config.assert_awaited_once_with("mower-001", pathSpacing=200, perimeterMowLaps=2)
 
 
+async def test_handle_set_task_config_new_fields_forwarded_deprecated_ignored() -> None:
+    """The confirmed f17/f18 params are forwarded; the deprecated line_follow_mode
+    / brush_speed the old card still sends are accepted but dropped (no wire home)."""
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"safe_margin_mode": True, "turn_off_outer_motor": False, "line_follow_mode": True, "brush_speed": 90},
+    )
+    await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_awaited_once_with("mower-001", safeMarginMode=True, turnOffOuterMotor=False)
+
+
 async def test_handle_set_task_config_no_params_raises() -> None:
     coord = _make_coord()
     entry = MagicMock()

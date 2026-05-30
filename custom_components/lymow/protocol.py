@@ -492,50 +492,48 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
     return out
 
 
-# PbZoneConfig wire layout — confirmed against Hermes class #9432 (PbZoneConfig).
-# This is the *mowing-settings* record: globally on PbMap.f11 globalZoneConfig
-# and per-zone as PbZone.f2 (zone-level override). Wire fields:
-#   f1  cutHeight (int, mm)
-#   f2  raiseCutHeight (bool, command trigger)
-#   f3  lowerCutHeight (bool, command trigger)
-#   f4  moveSpeed (float32, m/s)
-#   f5  brushSpeed (int)
-#   f6  cutSpeed (int)
-#   f7  cleanMode (int)
-#   f8  cleanDir (int — direction enum / bitmask)
-#   f9  relativeCleanDir (int, deg)
-#   f10 pathSpacing (int)
-#   f11 perimeterMowLaps (int)
-#   f12 perimeterMowDir (int)
-#   f13 noGoMowLaps (int)
-#   f14 obsDecMode (int)
-#   f15 pathOrder (bool)
-#   f16 startProgress (int)
-#   f17 lineFollowMode (bool)
-#   f18 disableOuterDischarge (bool)
-#   f19 followDetectMode (int)
-_ZONE_CONFIG_BOOL_FIELDS = {2, 3, 15, 17, 18}
+# PbZoneConfig wire layout — field numbers LIVE-CONFIRMED 2026-05-30 by
+# correlating the app's labeled Mowing Settings to globalZoneConfig (PbMap.f11)
+# wire values + toggle + re-query (see BRANCH_STATUS sections C/I/K/M). This is
+# the *mowing-settings* record: globally on PbMap.f11 globalZoneConfig and
+# per-zone as PbZone.f2 (zone-level override). Wire fields:
+#   f1  cutHeight (int, mm)                  — confirmed (app 60mm)
+#   f4  moveSpeed (float32, m/s)             — confirmed (app 0.6)
+#   f6  cutSpeed (int)                       — anchored
+#   f7  cleanMode (int)                      — anchored
+#   f8  enabledZoneMask (uint64 bitmask)     — decode-only, not a setting
+#   f9  pathSpacing (int, cm)                — CONFIRMED (app 35cm = f9)
+#   f10 perimeterMowLaps (int)               — CONFIRMED (app Zone-Perimeter)
+#   f11 perimeterMowDir (int)                — anchored
+#   f12 noGoMowLaps (int)                    — CONFIRMED (app No-Go)
+#   f13 obsDecMode (int, zone obstacle)      — anchored
+#   f14 pathOrder/mowingOrder (bool)         — anchored
+#   f15 (unknown, =0)                        — left raw, no confirmed meaning
+#   f16 relativeCleanDir (int, stripe angle) — anchored (=90)
+#   f17 safeMarginMode (bool, Offset=1/Precise=0) — CONFIRMED (toggle)
+#   f18 turnOffOuterMotor (bool, ON=1)       — CONFIRMED (toggle)
+#   f19 followDetectMode (int)               — anchored
+# NOTE: the prior layout mislabeled f9 as relativeCleanDir / f10 as pathSpacing
+# (a +1 shift); cleanDir@8 / startProgress@16 / lineFollowMode@17 had no real
+# home and are dropped. raiseCutHeight/lowerCutHeight/brushSpeed are NOT
+# steady-state fields (raise/lower are momentary +/- commands).
+_ZONE_CONFIG_BOOL_FIELDS = {14, 17, 18}
 _ZONE_CONFIG_INT_NAMES: dict[int, str] = {
     1: "cutHeight",
-    5: "brushSpeed",
     6: "cutSpeed",
     7: "cleanMode",
-    8: "cleanDir",
-    9: "relativeCleanDir",
-    10: "pathSpacing",
-    11: "perimeterMowLaps",
-    12: "perimeterMowDir",
-    13: "noGoMowLaps",
-    14: "obsDecMode",
-    16: "startProgress",
+    9: "pathSpacing",
+    10: "perimeterMowLaps",
+    11: "perimeterMowDir",
+    12: "noGoMowLaps",
+    13: "obsDecMode",
+    16: "relativeCleanDir",
     19: "followDetectMode",
 }
 _ZONE_CONFIG_BOOL_NAMES: dict[int, str] = {
-    2: "raiseCutHeight",
-    3: "lowerCutHeight",
-    15: "pathOrder",
-    17: "lineFollowMode",
-    18: "disableOuterDischarge",
+    14: "pathOrder",
+    17: "safeMarginMode",
+    18: "turnOffOuterMotor",
 }
 
 
@@ -986,30 +984,34 @@ def encode_userctrl(command: int) -> bytes:
     return pb
 
 
-# PbZoneConfig field map — (proto field number, wire kind) — pinned to the
-# canonical PbZoneConfig class declaration in the app's Hermes bytecode (#9432).
-# The HA "set_task_config" service writes this submessage even though the
-# class name in the protocol is PbZoneConfig — the historical name is kept for
-# back-compat. Carried in PbInput.f26 under USER_CTRL_SET_TASK_CONFIG.
+# PbZoneConfig field map — (proto field number, wire kind). Field numbers
+# LIVE-CONFIRMED 2026-05-30 (BRANCH_STATUS C/I/K/M): pathSpacing=f9,
+# perimeterMowLaps=f10, noGoMowLaps=f12, safeMarginMode=f17,
+# turnOffOuterMotor=f18 verified by app-label correlation + toggle/re-query;
+# the rest are anchored by the confirmed positions. Must stay in sync with the
+# decoder maps (`_ZONE_CONFIG_INT_NAMES`/`_BOOL_NAMES`). Used by the per-zone
+# userCtrl=9 write (`encode_set_zone_config`) and the sync_map round-trip
+# (`_encode_go_zone`); both build a PbZoneConfig sub-message from these numbers.
+# Dropped vs the old (wrong) map: brushSpeed(f5), cleanDir(f8) [f8 is actually
+# enabledZoneMask], startProgress(f16) [f16 is the stripe angle], lineFollowMode
+# (f17) [f17 is safeMarginMode] — none had a confirmed wire home. raiseCutHeight
+# /lowerCutHeight (f2/f3) are momentary +/- commands, kept as-is (unconfirmed).
 _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "cutHeight": (1, "int"),
     "raiseCutHeight": (2, "bool"),
     "lowerCutHeight": (3, "bool"),
     "moveSpeed": (4, "float"),
-    "brushSpeed": (5, "int"),
     "cutSpeed": (6, "int"),
     "cleanMode": (7, "int"),
-    "cleanDir": (8, "int"),
-    "relativeCleanDir": (9, "int"),
-    "pathSpacing": (10, "int"),
-    "perimeterMowLaps": (11, "int"),
-    "perimeterMowDir": (12, "int"),
-    "noGoMowLaps": (13, "int"),
-    "obsDecMode": (14, "int"),
-    "pathOrder": (15, "bool"),
-    "startProgress": (16, "int"),
-    "lineFollowMode": (17, "bool"),
-    "disableOuterDischarge": (18, "bool"),
+    "pathSpacing": (9, "int"),
+    "perimeterMowLaps": (10, "int"),
+    "perimeterMowDir": (11, "int"),
+    "noGoMowLaps": (12, "int"),
+    "obsDecMode": (13, "int"),
+    "pathOrder": (14, "bool"),
+    "relativeCleanDir": (16, "int"),
+    "safeMarginMode": (17, "bool"),
+    "turnOffOuterMotor": (18, "bool"),
     "followDetectMode": (19, "int"),
 }
 

@@ -205,53 +205,90 @@ set_device_name:
         text:
 
 set_task_config:
-  name: Set task config
+  name: Set mowing settings
   description: >
-    Set mowing task parameters on the robot (USER_CTRL_SET_TASK_CONFIG).
-    Only the parameters you provide are sent. Values are passed through to the
-    robot as-is — valid ranges aren't fully characterised, so change one at a
-    time and observe. Wire layout derived from the app.
+    Set global mowing settings (PbZoneConfig). Field numbers live-confirmed
+    2026-05-30 by correlating the app's labeled Mowing Settings to the wire.
+    Only the parameters you provide are sent. (Note: line_follow_mode and
+    brush_speed are accepted for backward-compatibility but ignored — neither
+    has a confirmed wire home.)
   target:
     entity:
       integration: lymow
       domain: lawn_mower
   fields:
+    move_speed:
+      name: Moving speed
+      description: Mowing speed in m/s.
+      example: 0.6
+      selector:
+        number: { min: 0.3, max: 1.0, step: 0.1, unit_of_measurement: "m/s" }
     path_spacing:
       name: Path spacing
-      description: Spacing between mowing passes (robot units).
-      example: 200
+      description: Distance between mowing passes, in cm (confirmed wire field f9).
+      example: 35
       selector:
-        number: { min: 0, max: 1000, step: 1, mode: box }
+        number: { min: 25, max: 35, step: 1, unit_of_measurement: "cm" }
     perimeter_mow_laps:
-      name: Perimeter laps
-      description: Number of perimeter (edge) mowing laps.
+      name: Zone perimeter laps
+      description: Number of perimeter (edge) mowing laps per zone.
       example: 1
       selector:
-        number: { min: 0, max: 5, step: 1, mode: box }
+        number: { min: 0, max: 3, step: 1, mode: box }
     perimeter_mow_dir:
       name: Perimeter direction
-      description: Perimeter mowing direction code.
-      example: 0
+      description: Perimeter mowing direction (0/1/2 — e.g. Random/CW/CCW).
+      example: 2
       selector:
-        number: { min: 0, max: 3, step: 1, mode: box }
+        number: { min: 0, max: 2, step: 1, mode: box }
     nogo_mow_laps:
       name: No-go laps
       description: Number of laps around no-go zones.
       example: 1
       selector:
-        number: { min: 0, max: 5, step: 1, mode: box }
+        number: { min: 0, max: 3, step: 1, mode: box }
     cut_speed:
-      name: Cut speed
-      description: Cutting speed (robot units).
-      example: 100
+      name: Blade speed
+      description: Blade/cut speed code.
+      example: 4
       selector:
-        number: { min: 0, max: 1000, step: 1, mode: box }
-    brush_speed:
-      name: Brush speed
-      description: Brush/blade speed (robot units).
-      example: 100
+        number: { min: 0, max: 10, step: 1, mode: box }
+    clean_mode:
+      name: Clean mode
+      description: Clean-mode code.
+      example: 1
       selector:
-        number: { min: 0, max: 1000, step: 1, mode: box }
+        number: { min: 0, max: 5, step: 1, mode: box }
+    obs_dec_mode:
+      name: Zone obstacle detection
+      description: Zone obstacle-detection mode (e.g. Smart/Touch-Only).
+      example: 2
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    relative_clean_dir:
+      name: Stripe angle
+      description: Mowing stripe angle in degrees (wire field f16).
+      example: 90
+      selector:
+        number: { min: 0, max: 180, step: 1, unit_of_measurement: "°" }
+    path_order:
+      name: Mowing order
+      description: Mowing order (false = Main Area First, true = Perimeter First).
+      example: false
+      selector:
+        boolean:
+    safe_margin_mode:
+      name: Safe-margin mode
+      description: Edge mode — true = Offset Edge, false = Precise Edge (confirmed f17).
+      example: true
+      selector:
+        boolean:
+    turn_off_outer_motor:
+      name: Turn off outer motor
+      description: Turn off the outer mowing motor at boundaries (confirmed f18).
+      example: false
+      selector:
+        boolean:
 
 set_device_settings:
   name: Set Device Settings
