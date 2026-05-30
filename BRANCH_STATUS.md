@@ -1848,6 +1848,26 @@ to be physically near the robot for those two).
 
 ---
 
+## ✅ DONE 2026-05-30: PbZoneConfig remap SHIPPED (commit 246c639)
+
+The mowing-settings field-map bug is FIXED and merged to the branch. Decoder
+(`_ZONE_CONFIG_INT_NAMES`/`_BOOL_NAMES`) + encoder (`_TASK_CONFIG_FIELDS`)
+both now use the live-confirmed layout (pathSpacing=f9, perimeterMowLaps=f10,
+noGoMowLaps=f12, safeMarginMode=f17, turnOffOuterMotor=f18; dropped
+cleanDir/startProgress/lineFollowMode/brushSpeed). Fixes what the card shows
+and what per-zone (userCtrl=9) + sync_map writes send. Service params updated
+(line_follow_mode/brush_speed accepted-but-ignored; added safe_margin_mode/
+turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
+
+**Remaining mowing-settings follow-ups (not blocking):**
+- Global `set_task_config` still wraps in userCtrl=36+PbTaskConfig(f26); the
+  app uses **userCtrl=49+PbMap.f11** (proven via MQTT). Switch the envelope
+  (and route raise/lower-cut-height separately) once confirmed userCtrl=36
+  is ineffective for mowing settings. Per-zone + sync_map paths are correct.
+- raise/lower-cut-height wire home + f15 still unconfirmed (left as-is/raw).
+- Card panel (supervisor) can later drop line_follow_mode/brush_speed and add
+  safe_margin_mode/turn_off_outer_motor/stripe_angle controls.
+
 ## 🧪 RELIABLE TECHNIQUES (learned 2026-05-30 — use these, the app taps are flaky)
 
 1. **MQTT write-probe (most reliable for config RE).** Build a global write
