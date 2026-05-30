@@ -1498,8 +1498,8 @@ Drove through every Settings → sub-screen via WiFi-ADB, captured wire frames w
 | Map Backup & Restore | list + restore + (long-press) rename/delete + Back up button | ✅ backend wire-validated today (Task E); **card UI still missing — 📦 panel needed** |
 | Notifications | Device Notifications (master) + Alerts Only (nested) | ✅ tristate switch |
 | Network Settings | SSID dropdown, password input, Reconnect button, Network Priority (4G Preferred toggle) | ⚠️ — we have `prefer_4g` switch but **SSID/password write is not in HA** |
-| RTK Diagnostic | RTK status (Fixed/Fix), Location precision, GNSS sat count, L1/L2/L5 sat counts + SNR, Base station status, Data error rate, Advanced Diagnostics expander | ⚠️ — query services exist but **per-band sat counts + SNR + base-station-online + error rate not surfaced as sensors** |
-| Bind RTK | RTK SN field + Scan/Bind buttons | ❌ **MISSING** — no service to swap/bind a fresh RTK base |
+| RTK Diagnostic | RTK status (Fixed/Fix), Location precision, GNSS sat count, L1/L2/L5 sat counts + SNR, Base station status, Data error rate, Advanced Diagnostics expander | ✅ — full per-band suite IS surfaced as sensors (precision, gnss/L1/L2/L5 sat counts, L1/L2/L5 SNR, data error rate, differential age, lora bandwidth, DC voltage, CW interference, antenna gain) + `LymowRtkSensor` for status; names confirmed against official i18n `rtk_diagnostic` labels (2026-05-30) |
+| Bind RTK | RTK SN field + Scan/Bind buttons | ✅ — `lymow.bind_rtk` service (encode_bind_rtk, robotConfig f17) shipped this session |
 | Find My Robot | Map view with lat/lon + reverse-geocoded address + **Play Sound** button | ⚠️ — we have `FindRobotSwitch` (REST enable/disable) but **the BLE Play Sound trigger is NEW** (see wire above) |
 | PIN Code | 4-digit PIN entry + Update button. Default 0000. Locks the mower's body LCD screen | ❌ **MISSING** — no service to set/clear the PIN |
 | Anti-theft | Map with **geofence center pin + radius slider (currently 150 m)** + Enable toggle + Save | ⚠️ — we have `TheftDetectionSwitch` + `TheftLockSwitch` (REST switches), but **geofence center + radius are not configurable from HA** |
@@ -1543,10 +1543,10 @@ HA status:
 3. **Per-zone settings full** — extend `lymow.update_zone_cut_height` to `lymow.update_zone_config(moveSpeed, pathSpacing, bladeSpeed, ...)` matching capture reply 4's `encode_set_zone_configs` finding.
 4. **Per-channel settings** — equivalent for channels.
 5. **Anti-theft geofence config** — `lymow.set_anti_theft_geofence(center_lat, center_lon, radius_m)` + sensor for current geofence.
-6. **PIN Code service** — `lymow.set_lcd_pin(pin)` + `lymow.clear_lcd_pin()`.
-7. **WiFi SSID/password write** — `lymow.set_wifi(ssid, password)` (be careful — wrong password disconnects the robot).
-8. **Bind RTK** — `lymow.bind_rtk(sn)` to swap to a new base station SN.
-9. **Per-band RTK sensors** — surface L1/L2/L5 sat counts + SNR + base-station online + data error rate as separate sensors.
+6. ✅ DONE — **PIN Code service** (`lymow.set_pin`, robotConfig f13.f9; PIN never logged/stored).
+7. ✅ DONE (BLE-only) — **WiFi SSID/password write** (`lymow.set_wifi`); MQTT path raises HomeAssistantError, real write is BLE-only (issue #200).
+8. ✅ DONE — **Bind RTK** (`lymow.bind_rtk`, robotConfig f17).
+9. ✅ DONE — **Per-band RTK sensors** all surfaced (see RTK Diagnostic row above); names i18n-confirmed.
 10. **Headlight Mode multi-state** — confirm app shows more than on/off; add select entity if so.
 11. **Stripe Angle / Safe-margin mode / Channel Deck Height / etc. global settings** — add fields to `set_task_config` if currently missing.
 12. **Device IP / MAC sensors** — minor, low priority.
