@@ -2,6 +2,14 @@
 
 # Branch: feat/map-lovelace-card — Supervisor Document
 
+> 🔒 **PUBLIC REPO — NO SENSITIVE DATA.** This branch is public. Never write
+> GPS coordinates, PIN codes, email addresses, passwords, auth tokens, or
+> Cognito *user* identity IDs into any tracked file (doc/code/tests/commit
+> messages). IP addresses, the Cognito *pool* ID (shared app config), device
+> thing-name, and factory-default hints (e.g. PIN default 0000) are OK.
+> Capture artifacts (`*.cfa/*.pcap/*.har/capture-*.txt`, `/tmp/lymow-*`) are
+> gitignored — decode them locally, record only redacted structure here.
+
 **This document is the interface between two sessions:**
 - **Supervisor session** (this laptop, WSL2): has full codebase access, plans work, writes code, and **owns all browser testing** (HA Lovelace card in Chrome). This is the ONLY session that can do browser testing.
 - **Capture session** (other Linux box): has mitmproxy running, can control the Lymow Android app, decodes raw traffic, implements backend changes
@@ -246,7 +254,7 @@ Decoder (critical — wires up real robot settings instead of localStorage):
 - [x] **`decode_zone_config` added** (2026-05-26): decodes the canonical 19-field PbZoneConfig (Hermes class #9432) — covers PbMap.f11 globalZoneConfig **and** PbZone.f2 per-zone override. Live frame confirms: globalZoneConfig{cutHeight:60, moveSpeed:0.6, pathSpacing:1, perimeterMowLaps:2, lineFollowMode:true, …}; zone-level overrides cutHeight:40 + moveSpeed:0.8.
 - [x] **`decode_channel_config` added** (2026-05-26): PbChannelConfig {detectMode, cutHeight, channelLift} for PbMap.f12 globalChannelConfig (Hermes class #9444).
 - [x] **chargingStation extended** (2026-05-26): PbPose.f4 z is now decoded when present; live frame has z=-0.030.
-- [x] **enuBasePoint added** (2026-05-26): PbMap.f7 is `PbRobotLLACoords {latitude, longitude, altitude}` (Hermes class #9276). Live frame: lat 59.682, lon 16.759, alt 34.09 m. `gpsOrigin` retained as an alias.
+- [x] **enuBasePoint added** (2026-05-26): PbMap.f7 is `PbRobotLLACoords {latitude, longitude, altitude}` (Hermes class #9276). Live frame carries the site lat/lon/altitude (values omitted — user location, public repo). `gpsOrigin` retained as an alias.
 - [x] **diagonalCoords added** (2026-05-26): PbMap.f6 (repeated PbPoint) decoded; live frame has two corners spanning the map bbox.
 - [~] **PbZone.f8/f9 + BasicInfo.f8/f9 — not present in fresh frame.** Earlier audit saw them on a different capture; conditional fields — defer until a frame surfaces them.
 - [~] **Top-level pb.f6 fixed64 — not in this frame either.** Top-level only has f23 + f4=1.
