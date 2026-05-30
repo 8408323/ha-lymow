@@ -1878,6 +1878,31 @@ turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
   safe_margin_mode/turn_off_outer_motor/stripe_angle controls, plus a Blade
   Speed select (cutSpeed Eco=3/Standard=4/Power=5/Turbo=6).
 
+## ✅ VALIDATED 2026-05-30: Start-mow-selected command (live mow capture)
+
+User authorized mowing the bigger zone for a live capture. Started it from the
+app (Select Mow → tap big zone → Mow), captured the start command over BLE,
+then docked ("forget progress"). The start-mow-selected frame:
+```
+10312801621c0a1a0a181a08<hashId>40014a0a0d<f32 x>15<f32 y>
+PbInput { f2:49, f5:1 (USER_CTRL_CLEAN), f12(PbMap){ f1 goZones[0]=PbZone{
+  f1 basicInfo{ f3 hashId, f8:1 selected, f9 point{f1 x,f2 y} } } } }
+```
+This **validates our `encode_start_zones`** (same userCtrl=1 + PbMap.goZones.
+basicInfo shape). Deltas vs the app, single-zone-harmless, left as-is:
+- app sends basicInfo `f8=1` (selected flag); ours sends `f8=index` (1,2,3…).
+  Only one zone captured — can't tell if multi-zone app uses 1,1,1 or 1,2,3,
+  so NOT changed (no-assumptions). Revisit with a multi-zone capture.
+- app includes the zone `f9 point`; ours omits it (robot re-derives — same as
+  schedules + the shipped set_schedules path).
+
+In-progress telemetry during the mow is the **standard pboutput** the
+integration already decodes (workStatus block, battery 99→98, position floats
+updating as it moved, zone area in PbMap f12). No new undecoded fields surfaced.
+Live HA validation not possible mid-capture: `lawn_mower.7b6521` reads
+`unavailable` because the phone app holds the single AWS IoT connection while
+mitmproxy/ADB capture is active (known limitation — see [[reference_ha_live_access]]).
+
 ## ✅ DECODED 2026-05-30: Schedule mutations = full-list replace via MQTT (gap)
 
 Live capture (added a 1-zone test task, toggled it off, deleted it; device
@@ -1900,8 +1925,15 @@ as hashId strings only) and works — so the robot re-derives the point; granula
 read-modify-write that drops point/config is consistent with shipped behaviour,
 no new risk. NOTE: decoded entry doesn't carry per-task PbScheduleConfig (f11)
 — lossy for tasks that set custom config, same as existing set_schedules.
-**TODO(backend): add coordinator async_add/update/delete/toggle_schedule +
-services (read-modify-write over cached schedules → encode_set_schedules).**
+**✅ SHIPPED (commit f4dd7f7): granular schedule ops** — coordinator
+async_add_schedule / async_delete_schedule / async_toggle_schedule + the
+matching services (add_schedule / delete_schedule / toggle_schedule). They
+read-modify-write the cached schedule list and re-send the full list via
+encode_set_schedules (`_wire_entries_from_cached` preserves each entry's UTC
+time/id/timeZone and re-fills the zone point from cached map data). Delete-last
+falls back to encode_clear_schedules; unknown id raises. **Edit-in-place
+deferred** (composable as delete+add; the local↔UTC round-trip on existing
+entries has DST edge cases for a focused follow-up).
 
 ## ✅ DECODED 2026-05-30: Global mowing-settings envelope + Blade Speed + OD fields
 
