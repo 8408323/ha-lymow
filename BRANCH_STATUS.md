@@ -1627,6 +1627,85 @@ at 96% battery, idle.
 on both `format --check` and `check`. Branch is 4 commits ahead of
 `origin/feat/map-lovelace-card` — push when ready.
 
+### 🛰 Remote camera (#97) — capture analysis, 2026-05-30 (supervisor laptop)
+
+User asked: can we do the camera feed over the internet, not just local? Two
+distinct answers, don't conflate them:
+
+1. **View the camera through HA from outside the LAN — already works, no code.**
+   This HA instance has `cloud` (Nabu Casa) + `go2rtc` + `stream` + `ffmpeg`
+   loaded, and HA sits on the robot's LAN. So HA itself proxies the local RTSP
+   entity out to any remote client (Nabu Casa URL / reverse proxy / VPN). The
+   only reason `camera.7b6521_camera` reads `unavailable` is the **robot is
+   offline right now** (every `7b6521` entity is unavailable; pboutput in the
+   capture stops at 17:48 today). Nothing to build for this case — verify once
+   the robot is back online. (`external_url`/`internal_url` are unset, so the
+   remote path is whatever Nabu Casa / proxy the user already uses.)
+
+2. **Robot streaming to the cloud independent of HA's LAN reach (KVS WebRTC) —
+   still issue #97, NOT solved.** Analyzed a fresh `tools/capture-lymow.txt`
+   (app opened the camera at 15:47:36 today). What it shows:
+   - Full app flow confirmed: MQTT presence + `POST /prod/kvs/cmd` →
+     `getSignalingChannelEndpoint` (VIEWER) → `get-ice-server-config` →
+     SigV4-presigned WSS connect (HTTP 101) → `SDP_OFFER` + trickle ICE. All of
+     this is already implemented in `api.py` (`start_video_session`,
+     `get_signaling_channel_endpoint`, `get_ice_server_config`,
+     `presign_signaling_url`) and `scripts/camera_feed_test.py`.
+   - **NEW: the app continuously publishes a presence beacon** to
+     `/device/<thing>/pbinput`: `{f7:2, f27:<viewerClientId>}` (177× in this
+     capture). Decoded bytes: `3802 da0125 <ascii clientId>`. The 22B
+     "heartbeat" is the same message with f27 empty (`3802da0100`). The beacon
+     clientId is the **short** form `ONEPLUSA5010_Android_<devhex>` (no
+     `_userId_<sub>` suffix), whereas the KVS *viewer* clientId is the **long**
+     form `ONEPLUSA5010_Android10_<devhex>_userId_<sub>`. This beacon is the
+     same `f7=2` realtime-control family as `encode_ble_drive` (which uses f10).
+     `scripts/camera_feed_test.py` does **not** send this beacon and uses a
+     random clientId — a gap vs. the app.
+   - **BUT this captured session FAILED**: the robot returned only 8 × 0-byte
+     `KVS-WSS ←` keepalives, **no `SDP_ANSWER`**, even though the real app sent
+     the real beacon + real clientId + `kvs/cmd`. So the capture does **not**
+     reveal the success condition, and the "beacon is the missing trigger"
+     idea is **unproven** (the app sent it and still got no answer here).
+   - Conclusion unchanged from prior sessions: the robot-becomes-MASTER trigger
+     is not reproduced by this capture. The decisive next artifact is a capture
+     of a **successful** remote session (app on cellular/off home WiFi, robot
+     online, video confirmed visible) — only that shows what differs. Then the
+     experiment is: replay beacon (long+short clientId) + viewer handshake as
+     **sole** client with no app open. Blocked on: robot online + a successful
+     reference capture. ADB (USB `fc7d1e36`) is available on this box now.
+
+   **LIVE TEST, 20:16 CEST (18:16 UTC) same day — robot WAS online (HA link was
+   just down; pboutput flowing). Drove the app via ADB and captured a SUCCESSFUL
+   remote camera open, then ran our client as sole viewer. Definitive results:**
+   - Tapped the app's camera icon → **live video confirmed** (robot's lawn view,
+     timestamp overlay, streaming over 4G). Robot was actively **mowing**, 29% batt.
+   - The successful open is a **pure cloud flow**: `POST /prod/kvs/cmd`
+     `{deviceThingName, action:"start"}` → signaling → ICE → app sends SDP_OFFER →
+     **robot SDP_ANSWERs in ~2.5s** (1636B inbound `KVS-WSS ←`, `messageType`
+     ICE from robot IPs 192.168.1.85 / relay). **NO app→robot MQTT pbinput and NO
+     presence beacon in the success window** (beacon-as-trigger hypothesis is
+     **dead** — `da01` count = 0 across the whole 18:16 session). kvs/cmd body is
+     byte-identical to what `api.py::start_video_session` already sends.
+   - Then closed the app camera and ran `scripts/camera_feed_test.py` as the SOLE
+     viewer while the robot was still mowing → **NO SDP_ANSWER over 30 offers /
+     120s.** Same account, same cloud flow, robot willing for the app 2 min
+     earlier. So replicating the cloud flow is **necessary but not sufficient.**
+   - Also note: the SAME app **failed at 15:47** (robot returned only 0-byte
+     keepalives) but **succeeded at 18:16** while mowing → the robot's
+     willingness to become MASTER is **state/timing-gated**, not deterministic.
+   - **Narrowed gap (what still differs app-vs-our-client):** (a) viewer clientId
+     prefix (`ONEPLUSA5010_Android10_<devhex>_userId_<sub>` vs our
+     `ha-lymow_<pid>_userId_<sub>` — same sub); prior sessions say exact-clientId
+     was already tried & failed, but possibly while robot was unwilling (docked).
+     (b) the app holds a **live AWS IoT MQTT subscription** (pboutput stream) for
+     the account throughout; our standalone test does NOT. (c) freshness: our run
+     was seconds-to-minutes after the app's kvs/cmd; the robot-master window may
+     be tight. **Next experiments (robot must be online + mowing):** run the KVS
+     handshake while holding a live IoT MQTT subscribe for the account, with the
+     app's exact clientId, issuing our own fresh kvs/cmd, all within ~3s — i.e.
+     the "sole client in real HA with live MQTT" condition. Capture our client's
+     kvs/cmd response and diff channelARN/creds vs the app's.
+
 ### Continuation, 2026-05-27 late evening (same supervisor session)
 
 User asked to keep iterating. Three more commits shipped on the
@@ -1914,6 +1993,37 @@ way), plus `mowProgress`/`mowStripCount`/`currentTaskZoneHashId`.
   (no-assumptions) — fully characterized but not named.
 - `cleanReport` (PbOutput, fires at session end) — still pending capture
   (monitor watching for the novel field number).
+
+## 📋 2026-05-30: APK-VERIFIED PbOutput field→number map (Hermes v96 disasm)
+
+Disassembled `index.android.bundle` (HBC v96) with `hermes-dec` and read
+`PbOutput.encode` for authoritative field numbers. **Method:** pip-install
+hermes-dec in a venv → `hbc-disassembler bundle out.txt` → in the encode fn each
+field's `LoadConstString '<name>'` / `GetById <name>` pairs with its
+`LoadConst(UInt8|Int) <tag>` (tag = field#<<3 | wiretype; tags ≤255 use
+LoadConstUInt8, larger use LoadConstInt).
+
+```
+ 1 msgId        11 map*          21 audioId            31 robotPosePib
+ 2 version      12 cleanInfo     22 wifiConfigRes       32 taskConfig
+ 3 errorCodes   13 path          23 btMap(=map resp)    33 floorData
+ 4 warningCodes 14 pose          24 chargingStationLoc  34 netDetailInfo
+ 5 robotInfo    15 promptInfo    25 mobilePushNotif     35 rtkDiagnosticL1
+ 6 localizationInfo(our"RTK") 16 schedule 26 robotLlaCoords 36 rtkDiagnosticL2
+ 7 baseOutput   17 robotConfig   27 theftLock           37 heatedLensTimes(varint)
+ 8 iotCmd(RTK-diag JSON) 18 outputCtrl 28 cleanReport    38 aeRangeLevel(varint)
+ 9 debugSetting 19 algoLocOutput
+10 deviceInfo   20 algoSegOutput
+```
+**All our decoder field numbers verified correct.** Resolutions:
+- **f37 = heatedLensTimes** (camera lens defog/de-ice heater count — the
+  "intermittent =15"). f38 = aeRangeLevel (camera auto-exposure). Decoded (cb1ef05).
+- **f13 = path** (PbPath poses) — the coverage-path geometry's true home; not
+  populated in captures yet, decode from f13 when a populated frame appears.
+- **f28 = cleanReport** — session-end report (monitor watches for it).
+- f6=localizationInfo (we read as RTK pose — content matches); f8=iotCmd (carries
+  the RTK-diag JSON we decode); f23=btMap is where the mower returns the map (our
+  reader is right); f11=map appears unused for the query reply.
 
 ## 📋 2026-05-30: AUTHORITATIVE undecoded-gaps list (from APK proto schema)
 
