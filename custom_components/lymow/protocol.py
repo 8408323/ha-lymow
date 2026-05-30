@@ -1027,11 +1027,20 @@ _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
 
 
 def encode_set_task_config(**fields: Any) -> bytes:
-    """Encode a USER_CTRL_SET_TASK_CONFIG command setting only the given fields.
+    """Encode a global mowing-settings write setting only the given fields.
 
-    Field names match PbTaskConfig (see ``_TASK_CONFIG_FIELDS``); ``None``
+    Field names match PbZoneConfig (see ``_TASK_CONFIG_FIELDS``); ``None``
     values are skipped so only explicitly-set parameters are sent. Unknown
     field names raise ValueError.
+
+    Envelope LIVE-CONFIRMED 2026-05-30 from the app's Mowing Settings → Global
+    tab "Save → Keep Custom": ``PbInput {f2:49, f5:49(GLOBAL_SETTING_N), f12
+    (PbMap):{f11: globalZoneConfig}}`` — userCtrl **49** ("Keep Custom": apply
+    the global mowing settings while preserving per-zone customs), NOT the old
+    userCtrl=36+PbTaskConfig(f26) which is the unrelated Device Settings page.
+    The robot merges the partial globalZoneConfig (same as the per-zone
+    userCtrl=9 path). The app also sends a sibling PbMap.f12 globalChannelConfig
+    snapshot; we omit it (only mowing fields are being written here).
     """
     cfg = b""
     for name, value in fields.items():
@@ -1046,11 +1055,11 @@ def encode_set_task_config(**fields: Any) -> bytes:
             cfg += _field_f32(field_no, float(value))
         else:
             cfg += _field_i32(field_no, int(value))
-    from .const import USER_CTRL_SET_TASK_CONFIG
+    from .const import USER_CTRL_GLOBAL_SETTING_N
 
     pb = _field_i32(2, PB_VERSION)
-    pb += _field_i32(5, USER_CTRL_SET_TASK_CONFIG)
-    pb += _field_bytes(26, cfg)
+    pb += _field_i32(5, USER_CTRL_GLOBAL_SETTING_N)
+    pb += _field_bytes(12, _field_bytes(11, cfg))  # PbInput.map (f12) → PbMap.globalZoneConfig (f11)
     return pb
 
 

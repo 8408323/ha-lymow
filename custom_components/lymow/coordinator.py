@@ -766,9 +766,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self.async_query_schedules(thing_name)
 
     async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:
-        """Set mowing task-config parameters (USER_CTRL_SET_TASK_CONFIG).
+        """Set global mowing settings (userCtrl=49 GLOBAL_SETTING, "Keep Custom").
 
-        Only the provided PbTaskConfig fields are sent; see
+        Only the provided globalZoneConfig fields are sent; see
         :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
         """
         from .protocol import encode_set_task_config
