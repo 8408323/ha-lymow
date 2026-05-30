@@ -1878,6 +1878,24 @@ turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
   safe_margin_mode/turn_off_outer_motor/stripe_angle controls, plus a Blade
   Speed select (cutSpeed Eco=3/Standard=4/Power=5/Turbo=6).
 
+## 📋 2026-05-30: live full-mow capture findings (dock→channel→zone)
+
+Captured a full mow of KX1kGyat (1197 m², ~1cm RTK). The whole sequence is
+traceable from already-decoded telemetry — **no path query exists**; the
+coverage trail = `pose` (f14) accumulated over time (the app draws it the same
+way), plus `mowProgress`/`mowStripCount`/`currentTaskZoneHashId`.
+
+- **Progress: use `mowStripCount` (f12.f1), not `mowProgress` (f12.f5).** During
+  the whole run f12.f5 stayed 0.0% (and the app likewise shows "Mowing Progress
+  0%"), while f12.f1 climbed 0→27+. So f5 is unreliable for this device/run; the
+  stripe count is the live granular signal. (Not a decoder bug — we match the app.)
+- **New undecoded field `PbOutput.f37`** — a varint (=15) that appears
+  *intermittently* during active mowing (seen at stripCount 9–12, absent at
+  26–27). Meaning unknown; not decoded (no-assumptions). Likely a transient
+  mowing phase/sub-state. Revisit if a use emerges.
+- `cleanReport` (PbOutput, fires at session end) — still pending capture
+  (monitor watching for the novel field number).
+
 ## 📋 2026-05-30: AUTHORITATIVE undecoded-gaps list (from APK proto schema)
 
 Source: `tools/apk/assets/index.android.bundle` (protobufjs schema strings
