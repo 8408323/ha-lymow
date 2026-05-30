@@ -2125,6 +2125,36 @@ startProgress@16, lineFollowMode@17. **Global write opcode:** userCtrl=49
 Remap = rewrite both maps to the above, add `encode_set_global_zone_config`
 (userCtrl=49), keep per-zone userCtrl=9, fix the card-facing service params
 (drop line_follow_mode, add safe_margin_mode), update pinned tests.
+
+### L. ⚠️ REMAP IS A COORDINATED FRONTEND+BACKEND CHANGE (2026-05-30)
+The card's settings panel (`lymow-map-card.js`, `data-field=` attrs) SENDS
+these to `lymow.set_task_config`: move_speed, path_spacing, perimeter_mow_laps,
+perimeter_mow_dir, nogo_mow_laps, cut_speed, brush_speed, obs_dec_mode,
+clean_mode, path_order, **line_follow_mode** — plus raise_cut_height/
+lower_cut_height (momentary). Two of these have **no confirmed wire home**:
+- `line_follow_mode` — current code puts it at f17, but f17 is **safeMargin**.
+- `brush_speed` — at f5, which never appears in the wire (Blade Speed
+  showed "-2" when f6=1, so Blade Speed ≠ f6 either; its field is unknown).
+
+⇒ A backend-only field-map rewrite would either (a) error on the card's
+line_follow_mode/brush_speed, or (b) misroute them. And renaming the
+DECODER keys (pathSpacing etc.) changes what the card reads to populate the
+panel. **So decode + encode + the card's panel field-set + which it sends
+must change together.** Per the repo's division (supervisor session owns
+`www/lymow-map-card.js`), this remap needs **frontend coordination**:
+- Backend: rewrite `_TASK_CONFIG_FIELDS` + `_ZONE_CONFIG_*` to section K,
+  add `encode_set_global_zone_config` (userCtrl=49), make the encoder skip
+  unknown/unconfirmed fields instead of raising.
+- Frontend: drop line_follow_mode + brush_speed from the panel (no home),
+  add safe_margin_mode + turn_off_outer_motor + stripe_angle, and read the
+  corrected decoder keys.
+- Still-needed RE for completeness: the wire homes of line_follow_mode,
+  brush_speed/Blade-Speed, and f15 (MQTT-probe each: set value, read app,
+  restore). Until then ship them as unmapped, not mislabeled.
+
+**Status:** mowing-settings DECODE is fully RE'd (layout known + verified);
+the remap CODE is a coordinated change, specced above, not shippable
+backend-only. Moving on to additive backend gaps that have no card coupling.
 - Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor — needs a
   Save that transmits; this session's didn't).
 - Gap 4 enum values (toggle Channel Obstacle Detection, re-query).
