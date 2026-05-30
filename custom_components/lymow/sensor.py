@@ -633,14 +633,6 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._attr_name = "Map"
         self._attr_icon = "mdi:map"
 
-    @property
-    def native_value(self) -> int | None:
-        """Number of go-zones loaded, or None if map data is not yet available."""
-        map_data = self.coordinator.data.get(self._thing_name, {}).get("mapData")
-        if not map_data:
-            return None
-        return len(map_data.get("goZones", []))
-
     @staticmethod
     def _trim_poly(points: list[dict]) -> list[dict]:
         """Round polygon coordinates to 4 decimal places (~1 cm precision in ENU metres).
@@ -652,6 +644,15 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         return [{"x": round(p["x"], 4), "y": round(p["y"], 4)} for p in points]
 
     @property
+    def native_value(self) -> int | None:
+        """Number of go-zones loaded, or None if map data is not yet available."""
+        map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
+        if not map_data:
+            return None
+        # Only count zones that have a hashId — empty {} entries are stale decode artifacts
+        return sum(1 for z in map_data.get("goZones", []) if z.get("hashId"))
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Full map data for the Lovelace card."""
         map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
@@ -659,9 +660,12 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         attrs: dict[str, Any] = {}
 
         if "goZones" in map_data:
+            # Filter out stale empty zone entries (no hashId) that accumulate when
+            # MQTT delivers repeated partial map responses without full zone data
+            valid_zones = [z for z in map_data["goZones"] if z.get("hashId")]
             attrs["go_zones"] = [
                 {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z
-                for z in map_data["goZones"]
+                for z in valid_zones
             ]
         if "nogoZones" in map_data:
             attrs["nogo_zones"] = [
