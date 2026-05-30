@@ -138,11 +138,12 @@ def test_error_sensor_unknown_code_has_unknown_description() -> None:
 
 
 def test_error_sensor_warning_codes_included_when_present() -> None:
-    coord = _make_coord({"errorCode": 0, "warningCodes": [1, 2]})
+    coord = _make_coord({"errorCode": 0, "warningCodes": [1, 999]})
     desc = next(d for d in SENSORS if d.key == "error_code")
     sensor = LymowErrorSensor(coord, DEVICE, desc)
     attrs = sensor.extra_state_attributes
-    assert attrs["warning_codes"] == [1, 2]
+    assert attrs["warning_codes"] == [1, 999]
+    assert attrs["warning_descriptions"] == ["Wheel over current", "Unknown (999)"]
 
 
 def test_error_sensor_warning_codes_absent_when_missing() -> None:
