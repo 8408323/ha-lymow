@@ -1913,6 +1913,52 @@ f1=60  f4=0.6  f6=5  f7=1  f9=25  f10=2  f11=2  f16=90  f17=1  f19=2
   (Task D). The card would have to read-modify-rewrite the whole list.
   Capturable now (no movement) once the app is logged in.
 
+### ✅ RESOLVED 2026-05-30 — PbZoneConfig labeling CONFIRMED WRONG (f9 = pathSpacing)
+Logged into the app (Google sign-in) and read the **labeled** Mowing
+Settings → Global screen, correlating each value to the live
+globalZoneConfig (PbMap.f11) wire fields from a synchronous query_map:
+
+| App label (Global) | App value | Wire field | Shipped code label | Verdict |
+|---|---|---|---|---|
+| Cutting Height | 60 mm | f1 = 60 | cutHeight | ✅ correct |
+| Moving Speed | 0.6 m/s | f4 = 0.6 | moveSpeed | ✅ correct |
+| **Path Spacing** | **35 cm** | **f9 = 35** | **relativeCleanDir** | ❌ **WRONG — f9 IS pathSpacing** |
+| No-Go Zone Mowing Laps | 1 | f12 = 1 | perimeterMowDir | ❌ shifted |
+| Perimeter Mowing Direction | (enum) | f11 = 2 | perimeterMowLaps | ❌ shifted |
+
+**This is the hardware check bfb37bc asked for.** `f9 = 35 = Path Spacing`
+proves the shipped "canonical Hermes #9432" layout is mislabeled from f9
+onward, and **capture-reply-4's mapping was correct all along**. The
+confirmed PbZoneConfig layout is:
+
+```
+f1 cutHeight   f4 moveSpeed(f32)  f6 cutSpeed   f7 cleanMode
+f8 enabledZoneMask(uint64; global=all-ones)     f9 pathSpacing
+f10 perimeterMowLaps   f11 perimeterMowDir   f12 noGoMowLaps
+f13 zoneObstacleDetect(obsDecMode)   f14 mowingOrder(pathOrder)
+f15 ? (global=0; candidate Safe-margin mode — gap 3)
+f16 relativeCleanDir/stripeAngle(=90 "Optimized")
+f17 lineFollowMode   f18 turnOffOuterMotor(disableOuterDischarge)
+f19 followDetectMode
+```
+vs the **shipped (wrong)** `_ZONE_CONFIG_INT_NAMES`/`_TASK_CONFIG_FIELDS`:
+`f9 relativeCleanDir, f10 pathSpacing, f11 perimeterMowLaps,
+f12 perimeterMowDir, f13 noGoMowLaps, f14 obsDecMode, f15 pathOrder,
+f16 startProgress` — a +1 shift across f9–f14 plus f16.
+
+**Impact:** `lymow.set_task_config(path_spacing=…)` / `set_zone_config`
+currently write Path Spacing into f10 (robot reads as perimeterMowLaps)
+and stripe angle into the wrong slot; decode mislabels the same. **FIX
+REQUIRED** — remap `_ZONE_CONFIG_INT_NAMES`, `_ZONE_CONFIG_BOOL_NAMES`,
+`_TASK_CONFIG_FIELDS`, `decode_zone_config`, `_encode_go_zone`, and every
+pinned test, then re-verify against these app values. (Deliberately NOT
+done in the same session as the discovery — this area has a revert-war
+history; the remap must land as one careful, fully-correlated commit.)
+
+Also located for **gap 3**: Safe-margin mode (Offset Edge / Precise Edge)
+and Turn Off Outer Mowing Motor are real Global Advanced toggles; the
+former is the likely f15 (global=0), the latter likely f18.
+
 ### Bottom line
 Backup = done. State machine + device settings + rename = confirmed.
 Mowing settings = mostly captured but carry **one unresolved labeling
