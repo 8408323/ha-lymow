@@ -126,6 +126,11 @@ _ZONE_ORDER_CHOICES = {_service_label(name): value for value, name in ZONE_ORDER
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
 # subset of PbTaskConfig; the encoder supports more. All optional ints.
+# Service-field (snake_case) → PbZoneConfig field (camelCase). Field numbers
+# are in protocol._TASK_CONFIG_FIELDS (live-confirmed 2026-05-30). Dropped
+# line_follow_mode + brush_speed: neither has a confirmed wire home, so they
+# are silently ignored if a caller (e.g. the current card) still sends them.
+# Added safe_margin_mode + turn_off_outer_motor (confirmed f17/f18).
 _TASK_CONFIG_SERVICE_FIELDS = {
     "move_speed": "moveSpeed",
     "path_spacing": "pathSpacing",
@@ -133,18 +138,25 @@ _TASK_CONFIG_SERVICE_FIELDS = {
     "perimeter_mow_dir": "perimeterMowDir",
     "nogo_mow_laps": "noGoMowLaps",
     "cut_speed": "cutSpeed",
-    "brush_speed": "brushSpeed",
     "obs_dec_mode": "obsDecMode",
     "clean_mode": "cleanMode",
     "path_order": "pathOrder",
-    "line_follow_mode": "lineFollowMode",
+    "relative_clean_dir": "relativeCleanDir",
+    "safe_margin_mode": "safeMarginMode",
+    "turn_off_outer_motor": "turnOffOuterMotor",
     "raise_cut_height": "raiseCutHeight",
     "lower_cut_height": "lowerCutHeight",
 }
 # Fields that accept floats rather than ints.
 _TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}
 # Fields that accept booleans (encoded as 0/1 in protobuf).
-_TASK_CONFIG_BOOL_FIELDS = {"path_order", "line_follow_mode", "raise_cut_height", "lower_cut_height"}
+_TASK_CONFIG_BOOL_FIELDS = {
+    "path_order",
+    "safe_margin_mode",
+    "turn_off_outer_motor",
+    "raise_cut_height",
+    "lower_cut_height",
+}
 
 # Service-field (snake_case) → PbRunTimeConfig field (camelCase) + safe numeric
 # bounds. Run-time config overrides settings on the currently-running task (vs
@@ -419,6 +431,11 @@ _MOVE_CHARGING_STATION_SCHEMA = vol.Schema(
         vol.Optional("theta"): vol.Coerce(float),
     }
 )
+# Deprecated params accepted-but-ignored so existing callers (the current
+# Lovelace card still sends these) don't get a validation error. Neither has
+# a confirmed PbZoneConfig wire home, so the handler drops them (they are not
+# in _TASK_CONFIG_SERVICE_FIELDS). Remove once the card stops sending them.
+_TASK_CONFIG_IGNORED_FIELDS = {"line_follow_mode": cv.boolean, "brush_speed": vol.Coerce(int)}
 _SET_TASK_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
@@ -432,6 +449,7 @@ _SET_TASK_CONFIG_SCHEMA = vol.Schema(
             )
             for k in _TASK_CONFIG_SERVICE_FIELDS
         },
+        **{vol.Optional(k): v for k, v in _TASK_CONFIG_IGNORED_FIELDS.items()},
     }
 )
 _SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
