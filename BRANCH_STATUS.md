@@ -1946,8 +1946,55 @@ UI is watched to confirm the Save registers (the ADB tap missed this time).
 Until then: the bug is documented, f9/f10/f12 are proven, but the field-map
 rewrite is deliberately deferred (NO-ASSUMPTIONS + revert-war history).
 
+### H. GLOBAL mowing-settings WRITE — captured + gap-3 CONFIRMED (2026-05-30)
+Got the app's Save to transmit (the earlier failures were a blocking
+"Override / Keep Custom" dialog — the BLE write fires only after you
+choose). Captured the real global write frame (BLE handle 0x14):
+```
+userCtrl=49 (USER_CTRL_GLOBAL_SETTING_N = the dialog's "Keep Custom";
+            "Override" is userCtrl=48 GLOBAL_SETTING_Y). Payload =
+PbInput{ f12 PbMap{ f11 globalZoneConfig(PbZoneConfig, all 19 fields),
+                    f12 globalChannelConfig(PbChannelConfig) } }
+captured hex (with outer-motor ON, safe-margin Precise — non-sensitive):
+10312831623a5a30083c259a99193f3004380140ffffffffffffffffff01482350
+015802600168027001780080015a880100900101980102 62060802103c1800
+```
+**This is a different opcode+message than HA uses today.** HA's
+`lymow.set_task_config(path_spacing=…)` sends **userCtrl=36 + PbTaskConfig
+(f26)** — but that is the 4-field DEVICE-settings record (rain/charging/
+handbrake/zoneOrder), NOT the mowing-settings PbZoneConfig. The robot's
+global mowing settings (cut height, move speed, path spacing, perimeter
+laps, safe-margin, …) are written via **userCtrl=48/49 + PbMap.f11
+globalZoneConfig**. So the mowing-settings half of `set_task_config` is
+not just field-mislabeled — it's using the **wrong opcode and message**.
+
+**Gap-3 fields CONFIRMED by live toggle + re-query (definitive):**
+- `f17 = safeMarginMode` — Offset Edge = **1**, Precise Edge = **0**
+  (toggled Offset→Precise, watched f17 go 1→0, then restored 0→1).
+- `f18 = turnOffOuterMotor` — OFF = **0**, ON = **1** (toggled 0→1, restored).
+- `f9 = pathSpacing` re-confirmed = 35 (app 35cm).
+
+**⚠️ reply-4's mapping is also partly WRONG:** it labels f17 =
+lineFollowMode, but live toggle proves f17 = safeMargin. So the remap must
+be built from **per-field live toggles**, not reply-4 and not Hermes #9432.
+Still need distinctive-value toggles for f10 vs f12 (both currently 1),
+f11 perimeterMowDir, f13 zoneObstacleDetect, f14 mowingOrder, f16
+stripeAngle, f15 (unknown, =0), and the cleanMode/cutSpeed/followDetect
+enums — best done as one multi-field distinctive-value Save + re-query.
+
+**Robot config RESTORED to original** (f17=1 Offset, f18=0 outer-motor-off,
+verified by re-query). No movement commands issued this session.
+
+### Revised remap scope (bigger than first thought)
+The mowing-settings fix is not just renaming `_ZONE_CONFIG_*` fields — it
+needs a **new encoder** for the global write (userCtrl=48/49 + PbMap.f11/f12)
+that `lymow.set_task_config` (or a new `set_mowing_settings`) calls for the
+PbZoneConfig fields, while the existing userCtrl=36 path stays for the true
+PbTaskConfig device settings. Decoder field labels also get corrected. All
+gated on finishing the per-field live confirmation above.
+
 ### Still to capture (needs per-screen nav / BTSnoop / verified-Save)
-- **Global "Save" write frame** — unblocks the PbZoneConfig remap (above).
+- **Remaining PbZoneConfig fields** via one multi-field distinctive Save.
 - Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor — needs a
   Save that transmits; this session's didn't).
 - Gap 4 enum values (toggle Channel Obstacle Detection, re-query).
