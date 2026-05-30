@@ -737,14 +737,32 @@ class LymowMapCard extends HTMLElement {
         !this._drawingZone
       ) {
         const z = goZones.find(g => g.hashId === this._editHash);
-        const current = z?.cutHeight ?? 40;
+        const zc = z?.zoneConfig || {};
+        const chV   = z?.cutHeight   ?? zc.cutHeight   ?? 40;
+        const msV   = zc.moveSpeed   ?? 0.6;
+        const psV   = z?.pathSpacing ?? zc.pathSpacing ?? 25;
+        const plV   = zc.perimeterMowLaps ?? 1;
         extraRow = `
-          <div class="btn-row" style="margin-top:4px;align-items:center;gap:6px;flex-wrap:wrap">
-            <span style="font-size:0.8em;color:var(--secondary-text-color)">Cut height (mm):</span>
-            <input id="zone-cut-height" type="number" min="20" max="100" step="5" value="${current}"
-                   style="width:60px;padding:2px 4px;font-size:0.85em" />
-            <button class="btn save" data-action="apply-zone-cut-height">✓ Apply</button>
-            <span class="zone-ch-status" style="font-size:0.78em;color:var(--secondary-text-color)"></span>
+          <div style="margin-top:6px;padding:6px 8px;background:var(--card-background-color,#1c1c1e);border-radius:8px;border:1px solid var(--divider-color,#333)">
+            <div style="font-size:0.75em;font-weight:600;letter-spacing:0.05em;color:var(--secondary-text-color);margin-bottom:6px">ZONE SETTINGS</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;align-items:center;font-size:0.82em">
+              <span style="color:var(--secondary-text-color)">Cut height (mm)</span>
+              <input id="zs-cut-height" type="number" min="20" max="100" step="5" value="${chV}"
+                     style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+              <span style="color:var(--secondary-text-color)">Move speed (m/s)</span>
+              <input id="zs-move-speed" type="number" min="0.1" max="1.5" step="0.05" value="${msV.toFixed(2)}"
+                     style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+              <span style="color:var(--secondary-text-color)">Path spacing (cm)</span>
+              <input id="zs-path-spacing" type="number" min="0" max="100" step="1" value="${psV}"
+                     style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+              <span style="color:var(--secondary-text-color)">Perimeter laps</span>
+              <input id="zs-perimeter-laps" type="number" min="0" max="5" step="1" value="${plV}"
+                     style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+              <button class="btn save" data-action="apply-zone-config" style="flex:1">✓ Apply zone settings</button>
+              <span class="zone-ch-status" style="font-size:0.78em;color:var(--secondary-text-color)"></span>
+            </div>
           </div>`;
       }
       toolbar = `
@@ -1235,7 +1253,8 @@ class LymowMapCard extends HTMLElement {
           case "start-split":       this._startSplit(); break;
           case "cancel-split":      this._cancelSplit(); break;
           case "merge":             this._mergeSelected(); break;
-          case "apply-zone-cut-height": this._applyZoneCutHeight(); break;
+          case "apply-zone-cut-height": this._applyZoneConfig(); break;
+          case "apply-zone-config":    this._applyZoneConfig(); break;
         }
       });
     });
@@ -1720,23 +1739,27 @@ class LymowMapCard extends HTMLElement {
     }
   }
 
-  async _applyZoneCutHeight() {
+  async _applyZoneConfig() {
     if (!this._hass || !this._config.mower_entity || !this._editHash || this._editType !== "go") return;
-    const input = this.shadowRoot.getElementById("zone-cut-height");
     const status = this.shadowRoot.querySelector(".zone-ch-status");
-    const mm = parseInt(input?.value, 10);
-    if (!Number.isFinite(mm) || mm < 20 || mm > 100) {
-      if (status) status.textContent = "⚠️ 20–100 mm";
-      return;
-    }
+    const ch  = parseInt(this.shadowRoot.getElementById("zs-cut-height")?.value, 10);
+    const ms  = parseFloat(this.shadowRoot.getElementById("zs-move-speed")?.value);
+    const ps  = parseInt(this.shadowRoot.getElementById("zs-path-spacing")?.value, 10);
+    const pl  = parseInt(this.shadowRoot.getElementById("zs-perimeter-laps")?.value, 10);
+    if (!Number.isFinite(ch) || ch < 20 || ch > 100) { if (status) status.textContent = "⚠️ cut height 20–100"; return; }
+    if (!Number.isFinite(ms) || ms < 0.1 || ms > 1.5) { if (status) status.textContent = "⚠️ speed 0.1–1.5"; return; }
     if (status) status.textContent = "Sending…";
+    const data = {
+      entity_id: this._config.mower_entity,
+      zone_hash_id: this._editHash,
+      cut_height: ch,
+      move_speed: ms,
+    };
+    if (Number.isFinite(ps) && ps >= 0) data.path_spacing = ps;
+    if (Number.isFinite(pl) && pl >= 0) data.perimeter_mow_laps = pl;
     try {
-      await this._hass.callService("lymow", "update_zone_cut_height", {
-        entity_id: this._config.mower_entity,
-        zone_hash_id: this._editHash,
-        cut_height_mm: mm,
-      });
-      if (status) status.textContent = `✓ ${mm} mm`;
+      await this._hass.callService("lymow", "set_zone_config", data);
+      if (status) status.textContent = `✓ Applied`;
       setTimeout(() => { if (status) status.textContent = ""; }, 3000);
     } catch (err) {
       if (status) status.textContent = `⚠️ ${err?.message || err}`;
