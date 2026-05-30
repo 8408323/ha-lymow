@@ -211,6 +211,7 @@ class LymowMapCard extends HTMLElement {
       rtkStatus: a.rtkStatus,
       rtkLabel: a.rtkLabel || null,
       workStatus: a.workStatus,
+      mowProgress: a.mowProgress ?? null,
       // Schedule data from optional schedule_entity
       schedules: (() => {
         const se = this._config.schedule_entity && this._hass?.states[this._config.schedule_entity];
@@ -292,7 +293,8 @@ class LymowMapCard extends HTMLElement {
 
     // Work-status label and mow progress from mower entity
     const mowerState = this._config.mower_entity && this._hass?.states[this._config.mower_entity];
-    const mowProgress = mowerState?.attributes?.mow_progress ?? null;
+    // mowProgress comes from the map sensor (mowProgress attr) or the mower entity
+    const mowProgress = mapData.mowProgress ?? mowerState?.attributes?.mow_progress ?? null;
     const battery = mowerState?.attributes?.battery_level ?? null;
 
     if ([...goZones, ...nogoZones].length === 0 && !chargingStation) {

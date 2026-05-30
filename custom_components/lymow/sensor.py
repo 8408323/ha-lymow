@@ -701,6 +701,11 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         if rtk_raw is not None:
             _RTK_LABELS = {0: "No fix", 1: "Float fix", 2: "Fixed", 3: "RTK fixed"}
             attrs["rtkLabel"] = _RTK_LABELS.get(int(rtk_raw), f"Unknown ({rtk_raw})")
+        # Live mow progress so the card status bar shows % without needing a separate entity
+        for key in ("mowProgress", "mowStripCount", "totalTaskAreaM2"):
+            val = data.get(key)
+            if val is not None:
+                attrs[key] = val
         return attrs
 
 
