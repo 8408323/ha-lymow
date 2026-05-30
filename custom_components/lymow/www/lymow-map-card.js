@@ -202,6 +202,7 @@ class LymowMapCard extends HTMLElement {
       gpsOrigin: a.gps_origin || null,
       chargingStation: a.charging_station || null,
       mowingSettings: a.mowing_settings || null,
+      mowPath: a.mow_path || null,
       poseEastM: a.poseEastM,
       poseNorthM: a.poseNorthM,
       poseThetaRad: a.poseThetaRad,
@@ -281,7 +282,7 @@ class LymowMapCard extends HTMLElement {
       return;
     }
 
-    const { goZones, nogoZones, channels, chargingStation, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, workStatus, schedules } = mapData;
+    const { goZones, nogoZones, channels, chargingStation, mowPath, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, workStatus, schedules } = mapData;
 
     // RTK auto-pause: if enabled, pause mowing when fix quality drops below threshold
     if (this._config.rtk_autopause && this._config.mower_entity) {
@@ -376,6 +377,13 @@ class LymowMapCard extends HTMLElement {
         <tspan x="${sx(mid.x)}" y="${sy(mid.y)}" dy="${dy}">${line1}</tspan>
         ${line2 ? `<tspan x="${sx(mid.x)}" dy="${(parseFloat(fs) * 1.2).toFixed(2)}">${line2}</tspan>` : ""}
       </text>`;
+    }).join("\n");
+
+    // ── Mow track (QUERY_PATH response — filled area of already-mowed strips) ──
+    const trackPaths = (mowPath?.goZones || []).map((zt) => {
+      if (!zt.trackPoints || zt.trackPoints.length < 2) return "";
+      const pts = zt.trackPoints.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      return `<polyline points="${pts}" fill="none" stroke="#4caf50" stroke-width="0.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.7" pointer-events="none"/>`;
     }).join("\n");
 
     // ── Go-zones ──────────────────────────────────────────────────────────────
@@ -931,6 +939,7 @@ class LymowMapCard extends HTMLElement {
             <defs>${goLabelDefs}</defs>
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
+            ${trackPaths}
             ${goPaths}
             ${goLabels}
             ${nogoPaths}

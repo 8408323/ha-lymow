@@ -256,7 +256,7 @@ async def try_mqtt_query_map(
     ws_path = build_presigned_ws_path(iot_host, region, access_key, secret_key, session_token)
     print(f"  WS path (first 120 chars): {ws_path[:120]}...")
 
-    cmd = encode_query_map(query_index=0)
+    cmd = encode_query_map(queryIndex=0)
     envelope = wrap_envelope(cmd)
     topic_out = f"/device/{thing_name}/pbinput"
     topic_in = f"/device/{thing_name}/pboutput"
