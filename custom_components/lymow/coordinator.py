@@ -338,6 +338,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 notification_id=f"{DOMAIN}_{thing_name}_done",
             )
 
+        # Clear stale path cache when a new mow session starts (docked/waiting → mowing).
+        # Without this the previous session's completed track masks current progress.
+        if new_ws in WORK_STATUS_MOWING_GROUP and prev_ws not in WORK_STATUS_MOWING_GROUP:
+            self._last_path_data.pop(thing_name, None)
+
         # Auto-query mow path while actively mowing (≤ once per 30 s).
         # Fires on any workStatus update when the robot is in a mowing state,
         # but only schedules a new task if one isn't already waiting.
@@ -917,10 +922,21 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
 
     async def _async_poll_path(self, thing_name: str) -> None:
-        """Send QUERY_PATH then clear the pending flag so the next mow tick can schedule again."""
-        await asyncio.sleep(5)  # small delay so the robot finishes its current strip
+        """Poll QUERY_PATH every 30 s while the robot is mowing.
+
+        The pending flag gates entry so workStatus ticks don't pile up requests.
+        After each query-and-sleep cycle we re-schedule only if the robot is still
+        in a mowing state, giving a clean 30 s cadence with no drift.
+        """
         try:
+            await asyncio.sleep(2)  # brief delay so robot finishes the current strip
             await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+            await asyncio.sleep(28)  # rest of the 30 s window
+            # If still mowing, kick off the next cycle immediately
+            ws = (self.data or {}).get(thing_name, {}).get("workStatus")
+            if ws in WORK_STATUS_MOWING_GROUP:
+                self.hass.async_create_task(self._async_poll_path(thing_name))
+                return  # keep pending=True for the new task
         finally:
             self._path_poll_pending[thing_name] = False
 
