@@ -1912,10 +1912,20 @@ dropped mid-session.)
 - `wifiConfigRes` → Wi-Fi set result (and set_wifi is BLE-only — see #200).
 - `localizationInfo`, `iotCmd`, `btMap`, `algo*`, `baseOutput` → internal/minor.
 
-**Likely NOT a robot wire command (cloud/app-side):**
-- **Notifications** (the per-notification tristate toggles) — there is no PbInput
-  notification field; these are app/cloud push preferences (REST), not a robot
-  protobuf command. Capture via mitmproxy REST when the phone is back.
+**Cloud/REST settings — ALREADY IMPLEMENTED (live-validated 2026-05-30):** these
+go via `PATCH /prod/update-device-feature` (NOT robot protobuf) and are already
+exposed as HA switches backed by `async_set_device_feature`:
+- **Notifications** = `mobileNotificationSwitch` → `MobileNotificationSwitch`. ✓
+- **Anti-theft** = `theftDetectionSwitch` + geoFence[{lat,lon,radius}] →
+  `TheftDetectionSwitch` + `set_geofence`. ✓ (live PATCH body confirmed the shape)
+- **Device-lock** = `theftLock` → `TheftLockSwitch`. ✓
+- **Find-robot** = `findRobotSwitch` → `FindRobotSwitch`. ✓
+  So #5/#6 from the "next" list were NOT gaps — they're done and now verified.
+
+**Multi-floor (40–43):** constants exist (FLOOR_SWITCH/ADD/DELETE/MODIFY) but no
+encoders/services; this device is SINGLE-MAP (no floor/map switcher in the app),
+so there's nothing to capture here. BACKUP/RESTORE (44/45) are covered. Only
+relevant if a multi-map device shows up.
 
 **Known userCtrl, intentionally not wired (low value / risky):** SELF_CHECKING(16),
 CHARGING_STATION_RESET(17), FORCE_REINIT(28), RECORDING start/stop(30/31),
