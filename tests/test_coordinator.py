@@ -504,13 +504,15 @@ async def test_async_bind_rtk_publishes_encoded_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_set_wifi_publishes_encoded_command() -> None:
+async def test_async_set_wifi_raises_ble_only() -> None:
+    """Wi-Fi provisioning is BLE-only; over MQTT it must fail loudly, not no-op
+    (live-confirmed 2026-05-30; see issue #200)."""
+    from homeassistant.exceptions import HomeAssistantError
+
     coord, mqtt, _ = _make_coordinator()
-    await coord.async_set_wifi(THING, "TestNet", "testpass12")  # placeholder creds
-    mqtt.async_publish_command.assert_awaited_once()
-    thing, pb = mqtt.async_publish_command.await_args.args
-    assert thing == THING
-    assert pb.hex() == "8a01170a07546573744e6574120a746573747061737331322803"
+    with pytest.raises(HomeAssistantError, match="BLE-only"):
+        await coord.async_set_wifi(THING, "TestNet", "testpass12")  # placeholder creds
+    mqtt.async_publish_command.assert_not_awaited()
 
 
 @pytest.mark.asyncio

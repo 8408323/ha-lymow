@@ -943,14 +943,19 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_bind_rtk(base_id))
 
     async def async_set_wifi(self, thing_name: str, ssid: str, password: str) -> None:
-        """Provision the mower's Wi-Fi (PbInput.wifiConfig). Creds never logged.
+        """Provision the mower's Wi-Fi — BLE-only, not supported over MQTT.
 
-        Wire format captured over BLE; the same protobuf is published over MQTT
-        here (the mower must be reachable — typically via 4G — to receive it).
+        The wire format (``encode_set_wifi``) is confirmed, but a live test
+        (2026-05-30) showed the robot ignores the command over the cloud/MQTT
+        transport this integration uses, while start/zone-config commands over
+        the same path work. Wi-Fi provisioning goes over BLE GATT, which this
+        integration has no path to — so fail loudly rather than silently no-op.
+        See https://github.com/8408323/ha-lymow/issues/200. Creds never logged.
         """
-        from .protocol import encode_set_wifi
-
-        await self._mqtt.async_publish_command(thing_name, encode_set_wifi(ssid, password))
+        # ssid/password validated by encode_set_wifi when a BLE transport exists.
+        raise HomeAssistantError(
+            "Wi-Fi provisioning is BLE-only and not supported over the cloud connection (see issue #200)"
+        )
 
     async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
         """Set PbRobotConfig fields on the robot — currently just network priority.
