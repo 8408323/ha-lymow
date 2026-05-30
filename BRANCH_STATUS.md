@@ -1993,8 +1993,48 @@ PbZoneConfig fields, while the existing userCtrl=36 path stays for the true
 PbTaskConfig device settings. Decoder field labels also get corrected. All
 gated on finishing the per-field live confirmation above.
 
-### Still to capture (needs per-screen nav / BTSnoop / verified-Save)
-- **Remaining PbZoneConfig fields** via one multi-field distinctive Save.
+### I. Laps disambiguation CONFIRMED + working MQTT write path (2026-05-30)
+Drove the laps **sliders** (they're SeekBars, not tap-digits) to distinct
+values, Saved (→ Keep Custom), re-queried:
+- set No-Go=3, Zone-Perimeter=2 → wire came back **f12=3, f10=2**.
+- ⇒ **f10 = perimeterMowLaps, f12 = noGoMowLaps** (resolves the last
+  ambiguous pair; matches reply-4 ordering for these two).
+
+**Proved the global write works from MQTT too:** hand-built the userCtrl=49
++ PbMap{f11 globalZoneConfig, f12 globalChannelConfig} frame with ORIGINAL
+values and published it via `scripts/_publish_hex.py` — robot applied it,
+re-query confirmed full restore (f10=1,f12=1,f17=1,f18=0). The constructed
+frame was byte-identical to the captured app frame except the two fields
+that legitimately differed (f17/f18) → construction verified. So HA can
+write global mowing settings via this exact path (userCtrl=49 over MQTT).
+
+**Confirmed PbZoneConfig layout (toggle/​value-verified — TRUST THESE):**
+`f1 cutHeight · f4 moveSpeed(f32) · f9 pathSpacing · f10 perimeterMowLaps ·
+f12 noGoMowLaps · f17 safeMarginMode(Offset=1/Precise=0) ·
+f18 turnOffOuterMotor(ON=1)`.
+**Corroborated (read + order-anchored by the confirmed points, NOT yet
+toggle-verified):** f6 cutSpeed, f7 cleanMode, f8 enabledZoneMask(uint64),
+f11 perimeterMowDir(=2), f13 zoneObstacleDetect(=2), f14 mowingOrder(=1),
+f16 relativeCleanDir/stripeAngle(=90), f19 followDetectMode(=2).
+**Unknown:** f15 (=0; candidate lineFollowMode — the field reply-4
+mis-placed at f17). Confirm f11/f13/f14/f16/f15 with one more multi-enum
+distinctive Save before the field-map rewrite ships.
+
+Robot config RESTORED + verified. No movement commands this session.
+
+### Remap — ready to implement (after f11/f13/f14/f15/f16 final toggle)
+- New encoder `encode_set_global_zone_config(**fields)` → userCtrl=49
+  (USER_CTRL_GLOBAL_SETTING_N) + PbMap.f11 globalZoneConfig (+f12 channel).
+  Replaces the wrong userCtrl=36/PbTaskConfig path for MOWING settings;
+  keep userCtrl=36/PbTaskConfig for the 4-field DEVICE settings.
+- Correct `_ZONE_CONFIG_INT_NAMES`/`_ZONE_CONFIG_BOOL_*`/`_TASK_CONFIG_FIELDS`
+  + `decode_zone_config` + `_encode_go_zone` to the verified layout above.
+- Coordinator `async_set_global_zone_config` + `lymow.set_mowing_settings`
+  service; keep `set_zone_config` (per-zone userCtrl=9) for overrides.
+- Rewrite the pinned PbZoneConfig tests to the verified layout.
+
+### Still to capture (other gaps)
+- Final enum toggles (f11/f13/f14/f15/f16) — one multi-enum distinctive Save.
 - Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor — needs a
   Save that transmits; this session's didn't).
 - Gap 4 enum values (toggle Channel Obstacle Detection, re-query).
