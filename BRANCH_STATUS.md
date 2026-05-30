@@ -2061,15 +2061,21 @@ UI-vs-proto names (f17/f18 by choice; wifi f5=secret; zone f8/f9), all benign.
 
 **Enums / error tables (2026-05-30):** workStatus enum already complete in
 const.py; setting-value enums (cutSpeed 3–6, obsDecMode/followDetectMode 1/2,
-perimeterMowDir) verified live earlier. **Error/warning DESCRIPTIONS are NOT in
-the binary** — the app uses i18n keys (`warnings.code_15`…`code_62`,
-`errors.unknown_error`) whose text is fetched at runtime via `remote_config.*`
-(cloud). So numeric error/warning codes flow through fine (we decode them as
-ints), but human descriptions can't be extracted from the APK. `ERROR_DESCRIPTIONS`
-in const.py is therefore a hand-curated subset, not derivable from the bundle.
-Symbolic audio-error categories found: AUDIO_ERROR_{BATTERY_LOW, BLADE_STUCK,
-CLIFF, DOCK_FAIL, INI_FAIL, ROBOT_SLIP, SLOPE}. Warning-code domain (i18n keys):
-15,19,21,25,27–31,38–53,56–62.
+perimeterMowDir) verified live earlier. **Error/warning code tables now
+AUTHORITATIVE (commit 713f1cc):** the localized description *text* is remote
+i18n (`warnings.code_15`…, `errors.unknown_error` fetched via `remote_config.*`),
+but the **PbErrorCode (90 codes) and PbWarningCode (63 codes) enums — symbolic
+names + their numeric values — ARE in the bytecode.** Extracted by reading each
+enum member's LoadConst register (declaration order is non-sequential, e.g.
+WARNING_BLADE_STUCK=32 sits between 13 and 14, so positions were NOT assumed).
+This REPLACED the old 10-entry hand-curated `ERROR_DESCRIPTIONS`, which had
+codes 51/52 wrong — those were *warning* codes (no-RTK-base / RTK-bind-fail), not
+error codes (real error 51/52 = dock-signal-lost / dock-path-not-found).
+`WARNING_DESCRIPTIONS` is new; the error sensor now also exposes
+`warning_descriptions`. Descriptions are humanized from the symbolic names
+(codes 18/71 use the app's exact wording). Verified live: E18=ROBOT_INCLINE
+(tilt ✓), E71=ACTION_TIMEOUT ✓. Symbolic audio-error categories also found:
+AUDIO_ERROR_{BATTERY_LOW, BLADE_STUCK, CLIFF, DOCK_FAIL, INI_FAIL, ROBOT_SLIP, SLOPE}.
 **Bytecode decoding is COMPLETE** — every message/field is verified; the only
 non-extractable piece (error-description text) is remote i18n, not in the binary.
 
