@@ -705,18 +705,11 @@ class LymowMapCard extends HTMLElement {
           <span class="sp-val">${(sv.move_speed ?? 0.6).toFixed(1)}</span>
         </div>
         <div class="sp-row">
-          <label>Cut speed (m/s)</label>
-          <input type="range" class="sp-input" data-field="cut_speed" data-type="float"
-            min="0.1" max="1.0" step="0.1" value="${sv.cut_speed ?? 0.6}"
-            oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(1)"/>
-          <span class="sp-val">${(sv.cut_speed ?? 0.6).toFixed(1)}</span>
-        </div>
-        <div class="sp-row">
-          <label>Brush speed (m/s)</label>
-          <input type="range" class="sp-input" data-field="brush_speed" data-type="float"
-            min="0.1" max="1.0" step="0.1" value="${sv.brush_speed ?? 0.6}"
-            oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(1)"/>
-          <span class="sp-val">${(sv.brush_speed ?? 0.6).toFixed(1)}</span>
+          <label>Cut speed</label>
+          <input type="range" class="sp-input" data-field="cut_speed" data-type="int"
+            min="1" max="10" step="1" value="${sv.cut_speed ?? 5}"
+            oninput="this.nextElementSibling.textContent=parseInt(this.value)"/>
+          <span class="sp-val">${sv.cut_speed ?? 5}</span>
         </div>
         <div class="sp-row">
           <label>Path spacing (mm)</label>
@@ -1523,7 +1516,7 @@ class LymowMapCard extends HTMLElement {
 
     if (fixLow && isMowing && !this._rtkPauseSent) {
       this._rtkPauseSent = true;
-      this._hass.callService("lymow", "pause", { entity_id: this._config.mower_entity })
+      this._hass.callService("lawn_mower", "pause", { entity_id: this._config.mower_entity })
         .catch((err) => console.warn("lymow-map-card: RTK auto-pause failed:", err));
     }
     // Reset once fix recovers so next degradation episode can pause again
@@ -1540,7 +1533,7 @@ class LymowMapCard extends HTMLElement {
     if (this._settingsOpen && !this._settingsValues) {
       const saved = localStorage.getItem("lymow_settings_values");
       const defaults = saved ? JSON.parse(saved) : {
-        move_speed: 0.6, cut_speed: 0.6, brush_speed: 0.6,
+        move_speed: 0.6, cut_speed: 5,
         path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
         perimeter_mow_dir: 0, obs_dec_mode: 0,
         clean_mode: 0, path_order: 0, line_follow_mode: 0,
@@ -1825,8 +1818,8 @@ class LymowMapCard extends HTMLElement {
     try {
       await this._hass.callService("lymow", "pin_and_go", {
         entity_id: this._config.mower_entity,
-        east_m: +enu.x.toFixed(3),
-        north_m: +enu.y.toFixed(3),
+        x: +enu.x.toFixed(3),
+        y: +enu.y.toFixed(3),
       });
     } catch (err) {
       console.warn("lymow-map-card: pin_and_go failed", err);
