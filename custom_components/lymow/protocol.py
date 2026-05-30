@@ -508,15 +508,19 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
 #   f12 noGoMowLaps (int)                    — CONFIRMED (app No-Go)
 #   f13 obsDecMode (int, zone obstacle)      — anchored
 #   f14 pathOrder/mowingOrder (bool)         — anchored
-#   f15 (unknown, =0)                        — left raw, no confirmed meaning
+#   f15 startProgress (proto name; we leave it raw, =0)
 #   f16 relativeCleanDir (int, stripe angle) — anchored (=90)
-#   f17 safeMarginMode (bool, Offset=1/Precise=0) — CONFIRMED (toggle)
-#   f18 turnOffOuterMotor (bool, ON=1)       — CONFIRMED (toggle)
+#   f17 safeMarginMode (bool, Offset=1/Precise=0) — CONFIRMED (toggle).
+#       Proto name is `lineFollowMode` (APK, Hermes v96); we keep the UI-derived
+#       name on purpose (per maintainer choice) — field NUMBER 17 is correct.
+#   f18 turnOffOuterMotor (bool, ON=1)       — CONFIRMED (toggle).
+#       Proto name is `disableOuterDischarge` (APK); UI-derived name kept; #18 correct.
 #   f19 followDetectMode (int)               — anchored
 # NOTE: the prior layout mislabeled f9 as relativeCleanDir / f10 as pathSpacing
-# (a +1 shift); cleanDir@8 / startProgress@16 / lineFollowMode@17 had no real
-# home and are dropped. raiseCutHeight/lowerCutHeight/brushSpeed are NOT
-# steady-state fields (raise/lower are momentary +/- commands).
+# (a +1 shift). The full PbZoneConfig map is now APK-verified (Hermes v96):
+# cleanDir=f8, startProgress=f15, brushSpeed=f5 exist but we don't surface them
+# (no HA use). raiseCutHeight/lowerCutHeight are momentary +/- commands, kept
+# as-is. All field NUMBERS we DO use are confirmed correct.
 _ZONE_CONFIG_BOOL_FIELDS = {14, 17, 18}
 _ZONE_CONFIG_INT_NAMES: dict[int, str] = {
     1: "cutHeight",
@@ -1067,10 +1071,11 @@ def encode_userctrl(command: int) -> bytes:
 # decoder maps (`_ZONE_CONFIG_INT_NAMES`/`_BOOL_NAMES`). Used by the per-zone
 # userCtrl=9 write (`encode_set_zone_config`) and the sync_map round-trip
 # (`_encode_go_zone`); both build a PbZoneConfig sub-message from these numbers.
-# Dropped vs the old (wrong) map: brushSpeed(f5), cleanDir(f8) [f8 is actually
-# enabledZoneMask], startProgress(f16) [f16 is the stripe angle], lineFollowMode
-# (f17) [f17 is safeMarginMode] — none had a confirmed wire home. raiseCutHeight
-# /lowerCutHeight (f2/f3) are momentary +/- commands, kept as-is (unconfirmed).
+# Not surfaced (no HA use), names per the APK-verified map (Hermes v96):
+# brushSpeed=f5, cleanDir=f8, startProgress=f15. Our f17/f18 use UI-derived
+# names (safeMarginMode/turnOffOuterMotor); proto names are lineFollowMode/
+# disableOuterDischarge — numbers correct, names kept by choice. raiseCutHeight/
+# lowerCutHeight (f2/f3) are momentary +/- commands, kept as-is.
 _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "cutHeight": (1, "int"),
     "raiseCutHeight": (2, "bool"),
