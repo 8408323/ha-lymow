@@ -706,7 +706,10 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             state["rtkStatus"] = _signed32(rtk_status)
 
     # Area / progress info (field 12):
-    #   f1=mowStripCount(int), f2=totalTaskArea(float32, the current task's
+    #   f1=missionTimeMin(int — elapsed mission/cleaning time in MINUTES; this is
+    #   the app's "Mission time". LIVE-CONFIRMED 2026-05-30: matched the app's
+    #   Mission-time across a 46-min run, 1:1. Was previously mislabeled
+    #   "mowStripCount".), f2=totalTaskArea(float32, the current task's
     #   total area — denominator for mowProgress), f3=currentTaskZone
     #   (PbZoneBasicInfo, hashId=f2 — which go-zone is being mowed now; present in
     #   the QUERY_PATH reply during an active task), f5=mowProgress(float32 0–1).
@@ -721,9 +724,9 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         total_area = _first(area_fields, 2)
         if total_area is not None:
             state["totalTaskAreaM2"] = _decode_f32(total_area)
-        strip_count = _first(area_fields, 1)
-        if strip_count is not None:
-            state["mowStripCount"] = _signed32(strip_count)
+        mission_min = _first(area_fields, 1)
+        if mission_min is not None:
+            state["missionTimeMin"] = _signed32(mission_min)
         progress_raw = _first(area_fields, 5)
         if progress_raw is not None:
             state["mowProgress"] = round(_decode_f32(progress_raw) * 100, 1)
