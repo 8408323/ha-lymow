@@ -671,6 +671,17 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         lte_sig = _first(ri, 4)
         if lte_sig is not None:
             state["lteSignalQuality"] = _signed32(lte_sig)
+        # f5 btSignalQuality, f9 wifiWorking, f10 lteWorking — names APK-verified
+        # (Hermes v96). The "working" flags say which link is currently active.
+        bt_sig = _first(ri, 5)
+        if bt_sig is not None:
+            state["btSignalQuality"] = _signed32(bt_sig)
+        wifi_working = _first(ri, 9)
+        if wifi_working is not None:
+            state["wifiWorking"] = bool(wifi_working)
+        lte_working = _first(ri, 10)
+        if lte_working is not None:
+            state["lteWorking"] = bool(lte_working)
 
     # PbDeviceProfile (field 10). f3 softwareVersion ("v2.1.48.1") live-confirmed
     # 2026-05-30 (matches REST get-device-info.softwareVersion). f4 wifiSsid,
@@ -804,6 +815,22 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             state["poseNorthM"] = _decode_f32(north_m)
         if theta_rad is not None:
             state["poseThetaRad"] = _decode_f32(theta_rad)
+
+    # Coverage path (field 13 = PbPath {poses: repeated PbPose, cleanFinishedZones}).
+    # Field names APK-verified (Hermes v96); each PbPose is {f1 east, f2 north,
+    # f3 theta} float32 (same shape as the live pose). Surfaced as a list the map
+    # card can draw. Empty/absent in normal heartbeats — populated on demand.
+    path_raw = _first(fields, 13)
+    if isinstance(path_raw, bytes) and path_raw:
+        poses: list[dict[str, float]] = []
+        for praw in _all(_decode_fields(path_raw), 1):
+            if isinstance(praw, bytes):
+                pf = _decode_fields(praw)
+                e, n = _first(pf, 1), _first(pf, 2)
+                if isinstance(e, int) and isinstance(n, int):
+                    poses.append({"east": _decode_f32(e), "north": _decode_f32(n)})
+        if poses:
+            state["coveragePoses"] = poses
 
     # Mowing schedules: PbOutput field 16 = PbSchedules { tasks(1) = [PbSchedule] }.
     # The QUERY_SCHEDULES reply carries the full list (verified against a live

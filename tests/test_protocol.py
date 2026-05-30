@@ -1475,6 +1475,32 @@ def test_decode_pboutput_pose_enu() -> None:
     assert abs(state["poseThetaRad"] - math.pi / 2) < 0.001
 
 
+def test_decode_pboutput_robot_info_extra_signals() -> None:
+    """btSignalQuality(f5), wifiWorking(f9), lteWorking(f10) — APK-verified names (Hermes v96)."""
+    from lymow.protocol import PB_VERSION
+
+    ri = _field_i32(6, 2) + _field_i32(5, 70) + _field_i32(9, 1) + _field_i32(10, 0)
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(5, ri)
+    state = decode_pboutput(pb)
+    assert state["btSignalQuality"] == 70
+    assert state["wifiWorking"] is True
+    assert state["lteWorking"] is False
+
+
+def test_decode_pboutput_coverage_path() -> None:
+    """PbOutput f13 PbPath{poses: repeated PbPose} → coveragePoses (APK-verified)."""
+    from lymow.protocol import PB_VERSION
+
+    path = _field_bytes(1, _field_f32(1, 1.5) + _field_f32(2, 2.5)) + _field_bytes(
+        1, _field_f32(1, 3.0) + _field_f32(2, 4.0)
+    )
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(13, path)
+    poses = decode_pboutput(pb)["coveragePoses"]
+    assert len(poses) == 2
+    assert poses[0]["east"] == pytest.approx(1.5) and poses[0]["north"] == pytest.approx(2.5)
+    assert poses[1]["east"] == pytest.approx(3.0) and poses[1]["north"] == pytest.approx(4.0)
+
+
 def test_decode_pboutput_no_rtk_when_absent() -> None:
     pb = _build_pboutput()
     state = decode_pboutput(pb)
