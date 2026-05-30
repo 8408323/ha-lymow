@@ -81,6 +81,12 @@ class LymowMapCard extends HTMLElement {
     this._longPressTimer = null; // for zone enable/disable long-press
     this._pinAndGoMode = false; // double-click sends robot to point
 
+    // Live mow trail — circular buffer of {x,y} ENU positions recorded during active mow.
+    // Max 2000 points (~33 min at 1 Hz). Reset when mowing stops.
+    this._mowTrail = [];
+    this._mowTrailMaxPts = 2000;
+    this._mowTrailActive = false; // true while workStatus is in mowing group
+
     // Pan/zoom state (in SVG user units)
     this._vx = 0; this._vy = 0; this._vw = 100; this._vh = 100;
     this._mapReady = false;
@@ -154,6 +160,35 @@ class LymowMapCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+
+    // Record live robot position into the mow trail while actively mowing
+    const mapState = hass?.states[this._config?.entity];
+    if (mapState) {
+      const a = mapState.attributes;
+      const ws = a.workStatus !== undefined ? parseInt(a.workStatus) : -1;
+      const MOWING = new Set([2, 8, 9]); // MOWING, RESUME, ZONE_PARTITION
+      const isMowing = MOWING.has(ws);
+      if (isMowing) {
+        if (!this._mowTrailActive) {
+          // New mow session started — clear the old trail
+          this._mowTrail = [];
+          this._mowTrailActive = true;
+        }
+        const x = a.poseEastM, y = a.poseNorthM;
+        if (x !== undefined && y !== undefined) {
+          const last = this._mowTrail[this._mowTrail.length - 1];
+          // Only append if robot moved more than 0.05 m (skip GPS jitter while stationary)
+          if (!last || Math.hypot(x - last.x, y - last.y) > 0.05) {
+            this._mowTrail.push({ x, y });
+            if (this._mowTrail.length > this._mowTrailMaxPts)
+              this._mowTrail.shift();
+          }
+        }
+      } else {
+        this._mowTrailActive = false;
+      }
+    }
+
     // Don't re-render while the user is actively interacting with the UI:
     // - typing in a rename/draw-name input
     // - has focus inside any settings panel input or select (keeps dropdowns open)
@@ -382,14 +417,27 @@ class LymowMapCard extends HTMLElement {
       </text>`;
     }).join("\n");
 
-    // ── Mow track — build lookup by hashId ───────────────────────────────────
-    // trackPoints form the outer boundary of the already-mowed area (closed polygon).
-    // We fill it bright green clipped to the zone polygon so unmowed area shows dimmer.
+    // ── Mow track overlay ────────────────────────────────────────────────────
+    // During an active mow: show the live position trail (breadcrumb polyline).
+    // After mowing ends: show the session's mowed-area polygon from QUERY_PATH.
+    // Never show the stale previous-session path while the robot is currently mowing,
+    // because that data covers the whole zone and masks the current progress.
+    const isMowingNow = this._mowTrailActive;
     const mowedByZone = {};
-    for (const zt of (mowPath?.goZones || [])) {
-      if (zt.hashId && zt.trackPoints?.length >= 3) mowedByZone[zt.hashId] = zt;
+    if (!isMowingNow) {
+      // Only show the stored path overlay when NOT actively mowing
+      for (const zt of (mowPath?.goZones || [])) {
+        if (zt.hashId && zt.trackPoints?.length >= 3) mowedByZone[zt.hashId] = zt;
+      }
     }
     const hasMowData = Object.keys(mowedByZone).length > 0;
+
+    // ── Live mow trail (breadcrumb during active mow) ─────────────────────────
+    let liveTrail = "";
+    if (isMowingNow && this._mowTrail.length >= 2) {
+      const pts = this._mowTrail.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      liveTrail = `<polyline points="${pts}" fill="none" stroke="#ff6f00" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" pointer-events="none"/>`;
+    }
 
     // ── Go-zones ──────────────────────────────────────────────────────────────
     const goPaths = goZones.map((z) => {
@@ -448,7 +496,8 @@ class LymowMapCard extends HTMLElement {
 
       // Mow progress line — shown when QUERY_PATH data is available for this zone
       const mowedZone = mowedByZone[z.hashId];
-      const progressPart = mowedZone != null
+      // Don't show strip count while actively mowing (data is from previous session)
+      const progressPart = (!isMowingNow && mowedZone != null)
         ? `${mowedZone.stripsDone ?? "?"} strips` : "";
 
       // Mode 2 (both): two stacked lines; modes 0/1 single line.
@@ -729,9 +778,14 @@ class LymowMapCard extends HTMLElement {
     const _li = (svgInner, vb, label) =>
       `<div class="legend-item"><span class="lsym"><svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">${svgInner}</svg></span>${label}</div>`;
     const legendItems = [
-      hasMowData
-        ? _li(`<rect x="1" y="1" width="7" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/><rect x="8" y="1" width="7" height="10" fill="#a5d6a7" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Mowed / Left")
-        : _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
+      isMowingNow
+        ? _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone")
+        : hasMowData
+          ? _li(`<rect x="1" y="1" width="7" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/><rect x="8" y="1" width="7" height="10" fill="#a5d6a7" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Mowed / Left")
+          : _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
+      isMowingNow && this._mowTrail.length >= 2
+        ? _li(`<polyline points="1,11 6,7 11,4 19,2" fill="none" stroke="#ff6f00" stroke-width="2" stroke-linecap="round"/>`, "0 0 20 12", "Mow trail")
+        : "",
       nogoZones.length ? _li(`<rect x="1" y="1" width="14" height="10" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="1.5" rx="1" stroke-dasharray="3,2"/>`, "0 0 16 12", "No-go") : "",
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
       poseEastM !== undefined ? _li(`<circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/>`, "0 0 18 14", "Robot") : "",
@@ -979,6 +1033,7 @@ class LymowMapCard extends HTMLElement {
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
             ${goPaths}
+            ${liveTrail}
             ${goLabels}
             ${nogoPaths}
             ${nogoLabels}
