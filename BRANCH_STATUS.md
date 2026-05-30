@@ -1896,10 +1896,22 @@ way), plus `mowProgress`/`mowStripCount`/`currentTaskZoneHashId`.
   toggling Imperial sent ZERO traffic (no REST/MQTT/BLE). The mower always
   reports metric; the app converts for display. HA does its own unit display,
   so nothing to change in the backend.
-- **New undecoded field `PbOutput.f37`** — a varint (=15) that appears
-  *intermittently* during active mowing (seen at stripCount 9–12, absent at
-  26–27). Meaning unknown; not decoded (no-assumptions). Likely a transient
-  mowing phase/sub-state. Revisit if a use emerges.
+- **`PbOutput.f8` = advanced RTK/LoRa diagnostic — DECODED (commit ab0a5ce).**
+  JSON blob {precision, quality, diff_age, sats[], chl_snr_median[],
+  ant1_value[], cw_ratio[], lora_bandwidth[], hw_dc[], primary_error_desc,
+  error_desc_list, error_position_list[x/y/z], timestamp}. Surfaced as
+  `state['rtkDiagnostic']` = {precisionM, quality, diffAgeS, primaryError,
+  errors}. The RTK base links via **LoRa**; `ERTK_LORA_DATA_ERROR_RATE` (noisy
+  LoRa) is what degrades accuracy — the field to watch for low-precision
+  episodes. Per-error x/y/z positions intentionally not surfaced.
+- **`PbOutput.f37` = varint, CONSTANTLY 15** (12 samples). Appears ONLY during
+  active mowing (workStatus=2) in an early window (mission minutes ~8–13), then
+  the mower stops sending it. Behaviorally a transient early-phase marker
+  (plausibly the perimeter-lap phase, since perimeterMowLaps=2 runs first —
+  inference, NOT confirmed). Semantic NAME unreadable from the bundle:
+  protobufjs exposes field *names* but field *numbers* are compiled into Hermes
+  bytecode, so #37→name needs bytecode disassembly. Left un-decoded
+  (no-assumptions) — fully characterized but not named.
 - `cleanReport` (PbOutput, fires at session end) — still pending capture
   (monitor watching for the novel field number).
 
