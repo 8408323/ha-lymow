@@ -195,6 +195,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # Track whether a path-query task is already scheduled so we don't flood
         # the robot with QUERY_PATH commands while mowing.
         self._path_poll_pending: dict[str, bool] = {}
+        # Last non-empty pathData per device — persisted in memory so the map
+        # card can still show mow coverage after the robot docks (the robot stops
+        # sending path data once docked, but the last session's track is useful).
+        self._last_path_data: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -245,6 +249,14 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
         if "mapData" in patch:
             patch = self._apply_channel_name_overrides(thing_name, patch)
+        # Cache non-empty pathData so the map card can show last-mow coverage
+        # even after the robot docks (robot stops sending path data when docked).
+        if "pathData" in patch and patch["pathData"].get("goZones"):
+            self._last_path_data[thing_name] = patch["pathData"]
+        # If this patch has no pathData but we have a cached one, inject it so
+        # the sensor attribute stays populated until next mow clears/replaces it.
+        if "pathData" not in patch and thing_name in self._last_path_data:
+            patch = {**patch, "pathData": self._last_path_data[thing_name]}
         merged_patch = self._merge_nested_patch(self._mqtt_state.setdefault(thing_name, {}), patch)
         self._mqtt_state[thing_name].update(merged_patch)
         if self.data and thing_name in self.data:

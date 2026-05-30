@@ -209,6 +209,7 @@ class LymowMapCard extends HTMLElement {
       rtkEastM: a.rtkEastM,
       rtkNorthM: a.rtkNorthM,
       rtkStatus: a.rtkStatus,
+      rtkLabel: a.rtkLabel || null,
       workStatus: a.workStatus,
       // Schedule data from optional schedule_entity
       schedules: (() => {
@@ -282,7 +283,7 @@ class LymowMapCard extends HTMLElement {
       return;
     }
 
-    const { goZones, nogoZones, channels, chargingStation, mowPath, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, workStatus, schedules } = mapData;
+    const { goZones, nogoZones, channels, chargingStation, mowPath, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, rtkLabel, workStatus, schedules } = mapData;
 
     // RTK auto-pause: if enabled, pause mowing when fix quality drops below threshold
     if (this._config.rtk_autopause && this._config.mower_entity) {
@@ -607,7 +608,6 @@ class LymowMapCard extends HTMLElement {
     const wsColor = wsNum !== null ? (_wsColors[wsNum] ?? "#757575") : null;
 
     const rtkNum = rtkStatus !== undefined ? parseInt(rtkStatus) : null;
-    const rtkLabels = { 0:"No fix", 1:"Float ~40cm", 2:"Fixed ~2cm", 3:"RTK ~2cm" };
     const rtkColors = { 0:"#c62828", 1:"#ef6c00", 2:"#2e7d32", 3:"#1565c0" };
 
     const statusBar = (wsLabel || battery !== null || rtkNum !== null) ? `
@@ -615,7 +615,7 @@ class LymowMapCard extends HTMLElement {
         ${wsLabel ? `<span class="status-chip" style="background:${wsColor}">${wsLabel}</span>` : ""}
         ${mowProgress !== null ? `<span class="status-chip" style="background:#455a64">🌿 ${Math.round(mowProgress)}%</span>` : ""}
         ${battery !== null ? `<span class="status-chip" style="background:#455a64">🔋 ${Math.round(battery)}%</span>` : ""}
-        ${rtkNum !== null ? `<span class="status-chip" style="background:${rtkColors[rtkNum] ?? '#757575'}" title="${this._config.rtk_autopause ? 'auto-pause on' : ''}">📡 ${rtkLabels[rtkNum] ?? 'RTK'}</span>` : ""}
+        ${rtkNum !== null ? `<span class="status-chip" style="background:${rtkColors[rtkNum] ?? '#757575'}" title="${this._config.rtk_autopause ? 'auto-pause on' : ''}">📡 ${rtkLabel ?? 'RTK'}</span>` : ""}
       </div>` : "";
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
