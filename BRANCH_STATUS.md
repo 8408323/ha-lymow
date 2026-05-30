@@ -1706,6 +1706,31 @@ distinct answers, don't conflate them:
      the "sole client in real HA with live MQTT" condition. Capture our client's
      kvs/cmd response and diff channelARN/creds vs the app's.
 
+   **FOLLOW-UP, same evening — ran those experiments in the willing window
+   (robot still mowing, app still getting video). ALL FAILED:**
+   - `scripts/camera_feed_test.py` made the clientId prefix overridable via env
+     `LYMOW_KVS_CLIENT_PREFIX` (sub is appended from the token, never written).
+   - Test 1 — app's **exact** KVS clientId
+     (`ONEPLUSA5010_Android10_<devhex>_userId_<sub>`): **no SDP_ANSWER / 120s.**
+   - Test 2 — exact clientId **+ a live AWS IoT MQTT presence** held the whole
+     time (`/tmp/presence_hold.py`: auth → identity creds → connect → subscribe
+     `/device/<thing>/pboutput`+`/notify-app`, idle): **no SDP_ANSWER / 120s.**
+   - So in the confirmed-willing window, replicating the cloud flow + the app's
+     exact identity + a live IoT presence is **still insufficient** — the robot
+     serves the app but not our standalone client. The "sole client in real HA
+     with live MQTT" hypothesis is **effectively disproven** (reproduced both its
+     pillars, still nothing).
+   - **Verdict:** the master-wake is tied to something the app does that is NOT
+     on the captured cloud surface (kvs/cmd body is just
+     `{deviceThingName, action:"start"}` — no extra headers/params; no app→robot
+     MQTT). Remaining viable leads, both heavier: (1) **APK/Hermes analysis** of
+     the camera-tap path — does the app attach a device/push token to kvs/cmd,
+     write an IoT shadow, or hit an endpoint we didn't proxy? (2) the kvs/cmd
+     Lambda likely keys the master-wake on the app's **registered device
+     identity** (FCM/APNs push token or IoT thing cert) a Cognito-only client
+     can't present. **#97 unsolved; ship the LAN/Cloud selector with the Cloud
+     option gated/experimental.**
+
 ### Continuation, 2026-05-27 late evening (same supervisor session)
 
 User asked to keep iterating. Three more commits shipped on the
@@ -1932,6 +1957,46 @@ to be physically near the robot for those two).
   Logs, Imperial/Metric toggle) — app-only / frontend / out of scope.
 - **Map edits** (create/edit/delete zones/channels via Edit Boundary) —
   user said postpone to a manual-supervision session.
+
+## 📋 2026-05-30: APK-verified message field maps (Hermes v96 disasm)
+
+Extractor: `/tmp/extract_fields.py <anchorFieldName>` over `/tmp/disasm.txt`
+(finds the encode fn whose field-map contains the anchor; pairs each field's
+name string with its LoadConst tag). **Verdict: every field NUMBER our
+encoders/decoders use is CONFIRMED correct.** Notable names + new fields:
+
+**PbInput (commands):** userCtrl=5, remoteControl=10, schedule=11, map=12,
+robotConfig=13, wifiConfig=17, btMap=23, theftSetting=24, taskConfig=26,
+floorData=28, mergeZone=30, cutZone=31, netRtcm=32. → our encoders (userCtrl5,
+schedule11, map12, robotConfig13, wifiConfig17, taskConfig26) all correct.
+
+**PbRobotConfig:** rcCutSpeed=2, rcCutHeight=3, rcRaiseCutHeight=4,
+rcLowerCutHeight=5, audioVolume=6, isOpenLed=7, signal=8, lcdPinCode=9,
+cmdCellularSwitch=10, metric_4g=11, **camLedStatus=12, vehLedStatus=13**
+(LED brightness 0–4 — the "Headlight Mode multi-state" we'd wondered about),
+**openLedTime=14, closeLedTime=15** (= our headlight start/end — names confirmed),
+resumeBat=16, **rtkBinding=17** (our bind_rtk ✓), rrConfig=18, scheduleId=19,
+schedulePathOffset=20, timezoneOffset=21, dockOnError=22. → all our mappings ✓;
+NEW available: vehLedStatus (LED brightness select), scheduleId.
+
+**PbSchedule:** dayOfWeek=1…isDisabled=8, isAngleOffset=9, **mowAngle=10**(new),
+config=11. → all ours ✓; NEW: mowAngle (per-task stripe angle).
+
+**PbPath (PbOutput f13):** poses=1, cleanFinishedZones=2.
+
+**PbZoneConfig — numbers all correct, but two NAME mismatches vs our remap:**
+cutHeight1, raiseCutHeight2, lowerCutHeight3, moveSpeed4, brushSpeed5, cutSpeed6,
+cleanMode7, **cleanDir8** (we'd guessed "enabledZoneMask"), pathSpacing9,
+perimeterMowLaps10, perimeterMowDir11, noGoMowLaps12, obsDecMode13, pathOrder14,
+**startProgress15**, relativeCleanDir16, **lineFollowMode17** (we call it
+`safeMarginMode`), **disableOuterDischarge18** (we call it `turnOffOuterMotor`),
+followDetectMode19. → DECISION NEEDED: align f17/f18 to the proto names
+(authoritative, per the verbatim-wire-names rule) vs keep our UI-derived names
+(the supervisor's card reads these keys). Field numbers are right either way.
+
+(Anchor `statusTimes` hit the internal mowing-algorithm state msg —
+boustrophedon/wallFollowing/chess/curPose/cleanStartTime/usedBattery/errorList —
+not user-facing; useful end-of-run bits are cleanStartTime, usedBattery.)
 
 ---
 
