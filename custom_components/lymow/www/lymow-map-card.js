@@ -379,12 +379,14 @@ class LymowMapCard extends HTMLElement {
       </text>`;
     }).join("\n");
 
-    // ── Mow track (QUERY_PATH response — filled area of already-mowed strips) ──
-    const trackPaths = (mowPath?.goZones || []).map((zt) => {
-      if (!zt.trackPoints || zt.trackPoints.length < 2) return "";
-      const pts = zt.trackPoints.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
-      return `<polyline points="${pts}" fill="none" stroke="#4caf50" stroke-width="0.4" stroke-linecap="round" stroke-linejoin="round" opacity="0.7" pointer-events="none"/>`;
-    }).join("\n");
+    // ── Mow track — build lookup by hashId ───────────────────────────────────
+    // trackPoints form the outer boundary of the already-mowed area (closed polygon).
+    // We fill it bright green clipped to the zone polygon so unmowed area shows dimmer.
+    const mowedByZone = {};
+    for (const zt of (mowPath?.goZones || [])) {
+      if (zt.hashId && zt.trackPoints?.length >= 3) mowedByZone[zt.hashId] = zt;
+    }
+    const hasMowData = Object.keys(mowedByZone).length > 0;
 
     // ── Go-zones ──────────────────────────────────────────────────────────────
     const goPaths = goZones.map((z) => {
@@ -392,12 +394,31 @@ class LymowMapCard extends HTMLElement {
       const selected = this._selectedZones.has(z.hashId);
       const beingEdited = this._editing && this._editHash === z.hashId;
       const enabled = z.isEnabled !== false;
-      const fill = beingEdited ? "#fff3e0" : selected ? "#1b5e20" : enabled ? "#43a047" : "#e0e0e0";
+      const mowed = mowedByZone[z.hashId];
+
+      // When mow data is present, zone base fill is dimmer ("remaining" area).
+      const baseFill = beingEdited ? "#fff3e0"
+        : selected ? "#1b5e20"
+        : !enabled ? "#e0e0e0"
+        : hasMowData ? "#a5d6a7"   // light green = remaining
+        : "#43a047";               // normal green
       const stroke = beingEdited ? "#ef6c00" : selected ? "#a5d6a7" : enabled ? "#2e7d32" : "#9e9e9e";
       const dash = enabled ? "" : `stroke-dasharray="2,1"`;
+
+      // Clipped mowed-area polygon (only when we have track data for this zone)
+      let mowedOverlay = "";
+      if (mowed && !beingEdited) {
+        const tpts = mowed.trackPoints.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+        const clipId = `mow-clip-${z.hashId}`;
+        mowedOverlay = `
+          <defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>
+          <polygon points="${tpts}" fill="#43a047" fill-opacity="0.75" stroke="none"
+            clip-path="url(#${clipId})" pointer-events="none"/>`;
+      }
+
       return `<polygon data-hash="${z.hashId}" data-type="go" points="${pts}"
-        fill="${fill}" stroke="${stroke}" stroke-width="0.4" opacity="${enabled ? 1 : 0.6}" ${dash}
-        style="cursor:pointer"/>`;
+        fill="${baseFill}" stroke="${stroke}" stroke-width="0.4" opacity="${enabled ? 1 : 0.6}" ${dash}
+        style="cursor:pointer"/>${mowedOverlay}`;
     }).join("\n");
 
     // For each go-zone: clip label to polygon so it never renders outside the zone.
@@ -420,16 +441,30 @@ class LymowMapCard extends HTMLElement {
       const zoneFontSz = Math.max(0.8, Math.min(parseFloat(fontSz), Math.min(bboxW, bboxH) * 0.15)).toFixed(2);
       const clip = `clip-path="url(#lbl-clip-${z.hashId})"`;
       const textAttrs = `x="${sx(cx)}" text-anchor="middle" font-weight="bold" fill="white" pointer-events="none" font-size="${zoneFontSz}" ${clip}`;
+      const lineH = (parseFloat(zoneFontSz) * 1.3).toFixed(2);
+
+      // Mow progress line — shown when QUERY_PATH data is available for this zone
+      const mowedZone = mowedByZone[z.hashId];
+      const progressPart = mowedZone != null
+        ? `${mowedZone.stripsDone ?? "?"} strips` : "";
+
       // Mode 2 (both): two stacked lines; modes 0/1 single line.
       if (m === 2 && areaPart) {
-        const lineH = (parseFloat(zoneFontSz) * 1.2).toFixed(2);
-        return `<text ${textAttrs} dominant-baseline="auto" y="${sy(cy)}">` +
-          `<tspan x="${sx(cx)}" dy="-${lineH}">${namePart}</tspan>` +
-          `<tspan x="${sx(cx)}" dy="${(parseFloat(lineH) * 2).toFixed(2)}">${areaPart}</tspan>` +
+        const lines = [namePart, areaPart, progressPart].filter(Boolean);
+        const startDy = -((lines.length - 1) * 0.5 * parseFloat(lineH)).toFixed(2);
+        return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">` +
+          lines.map((l, i) => `<tspan x="${sx(cx)}" dy="${i === 0 ? startDy : lineH}">${l}</tspan>`).join("") +
           `</text>`;
       }
-      const label = m === 0 ? namePart : m === 1 ? (areaPart || namePart) : namePart;
-      return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">${label}</text>`;
+      // Modes 0/1: name or area + optional progress on second line
+      const line1 = m === 0 ? namePart : m === 1 ? (areaPart || namePart) : namePart;
+      if (progressPart) {
+        return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">` +
+          `<tspan x="${sx(cx)}" dy="-${(parseFloat(lineH) * 0.5).toFixed(2)}">${line1}</tspan>` +
+          `<tspan x="${sx(cx)}" dy="${lineH}" font-weight="normal" opacity="0.9">${progressPart}</tspan>` +
+          `</text>`;
+      }
+      return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">${line1}</text>`;
     }).join("\n");
 
     // ── No-go zones (on top of go-zones) ─────────────────────────────────────
@@ -692,7 +727,9 @@ class LymowMapCard extends HTMLElement {
     const _li = (svgInner, vb, label) =>
       `<div class="legend-item"><span class="lsym"><svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">${svgInner}</svg></span>${label}</div>`;
     const legendItems = [
-      _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
+      hasMowData
+        ? _li(`<rect x="1" y="1" width="7" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/><rect x="8" y="1" width="7" height="10" fill="#a5d6a7" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Mowed / Left")
+        : _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
       nogoZones.length ? _li(`<rect x="1" y="1" width="14" height="10" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="1.5" rx="1" stroke-dasharray="3,2"/>`, "0 0 16 12", "No-go") : "",
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
       poseEastM !== undefined ? _li(`<circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/>`, "0 0 18 14", "Robot") : "",
@@ -939,7 +976,6 @@ class LymowMapCard extends HTMLElement {
             <defs>${goLabelDefs}</defs>
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
-            ${trackPaths}
             ${goPaths}
             ${goLabels}
             ${nogoPaths}

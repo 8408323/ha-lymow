@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime, timedelta
@@ -191,6 +192,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # MQTT polls. Keyed by thing_name → {hashId → name}. Lost on HA restart;
         # the card's localStorage covers the browser-side persistence gap.
         self._channel_name_overrides: dict[str, dict[str, str]] = {}
+        # Track whether a path-query task is already scheduled so we don't flood
+        # the robot with QUERY_PATH commands while mowing.
+        self._path_poll_pending: dict[str, bool] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -321,6 +325,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 title=f"Lymow — {device_label} done",
                 notification_id=f"{DOMAIN}_{thing_name}_done",
             )
+
+        # Auto-query mow path while actively mowing (≤ once per 30 s).
+        # Fires on any workStatus update when the robot is in a mowing state,
+        # but only schedules a new task if one isn't already waiting.
+        if new_ws in WORK_STATUS_MOWING_GROUP and not self._path_poll_pending.get(thing_name):
+            self._path_poll_pending[thing_name] = True
+            self.hass.async_create_task(self._async_poll_path(thing_name))
 
     def _check_rtk_guard(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Auto-pause when RTK falls below user-configured threshold; auto-resume when it recovers.
@@ -892,6 +903,14 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_query_path(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+
+    async def _async_poll_path(self, thing_name: str) -> None:
+        """Send QUERY_PATH then clear the pending flag so the next mow tick can schedule again."""
+        await asyncio.sleep(5)  # small delay so the robot finishes its current strip
+        try:
+            await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+        finally:
+            self._path_poll_pending[thing_name] = False
 
     async def async_query_channels(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_CHANNELS)
