@@ -1878,6 +1878,31 @@ turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
   safe_margin_mode/turn_off_outer_motor/stripe_angle controls, plus a Blade
   Speed select (cutSpeed Eco=3/Standard=4/Power=5/Turbo=6).
 
+## ✅ DECODED 2026-05-30: Schedule mutations = full-list replace via MQTT (gap)
+
+Live capture (added a 1-zone test task, toggled it off, deleted it; device
+restored to empty). **Schedules transmit over MQTT, NOT BLE** (no handle-0x0014
+write fired; the frames appeared only in the mitmproxy MQTT capture). Every
+mutation is a **full-list replacement** on `PbInput.f11 (PbSchedules)`:
+- **Add / Save Task**: `PbInput{f2:49, f11:PbSchedules{tasks:[PbSchedule]}}`.
+  PbSchedule: f1 days(packed, Sat=6), f2 hour(UTC=local-2), f3 minute,
+  f4 isRepeated, f5 zonesInfo{f3 hashId, f8=1, f9 point}, f6 id(large int),
+  f7 timeZone(=2, UTC offset hrs), f8 isDisabled.
+- **Toggle off**: re-sends the SAME full task list with `f8 isDisabled=1`.
+- **Delete (last one)**: `PbInput{f2:49, f11:<empty>}` == `10315a00` ==
+  exactly `encode_clear_schedules()`.
+
+So **`encode_set_schedules` (already shipped) is the one wire primitive** for
+add/edit/toggle/delete — granular ops are coordinator-level read-modify-write
+over the cached `schedules` list, re-sending the full list each time. The
+already-shipped `set_schedules` service ALSO omits the zone point (sends zones
+as hashId strings only) and works — so the robot re-derives the point; granular
+read-modify-write that drops point/config is consistent with shipped behaviour,
+no new risk. NOTE: decoded entry doesn't carry per-task PbScheduleConfig (f11)
+— lossy for tasks that set custom config, same as existing set_schedules.
+**TODO(backend): add coordinator async_add/update/delete/toggle_schedule +
+services (read-modify-write over cached schedules → encode_set_schedules).**
+
 ## ✅ DECODED 2026-05-30: Global mowing-settings envelope + Blade Speed + OD fields
 
 Live BLE capture of the Mowing Settings → **Global** tab "Save → Keep Custom"
