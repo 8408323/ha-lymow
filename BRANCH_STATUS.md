@@ -2059,6 +2059,20 @@ msg (= rtkDiagnosticL1/L2 f35/f36, matches the f8 JSON): diffAge=1, loraBps0-2=
 **VERDICT: all decoder & encoder field NUMBERS are APK-correct.** Only nuances:
 UI-vs-proto names (f17/f18 by choice; wifi f5=secret; zone f8/f9), all benign.
 
+**Enums / error tables (2026-05-30):** workStatus enum already complete in
+const.py; setting-value enums (cutSpeed 3–6, obsDecMode/followDetectMode 1/2,
+perimeterMowDir) verified live earlier. **Error/warning DESCRIPTIONS are NOT in
+the binary** — the app uses i18n keys (`warnings.code_15`…`code_62`,
+`errors.unknown_error`) whose text is fetched at runtime via `remote_config.*`
+(cloud). So numeric error/warning codes flow through fine (we decode them as
+ints), but human descriptions can't be extracted from the APK. `ERROR_DESCRIPTIONS`
+in const.py is therefore a hand-curated subset, not derivable from the bundle.
+Symbolic audio-error categories found: AUDIO_ERROR_{BATTERY_LOW, BLADE_STUCK,
+CLIFF, DOCK_FAIL, INI_FAIL, ROBOT_SLIP, SLOPE}. Warning-code domain (i18n keys):
+15,19,21,25,27–31,38–53,56–62.
+**Bytecode decoding is COMPLETE** — every message/field is verified; the only
+non-extractable piece (error-description text) is remote i18n, not in the binary.
+
 **NEW fields now named & available for future HA features (numbers verified):**
 `vehLedStatus`/`camLedStatus` (robotConfig f13/f12, LED brightness 0–4 → a
 brightness select), `mowAngle` (schedule f10, per-task stripe angle),
