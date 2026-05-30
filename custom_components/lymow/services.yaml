@@ -419,6 +419,26 @@ set_headlight_schedule:
       selector:
         text:
 
+set_pin:
+  name: Set screen PIN
+  description: >
+    Set the 4-digit PIN that unlocks the physical keypad on the mower's body
+    (PbRobotConfig.lcdPinCode). Note: the PIN is sensitive — it is sent to the
+    robot but never logged by the integration. Default from the factory is 0000.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    pin:
+      name: PIN
+      description: Exactly 4 digits (0-9).
+      required: true
+      example: "1234"
+      selector:
+        text:
+          type: password
+
 set_network_priority:
   name: Set network priority
   description: >

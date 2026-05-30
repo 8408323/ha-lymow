@@ -930,6 +930,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             encode_set_headlight_schedule(enable=enable, start=start, end=end),
         )
 
+    async def async_set_pin(self, thing_name: str, pin: str) -> None:
+        """Set the mower's 4-digit LCD-screen PIN. The value is never logged."""
+        from .protocol import encode_set_pin
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_pin(pin))
+
     async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
         """Set PbRobotConfig fields on the robot — currently just network priority.
 

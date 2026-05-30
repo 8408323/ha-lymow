@@ -96,6 +96,7 @@ _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
 _SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
 _SERVICE_SET_HEADLIGHT_SCHEDULE = "set_headlight_schedule"
+_SERVICE_SET_PIN = "set_pin"
 _SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
@@ -502,6 +503,12 @@ _SET_HEADLIGHT_SCHEDULE_SCHEMA = vol.Schema(
         vol.Required(_ATTR_HL_ENABLE): cv.boolean,
         vol.Optional(_ATTR_HL_START): _to_hour_minute,
         vol.Optional(_ATTR_HL_END): _to_hour_minute,
+    }
+)
+_SET_PIN_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("pin"): vol.All(cv.string, vol.Match(r"^\d{4}$", msg="pin must be exactly 4 digits")),
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -1091,6 +1098,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_headlight_schedule(entity._thing_name, enable=enable, start=start, end=end)
 
+    async def handle_set_pin(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        pin: str = call.data["pin"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_pin(entity._thing_name, pin)
+
     async def handle_set_device_settings(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         cm = call.data.get(_ATTR_DS_CHARGING_MODE)
@@ -1311,6 +1328,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         handle_set_headlight_schedule,
         schema=_SET_HEADLIGHT_SCHEDULE_SCHEMA,
     )
+    hass.services.async_register(DOMAIN, _SERVICE_SET_PIN, handle_set_pin, schema=_SET_PIN_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
     )

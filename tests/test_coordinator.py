@@ -491,6 +491,16 @@ async def test_async_get_clean_history_wraps_underlying_errors() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_pin_publishes_encoded_command() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_pin(THING, "1234")  # placeholder PIN
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    assert pb.hex() == "10316a084a060a0401020304"
+
+
+@pytest.mark.asyncio
 async def test_async_set_headlight_schedule_publishes_encoded_command() -> None:
     coord, mqtt, _ = _make_coordinator()
     await coord.async_set_headlight_schedule(THING, enable=True, start=(3, 17), end=(4, 23))

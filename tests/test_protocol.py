@@ -2673,6 +2673,27 @@ def test_encode_set_recharge_resume_partial_skips_unset() -> None:
         assert _first(rr, fno) is None
 
 
+def test_encode_set_pin_structure_with_placeholder() -> None:
+    """Structure (PbInput.f13.f9.f1 = digit bytes) confirmed live 2026-05-30;
+    asserted with a placeholder PIN, never the real value."""
+    from lymow.protocol import encode_set_pin
+
+    pb = encode_set_pin("1234")
+    assert pb.hex() == "10316a084a060a0401020304"  # placeholder 1->04 bytes
+    f = _decode_fields(pb)
+    cfg = _decode_fields(_first(f, 13))  # robotConfig
+    lcd = _decode_fields(_first(cfg, 9))  # lcdPinCode
+    assert _first(lcd, 1) == bytes([1, 2, 3, 4])
+
+
+def test_encode_set_pin_rejects_bad_input() -> None:
+    from lymow.protocol import encode_set_pin
+
+    for bad in ("123", "12345", "12a4", "", "abcd"):
+        with pytest.raises(ValueError, match="exactly 4 digits"):
+            encode_set_pin(bad)
+
+
 def test_encode_set_headlight_schedule_enable_matches_capture() -> None:
     """Byte-exact against the live BLE frame captured 2026-05-30 (start 03:17,
     end 04:23 UTC). PbInput {f2:49, f9:{f10:1}, f13:{f14 start, f15 end}}."""
