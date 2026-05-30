@@ -1867,14 +1867,61 @@ and what per-zone (userCtrl=9) + sync_map writes send. Service params updated
 (line_follow_mode/brush_speed accepted-but-ignored; added safe_margin_mode/
 turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
 
-**Remaining mowing-settings follow-ups (not blocking):**
-- Global `set_task_config` still wraps in userCtrl=36+PbTaskConfig(f26); the
-  app uses **userCtrl=49+PbMap.f11** (proven via MQTT). Switch the envelope
-  (and route raise/lower-cut-height separately) once confirmed userCtrl=36
-  is ineffective for mowing settings. Per-zone + sync_map paths are correct.
-- raise/lower-cut-height wire home + f15 still unconfirmed (left as-is/raw).
+**Remaining mowing-settings follow-ups:**
+- ✅ DONE (commit 18f4302): Global `set_task_config` now uses **userCtrl=49 +
+  PbInput.f12(PbMap).f11(globalZoneConfig)** — live-confirmed via BLE, not the
+  old userCtrl=36+f26. Per-zone + sync_map paths were already correct.
+- ✅ RESOLVED: f15 = reserved/unused (no Global UI control touches it); raise/
+  lower-cut-height is not a Global/Customize control (absolute cutHeight only).
+  See "✅ DECODED 2026-05-30: Global mowing-settings envelope" below.
 - Card panel (supervisor) can later drop line_follow_mode/brush_speed and add
-  safe_margin_mode/turn_off_outer_motor/stripe_angle controls.
+  safe_margin_mode/turn_off_outer_motor/stripe_angle controls, plus a Blade
+  Speed select (cutSpeed Eco=3/Standard=4/Power=5/Turbo=6).
+
+## ✅ DECODED 2026-05-30: Global mowing-settings envelope + Blade Speed + OD fields
+
+Live BLE capture of the Mowing Settings → **Global** tab "Save → Keep Custom"
+(two frames: baseline vs Blade=Turbo + Perimeter-OD=Touch-Only; then restored
+byte-identical to baseline). Findings:
+
+**Global write envelope (CONFIRMS the #7 fix — userCtrl=49, NOT 36):**
+```
+PbInput { f2:49, f5:49(userCtrl GLOBAL_SETTING), f12(PbMap):{
+  f11(globalZoneConfig = full PbZoneConfig): { ...19 fields... },
+  f12: { f1:2, f2:60, f3:0 }   # global channel cfg? f2=60 mirrors cutHeight
+}}
+```
+So the app sends global mowing settings as **userCtrl=49 + PbInput.f12(PbMap)
+.f11(globalZoneConfig)** — a full PbZoneConfig, same field map as per-zone.
+Our `encode_set_task_config` still wraps userCtrl=36 + PbTaskConfig(f26) for
+the global path (#7) — that's the bug to fix. Per-zone (userCtrl=9) + sync_map
+paths are already correct. NOTE: the app ALSO sends a sibling PbMap.f12
+{f1:2,f2:60,f3:0} in the same frame; reproduce it for byte-parity if we switch
+the envelope (decode TBD — likely globalChannelConfig).
+
+**Baseline globalZoneConfig field values (anchors the whole map):**
+f1 cutHeight=60, f4 moveSpeed=0.6(f32), f6 cutSpeed=4, f7 cleanMode=1,
+f8 enabledZoneMask=-1(all), f9 pathSpacing=35, f10 perimeterMowLaps=1,
+f11 perimeterMowDir=2(Random), f12 noGoMowLaps=1, f13 obsDecMode=2,
+f14 pathOrder=1, **f15=0 (unknown/reserved)**, f16 relativeCleanDir=90
+(stripe "Optimized"), f17 safeMarginMode=1, f18 turnOffOuterMotor=0,
+f19 followDetectMode=2.
+
+**Newly confirmed via the A→B diff (only f6 and f19 changed):**
+- **Blade Speed = cutSpeed (f6)** — UI slider Eco/Standard/Power/Turbo =
+  **3 / 4 / 5 / 6** (Standard=4 → Turbo=6 observed).
+- **Zone Obstacle Detection = obsDecMode (f13)**; **Perimeter Obstacle
+  Detection = followDetectMode (f19)**. Both: **Touch-Only=1, Smart=2**.
+- **f15 stays 0** under every Global control — it is NOT Perimeter-OD and NOT
+  raise/lower cut-height. Treat as reserved/unused (no UI control maps to it).
+- raise/lower cut-height: the Global/Customize tabs expose absolute Cutting
+  Height (mm) only — there is no momentary +/- raise/lower control on these
+  screens. PbRobotConfig f4/f5 (rcRaise/rcLower) are a separate channel-deck
+  feature; left as-is (we set absolute cutHeight via SYNC_MAP, which is better).
+
+Item #2 (raise/lower + f15 + Blade Speed) is RESOLVED as decode findings; the
+only follow-up code work is #7 (the envelope switch) + optionally a Blade Speed
+select entity (cutSpeed 3-6) for the card.
 
 ## ✅ DONE 2026-05-30: Headlight schedule SHIPPED (commit e510f2d)
 
