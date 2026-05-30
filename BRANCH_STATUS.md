@@ -2152,9 +2152,44 @@ must change together.** Per the repo's division (supervisor session owns
   brush_speed/Blade-Speed, and f15 (MQTT-probe each: set value, read app,
   restore). Until then ship them as unmapped, not mislabeled.
 
-**Status:** mowing-settings DECODE is fully RE'd (layout known + verified);
-the remap CODE is a coordinated change, specced above, not shippable
-backend-only. Moving on to additive backend gaps that have no card coupling.
+**Status:** mowing-settings DECODE is fully RE'd (layout known + verified).
+
+### M. ✅ REMAP IS BACKEND-SAFE AFTER ALL — actionable recipe (2026-05-30)
+Checked how the card consumes the decode (`lymow-map-card.js` ~L1548):
+it reads `this._getMapData().mowingSettings.<key>` using the SAME key names
+the decoder emits — `moveSpeed, pathSpacing, perimeterMowLaps, noGoMowLaps,
+perimeterMowDir, obsDecMode, cleanMode, pathOrder, lineFollowMode` — and
+overlays only non-null values (`if (v != null)`). So:
+- **Decoder fix is a strict improvement, NO card change:** keep these exact
+  key NAMES, just fix their FIELD NUMBERS → pathSpacing=f9, perimeterMowLaps
+  =f10, perimeterMowDir=f11, noGoMowLaps=f12, obsDecMode=f13, pathOrder=f14
+  (moveSpeed=f4, cleanMode=f7, cutSpeed=f6, cutHeight=f1 unchanged). Today
+  the card shows WRONG values (reads mislabeled keys); this fixes them.
+- **Drop `lineFollowMode` from the decoder** (no wire home — its f17 is
+  safeMargin). Card's `ms.lineFollowMode` becomes undefined → skipped → uses
+  default. Safe. Add `safeMarginMode`(f17)/`turnOffOuterMotor`(f18)/
+  `relativeCleanDir`(f16) as new keys (card ignores until panel updated).
+- **Encoder/service fix, also backend-only-safe:** the service handler only
+  forwards keys present in `_TASK_CONFIG_SERVICE_FIELDS`, so **remove
+  `line_follow_mode` + `brush_speed` from that map** → the card's sends of
+  them are silently ignored (no error). Fix the remaining field NUMBERS in
+  `_TASK_CONFIG_FIELDS`. Change `encode_set_task_config` envelope from the
+  (wrong) userCtrl=36+PbTaskConfig(f26) to **userCtrl=49 + PbInput.f12
+  PbMap.f11 globalZoneConfig** (the proven path). `encode_set_zone_config`
+  (userCtrl=9 per-zone) and `_encode_go_zone` (sync_map) automatically get
+  correct fields once `_TASK_CONFIG_FIELDS` numbers are fixed.
+- **One residual guess to AVOID:** `raise_cut_height`/`lower_cut_height`
+  (momentary +/- the card sends). Their wire home is unknown and they're
+  NOT part of globalZoneConfig steady state. Keep them on a SEPARATE path
+  (do not fold into the userCtrl=49 global write); leave their current
+  behaviour untouched until captured. f15 also stays unmapped.
+
+This is implementable backend-only without breaking the card. It IS a large
+change (shared map + envelope + ~15 pinned tests across 4 test files +
+coverage), so it should land as one careful, fully-tested commit. Next
+session: implement per this recipe, run `pytest --cov-fail-under=100` +
+ruff, then the card panel can later add safe_margin/turn_off_outer_motor/
+stripe_angle and drop line_follow_mode/brush_speed (frontend/supervisor).
 - Gap 3 on/off values (toggle Safe-margin + Turn-Off-Outer-Motor — needs a
   Save that transmits; this session's didn't).
 - Gap 4 enum values (toggle Channel Obstacle Detection, re-query).
