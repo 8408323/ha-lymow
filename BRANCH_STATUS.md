@@ -1885,11 +1885,17 @@ traceable from already-decoded telemetry — **no path query exists**; the
 coverage trail = `pose` (f14) accumulated over time (the app draws it the same
 way), plus `mowProgress`/`mowStripCount`/`currentTaskZoneHashId`.
 
-- **Progress %: `mowProgress` (f12.f5 × 100) WORKS and climbs.** Measured 3.71%
-  → 3.92% at stripCount 40→41 (low because 1197 m² is large, so early on it's
-  ~0–1% and the app rounds to "0%"). Both signals are good: `mowProgress` (true
-  %) and `mowStripCount` (f12.f1, finer-grained). (An earlier note here wrongly
-  said f5 stays 0 — that was a bug in a throwaway monitor's reader, not the data.)
+- **`mowProgress` (f12.f5 × 100) WORKS** — true completion %, climbs slowly
+  (~6% at 46 min for the 1197 m² zone; ~0–1% early so the app rounds to "0%").
+- **`f12.f1` = MISSION TIME in minutes** (commit 5678ce3) — was mislabeled
+  "mowStripCount". LIVE-CONFIRMED: matched the app's "Mission time" 1:1 over a
+  46-min run (and it's mower-reported, so both phone apps agree). Now exposed as
+  the `mission_time` DURATION sensor (minutes). So the progress-bar's "Mission
+  time 46 min" + "Map area 1197 m²" are BOTH decoded (missionTimeMin + totalTaskAreaM2).
+- **Units (Metric/Imperial)** = frontend-only — set in the app's "Me" tab;
+  toggling Imperial sent ZERO traffic (no REST/MQTT/BLE). The mower always
+  reports metric; the app converts for display. HA does its own unit display,
+  so nothing to change in the backend.
 - **New undecoded field `PbOutput.f37`** — a varint (=15) that appears
   *intermittently* during active mowing (seen at stripCount 9–12, absent at
   26–27). Meaning unknown; not decoded (no-assumptions). Likely a transient
