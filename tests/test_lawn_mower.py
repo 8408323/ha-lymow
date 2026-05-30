@@ -55,6 +55,9 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_rename_channel = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
     coord.async_set_schedules = AsyncMock()
+    coord.async_add_schedule = AsyncMock()
+    coord.async_delete_schedule = AsyncMock()
+    coord.async_toggle_schedule = AsyncMock()
     coord.async_restore_backup_map = AsyncMock()
     coord.async_delete_backup_map = AsyncMock()
     coord.async_rename_backup_map = AsyncMock()
@@ -253,10 +256,10 @@ async def test_async_setup_entry_registers_services() -> None:
     # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
     # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station
     # + 1 resume + 1 set-run-time-config + 1 set-network-priority + 1 set-recharge-resume + 1 set-device-settings
-    # + 1 set-headlight-schedule
+    # + 1 set-headlight-schedule + 3 granular schedule (add/delete/toggle)
     # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence
     # + 1 update-channel-settings + 1 get-clean-history.
-    assert hass.services.async_register.call_count == 49
+    assert hass.services.async_register.call_count == 52
 
 
 # ---------------------------------------------------------------------------
@@ -2015,6 +2018,65 @@ async def test_handle_set_schedules_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"schedules": [_validated_schedule()]})
     await handlers["set_schedules"](call)
     coord.async_set_schedules.assert_not_called()
+
+
+async def test_handle_add_schedule_forwards_kwargs() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"hour": 8, "minute": 5, "day_of_week": [1], "zones": ["abc"], "repeated": True, "disabled": False},
+    )
+    await handlers["add_schedule"](call)
+    coord.async_add_schedule.assert_awaited_once_with(
+        "mower-001", hour=8, minute=5, day_of_week=[1], zones=["abc"], is_repeated=True, is_disabled=False
+    )
+
+
+async def test_handle_delete_schedule_forwards_id() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["delete_schedule"](_make_call(["lawn_mower.mower_1"], {"id": 42}))
+    coord.async_delete_schedule.assert_awaited_once_with("mower-001", 42)
+
+
+async def test_handle_toggle_schedule_forwards_disabled() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["toggle_schedule"](_make_call(["lawn_mower.mower_1"], {"id": 42, "disabled": True}))
+    coord.async_toggle_schedule.assert_awaited_once_with("mower-001", 42, disabled=True)
+
+
+async def test_handle_granular_schedule_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["delete_schedule"](_make_call(["lawn_mower.other"], {"id": 1}))
+    await handlers["toggle_schedule"](_make_call(["lawn_mower.other"], {"id": 1, "disabled": True}))
+    await handlers["add_schedule"](
+        _make_call(
+            ["lawn_mower.other"],
+            {"hour": 8, "minute": 0, "day_of_week": [], "zones": [], "repeated": True, "disabled": False},
+        )
+    )
+    coord.async_delete_schedule.assert_not_called()
+    coord.async_toggle_schedule.assert_not_called()
+    coord.async_add_schedule.assert_not_called()
 
 
 def test_to_day_int_accepts_names_and_ints() -> None:
