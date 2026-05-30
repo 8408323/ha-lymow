@@ -1211,6 +1211,24 @@ def encode_set_headlight_schedule(
     return pb
 
 
+def encode_set_pin(pin: str) -> bytes:
+    """Encode an LCD-screen PIN write (PbRobotConfig.lcdPinCode).
+
+    ``pin`` is exactly 4 digits. Wire format captured live 2026-05-30:
+    ``PbInput {f2:49, f13(robotConfig):{f9(lcdPinCode):{f1: <one byte per
+    digit>}}}`` — no userCtrl (robotConfig dispatch). The PIN unlocks the
+    physical keypad on the mower. SECURITY: the value is sensitive — it is never
+    logged here and the ValueError carries no digits.
+    """
+    if not (isinstance(pin, str) and len(pin) == 4 and pin.isdigit()):
+        raise ValueError("PIN must be exactly 4 digits")
+    lcd = _field_bytes(1, bytes(int(c) for c in pin))  # lcdPinCode.f1 = digit bytes
+    cfg = _field_bytes(9, lcd)  # PbRobotConfig.lcdPinCode (f9)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
 # PbRunTimeConfig field map — pinned to Hermes class #9456: f1 cutHeight, f2
 # moveSpeed, f3 cutSpeed, f4 channelConfig (PbChannelConfig — per-channel
 # override, not exposed here). Carried at PbMap.runTimeConfig (PbInput.f12 →

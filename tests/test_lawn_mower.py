@@ -49,6 +49,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_set_robot_config = AsyncMock()
     coord.async_set_recharge_resume = AsyncMock()
     coord.async_set_headlight_schedule = AsyncMock()
+    coord.async_set_pin = AsyncMock()
     coord.async_set_device_settings = AsyncMock()
     coord.async_rename_zone = AsyncMock()
     coord.async_rename_nogo_zone = AsyncMock()
@@ -256,10 +257,10 @@ async def test_async_setup_entry_registers_services() -> None:
     # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
     # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station
     # + 1 resume + 1 set-run-time-config + 1 set-network-priority + 1 set-recharge-resume + 1 set-device-settings
-    # + 1 set-headlight-schedule + 3 granular schedule (add/delete/toggle)
+    # + 1 set-headlight-schedule + 3 granular schedule (add/delete/toggle) + 1 set-pin
     # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence
     # + 1 update-channel-settings + 1 get-clean-history.
-    assert hass.services.async_register.call_count == 52
+    assert hass.services.async_register.call_count == 53
 
 
 # ---------------------------------------------------------------------------
@@ -2018,6 +2019,28 @@ async def test_handle_set_schedules_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"schedules": [_validated_schedule()]})
     await handlers["set_schedules"](call)
     coord.async_set_schedules.assert_not_called()
+
+
+async def test_handle_set_pin_forwards_value() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_pin"](_make_call(["lawn_mower.mower_1"], {"pin": "1234"}))  # placeholder
+    coord.async_set_pin.assert_awaited_once_with("mower-001", "1234")
+
+
+async def test_handle_set_pin_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_pin"](_make_call(["lawn_mower.other"], {"pin": "1234"}))
+    coord.async_set_pin.assert_not_called()
 
 
 async def test_handle_add_schedule_forwards_kwargs() -> None:
