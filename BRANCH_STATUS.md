@@ -1878,6 +1878,26 @@ turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
   safe_margin_mode/turn_off_outer_motor/stripe_angle controls, plus a Blade
   Speed select (cutSpeed Eco=3/Standard=4/Power=5/Turbo=6).
 
+## ✅ DECODED 2026-05-30: PIN / Wi-Fi / Bind-RTK provisioning (sensitive — structure only)
+
+All captured live; **no real values are recorded here or in git** (the real
+PIN/SSID/password/base-id live only in the gitignored capture). Shipped as
+`set_pin` (d21de63), `set_wifi` (feee97b), `bind_rtk` (5800ae4):
+
+- **Set PIN** — `PbInput{f2:49, f13(robotConfig):{f9(lcdPinCode):{f1:<4 bytes,
+  one per digit>}}}`, no userCtrl. `decode_robot_config` already omits f9.
+- **Set Wi-Fi** — `PbInput{f17(wifiConfig):{f1:ssid, f2:password, f5:3}}`, **no
+  version prefix**, sent over BLE during (re)provisioning. f5=3 constant. The
+  app de-dupes unchanged creds (a no-op "Reconnect" transmits nothing); a real
+  change/forget+add triggers the send.
+- **Bind RTK** — `PbInput{f2:49, f13(robotConfig):{f17:{f1:baseId}}}`, no
+  userCtrl. (NB: robotConfig.f17 = RTK bind, but PbInput-top-level f17 = Wi-Fi —
+  two different f17s by parent.)
+
+SECURITY: encoders never log the secret; ValueErrors carry no value; all tests
+use placeholders. The mower's robotConfig pboutput echoes the PIN (f9) and
+network status (SSID/IP/4G/iccid) — decoders must keep omitting/avoiding those.
+
 ## ✅ VALIDATED 2026-05-30: Start-mow-selected command (live mow capture)
 
 User authorized mowing the bigger zone for a live capture. Started it from the
