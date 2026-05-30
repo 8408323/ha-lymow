@@ -1750,7 +1750,7 @@ metric** (mm, m/s, m²). HA already serves metric — no backend change needed.
 | 29 | **Mowing Settings → Customize → channelN** | Per-channel overrides (Channel Obs Detection + Channel Deck Height) | ✅ `lymow.update_channel_settings` (sync_map path) | Channel Obs Detection (Smart/Touch-Only) wire field within PbChannel still untested — assumed `detectMode`. |
 | 30 | **Settings → Cancel Task** | userCtrl=28 FORCE_REINIT | ✅ `ForceReinitButton` | |
 | 31 | **Settings → Device Settings → Recharge & Resume** | PbRobotConfig.rrConfig (f18) | ✅ `lymow.set_recharge_resume` | |
-| 32 | **Settings → Device Settings → Headlight Mode** | **SCHEDULED auto-on/off** (toggle + start/end time) — NOT brightness | ❌ wire format unknown | **Surprise finding**: not the `vehLedStatus` 5-state brightness we assumed. Similar shape to rrConfig; likely a PbRobotConfig sub-message at an unmapped field number. Needs capture. |
+| 32 | **Settings → Device Settings → Headlight Mode** | **SCHEDULED auto-on/off** (toggle + start/end time) — NOT brightness | ✅ SHIPPED e510f2d | Captured live 2026-05-30: PbRobotConfig f14 start / f15 end (PbTimeZone UTC), f9={f10:1} marker, disable=signal 7 + zeroed times. `set_headlight_schedule` service. See "✅ DONE 2026-05-30: Headlight schedule" section. |
 | 33 | **Settings → Device Settings → Vehicle LED** | Manual on/off | ✅ `VehicleLedSwitch` (signal=10/11) | |
 | 34 | **Settings → Device Settings → Rainy Mowing / Charging Handbrake** | PbTaskConfig f3/f4 | ✅ `lymow.set_device_settings` | |
 | 35 | **Settings → Device Settings → Timezone "Sync with Phone"** | PbRobotConfig.timezoneOffset (f21) | ✅ `SyncTimezoneButton` | |
@@ -1875,6 +1875,35 @@ turn_off_outer_motor/relative_clean_dir). 1073 tests, 100% cov, ruff clean.
 - raise/lower-cut-height wire home + f15 still unconfirmed (left as-is/raw).
 - Card panel (supervisor) can later drop line_follow_mode/brush_speed and add
   safe_margin_mode/turn_off_outer_motor/stripe_angle controls.
+
+## ✅ DONE 2026-05-30: Headlight schedule SHIPPED (commit e510f2d)
+
+Gap 5 **CLOSED**. Captured the Device Settings → Headlight Mode "Save" frame
+live via BLE BTSnoop (three saves: ON 05:17→06:23 local, OFF, restore
+23:46→00:46 local). The decode reproduces all three frames byte-for-byte.
+
+**Wire format** — it's NOT the `vehLedStatus` brightness picker we assumed;
+it's a scheduled auto on/off window on `PbRobotConfig` (PbInput.f13):
+
+```
+PbInput { f2:49, f9:{f10:1}, f13(robotConfig):{ f14:start, f15:end } }     # enabled
+PbInput { f2:49, f9:{f10:1}, f13:{ f8:7(signal), f14:{0,0}, f15:{0,0} } }   # disabled
+```
+
+- `f14` startTime / `f15` endTime = PbTimeZone `{f1 hour, f2 minute}` in **UTC**
+  (app converts the local picker value; 05:17 local CEST → f14{3,17}).
+- `f9 = {f10:1}` is a constant headlight-write marker — absent from rrConfig
+  and find-my-robot robotConfig frames, so it's headlight-specific.
+- Disable = `robotConfig.signal` (f8) = **7** + both times zeroed.
+
+**Backend shipped:** `protocol.encode_set_headlight_schedule(enable, start,
+end)` (byte-exact), `decode_robot_config` surfaces `headlightStart`/
+`headlightEnd`, `SIGNAL_DISABLE_HEADLIGHT_SCHEDULE=7`, coordinator
+`async_set_headlight_schedule`, `set_headlight_schedule` service +
+services.yaml. 1083 tests, 100% cov, ruff clean. Mower restored to original
+(ON 23:46→00:46 local). Capture technique: text-input mode on the Material
+time picker (tap clock icon → "Byt till textinmatningsläget" toggle → type
+HH then MM) is far more reliable than the clock-face drag.
 
 ## 🧪 RELIABLE TECHNIQUES (learned 2026-05-30 — use these, the app taps are flaky)
 
