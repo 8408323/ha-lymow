@@ -1731,6 +1731,41 @@ distinct answers, don't conflate them:
      can't present. **#97 unsolved; ship the LAN/Cloud selector with the Cloud
      option gated/experimental.**
 
+   **APK/Hermes analysis + owner-identity test, 2026-05-30 night (this box,
+   ADB+root via Magisk). Pulled `base.apk` (40MB) → `assets/index.android.bundle`
+   (HBC v96) → `hbc-disassembler` (153MB `out.hasm`). Findings:**
+   - The app's camera-open is **client-side identical to ours**: `kvs/cmd
+     {deviceThingName, action:"start"}` signed by the generic Amplify SigV4
+     signer (no extra device/token header), then the VIEWER handshake
+     (`getSignalingChannelEndpoint`→`getIceServerConfig`→`createOffer`→
+     `sendSdpOffer`, `RTCPeerConnection`). clientId =
+     `<model>_Android<ver>_<uniqueId>_userId_<sub>`. **No hidden client
+     ingredient.**
+   - App uses Firebase/Expo push tokens (`devicePushToken`/`updateDeviceToken`)
+     and bundles Cognito device-remembering (`DEVICE_SRP_AUTH`/`ConfirmDevice`/
+     `rememberDevice`) — but **neither is in the camera request**, and the app's
+     live AccessToken (pulled from `RKStorage`, claim NAMES only) has **NO
+     `device_key` claim** → device remembering is NOT the gate.
+   - **Account check:** `scripts/.env` (`LYMOW_USER`) is a **DIFFERENT Cognito
+     user than the app owner** (sub mismatch; owner token has `cognito:groups`+
+     `version`, ours doesn't). So earlier "exact clientId" tests carried the
+     WRONG sub. Re-tested **as the owner** — extracted the app's live access+id
+     tokens from `RKStorage`, ran the handshake with owner identity + owner's
+     exact clientId (`camera_feed_test.py` gained env overrides
+     `LYMOW_ACCESS_TOKEN`/`LYMOW_ID_TOKEN`/`LYMOW_KVS_CLIENT_PREFIX`; tokens kept
+     in subprocess env only, never written): **STILL no SDP_ANSWER / 120s.**
+   - **FINAL VERDICT on #97:** a standalone client cannot make the robot become
+     MASTER — not with random id, exact id, live MQTT presence, OR the **owner's
+     byte-exact identity**. The APK proves there's no client-side secret we're
+     missing. The robot-master wake is bound to the **live running app instance**
+     in a way the cloud API surface doesn't expose — most plausibly the kvs/cmd
+     Lambda routes the wake to the robot scoped to the requester's *active AWS
+     IoT session*, which a separate process can't assume. Cracking further needs
+     robot firmware or the Lambda — out of reach. **Recommendation: ship
+     LAN(RTSP) now (already remotable via HA/Nabu Casa); keep Cloud(KVS) wired
+     but disabled/experimental. The 4G-away-from-HA case is not achievable from
+     the client side on current evidence.** `tools/_apk/` is gitignored (`_*`).
+
 ### Continuation, 2026-05-27 late evening (same supervisor session)
 
 User asked to keep iterating. Three more commits shipped on the
@@ -2004,6 +2039,25 @@ isRecharging=7, isCharging=8, **wifiWorking=9, lteWorking=10**. → all our
 decodes ✓. **PbAreaInfo:** areaOrGlobal=1, cleanZoneIds=2. RTK-diag structured
 msg (= rtkDiagnosticL1/L2 f35/f36, matches the f8 JSON): diffAge=1, loraBps0-2=
 2-4, hwDc0-2=5-7, cwRatio0-2=8-10, antValue0-2=11-13.
+
+**COMPLETE cross-check (2026-05-30) — every message verified vs bytecode:**
+- PbMap ✓ goZones1/nogoZones2/channels3/chargingStationLoc4/enuBasePoint7/
+  taskConfig8/globalZoneConfig11/globalChannelConfig12/runTimeConfig13.
+- PbChannel ✓ isValid4/polygon5/isDockingChannel6/detectMode8/cutHeight9/channelLift10.
+- PbRRConfig ✓ enableRr1/start2/end3/rechargeBat4/resumeBat5 (exact).
+- PbDeviceProfile ✓ fwVersion1/mcuVersion2/softwareVersion3/ipAddress5/macAddress6/
+  sn7 (+ new rtkSn8/wheelVer10/knifeVer11; f4 wifiSsid & f9 simId left out = sensitive).
+- PbRobotLlaCoords ✓ latitude1/longitude2/altitude3. PbWifiConfig ✓ ssid1/password2
+  (our f5=3 = `secret`, matches app). PbAreaInfo areaOrGlobal1/cleanZoneIds2.
+- PbZoneBasicInfo: type1/name2/hashId3/**isEnabled4**/polygon5/zoneRename6/
+  updateTime7/**mowOrder8**/**mowOrderTextPos9**. decode reads isEnabled@4 ✓;
+  encode_set_zone_config sets isEnabled@4 ✓. NOTE: encode_start_zones + schedule
+  _encode_zone_basic_info put the "selected" flag at f8 (=mowOrder) & the point at
+  f9 (=mowOrderTextPos), and don't set f4=isEnabled — works (mower treats listed
+  zones as enabled; f8=index legitimately sets mow order). Optional faithfulness
+  tweak: also set f4=isEnabled=1 (the app does).
+**VERDICT: all decoder & encoder field NUMBERS are APK-correct.** Only nuances:
+UI-vs-proto names (f17/f18 by choice; wifi f5=secret; zone f8/f9), all benign.
 
 **NEW fields now named & available for future HA features (numbers verified):**
 `vehLedStatus`/`camLedStatus` (robotConfig f13/f12, LED brightness 0–4 → a
