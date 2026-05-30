@@ -1413,7 +1413,7 @@ def _build_pboutput_with_extras(
             rtk += _field_i32(4, rtk_status)
         out += _field_bytes(6, rtk)
 
-    # Area info (field 12): f1=mowStripCount, f2=totalAreaM2, f5=mowProgress
+    # Area info (field 12): f1=missionTimeMin, f2=totalAreaM2, f5=mowProgress
     if any(v is not None for v in (total_area_m2, mow_strip_count, mow_progress, current_task_zone)):
         area = b""
         if mow_strip_count is not None:
@@ -1484,11 +1484,13 @@ def test_decode_pboutput_no_rtk_when_absent() -> None:
     assert "poseEastM" not in state
 
 
-def test_decode_pboutput_mow_strip_count() -> None:
-    """f12.f1 → mowStripCount decoded as integer."""
+def test_decode_pboutput_mission_time() -> None:
+    """f12.f1 → missionTimeMin (mission/cleaning time in minutes; live-confirmed
+    2026-05-30 matching the app's Mission-time over a 46-min run). Previously
+    mislabeled mowStripCount."""
     pb = _build_pboutput_with_extras(mow_strip_count=17)
     state = decode_pboutput(pb)
-    assert state["mowStripCount"] == 17
+    assert state["missionTimeMin"] == 17
 
 
 def test_decode_pboutput_current_task_zone() -> None:
@@ -1632,11 +1634,11 @@ def test_decode_pboutput_mow_progress() -> None:
     assert abs(state["mowProgress"] - 52.6) < 1.0
 
 
-def test_decode_pboutput_mow_strip_count_and_progress_together() -> None:
-    """f12.f1, f12.f2, f12.f5 all decoded simultaneously."""
+def test_decode_pboutput_mission_time_area_progress_together() -> None:
+    """f12.f1 (missionTimeMin), f12.f2 (area), f12.f5 (progress) all decoded together."""
     pb = _build_pboutput_with_extras(total_area_m2=800.0, mow_strip_count=5, mow_progress=0.25)
     state = decode_pboutput(pb)
-    assert state["mowStripCount"] == 5
+    assert state["missionTimeMin"] == 5
     assert abs(state["totalTaskAreaM2"] - 800.0) < 1.0
     assert abs(state["mowProgress"] - 25.0) < 1.0
 

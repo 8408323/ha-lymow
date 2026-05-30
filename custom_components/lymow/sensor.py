@@ -348,12 +348,13 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:progress-clock",
     ),
     LymowSensorDescription(
-        key="mow_strip_count",
-        name="Mow strip count",
-        value_key="mowStripCount",
+        key="mission_time",
+        name="Mission time",
+        value_key="missionTimeMin",
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
-        icon="mdi:counter",
-        entity_registry_enabled_default=False,
+        icon="mdi:timer-outline",
     ),
     # Robot pose in local ENU frame (pboutput field 14), disabled by default —
     # mostly useful for debugging and advanced visualisations.

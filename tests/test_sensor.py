@@ -402,16 +402,20 @@ def test_mow_progress_sensor_returns_none_when_absent() -> None:
     assert sensor.native_value is None
 
 
-def test_mow_strip_count_sensor_returns_value() -> None:
-    coord = _make_coord({"mowStripCount": 42})
-    desc = next(s for s in SENSORS if s.key == "mow_strip_count")
+def test_mission_time_sensor_returns_value() -> None:
+    coord = _make_coord({"missionTimeMin": 46})
+    desc = next(s for s in SENSORS if s.key == "mission_time")
     sensor = LymowSensor(coord, DEVICE, desc)
-    assert sensor.native_value == 42
+    assert sensor.native_value == 46
 
 
-def test_mow_strip_count_sensor_disabled_by_default() -> None:
-    desc = next(s for s in SENSORS if s.key == "mow_strip_count")
-    assert desc.entity_registry_enabled_default is False
+def test_mission_time_sensor_is_duration_minutes() -> None:
+    from homeassistant.components.sensor import SensorDeviceClass
+    from homeassistant.const import UnitOfTime
+
+    desc = next(s for s in SENSORS if s.key == "mission_time")
+    assert desc.device_class == SensorDeviceClass.DURATION
+    assert desc.native_unit_of_measurement == UnitOfTime.MINUTES
 
 
 # ---------------------------------------------------------------------------
