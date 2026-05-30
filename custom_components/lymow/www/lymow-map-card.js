@@ -35,6 +35,26 @@ const _MARKER_PX = 18;   // robot / RTK / station marker diameter in px
 const _NORTH_PX  = 44;   // north arrow circle diameter in px
 const _SCALEBAR_PX_W = 80; // target scale bar width in px
 
+// Graham scan convex hull for mowed-area overlay. Points are {x, y} in ENU metres.
+// Returns the hull in CCW order, or [] if fewer than 3 distinct points.
+function _convexHull(pts) {
+  if (!pts || pts.length < 3) return pts || [];
+  const p = pts.slice().sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [], upper = [];
+  for (const pt of p) {
+    while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], pt) <= 0) lower.pop();
+    lower.push(pt);
+  }
+  for (let i = p.length - 1; i >= 0; i--) {
+    const pt = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], pt) <= 0) upper.pop();
+    upper.push(pt);
+  }
+  upper.pop(); lower.pop();
+  return lower.concat(upper);
+}
+
 class LymowMapCard extends HTMLElement {
   constructor() {
     super();
@@ -419,16 +439,16 @@ class LymowMapCard extends HTMLElement {
 
     // ── Mow track overlay ────────────────────────────────────────────────────
     // During an active mow: show the live position trail (breadcrumb polyline).
-    // After mowing ends: show the session's mowed-area polygon from QUERY_PATH.
-    // Never show the stale previous-session path while the robot is currently mowing,
-    // because that data covers the whole zone and masks the current progress.
+    // After mowing ends: show the session's mowed-area overlay from QUERY_PATH.
+    // trackPoints are ordered GPS fixes along each strip — rendering them as a
+    // polygon connects them in recording order (jagged/self-intersecting). Instead
+    // compute the convex hull of all track points to approximate the mowed area.
     const isMowingNow = this._mowTrailActive;
     const mowedByZone = {};
-    if (!isMowingNow) {
-      // Only show the stored path overlay when NOT actively mowing
-      for (const zt of (mowPath?.goZones || [])) {
-        if (zt.hashId && zt.trackPoints?.length >= 3) mowedByZone[zt.hashId] = zt;
-      }
+    // Show stored path overlay both when mowing and when not, so the user can
+    // see how much has been done during an active session via QUERY_PATH polls.
+    for (const zt of (mowPath?.goZones || [])) {
+      if (zt.hashId && zt.trackPoints?.length >= 3) mowedByZone[zt.hashId] = zt;
     }
     const hasMowData = Object.keys(mowedByZone).length > 0;
 
@@ -436,7 +456,7 @@ class LymowMapCard extends HTMLElement {
     let liveTrail = "";
     if (isMowingNow && this._mowTrail.length >= 2) {
       const pts = this._mowTrail.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
-      liveTrail = `<polyline points="${pts}" fill="none" stroke="#ff6f00" stroke-width="0.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" pointer-events="none"/>`;
+      liveTrail = `<polyline points="${pts}" fill="none" stroke="#b9f6ca" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" opacity="0.9" pointer-events="none"/>`;
     }
 
     // ── Go-zones ──────────────────────────────────────────────────────────────
@@ -451,20 +471,25 @@ class LymowMapCard extends HTMLElement {
       const baseFill = beingEdited ? "#fff3e0"
         : selected ? "#1b5e20"
         : !enabled ? "#e0e0e0"
-        : hasMowData ? "#a5d6a7"   // light green = remaining
+        : hasMowData ? "#2e7d32"   // dark green = remaining (unmowed)
         : "#43a047";               // normal green
       const stroke = beingEdited ? "#ef6c00" : selected ? "#a5d6a7" : enabled ? "#2e7d32" : "#9e9e9e";
       const dash = enabled ? "" : `stroke-dasharray="2,1"`;
 
-      // Clipped mowed-area polygon (only when we have track data for this zone)
+      // Mowed-area overlay: convex hull of track points clipped to the zone polygon.
+      // Convex hull avoids the self-intersecting shape you'd get from connecting
+      // recording-order GPS fixes directly as a polygon.
       let mowedOverlay = "";
       if (mowed && !beingEdited) {
-        const tpts = mowed.trackPoints.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
-        const clipId = `mow-clip-${z.hashId}`;
-        mowedOverlay = `
-          <defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>
-          <polygon points="${tpts}" fill="#43a047" fill-opacity="0.75" stroke="none"
-            clip-path="url(#${clipId})" pointer-events="none"/>`;
+        const hull = _convexHull(mowed.trackPoints);
+        if (hull.length >= 3) {
+          const hpts = hull.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+          const clipId = `mow-clip-${z.hashId}`;
+          mowedOverlay = `
+            <defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>
+            <polygon points="${hpts}" fill="#69f0ae" fill-opacity="0.55" stroke="none"
+              clip-path="url(#${clipId})" pointer-events="none"/>`;
+        }
       }
 
       return `<polygon data-hash="${z.hashId}" data-type="go" points="${pts}"
@@ -802,7 +827,7 @@ class LymowMapCard extends HTMLElement {
           ? _li(`<rect x="1" y="1" width="7" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/><rect x="8" y="1" width="7" height="10" fill="#a5d6a7" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Mowed / Left")
           : _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
       isMowingNow && this._mowTrail.length >= 2
-        ? _li(`<polyline points="1,11 6,7 11,4 19,2" fill="none" stroke="#ff6f00" stroke-width="2" stroke-linecap="round"/>`, "0 0 20 12", "Mow trail")
+        ? _li(`<polyline points="1,11 6,7 11,4 19,2" fill="none" stroke="#b9f6ca" stroke-width="2" stroke-linecap="round"/>`, "0 0 20 12", "Mow trail")
         : "",
       nogoZones.length ? _li(`<rect x="1" y="1" width="14" height="10" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="1.5" rx="1" stroke-dasharray="3,2"/>`, "0 0 16 12", "No-go") : "",
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
