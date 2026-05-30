@@ -1885,10 +1885,11 @@ traceable from already-decoded telemetry — **no path query exists**; the
 coverage trail = `pose` (f14) accumulated over time (the app draws it the same
 way), plus `mowProgress`/`mowStripCount`/`currentTaskZoneHashId`.
 
-- **Progress: use `mowStripCount` (f12.f1), not `mowProgress` (f12.f5).** During
-  the whole run f12.f5 stayed 0.0% (and the app likewise shows "Mowing Progress
-  0%"), while f12.f1 climbed 0→27+. So f5 is unreliable for this device/run; the
-  stripe count is the live granular signal. (Not a decoder bug — we match the app.)
+- **Progress %: `mowProgress` (f12.f5 × 100) WORKS and climbs.** Measured 3.71%
+  → 3.92% at stripCount 40→41 (low because 1197 m² is large, so early on it's
+  ~0–1% and the app rounds to "0%"). Both signals are good: `mowProgress` (true
+  %) and `mowStripCount` (f12.f1, finer-grained). (An earlier note here wrongly
+  said f5 stays 0 — that was a bug in a throwaway monitor's reader, not the data.)
 - **New undecoded field `PbOutput.f37`** — a varint (=15) that appears
   *intermittently* during active mowing (seen at stripCount 9–12, absent at
   26–27). Meaning unknown; not decoded (no-assumptions). Likely a transient
