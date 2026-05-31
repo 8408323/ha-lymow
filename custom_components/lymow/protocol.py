@@ -840,6 +840,61 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         tasks = _all(_decode_fields(schedules_raw), 1)
         state["schedules"] = [decode_schedule_entry(t) for t in tasks if isinstance(t, bytes)]
 
+    # Clean report (PbOutput field 28 = PbCleanReport) — the robot pushes this at
+    # the end of a mow. Field semantics confirmed 2026-05-31 by cross-checking 5
+    # captured reports against the REST get-clean-history record (same numbers):
+    #   f1 date(epoch s)  f2 PbCleanSummary {1 cleanTimeMin, 2 cleanAreaM2(f32),
+    #   3 {2: mapHashId}, 5 percent(f32 0–1), 6 mapTotalAreaM2(f32)}
+    #   f3 startType  f4 [error_list {1 code, 2 percent(f32)}]  f6 usedBatteryPct
+    clean_raw = _first(fields, 28)
+    if isinstance(clean_raw, bytes):
+        cr = _decode_fields(clean_raw)
+        report: dict[str, Any] = {}
+        date_raw = _first(cr, 1)
+        if date_raw is not None:
+            report["date"] = _signed32(date_raw)
+        summary_raw = _first(cr, 2)
+        if isinstance(summary_raw, bytes):
+            sm = _decode_fields(summary_raw)
+            time_min = _first(sm, 1)
+            if time_min is not None:
+                report["cleanTimeMin"] = _signed32(time_min)
+            area = _first(sm, 2)
+            if area is not None:
+                report["cleanAreaM2"] = round(_decode_f32(area), 2)
+            percent = _first(sm, 5)
+            if percent is not None:
+                report["percent"] = round(_decode_f32(percent) * 100, 1)
+            total_area = _first(sm, 6)
+            if total_area is not None:
+                report["mapTotalAreaM2"] = round(_decode_f32(total_area), 2)
+            map_id_raw = _first(sm, 3)
+            if isinstance(map_id_raw, bytes):
+                hid = _first(_decode_fields(map_id_raw), 2)
+                if isinstance(hid, bytes):
+                    report["mapHashId"] = hid.decode("utf-8", errors="replace")
+        start_type = _first(cr, 3)
+        if start_type is not None:
+            report["startType"] = _signed32(start_type)
+        used_battery = _first(cr, 6)
+        if used_battery is not None:
+            report["usedBatteryPct"] = _signed32(used_battery)
+        errors: list[dict[str, Any]] = []
+        for eraw in _all(cr, 4):
+            if isinstance(eraw, bytes):
+                ef = _decode_fields(eraw)
+                code = _first(ef, 1)
+                if code is not None:
+                    entry: dict[str, Any] = {"code": _signed32(code)}
+                    epct = _first(ef, 2)
+                    if epct is not None:
+                        entry["percent"] = round(_decode_f32(epct) * 100, 1)
+                    errors.append(entry)
+        if errors:
+            report["errorList"] = errors
+        if report:
+            state["cleanReport"] = report
+
     # Robot config (PbOutput field 17 = PbRobotConfig — from PbOutput.encode tag
     # 138 = (17<<3)|2). Carries the device-settings the app shows on its
     # Settings/Network screens. Each field is optional in the reply; we surface

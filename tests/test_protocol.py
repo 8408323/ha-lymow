@@ -393,6 +393,96 @@ def test_decode_pboutput_warning_codes() -> None:
     assert state["warningCodes"] == [4, 5]
 
 
+def _build_clean_report(
+    *,
+    date: int,
+    clean_time_min: int,
+    map_hash_id: str,
+    used_battery: int,
+    start_type: int = 1,
+    clean_area: float | None = None,
+    percent_frac: float | None = None,
+    total_area_frac: float | None = None,
+    errors: list[tuple[int, float | None]] | None = None,
+) -> bytes:
+    """Build a PbOutput carrying a PbCleanReport (field 28) for decode tests."""
+    summary = _field_i32(1, clean_time_min)
+    if clean_area is not None:
+        summary += _field_f32(2, clean_area)
+    summary += _field_bytes(3, _field_str(2, map_hash_id))
+    if percent_frac is not None:
+        summary += _field_f32(5, percent_frac)
+    if total_area_frac is not None:
+        summary += _field_f32(6, total_area_frac)
+    report = _field_i32(1, date) + _field_bytes(2, summary) + _field_i32(3, start_type)
+    for code, epct in errors or []:
+        entry = _field_i32(1, code)
+        if epct is not None:
+            entry += _field_f32(2, epct)
+        report += _field_bytes(4, entry)
+    report += _field_i32(6, used_battery)
+    return _build_pboutput() + _field_bytes(28, report)
+
+
+def test_decode_pboutput_clean_report_complete() -> None:
+    pb = _build_clean_report(
+        date=1780137536,
+        clean_time_min=73,
+        clean_area=345.0,
+        percent_frac=1.0,
+        total_area_frac=1489.02,
+        map_hash_id="wsmjco1T",
+        used_battery=51,
+        errors=[(18, 1.0)],
+    )
+    report = decode_pboutput(pb)["cleanReport"]
+    assert report["date"] == 1780137536
+    assert report["cleanTimeMin"] == 73
+    assert report["cleanAreaM2"] == 345.0
+    assert report["percent"] == 100.0
+    assert report["mapTotalAreaM2"] == 1489.02
+    assert report["mapHashId"] == "wsmjco1T"
+    assert report["usedBatteryPct"] == 51
+    assert report["startType"] == 1
+    assert report["errorList"] == [{"code": 18, "percent": 100.0}]
+
+
+def test_decode_pboutput_clean_report_interrupted_omits_absent_fields() -> None:
+    # An interrupted run with 0 area / no errors: proto3 omits those fields.
+    pb = _build_clean_report(
+        date=1780147021,
+        clean_time_min=6,
+        percent_frac=0.0,
+        total_area_frac=1489.02,
+        map_hash_id="KX1kGyat",
+        used_battery=1,
+        start_type=2,
+    )
+    report = decode_pboutput(pb)["cleanReport"]
+    assert report["cleanTimeMin"] == 6
+    assert report["startType"] == 2
+    assert "cleanAreaM2" not in report
+    assert "errorList" not in report
+
+
+def test_decode_pboutput_clean_report_error_without_percent() -> None:
+    pb = _build_clean_report(
+        date=1780155584,
+        clean_time_min=3,
+        percent_frac=0.0,
+        total_area_frac=1489.02,
+        map_hash_id="KX1kGyat",
+        used_battery=2,
+        errors=[(20, None)],
+    )
+    report = decode_pboutput(pb)["cleanReport"]
+    assert report["errorList"] == [{"code": 20}]
+
+
+def test_decode_pboutput_no_clean_report_when_absent() -> None:
+    assert "cleanReport" not in decode_pboutput(_build_pboutput())
+
+
 def test_decode_pboutput_wifi_signal() -> None:
     pb = _build_pboutput(wifi_signal=80)
     state = decode_pboutput(pb)
