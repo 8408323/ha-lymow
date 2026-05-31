@@ -432,6 +432,21 @@ def test_handle_pboutput_with_map_data(monkeypatch):
     assert states["mapData"] == {"zones": []}
 
 
+def test_handle_pboutput_with_path_data(monkeypatch):
+    import sys
+
+    proto = sys.modules["lymow.protocol"]
+    monkeypatch.setattr(proto, "unwrap_envelope", lambda b: b"")
+    monkeypatch.setattr(proto, "decode_pboutput", lambda b: {"state": 1})
+    monkeypatch.setattr(proto, "decode_map_response", lambda b: {})
+    monkeypatch.setattr(proto, "decode_path_response", lambda b: {"goZones": [{"hashId": "z1"}]})
+
+    states = {}
+    client = LymowMqttClient("h", "eu-west-1", lambda t, s: states.update(s), lambda *a: None)
+    client._handle_pboutput("m1", b"raw")
+    assert states["pathData"] == {"goZones": [{"hashId": "z1"}]}
+
+
 # ---------------------------------------------------------------------------
 # _handle_notify (lines 268-273)
 # ---------------------------------------------------------------------------
