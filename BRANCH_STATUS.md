@@ -2272,6 +2272,36 @@ mitmproxy**, or those phones lose internet (dead proxy). Kill mitmproxy by its
 listening port, not `pkill -f` on a pattern that also appears in your own shell
 command (that self-terminates the shell).
 
+### Remaining decode gaps — characterized 2026-05-31 (NOT shipped; here's why)
+
+Chased the leftover gaps; all three are now characterized but intentionally not
+implemented — each needs something we don't safely have yet:
+
+- **`promptInfo` (PbOutput f15 = PbPromptInfo) — command result feedback. Structure
+  CONFIRMED, code semantics NOT.** Layout: `{f1 selfCheckingRet, f2 zoneRet, f3
+  mutateRet}`, each a result sub-msg `{f1 code(varint), f2 hashId(string)}`. f15 is
+  present-but-empty in nearly every heartbeat; in the whole overnight capture only
+  **one** non-empty sample fired: `mutateRet{code:5}` at the big-mow completion. The
+  only named result enum in the bytecode is `MUTATE_RES_NONE=0`, so code `5` can't
+  be named with confidence. **Blocker: too few samples + no rich enum to name the
+  codes.** Decoding the structure is trivial; do it once we've captured several
+  results of known operations (rename/delete/cut a zone → read the resulting code).
+- **`cutZone` (PbInput, `USER_CTRL_CUT_ZONE` confirmed) — split a zone by a cut
+  line.** PbCutZone carries `hashId` + a cut `line`/`points` (exact field numbers
+  need the encoder dump). Complement to the merge we already support. **Blocker:
+  it's a destructive map mutation — derive the wire format from the bytecode, but it
+  must be validated in a supervised live session before shipping as a service (per
+  the map-edit safety rule), not sent blind.**
+- **`floorData` (PbInput, `USER_CTRL_FLOOR_ADD/DELETE/MODIFY/BACKUP/RESTORE`
+  confirmed) — multi-map / multi-floor management.** PbFloor{floors}, PbFloorInfo.
+  BACKUP/RESTORE (44/45) are already covered. **Blocker: multi-map mutations need
+  live validation AND the account must actually have multiple maps to test against.**
+
+Net: the high-value, safe-to-ship decode work is complete. What's left is either
+sample-starved (promptInfo) or map-mutation command encoders that the project's
+own rules say must be validated live-with-supervision, not shipped from static
+analysis. Recommend deferring until a supervised map-edit session is set up.
+
 **App version is current: 3.0.7 (versionCode 362, 2026-05-31).** Pulled the live
 installed APK and diffed its JS bundle vs the prior build: only 12 new string
 literals (MQTT-reconnect fix, zone-settings clear logic, sign-in error handling,
