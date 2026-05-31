@@ -584,10 +584,10 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     _attr_has_entity_name = True
 
     _RTK_LABELS = {
-        0: "Not ready",
-        1: "Float fix (~40 cm)",
-        2: "Fixed (~2 cm)",
-        3: "RTK fixed (~2 cm)",
+        0: "No fix",
+        1: "Float fix",
+        2: "Fixed",
+        3: "RTK fixed",
     }
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
@@ -638,13 +638,24 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._attr_name = "Map"
         self._attr_icon = "mdi:map"
 
+    @staticmethod
+    def _trim_poly(points: list[dict]) -> list[dict]:
+        """Round polygon coordinates to 4 decimal places (~1 cm precision in ENU metres).
+
+        Full float64 precision uses ~18 chars per coordinate; 4 dp uses ~7 chars,
+        cutting polygon size by ~60% and keeping the map sensor under HA's 16 kB
+        attribute limit even for large multi-zone maps.
+        """
+        return [{"x": round(p["x"], 4), "y": round(p["y"], 4)} for p in points]
+
     @property
     def native_value(self) -> int | None:
         """Number of go-zones loaded, or None if map data is not yet available."""
-        map_data = self.coordinator.data.get(self._thing_name, {}).get("mapData")
+        map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
         if not map_data:
             return None
-        return len(map_data.get("goZones", []))
+        # Only count zones that have a hashId — empty {} entries are stale decode artifacts
+        return sum(1 for z in map_data.get("goZones", []) if z.get("hashId"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -652,12 +663,25 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
         data = self.coordinator.data.get(self._thing_name) or {}
         attrs: dict[str, Any] = {}
+
         if "goZones" in map_data:
-            attrs["go_zones"] = map_data["goZones"]
+            # Filter out stale empty zone entries (no hashId) that accumulate when
+            # MQTT delivers repeated partial map responses without full zone data
+            valid_zones = [z for z in map_data["goZones"] if z.get("hashId")]
+            attrs["go_zones"] = [
+                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z
+                for z in valid_zones
+            ]
         if "nogoZones" in map_data:
-            attrs["nogo_zones"] = map_data["nogoZones"]
+            attrs["nogo_zones"] = [
+                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z
+                for z in map_data["nogoZones"]
+            ]
         if "channels" in map_data:
-            attrs["channels"] = map_data["channels"]
+            attrs["channels"] = [
+                {**ch, "polygon": self._trim_poly(ch["polygon"])} if "polygon" in ch else ch
+                for ch in map_data["channels"]
+            ]
         if "gpsOrigin" in map_data:
             attrs["gps_origin"] = map_data["gpsOrigin"]
         if "chargingStation" in map_data:
@@ -666,8 +690,28 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["mowing_settings"] = map_data["globalZoneConfig"]
         if "globalChannelConfig" in map_data:
             attrs["channel_config"] = map_data["globalChannelConfig"]
-        # Include live robot + RTK position and fix quality so the card updates without a separate entity
+
+        path_data = (self.coordinator.data.get(self._thing_name) or {}).get("pathData")
+        if path_data:
+            # Also trim mow-path track points to 4 dp
+            trimmed_zones = [
+                {**gz, "trackPoints": self._trim_poly(gz.get("trackPoints", []))}
+                for gz in path_data.get("goZones", [])
+            ]
+            attrs["mow_path"] = {"goZones": trimmed_zones}
+
+        # Live robot + RTK position and fix quality
         for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM", "rtkStatus", "workStatus"):
+            val = data.get(key)
+            if val is not None:
+                attrs[key] = val
+
+        rtk_raw = data.get("rtkStatus")
+        if rtk_raw is not None:
+            _RTK_LABELS = {0: "No fix", 1: "Float fix", 2: "Fixed", 3: "RTK fixed"}
+            attrs["rtkLabel"] = _RTK_LABELS.get(int(rtk_raw), f"Unknown ({rtk_raw})")
+        # Live mow progress so the card status bar shows % without needing a separate entity
+        for key in ("mowProgress", "mowStripCount", "totalTaskAreaM2"):
             val = data.get(key)
             if val is not None:
                 attrs[key] = val

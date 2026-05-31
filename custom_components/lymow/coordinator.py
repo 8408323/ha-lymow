@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime, timedelta
@@ -230,6 +231,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # MQTT polls. Keyed by thing_name → {hashId → name}. Lost on HA restart;
         # the card's localStorage covers the browser-side persistence gap.
         self._channel_name_overrides: dict[str, dict[str, str]] = {}
+        # Track whether a path-query task is already scheduled so we don't flood
+        # the robot with QUERY_PATH commands while mowing.
+        self._path_poll_pending: dict[str, bool] = {}
+        # Last non-empty pathData per device — persisted in memory so the map
+        # card can still show mow coverage after the robot docks (the robot stops
+        # sending path data once docked, but the last session's track is useful).
+        self._last_path_data: dict[str, dict] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -280,6 +288,14 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
         if "mapData" in patch:
             patch = self._apply_channel_name_overrides(thing_name, patch)
+        # Cache non-empty pathData so the map card can show last-mow coverage
+        # even after the robot docks (robot stops sending path data when docked).
+        if "pathData" in patch and patch["pathData"].get("goZones"):
+            self._last_path_data[thing_name] = patch["pathData"]
+        # If this patch has no pathData but we have a cached one, inject it so
+        # the sensor attribute stays populated until next mow clears/replaces it.
+        if "pathData" not in patch and thing_name in self._last_path_data:
+            patch = {**patch, "pathData": self._last_path_data[thing_name]}
         merged_patch = self._merge_nested_patch(self._mqtt_state.setdefault(thing_name, {}), patch)
         self._mqtt_state[thing_name].update(merged_patch)
         if self.data and thing_name in self.data:
@@ -360,6 +376,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 title=f"Lymow — {device_label} done",
                 notification_id=f"{DOMAIN}_{thing_name}_done",
             )
+
+        # Clear stale path cache when a new mow session starts (docked/waiting → mowing).
+        # Without this the previous session's completed track masks current progress.
+        if new_ws in WORK_STATUS_MOWING_GROUP and prev_ws not in WORK_STATUS_MOWING_GROUP:
+            self._last_path_data.pop(thing_name, None)
+
+        # Auto-query mow path while actively mowing (≤ once per 30 s).
+        # Fires on any workStatus update when the robot is in a mowing state,
+        # but only schedules a new task if one isn't already waiting.
+        if new_ws in WORK_STATUS_MOWING_GROUP and not self._path_poll_pending.get(thing_name):
+            self._path_poll_pending[thing_name] = True
+            self.hass.async_create_task(self._async_poll_path(thing_name))
 
     def _check_rtk_guard(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Auto-pause when RTK falls below user-configured threshold; auto-resume when it recovers.
@@ -1045,6 +1073,25 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_query_path(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+
+    async def _async_poll_path(self, thing_name: str) -> None:
+        """Poll QUERY_PATH every 30 s while the robot is mowing.
+
+        The pending flag gates entry so workStatus ticks don't pile up requests.
+        After each query-and-sleep cycle we re-schedule only if the robot is still
+        in a mowing state, giving a clean 30 s cadence with no drift.
+        """
+        try:
+            await asyncio.sleep(2)  # brief delay so robot finishes the current strip
+            await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+            await asyncio.sleep(28)  # rest of the 30 s window
+            # If still mowing, kick off the next cycle immediately
+            ws = (self.data or {}).get(thing_name, {}).get("workStatus")
+            if ws in WORK_STATUS_MOWING_GROUP:
+                self.hass.async_create_task(self._async_poll_path(thing_name))
+                return  # keep pending=True for the new task
+        finally:
+            self._path_poll_pending[thing_name] = False
 
     async def async_query_channels(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_CHANNELS)
