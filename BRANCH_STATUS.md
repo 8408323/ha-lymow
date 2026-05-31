@@ -3246,3 +3246,90 @@ once bytes are in hand. Do NOT write the (D) encoder until (C) has bytes.
    --cov-fail-under=100` + `ruff format --check .` + `ruff check .`.
 3. Commit per-gap; **never** `git add` the `.cfa`/capture file.
 4. Strike the gap in the "True gaps" list.
+
+---
+
+## 🖥️ Supervisor session — 2026-05-31 (this laptop)
+
+### Deployment status
+- Deployed v0.2.7 to HA at 192.168.1.99 via GitHub raw download to `/config/custom_components/lymow/`.
+- HA restarted cleanly. Both JS cards confirmed loading at v0.2.7:
+  - `lymow-map-card.js?v=0.2.7` ✅
+  - `lymow-camera-card.js?v=0.2.7` ✅
+
+### Entity registry after restart (2026-05-31)
+- **Total 7b6521 entities in HA registry**: 114 (active: 70, disabled by integration: 44)
+- **Disabled by design** (entity_registry_enabled_default=False): all 22 RTK per-band sensors
+  (l1/l2/l5 sat counts, SNRs, LoRa bandwidth, DC voltage, CW interference, antenna gain),
+  plus mac_address, wifi_ssid, cellular_ip, pose_east/north/heading, mcu_version,
+  last_mow_details, backup_maps, set_charging_station_here, dock_and_forget_progress, etc.
+- **Unknown (expected)**: robot config entities (vehicle_led, rainy_mowing, prefer_4g,
+  charging_handbrake, etc.) stay `unknown` when robot is docked — they populate only
+  when the robot sends a robotConfig echo during mowing or diagnostics query.
+- **Unavailable (stale registry)**: zone_d1d8 and zone_3f49 entities persist in the entity
+  registry from when those zones existed on the map. They will clear if the user removes
+  them from the entity registry manually. No code change needed.
+- **New entities confirmed live**: `sensor.7b6521_mission_time` = 79 min ✅
+
+### Map sensor validation (2026-05-31)
+- `mowing_settings` correctly decoded from globalZoneConfig:
+  - pathSpacing=35, perimeterMowLaps=1, noGoMowLaps=1 (correct field mapping)
+  - safeMarginMode=True (Offset edge), turnOffOuterMotor=False ✅
+- Per-zone zoneConfig decoded on both zones with full 14-field layout ✅
+- Zone names show `?` (empty string from robot) — coordinator name overrides are
+  not being persisted across restarts yet. This is known; the coordinator only writes
+  `_zone_name_overrides` on rename, and those survive MQTT updates but not HA restarts
+  (the robot's BasicInfo.f2 is the authoritative store; decoder reads it correctly).
+
+### Settings panel fix shipped (commit a1cbd9b)
+- Replaced the mislabeled `line_follow_mode` control (no wire home, was silently ignored)
+  with confirmed live-validated controls:
+  - **Safe margin** (safe_margin_mode): Offset edge=1 / Precise edge=0 — maps to f17
+  - **Outer motor** (turn_off_outer_motor): On=1 / Off=0 — maps to f18
+- JS verified: `lymow-map-card.js?v=0.2.7` contains `safe_margin_mode` ×5,
+  `turn_off_outer_motor` ×5, zero occurrences of `line_follow_mode`.
+- Robot-state overlay reads `ms.safeMarginMode` / `ms.turnOffOuterMotor` directly.
+
+### Camera card status
+- `lymow-camera-card.js` exists and loads at v0.2.7 ✅
+- LAN mode: `<img>` on `/api/camera_proxy_stream/<camera_entity>` — works when robot online
+- Cloud mode: in-browser KVS WebRTC with `a=ice-options:trickle renomination` handled
+  by the browser's native RTCPeerConnection (unlike aiortc which needed explicit munge).
+  Browser sends correct H264/recvonly offer — robot should answer as proven by the
+  headless Chrome test session (#97 resolved).
+- **To add camera card to a Lovelace dashboard:**
+  ```yaml
+  type: custom:lymow-camera-card
+  mower_entity: lawn_mower.7b6521
+  camera_entity: camera.7b6521_camera
+  default_source: lan
+  ```
+
+### Map card features — browser test needed
+- Card JS deployed at v0.2.7. Hard-reload the map page (Ctrl+Shift+R) to see the
+  new settings panel. Verify:
+  1. Settings panel (⚙) shows "Safe margin" + "Outer motor" instead of "Line follow" ✅ (code confirmed)
+  2. Settings panel pre-populates from robot state (globalZoneConfig) — pathSpacing=35,
+     safeMarginMode=Offset, etc.
+  3. Edit mode (E key) on a go-zone: vertex drag, rename, delete, per-zone cut-height
+  4. Zone labels (name + area), label mode toggle persists across reload
+  5. Schedules panel (📅), mow trail overlay, RTK badge
+  6. Fullscreen toggle (F key / ⊞ button)
+- **Cannot browser-test from terminal** — needs interactive browser session.
+
+### Remaining work (frontend/supervisor)
+- Browser manual verification of the above map card features
+- Add backup management panel (📦) to map card — backend REST complete, no card UI yet
+- Consider adding per-zone settings panel extension: add Safe margin + Outer motor to
+  the zone config panel (currently only shows cut height, move speed, path spacing, perimeter laps)
+
+### Gaps still open (backend — need capture or supervised session)
+See the per-gap playbook above (gaps 3–9). Status:
+- ✅ Gap 3 (safe-margin f17/f18): **DONE** — confirmed live-toggle 2026-05-30, shipped
+  in both decoder and card panel.
+- ✅ Gap 5 (headlight schedule): **DONE** — commit e510f2d.
+- ✅ Gap 7 (bind RTK): **DONE** — commit 5800ae4.
+- ✅ Gap 8 (PIN code): **DONE** — commit d21de63.
+- ✅ Gap 6 (WiFi write = BLE-only, MQTT raises): **DONE** — commit e4d8bb2 + issue #200.
+- ❌ Gap 4 (Channel OD toggle value confirm): `detectMode` assumed Smart=2/Touch=1 — needs toggle capture.
+- ❌ Gap 9 (Notification list REST endpoint): not captured.
