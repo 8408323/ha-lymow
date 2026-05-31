@@ -300,6 +300,26 @@ def test_map_sensor_extra_attrs_has_channels() -> None:
     assert sensor.extra_state_attributes["channels"] == channels
 
 
+def test_map_sensor_extra_attrs_path_rtk_and_progress() -> None:
+    coord = _make_coord(
+        {
+            "mapData": {"goZones": []},
+            "pathData": {"goZones": [{"hashId": "z1", "trackPoints": [{"x": 1.23456, "y": 2.34567}]}]},
+            "rtkStatus": 2,
+            "mowProgress": 45,
+            "mowStripCount": 12,
+            "totalTaskAreaM2": 350,
+        }
+    )
+    attrs = LymowMapSensor(coord, DEVICE).extra_state_attributes
+    # mow path track points are trimmed to 4 dp like zone polygons
+    assert attrs["mow_path"] == {"goZones": [{"hashId": "z1", "trackPoints": [{"x": 1.2346, "y": 2.3457}]}]}
+    assert attrs["rtkLabel"] == "Fixed"
+    assert attrs["mowProgress"] == 45
+    assert attrs["mowStripCount"] == 12
+    assert attrs["totalTaskAreaM2"] == 350
+
+
 def test_map_sensor_extra_attrs_has_gps_origin() -> None:
     origin = {"lat": 12.0, "lon": 65.0}
     coord = _make_coord({"mapData": {"gpsOrigin": origin}})

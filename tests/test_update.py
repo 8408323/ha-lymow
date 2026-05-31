@@ -57,6 +57,13 @@ def test_latest_version_uses_ota_state_when_available() -> None:
     assert entity.latest_version == "v2.1.48"
 
 
+def test_latest_version_strips_date_suffix() -> None:
+    # The OTA API returns "<base>_<date>"; the date suffix is stripped so HA
+    # doesn't show a false update against the installed base version.
+    entity = _make_entity({"softwareVersion": "v2.1.48.1", "latestVersion": "v2.1.48.1_20260528"})
+    assert entity.latest_version == "v2.1.48.1"
+
+
 def test_in_progress_flips_with_job_id() -> None:
     entity = _make_entity({"otaJobId": "JOB-42"})
     assert entity.in_progress is True

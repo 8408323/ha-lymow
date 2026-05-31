@@ -1668,6 +1668,56 @@ def test_decode_pboutput_no_current_task_zone_when_absent() -> None:
     assert "currentTaskZoneHashId" not in decode_pboutput(pb)
 
 
+def test_decode_path_response_full() -> None:
+    """QUERY_PATH reply → per-zone track polyline + stripsDone.
+
+    Wire: pb.f23 → f2 → f3 → repeated f1; each f1 has .f1{f3=hashId, f5=points}
+    and .f2{f1=stripsDone}; each point is a PbPoint {f1=x, f2=y} float32.
+    """
+    from lymow.protocol import decode_path_response
+
+    pt1 = _field_f32(1, 1.5) + _field_f32(2, 2.5)
+    pt2 = _field_f32(1, 3.0) + _field_f32(2, 4.0)
+    polyline = _field_bytes(1, pt1) + _field_bytes(1, pt2)  # f5 holds repeated f1 points
+    zone_info = _field_str(3, "wsmjco1T") + _field_bytes(5, polyline)
+    gz_raw = _field_bytes(1, zone_info) + _field_bytes(2, _field_i32(1, 7))
+    pb = _field_bytes(23, _field_bytes(2, _field_bytes(3, _field_bytes(1, gz_raw))))
+    assert decode_path_response(pb) == {
+        "goZones": [
+            {
+                "hashId": "wsmjco1T",
+                "trackPoints": [{"x": 1.5, "y": 2.5}, {"x": 3.0, "y": 4.0}],
+                "stripsDone": 7,
+            }
+        ]
+    }
+
+
+def test_decode_path_response_empty_without_content() -> None:
+    from lymow.protocol import decode_path_response
+
+    # f23 present but no f2 sub-message.
+    assert decode_path_response(_field_bytes(23, b"")) == {"goZones": []}
+
+
+def test_decode_path_response_empty_without_path_data() -> None:
+    from lymow.protocol import decode_path_response
+
+    # f23.f2 present but no f3 sub-message.
+    assert decode_path_response(_field_bytes(23, _field_bytes(2, b""))) == {"goZones": []}
+
+
+def test_decode_path_response_skips_malformed_entries() -> None:
+    from lymow.protocol import decode_path_response
+
+    # A varint where a go-zone sub-message is expected, and a zone entry with no
+    # hashId (only stats), are both skipped.
+    bad_varint = _field_i32(1, 5)
+    no_hash = _field_bytes(1, _field_bytes(2, _field_i32(1, 3)))
+    pb = _field_bytes(23, _field_bytes(2, _field_bytes(3, bad_varint + no_hash)))
+    assert decode_path_response(pb) == {"goZones": []}
+
+
 def test_decode_pboutput_network_info_field_34() -> None:
     """PbOutput.f34 networkInfo (populated by query_rtk_diagnostic_l1).
 
