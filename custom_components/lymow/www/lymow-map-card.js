@@ -974,10 +974,18 @@ class LymowMapCard extends HTMLElement {
             <span class="sp-val"></span>
           </div>
           <div class="sp-row">
-            <label>Line follow</label>
-            <select class="sp-input sp-select" data-field="line_follow_mode" data-type="int">
-              <option value="0" ${!(sv.line_follow_mode) ? "selected" : ""}>Off</option>
-              <option value="1" ${sv.line_follow_mode ? "selected" : ""}>On</option>
+            <label>Safe margin</label>
+            <select class="sp-input sp-select" data-field="safe_margin_mode" data-type="int">
+              <option value="1" ${(sv.safe_margin_mode ?? 1) === 1 ? "selected" : ""}>Offset edge</option>
+              <option value="0" ${(sv.safe_margin_mode ?? 1) === 0 ? "selected" : ""}>Precise edge</option>
+            </select>
+            <span class="sp-val"></span>
+          </div>
+          <div class="sp-row">
+            <label>Outer motor</label>
+            <select class="sp-input sp-select" data-field="turn_off_outer_motor" data-type="int">
+              <option value="0" ${!(sv.turn_off_outer_motor) ? "selected" : ""}>On</option>
+              <option value="1" ${sv.turn_off_outer_motor ? "selected" : ""}>Off</option>
             </select>
             <span class="sp-val"></span>
           </div>
@@ -1743,7 +1751,7 @@ class LymowMapCard extends HTMLElement {
         move_speed: 0.6, cut_speed: 5,
         path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
         perimeter_mow_dir: 0, obs_dec_mode: 0,
-        clean_mode: 0, path_order: 0, line_follow_mode: 0,
+        clean_mode: 0, path_order: 0, safe_margin_mode: 1, turn_off_outer_motor: 0,
       };
       // Overlay live robot state (globalZoneConfig echo) when available so the
       // panel reflects what the robot actually has, not just what HA last sent.
@@ -1758,7 +1766,8 @@ class LymowMapCard extends HTMLElement {
           obs_dec_mode: ms.obsDecMode,
           clean_mode: ms.cleanMode,
           path_order: ms.pathOrder ? 1 : 0,
-          line_follow_mode: ms.lineFollowMode ? 1 : 0,
+          safe_margin_mode: ms.safeMarginMode != null ? (ms.safeMarginMode ? 1 : 0) : null,
+          turn_off_outer_motor: ms.turnOffOuterMotor ? 1 : 0,
         };
         Object.entries(fromRobot).forEach(([k, v]) => { if (v != null) defaults[k] = v; });
       }
