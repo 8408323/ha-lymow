@@ -669,13 +669,11 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             # MQTT delivers repeated partial map responses without full zone data
             valid_zones = [z for z in map_data["goZones"] if z.get("hashId")]
             attrs["go_zones"] = [
-                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z
-                for z in valid_zones
+                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z for z in valid_zones
             ]
         if "nogoZones" in map_data:
             attrs["nogo_zones"] = [
-                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z
-                for z in map_data["nogoZones"]
+                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z for z in map_data["nogoZones"]
             ]
         if "channels" in map_data:
             attrs["channels"] = [
@@ -695,8 +693,7 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         if path_data:
             # Also trim mow-path track points to 4 dp
             trimmed_zones = [
-                {**gz, "trackPoints": self._trim_poly(gz.get("trackPoints", []))}
-                for gz in path_data.get("goZones", [])
+                {**gz, "trackPoints": self._trim_poly(gz.get("trackPoints", []))} for gz in path_data.get("goZones", [])
             ]
             attrs["mow_path"] = {"goZones": trimmed_zones}
 
