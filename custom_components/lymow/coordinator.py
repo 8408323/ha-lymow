@@ -1622,6 +1622,24 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 session["iceServers"] = await self._client.get_ice_server_config(
                     channel_arn, endpoints["HTTPS"], creds, region=region
                 )
+            # Turnkey viewer config: a browser/WebRTC client can connect with
+            # just these — the SigV4-presigned signaling WSS, a unique viewer
+            # client id, and the ICE/TURN list shaped for RTCPeerConnection.
+            if endpoints.get("WSS"):
+                client_id = self._client.viewer_client_id()
+                session["viewerClientId"] = client_id
+                session["viewerWssUrl"] = self._client.presign_signaling_url(
+                    endpoints["WSS"], channel_arn, client_id, creds, region=region
+                )
+                session["webrtcIceServers"] = [
+                    {
+                        "urls": s.get("Uris") or s.get("uris"),
+                        "username": s.get("Username"),
+                        "credential": s.get("Password"),
+                    }
+                    for s in session.get("iceServers", [])
+                    if isinstance(s, dict)
+                ]
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("KVS endpoint/ICE resolution failed for %s: %s", thing_name, err)
         return session

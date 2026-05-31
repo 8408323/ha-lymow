@@ -580,6 +580,23 @@ class TestStartVideoSession:
                 await client.start_video_session("mower-001")
 
 
+class TestViewerClientId:
+    async def test_embeds_sub_from_access_token(self):
+        import base64
+        import json
+        import re
+
+        payload = base64.urlsafe_b64encode(json.dumps({"sub": "USER-123"}).encode()).rstrip(b"=").decode()
+        async with aiohttp.ClientSession() as session:
+            c = LymowApiClient(session=session, access_token=f"hdr.{payload}.sig", region=REGION, identity_id="i")
+            cid = c.viewer_client_id()
+        assert re.fullmatch(r"ha-lymow_[0-9a-f]{8}_userId_USER-123", cid)
+
+    async def test_empty_sub_when_token_not_a_jwt(self, client):
+        # The fixture's access token has no "." → decode fails → sub falls back to empty.
+        assert client.viewer_client_id().endswith("_userId_")
+
+
 class TestOtaEndpoints:
     async def test_check_update_returns_payload(self, client):
         payload = {

@@ -25,6 +25,10 @@
  *   title: My lawn                        # optional
  *   rtk_autopause: true                   # optional – auto-pause on fix loss
  *   rtk_autopause_min_fix: 2              # optional – 0-3, default 2
+ *   show_camera: true                     # optional – adds a 📹 button that opens
+ *                                         #   the camera overlay (off by default)
+ *   camera_entity: camera.lymow_THING_camera  # optional – LAN view in the overlay
+ *   camera_default_source: lan | cloud    # optional – overlay's initial source
  */
 
 const _ZOOM_MIN = 0.5;
@@ -111,6 +115,58 @@ class LymowMapCard extends HTMLElement {
 
   disconnectedCallback() {
     if (this._boundKeyDown) window.removeEventListener('keydown', this._boundKeyDown);
+    this._closeCamera();
+  }
+
+  // Camera overlay — opt-in via `show_camera: true`. Hosted in document.body
+  // (not the shadow root) so the map's _render() can't tear down the live
+  // <video>/peer connection inside the embedded <lymow-camera-card>.
+  _openCamera() {
+    if (!this._cameraOverlay) {
+      const ov = document.createElement("div");
+      ov.style.cssText =
+        "position:fixed;inset:0;z-index:10000;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;";
+      ov.addEventListener("click", (e) => { if (e.target === ov) this._closeCamera(); });
+      const wrap = document.createElement("div");
+      wrap.style.cssText = "width:min(92vw,720px);max-height:92vh;position:relative;";
+      const close = document.createElement("button");
+      close.textContent = "✕";
+      close.title = "Close camera (Esc)";
+      close.style.cssText =
+        "position:absolute;top:-14px;right:-14px;z-index:1;width:36px;height:36px;border-radius:50%;border:0;background:#fff;color:#000;font:18px/1 sans-serif;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.4);";
+      close.addEventListener("click", () => this._closeCamera());
+      const card = document.createElement("lymow-camera-card");
+      if (typeof card.setConfig !== "function") {
+        // lymow-camera-card.js not loaded — fail soft.
+        wrap.textContent = "Camera card not available (lymow-camera-card.js missing).";
+      } else {
+        try {
+          card.setConfig({
+            mower_entity: this._config.mower_entity,
+            camera_entity: this._config.camera_entity,
+            default_source: this._config.camera_default_source,
+            title: "Lymow Camera",
+          });
+          this._cameraCard = card;
+          wrap.appendChild(card);
+        } catch (err) {
+          wrap.textContent = `Camera unavailable: ${err.message || err}`;
+        }
+      }
+      wrap.appendChild(close);
+      ov.appendChild(wrap);
+      this._cameraOverlay = ov;
+    }
+    if (this._cameraCard) this._cameraCard.hass = this._hass;
+    document.body.appendChild(this._cameraOverlay);
+  }
+
+  _closeCamera() {
+    if (this._cameraOverlay && this._cameraOverlay.parentNode) {
+      // Removing from the DOM fires the camera card's disconnectedCallback,
+      // which stops the cloud peer connection / clears the stream.
+      this._cameraOverlay.parentNode.removeChild(this._cameraOverlay);
+    }
   }
 
   _onKeyDown(e) {
@@ -120,6 +176,7 @@ class LymowMapCard extends HTMLElement {
     if (tag === 'input' || tag === 'textarea' || active?.isContentEditable) return;
     switch (e.key) {
       case 'Escape':
+        if (this._cameraOverlay?.parentNode) { this._closeCamera(); break; }
         if (this._expanded) { this._toggleExpand(); break; }
         if (this._splitMode) { this._cancelSplit(); break; }
         if (this._drawingZone || this._drawNameStep) { this._cancelDraw(); break; }
@@ -154,6 +211,7 @@ class LymowMapCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    if (this._cameraCard) this._cameraCard.hass = hass; // keep the camera overlay live
     // Don't re-render while the user is actively interacting with the UI:
     // - typing in a rename/draw-name input
     // - has focus inside any settings panel input or select (keeps dropdowns open)
@@ -675,9 +733,11 @@ class LymowMapCard extends HTMLElement {
         ? `<button class="btn sched${this._scheduleOpen ? " settings-active" : ""}" data-action="sched" title="Mowing schedules">📅</button>` : "";
       const settingsBtn = this._config.mower_entity
         ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" data-action="settings" title="Mowing settings">⚙</button>` : "";
+      const cameraBtn = this._config.show_camera
+        ? `<button class="btn camera" data-action="camera" title="Onboard camera (LAN / Cloud)">📹</button>` : "";
       const expandBtn = `<button class="btn expand" data-action="expand" title="${this._expanded ? "Collapse [F]" : "Expand [F]"}">${this._expanded ? "⊠" : "⊞"}</button>`;
       const resetBtn = `<button class="btn reset" data-action="reset" title="Reset zoom [R]">⊡</button>`;
-      toolbar = `<div class="btn-row">${mowBtn}${mergeBtn}${editBtn}${pinBtn}${schedBtn}${settingsBtn}${expandBtn}${resetBtn}</div>`;
+      toolbar = `<div class="btn-row">${mowBtn}${mergeBtn}${editBtn}${pinBtn}${schedBtn}${settingsBtn}${cameraBtn}${expandBtn}${resetBtn}</div>`;
     }
 
     // ── Legend with matching SVG symbols ─────────────────────────────────────
@@ -889,7 +949,7 @@ class LymowMapCard extends HTMLElement {
         .btn.save { background: #2e7d32; }
         .btn.rename { background: #6a1b9a; flex: 1; min-width: 72px; }
         .btn.cancel { background: #757575; flex: 1; min-width: 60px; }
-        .btn.reset, .btn.expand, .btn.settings, .btn.sched { background: #455a64; flex: 0; min-width: 36px; }
+        .btn.reset, .btn.expand, .btn.settings, .btn.sched, .btn.camera { background: #455a64; flex: 0; min-width: 36px; }
         .btn.pin { background: #455a64; flex: 1; min-width: 72px; }
         .btn.settings-active { background: #ef6c00; }
         .rename-input { flex: 1; padding: 7px 8px; border: 1px solid var(--divider-color,#444); border-radius: 6px; background: var(--card-background-color,#1c1c1c); color: var(--primary-text-color); font-size: 0.85em; }
@@ -1118,6 +1178,7 @@ class LymowMapCard extends HTMLElement {
           case "pin":            this._togglePinAndGo(); break;
           case "sched":          this._toggleSchedule(); break;
           case "settings":       this._toggleSettings(); break;
+          case "camera":         this._openCamera(); break;
           case "expand":         this._toggleExpand(); break;
           case "reset":          this._resetView(); break;
           case "mow":            this._mowSelected(); break;

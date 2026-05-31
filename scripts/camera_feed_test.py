@@ -124,6 +124,53 @@ def _jwt_sub(token: str) -> str:
     return json.loads(base64.urlsafe_b64decode(payload)).get("sub", "")
 
 
+def _munge_offer(sdp: str) -> str:
+    """Reshape aiortc's offer toward the Lymow app's (which the robot answers).
+
+    Adds the congestion-control feedback + header extension the robot's KVS master
+    expects (transport-cc, ccm fir, transport-wide-cc extmap, extmap-allow-mixed,
+    rtcp-rsize) WITHOUT changing payload-type numbering, so aiortc's local
+    description still matches the answer.
+    """
+    import re
+
+    lines = sdp.split("\r\n")
+    vids = {m.group(1) for ln in lines if (m := re.match(r"a=rtpmap:(\d+) (?:H264|VP8|VP9)/", ln))}
+    out: list[str] = []
+    in_video = False
+    for ln in lines:
+        if ln.startswith("a=ice-pwd:"):
+            out.append(ln)
+            out.append("a=ice-options:trickle renomination")  # REQUIRED — robot ignores offers without it
+            continue
+        if ln == "a=setup:actpass" and os.environ.get("LYMOW_SETUP_ACTIVE"):
+            out.append("a=setup:active")  # make robot the DTLS server (its likely streaming role)
+            continue
+        if ln.startswith("a=group:BUNDLE"):
+            out.append(ln)
+            out.append("a=extmap-allow-mixed")
+            continue
+        if ln.startswith("m=video"):
+            in_video = True
+        elif ln.startswith("m="):
+            in_video = False
+        if in_video and ln.startswith("a=mid:"):
+            out.append(ln)
+            out.append("a=extmap:4 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01")
+            out.append("a=rtcp-rsize")
+            continue
+        if in_video and (ln.startswith("a=ssrc") or ln.startswith("a=msid")):
+            continue  # a recvonly viewer declares no send SSRC/msid (the app omits these)
+        m = re.match(r"a=rtcp-fb:(\d+) goog-remb", ln)
+        if m and m.group(1) in vids:
+            out.append(ln)
+            out.append(f"a=rtcp-fb:{m.group(1)} transport-cc")
+            out.append(f"a=rtcp-fb:{m.group(1)} ccm fir")
+            continue
+        out.append(ln)
+    return "\r\n".join(out)
+
+
 async def _resolve_session(client: LymowApiClient, thing: str) -> dict | None:
     session = await client.start_video_session(thing)
     arn, creds = session.get("channelARN"), session.get("credentials")
@@ -144,9 +191,14 @@ async def _resolve_session(client: LymowApiClient, thing: str) -> dict | None:
 
 
 async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
+    if os.environ.get("LYMOW_RTC_LOG"):
+        import logging
+
+        logging.basicConfig(level=logging.INFO, format="    [log] %(name)s %(message)s")
+        logging.getLogger("aiortc").setLevel(logging.DEBUG)
     try:
         import websockets
-        from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCSessionDescription
+        from aiortc import RTCConfiguration, RTCIceServer, RTCPeerConnection, RTCRtpReceiver, RTCSessionDescription
     except ModuleNotFoundError as exc:
         print(
             f"\nMissing WebRTC dependency: {exc.name}. These aren't part of the integration —\n"
@@ -156,14 +208,62 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
         )
         raise SystemExit(2) from exc
 
+    if os.environ.get("LYMOW_COUNT_RTP"):
+        from aiortc.rtcrtpreceiver import RTCRtpReceiver as _R
+
+        _orig = _R._handle_rtp_packet
+        _cnt = {"n": 0}
+
+        async def _patched(self, *a, **k):  # noqa: ANN001, ANN002
+            _cnt["n"] += 1
+            if _cnt["n"] in (1, 2, 5, 30, 100, 300):
+                pkt = a[0] if a else None
+                print(
+                    f"    [rtp] decrypted RTP #{_cnt['n']} pt={getattr(pkt, 'payload_type', '?')} ssrc={getattr(pkt, 'ssrc', '?')}"
+                )
+            return await _orig(self, *a, **k)
+
+        _R._handle_rtp_packet = _patched
+
+        # Count one level deeper: raw SRTP packets arriving (before decrypt) + decrypt failures.
+        try:
+            import pylibsrtp
+
+            _sorig = pylibsrtp.Session.unprotect
+            _scnt = {"ok": 0, "err": 0}
+
+            def _sunprotect(self, data):  # noqa: ANN001
+                try:
+                    out = _sorig(self, data)
+                    _scnt["ok"] += 1
+                    if _scnt["ok"] in (1, 2, 5, 50):
+                        print(f"    [srtp] unprotect OK #{_scnt['ok']} ({len(data)}B)")
+                    return out
+                except Exception as exc:  # noqa: BLE001
+                    _scnt["err"] += 1
+                    if _scnt["err"] in (1, 2, 5, 50):
+                        print(f"    [srtp] unprotect FAILED #{_scnt['err']}: {type(exc).__name__}: {exc}")
+                    raise
+
+            pylibsrtp.Session.unprotect = _sunprotect
+        except Exception as exc:  # noqa: BLE001
+            print(f"    [srtp] could not patch pylibsrtp: {exc}")
+
     ice_servers = []
     for s in session["ice"]:
         urls = s.get("Uris") or s.get("uris") or []
         ice_servers.append(RTCIceServer(urls=urls, username=s.get("Username"), credential=s.get("Password")))
     print(f"  ICE servers: {len(ice_servers)}")
     pc = RTCPeerConnection(RTCConfiguration(iceServers=ice_servers))
-    pc.addTransceiver("video", direction="recvonly")
-    pc.addTransceiver("audio", direction="recvonly")
+    vt = pc.addTransceiver("video", direction="recvonly")
+    if not os.environ.get("LYMOW_VIDEO_ONLY"):
+        pc.addTransceiver("audio", direction="recvonly")
+    if os.environ.get("LYMOW_FORCE_H264"):
+        caps = RTCRtpReceiver.getCapabilities("video")
+        h264 = [c for c in caps.codecs if "H264" in c.mimeType or c.mimeType in ("video/rtx", "video/red")]
+        if h264:
+            vt.setCodecPreferences(h264)
+            print(f"  forced video offer to H264 ({sum('H264' in c.mimeType for c in h264)} profiles)")
 
     @pc.on("iceconnectionstatechange")
     def _ice():  # noqa: ANN202
@@ -198,7 +298,10 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
     # owner's Cognito sub as "…_userId_<sub>" (the app uses this format). A
     # random client id is silently ignored — this is why the offer goes
     # unanswered even with the master up.
-    client_id = f"ha-lymow_{os.getpid()}_userId_{session['user_sub']}"
+    prefix = os.environ.get("LYMOW_KVS_CLIENT_PREFIX")
+    client_id = (
+        f"{prefix}_userId_{session['user_sub']}" if prefix else f"ha-lymow_{os.getpid()}_userId_{session['user_sub']}"
+    )
     url = _presign_wss(session["wss"], session["arn"], client_id, session["region"], session["creds"])
     answered = asyncio.Event()
     async with websockets.connect(url, max_size=None) as ws:
@@ -214,12 +317,14 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
         else:
             print("  [WARN] ICE gathering did not complete in 30 s — sending offer with partial candidates")
         print(f"  WSS connected; ICE gathering {pc.iceGatheringState}, sending SDP_OFFER")
+        wire_sdp = pc.localDescription.sdp
+        if os.environ.get("LYMOW_MUNGE_OFFER"):
+            wire_sdp = _munge_offer(wire_sdp)
+            print("  munged offer to app-like structure (transport-cc/fir/extmap/rtcp-rsize)")
         offer_frame = json.dumps(
             {
                 "action": "SDP_OFFER",
-                "messagePayload": base64.b64encode(
-                    json.dumps({"type": "offer", "sdp": pc.localDescription.sdp}).encode()
-                ).decode(),
+                "messagePayload": base64.b64encode(json.dumps({"type": "offer", "sdp": wire_sdp}).encode()).decode(),
             }
         )
         await ws.send(offer_frame)
@@ -264,6 +369,15 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
             print(f"  recv {kind}")
             if kind == "SDP_ANSWER":
                 answered.set()
+                if os.environ.get("LYMOW_DEBUG_ANSWER"):
+                    for _l in payload["sdp"].split("\r\n"):
+                        if (
+                            _l.startswith(("m=video", "a=sendonly", "a=sendrecv", "a=recvonly", "a=inactive"))
+                            or "rtpmap" in _l
+                            or "fmtp" in _l
+                            or _l.startswith("a=ssrc:")
+                        ):
+                            print("    ANSWER>", _l)
                 await pc.setRemoteDescription(RTCSessionDescription(sdp=payload["sdp"], type="answer"))
             elif kind == "ICE_CANDIDATE" and payload.get("candidate"):
                 cand = candidate_from_sdp(payload["candidate"].split(":", 1)[1])
@@ -281,10 +395,26 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
             except Exception as exc:  # noqa: BLE001 — surface, don't swallow in the task
                 print(f"  signaling loop error: {type(exc).__name__}: {exc}")
 
+        async def _stats_monitor() -> None:
+            if not os.environ.get("LYMOW_RTC_STATS"):
+                return
+            while True:
+                await asyncio.sleep(5)
+                for r in pc.getReceivers():
+                    if r.track and r.track.kind == "video":
+                        stats = await r.getStats()
+                        for s in stats.values():
+                            if getattr(s, "type", "") == "inbound-rtp":
+                                print(
+                                    f"  [stats] packetsReceived={getattr(s, 'packetsReceived', '?')} "
+                                    f"bytesReceived={getattr(s, 'bytesReceived', '?')}"
+                                )
+
         loop_task = asyncio.create_task(_signal_loop())
         resend_task = asyncio.create_task(_resend_offer())
+        stats_task = asyncio.create_task(_stats_monitor())
         try:
-            await asyncio.wait_for(got.wait(), timeout=120)
+            await asyncio.wait_for(got.wait(), timeout=45)
             return True
         except asyncio.TimeoutError:
             state = "answered" if answered.is_set() else "no SDP_ANSWER — robot never joined as master"
@@ -296,7 +426,8 @@ async def _view(session: dict, client: LymowApiClient, thing: str) -> bool:
             # ConnectionClosed from a resend racing the socket close).
             resend_task.cancel()
             loop_task.cancel()
-            await asyncio.gather(resend_task, loop_task, return_exceptions=True)
+            stats_task.cancel()
+            await asyncio.gather(resend_task, loop_task, stats_task, return_exceptions=True)
             await pc.close()
 
 
@@ -307,7 +438,11 @@ async def main() -> int:
         return 1
     async with aiohttp.ClientSession() as http:
         auth = LymowAuth(http)
-        tokens = await auth.login(user, pw)
+        _at, _it = os.environ.get("LYMOW_ACCESS_TOKEN"), os.environ.get("LYMOW_ID_TOKEN")
+        if _at and _it:
+            tokens = {"AccessToken": _at, "IdToken": _it, "region": os.environ.get("LYMOW_REGION", "eu-west-1")}
+        else:
+            tokens = await auth.login(user, pw)
         cdata = await auth.get_aws_credentials(tokens["IdToken"], tokens["region"])
         aws = cdata["credentials"]
         client = LymowApiClient(http, tokens["AccessToken"], tokens["region"], cdata["identity_id"])

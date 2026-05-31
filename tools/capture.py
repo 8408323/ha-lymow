@@ -220,7 +220,7 @@ class LymowCapture:
             arrow = "→" if msg.from_client else "←"
             if "kinesisvideo" in host:
                 body = msg.text if msg.is_text else (msg.content.decode("utf-8", "replace") if msg.content else "")
-                _write(f"\n[{_ts()}] KVS-WSS {arrow} ({len(body)}B)\n  {body[:1400]}")
+                _write(f"\n[{_ts()}] KVS-WSS {arrow} ({len(body)}B)\n  {body[:8000]}")
                 continue
             if "iot." not in host or msg.is_text or not isinstance(msg.content, bytes):
                 continue
