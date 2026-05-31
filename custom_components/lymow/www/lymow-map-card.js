@@ -39,6 +39,26 @@ const _MARKER_PX = 18;   // robot / RTK / station marker diameter in px
 const _NORTH_PX  = 44;   // north arrow circle diameter in px
 const _SCALEBAR_PX_W = 80; // target scale bar width in px
 
+// Graham scan convex hull for mowed-area overlay. Points are {x, y} in ENU metres.
+// Returns the hull in CCW order, or [] if fewer than 3 distinct points.
+function _convexHull(pts) {
+  if (!pts || pts.length < 3) return pts || [];
+  const p = pts.slice().sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [], upper = [];
+  for (const pt of p) {
+    while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], pt) <= 0) lower.pop();
+    lower.push(pt);
+  }
+  for (let i = p.length - 1; i >= 0; i--) {
+    const pt = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], pt) <= 0) upper.pop();
+    upper.push(pt);
+  }
+  upper.pop(); lower.pop();
+  return lower.concat(upper);
+}
+
 class LymowMapCard extends HTMLElement {
   constructor() {
     super();
@@ -84,6 +104,12 @@ class LymowMapCard extends HTMLElement {
 
     this._longPressTimer = null; // for zone enable/disable long-press
     this._pinAndGoMode = false; // double-click sends robot to point
+
+    // Live mow trail — circular buffer of {x,y} ENU positions recorded during active mow.
+    // Max 2000 points (~33 min at 1 Hz). Reset when mowing stops.
+    this._mowTrail = [];
+    this._mowTrailMaxPts = 2000;
+    this._mowTrailActive = false; // true while workStatus is in mowing group
 
     // Pan/zoom state (in SVG user units)
     this._vx = 0; this._vy = 0; this._vw = 100; this._vh = 100;
@@ -212,6 +238,35 @@ class LymowMapCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._cameraCard) this._cameraCard.hass = hass; // keep the camera overlay live
+
+    // Record live robot position into the mow trail while actively mowing
+    const mapState = hass?.states[this._config?.entity];
+    if (mapState) {
+      const a = mapState.attributes;
+      const ws = a.workStatus !== undefined ? parseInt(a.workStatus) : -1;
+      const MOWING = new Set([2, 8, 9]); // MOWING, RESUME, ZONE_PARTITION
+      const isMowing = MOWING.has(ws);
+      if (isMowing) {
+        if (!this._mowTrailActive) {
+          // New mow session started — clear the old trail
+          this._mowTrail = [];
+          this._mowTrailActive = true;
+        }
+        const x = a.poseEastM, y = a.poseNorthM;
+        if (x !== undefined && y !== undefined) {
+          const last = this._mowTrail[this._mowTrail.length - 1];
+          // Only append if robot moved more than 0.05 m (skip GPS jitter while stationary)
+          if (!last || Math.hypot(x - last.x, y - last.y) > 0.05) {
+            this._mowTrail.push({ x, y });
+            if (this._mowTrail.length > this._mowTrailMaxPts)
+              this._mowTrail.shift();
+          }
+        }
+      } else {
+        this._mowTrailActive = false;
+      }
+    }
+
     // Don't re-render while the user is actively interacting with the UI:
     // - typing in a rename/draw-name input
     // - has focus inside any settings panel input or select (keeps dropdowns open)
@@ -260,13 +315,16 @@ class LymowMapCard extends HTMLElement {
       gpsOrigin: a.gps_origin || null,
       chargingStation: a.charging_station || null,
       mowingSettings: a.mowing_settings || null,
+      mowPath: a.mow_path || null,
       poseEastM: a.poseEastM,
       poseNorthM: a.poseNorthM,
       poseThetaRad: a.poseThetaRad,
       rtkEastM: a.rtkEastM,
       rtkNorthM: a.rtkNorthM,
       rtkStatus: a.rtkStatus,
+      rtkLabel: a.rtkLabel || null,
       workStatus: a.workStatus,
+      mowProgress: a.mowProgress ?? null,
       // Schedule data from optional schedule_entity
       schedules: (() => {
         const se = this._config.schedule_entity && this._hass?.states[this._config.schedule_entity];
@@ -339,7 +397,7 @@ class LymowMapCard extends HTMLElement {
       return;
     }
 
-    const { goZones, nogoZones, channels, chargingStation, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, workStatus, schedules } = mapData;
+    const { goZones, nogoZones, channels, chargingStation, mowPath, poseEastM, poseNorthM, poseThetaRad, rtkEastM, rtkNorthM, rtkStatus, rtkLabel, workStatus, schedules } = mapData;
 
     // RTK auto-pause: if enabled, pause mowing when fix quality drops below threshold
     if (this._config.rtk_autopause && this._config.mower_entity) {
@@ -348,7 +406,8 @@ class LymowMapCard extends HTMLElement {
 
     // Work-status label and mow progress from mower entity
     const mowerState = this._config.mower_entity && this._hass?.states[this._config.mower_entity];
-    const mowProgress = mowerState?.attributes?.mow_progress ?? null;
+    // mowProgress comes from the map sensor (mowProgress attr) or the mower entity
+    const mowProgress = mapData.mowProgress ?? mowerState?.attributes?.mow_progress ?? null;
     const battery = mowerState?.attributes?.battery_level ?? null;
 
     if ([...goZones, ...nogoZones].length === 0 && !chargingStation) {
@@ -436,18 +495,64 @@ class LymowMapCard extends HTMLElement {
       </text>`;
     }).join("\n");
 
+    // ── Mow track overlay ────────────────────────────────────────────────────
+    // During an active mow: show the live position trail (breadcrumb polyline).
+    // After mowing ends: show the session's mowed-area overlay from QUERY_PATH.
+    // trackPoints are ordered GPS fixes along each strip — rendering them as a
+    // polygon connects them in recording order (jagged/self-intersecting). Instead
+    // compute the convex hull of all track points to approximate the mowed area.
+    const isMowingNow = this._mowTrailActive;
+    const mowedByZone = {};
+    // Show stored path overlay both when mowing and when not, so the user can
+    // see how much has been done during an active session via QUERY_PATH polls.
+    for (const zt of (mowPath?.goZones || [])) {
+      if (zt.hashId && zt.trackPoints?.length >= 3) mowedByZone[zt.hashId] = zt;
+    }
+    const hasMowData = Object.keys(mowedByZone).length > 0;
+
+    // ── Live mow trail (breadcrumb during active mow) ─────────────────────────
+    let liveTrail = "";
+    if (isMowingNow && this._mowTrail.length >= 2) {
+      const pts = this._mowTrail.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      // Bright vivid green trail — clearly visible against the zone fills
+      liveTrail = `<polyline points="${pts}" fill="none" stroke="#00e676" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.95" pointer-events="none"/>`;
+    }
+
     // ── Go-zones ──────────────────────────────────────────────────────────────
     const goPaths = goZones.map((z) => {
       const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
       const selected = this._selectedZones.has(z.hashId);
       const beingEdited = this._editing && this._editHash === z.hashId;
       const enabled = z.isEnabled !== false;
-      const fill = beingEdited ? "#fff3e0" : selected ? "#1b5e20" : enabled ? "#43a047" : "#e0e0e0";
+      const mowed = mowedByZone[z.hashId];
+
+      // Zone base fill is always medium green — the mowed overlay sits on top.
+      const baseFill = beingEdited ? "#fff3e0"
+        : selected ? "#1b5e20"
+        : !enabled ? "#e0e0e0"
+        : "#43a047";               // always medium green background
       const stroke = beingEdited ? "#ef6c00" : selected ? "#a5d6a7" : enabled ? "#2e7d32" : "#9e9e9e";
       const dash = enabled ? "" : `stroke-dasharray="2,1"`;
+
+      // Mowed-area overlay: convex hull of track points, clipped to zone polygon,
+      // filled with dark forest green. Convex hull covers the full swept area
+      // without the self-intersections you'd get from raw recording-order GPS fixes.
+      let mowedOverlay = "";
+      if (mowed && !beingEdited) {
+        const hull = _convexHull(mowed.trackPoints);
+        if (hull.length >= 3) {
+          const hpts = hull.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+          const clipId = `mow-clip-${z.hashId}`;
+          mowedOverlay = `
+            <defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>
+            <polygon points="${hpts}" fill="#1b5e20" fill-opacity="0.72" stroke="none"
+              clip-path="url(#${clipId})" pointer-events="none"/>`;
+        }
+      }
+
       return `<polygon data-hash="${z.hashId}" data-type="go" points="${pts}"
-        fill="${fill}" stroke="${stroke}" stroke-width="0.4" opacity="${enabled ? 1 : 0.6}" ${dash}
-        style="cursor:pointer"/>`;
+        fill="${baseFill}" stroke="${stroke}" stroke-width="0.4" opacity="${enabled ? 1 : 0.6}" ${dash}
+        style="cursor:pointer"/>${mowedOverlay}`;
     }).join("\n");
 
     // For each go-zone: clip label to polygon so it never renders outside the zone.
@@ -470,16 +575,31 @@ class LymowMapCard extends HTMLElement {
       const zoneFontSz = Math.max(0.8, Math.min(parseFloat(fontSz), Math.min(bboxW, bboxH) * 0.15)).toFixed(2);
       const clip = `clip-path="url(#lbl-clip-${z.hashId})"`;
       const textAttrs = `x="${sx(cx)}" text-anchor="middle" font-weight="bold" fill="white" pointer-events="none" font-size="${zoneFontSz}" ${clip}`;
+      const lineH = (parseFloat(zoneFontSz) * 1.3).toFixed(2);
+
+      // Mow progress line — shown when QUERY_PATH data is available for this zone
+      const mowedZone = mowedByZone[z.hashId];
+      // Don't show strip count while actively mowing (data is from previous session)
+      const progressPart = (!isMowingNow && mowedZone != null)
+        ? `${mowedZone.stripsDone ?? "?"} strips` : "";
+
       // Mode 2 (both): two stacked lines; modes 0/1 single line.
       if (m === 2 && areaPart) {
-        const lineH = (parseFloat(zoneFontSz) * 1.2).toFixed(2);
-        return `<text ${textAttrs} dominant-baseline="auto" y="${sy(cy)}">` +
-          `<tspan x="${sx(cx)}" dy="-${lineH}">${namePart}</tspan>` +
-          `<tspan x="${sx(cx)}" dy="${(parseFloat(lineH) * 2).toFixed(2)}">${areaPart}</tspan>` +
+        const lines = [namePart, areaPart, progressPart].filter(Boolean);
+        const startDy = -((lines.length - 1) * 0.5 * parseFloat(lineH)).toFixed(2);
+        return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">` +
+          lines.map((l, i) => `<tspan x="${sx(cx)}" dy="${i === 0 ? startDy : lineH}">${l}</tspan>`).join("") +
           `</text>`;
       }
-      const label = m === 0 ? namePart : m === 1 ? (areaPart || namePart) : namePart;
-      return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">${label}</text>`;
+      // Modes 0/1: name or area + optional progress on second line
+      const line1 = m === 0 ? namePart : m === 1 ? (areaPart || namePart) : namePart;
+      if (progressPart) {
+        return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">` +
+          `<tspan x="${sx(cx)}" dy="-${(parseFloat(lineH) * 0.5).toFixed(2)}">${line1}</tspan>` +
+          `<tspan x="${sx(cx)}" dy="${lineH}" font-weight="normal" opacity="0.9">${progressPart}</tspan>` +
+          `</text>`;
+      }
+      return `<text ${textAttrs} dominant-baseline="middle" y="${sy(cy)}">${line1}</text>`;
     }).join("\n");
 
     // ── No-go zones (on top of go-zones) ─────────────────────────────────────
@@ -622,7 +742,6 @@ class LymowMapCard extends HTMLElement {
     const wsColor = wsNum !== null ? (_wsColors[wsNum] ?? "#757575") : null;
 
     const rtkNum = rtkStatus !== undefined ? parseInt(rtkStatus) : null;
-    const rtkLabels = { 0:"No fix", 1:"Float ~40cm", 2:"Fixed ~2cm", 3:"RTK ~2cm" };
     const rtkColors = { 0:"#c62828", 1:"#ef6c00", 2:"#2e7d32", 3:"#1565c0" };
 
     const statusBar = (wsLabel || battery !== null || rtkNum !== null) ? `
@@ -630,7 +749,7 @@ class LymowMapCard extends HTMLElement {
         ${wsLabel ? `<span class="status-chip" style="background:${wsColor}">${wsLabel}</span>` : ""}
         ${mowProgress !== null ? `<span class="status-chip" style="background:#455a64">🌿 ${Math.round(mowProgress)}%</span>` : ""}
         ${battery !== null ? `<span class="status-chip" style="background:#455a64">🔋 ${Math.round(battery)}%</span>` : ""}
-        ${rtkNum !== null ? `<span class="status-chip" style="background:${rtkColors[rtkNum] ?? '#757575'}" title="${this._config.rtk_autopause ? 'auto-pause on' : ''}">📡 ${rtkLabels[rtkNum] ?? 'RTK'}</span>` : ""}
+        ${rtkNum !== null ? `<span class="status-chip" style="background:${rtkColors[rtkNum] ?? '#757575'}" title="${this._config.rtk_autopause ? 'auto-pause on' : ''}">📡 ${rtkLabel ?? 'RTK'}</span>` : ""}
       </div>` : "";
 
     // ── Toolbar ───────────────────────────────────────────────────────────────
@@ -701,14 +820,32 @@ class LymowMapCard extends HTMLElement {
         !this._drawingZone
       ) {
         const z = goZones.find(g => g.hashId === this._editHash);
-        const current = z?.cutHeight ?? 40;
+        const zc = z?.zoneConfig || {};
+        const chV   = z?.cutHeight   ?? zc.cutHeight   ?? 40;
+        const msV   = zc.moveSpeed   ?? 0.6;
+        const psV   = z?.pathSpacing ?? zc.pathSpacing ?? 25;
+        const plV   = zc.perimeterMowLaps ?? 1;
         extraRow = `
-          <div class="btn-row" style="margin-top:4px;align-items:center;gap:6px;flex-wrap:wrap">
-            <span style="font-size:0.8em;color:var(--secondary-text-color)">Cut height (mm):</span>
-            <input id="zone-cut-height" type="number" min="20" max="100" step="5" value="${current}"
-                   style="width:60px;padding:2px 4px;font-size:0.85em" />
-            <button class="btn save" data-action="apply-zone-cut-height">✓ Apply</button>
-            <span class="zone-ch-status" style="font-size:0.78em;color:var(--secondary-text-color)"></span>
+          <div style="margin-top:6px;padding:6px 8px;background:var(--card-background-color,#1c1c1e);border-radius:8px;border:1px solid var(--divider-color,#333)">
+            <div style="font-size:0.75em;font-weight:600;letter-spacing:0.05em;color:var(--secondary-text-color);margin-bottom:6px">ZONE SETTINGS</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 12px;align-items:center;font-size:0.82em">
+              <span style="color:var(--secondary-text-color)">Cut height (mm)</span>
+              <input id="zs-cut-height" type="number" min="20" max="100" step="5" value="${chV}"
+                     style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+              <span style="color:var(--secondary-text-color)">Move speed (m/s)</span>
+              <input id="zs-move-speed" type="number" min="0.1" max="1.5" step="0.05" value="${msV.toFixed(2)}"
+                     style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+              <span style="color:var(--secondary-text-color)">Path spacing (cm)</span>
+              <input id="zs-path-spacing" type="number" min="0" max="100" step="1" value="${psV}"
+                     style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+              <span style="color:var(--secondary-text-color)">Perimeter laps</span>
+              <input id="zs-perimeter-laps" type="number" min="0" max="5" step="1" value="${plV}"
+                     style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+              <button class="btn save" data-action="apply-zone-config" style="flex:1">✓ Apply zone settings</button>
+              <span class="zone-ch-status" style="font-size:0.78em;color:var(--secondary-text-color)"></span>
+            </div>
           </div>`;
       }
       toolbar = `
@@ -744,7 +881,14 @@ class LymowMapCard extends HTMLElement {
     const _li = (svgInner, vb, label) =>
       `<div class="legend-item"><span class="lsym"><svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">${svgInner}</svg></span>${label}</div>`;
     const legendItems = [
-      _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
+      isMowingNow
+        ? _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone")
+        : hasMowData
+          ? _li(`<rect x="1" y="1" width="7" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/><rect x="8" y="1" width="7" height="10" fill="#a5d6a7" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Mowed / Left")
+          : _li(`<rect x="1" y="1" width="14" height="10" fill="#43a047" stroke="#2e7d32" stroke-width="1.5" rx="1"/>`, "0 0 16 12", "Go zone"),
+      isMowingNow && this._mowTrail.length >= 2
+        ? _li(`<polyline points="1,11 6,7 11,4 19,2" fill="none" stroke="#00e676" stroke-width="2" stroke-linecap="round"/>`, "0 0 20 12", "Mow trail")
+        : "",
       nogoZones.length ? _li(`<rect x="1" y="1" width="14" height="10" fill="#ff5252" fill-opacity="0.35" stroke="#c62828" stroke-width="1.5" rx="1" stroke-dasharray="3,2"/>`, "0 0 16 12", "No-go") : "",
       chargingStation ? _li(`<circle cx="8" cy="7" r="6" fill="#1565c0" opacity="0.9"/><circle cx="8" cy="7" r="3.5" fill="white"/><text x="8" y="8.5" text-anchor="middle" dominant-baseline="middle" font-size="5.5" fill="#1565c0" font-weight="bold">⚡</text>`, "0 0 16 14", "Station") : "",
       poseEastM !== undefined ? _li(`<circle cx="7" cy="8" r="5" fill="#e65100" stroke="white" stroke-width="1"/><line x1="7" y1="8" x2="16" y2="3" stroke="#e65100" stroke-width="1.5" stroke-linecap="round"/>`, "0 0 18 14", "Robot") : "",
@@ -765,18 +909,11 @@ class LymowMapCard extends HTMLElement {
           <span class="sp-val">${(sv.move_speed ?? 0.6).toFixed(1)}</span>
         </div>
         <div class="sp-row">
-          <label>Cut speed (m/s)</label>
-          <input type="range" class="sp-input" data-field="cut_speed" data-type="float"
-            min="0.1" max="1.0" step="0.1" value="${sv.cut_speed ?? 0.6}"
-            oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(1)"/>
-          <span class="sp-val">${(sv.cut_speed ?? 0.6).toFixed(1)}</span>
-        </div>
-        <div class="sp-row">
-          <label>Brush speed (m/s)</label>
-          <input type="range" class="sp-input" data-field="brush_speed" data-type="float"
-            min="0.1" max="1.0" step="0.1" value="${sv.brush_speed ?? 0.6}"
-            oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(1)"/>
-          <span class="sp-val">${(sv.brush_speed ?? 0.6).toFixed(1)}</span>
+          <label>Cut speed</label>
+          <input type="range" class="sp-input" data-field="cut_speed" data-type="int"
+            min="1" max="10" step="1" value="${sv.cut_speed ?? 5}"
+            oninput="this.nextElementSibling.textContent=parseInt(this.value)"/>
+          <span class="sp-val">${sv.cut_speed ?? 5}</span>
         </div>
         <div class="sp-row">
           <label>Path spacing (mm)</label>
@@ -999,6 +1136,7 @@ class LymowMapCard extends HTMLElement {
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
             ${goPaths}
+            ${liveTrail}
             ${goLabels}
             ${nogoPaths}
             ${nogoLabels}
@@ -1201,7 +1339,8 @@ class LymowMapCard extends HTMLElement {
           case "start-split":       this._startSplit(); break;
           case "cancel-split":      this._cancelSplit(); break;
           case "merge":             this._mergeSelected(); break;
-          case "apply-zone-cut-height": this._applyZoneCutHeight(); break;
+          case "apply-zone-cut-height": this._applyZoneConfig(); break;
+          case "apply-zone-config":    this._applyZoneConfig(); break;
         }
       });
     });
@@ -1584,7 +1723,7 @@ class LymowMapCard extends HTMLElement {
 
     if (fixLow && isMowing && !this._rtkPauseSent) {
       this._rtkPauseSent = true;
-      this._hass.callService("lymow", "pause", { entity_id: this._config.mower_entity })
+      this._hass.callService("lawn_mower", "pause", { entity_id: this._config.mower_entity })
         .catch((err) => console.warn("lymow-map-card: RTK auto-pause failed:", err));
     }
     // Reset once fix recovers so next degradation episode can pause again
@@ -1601,7 +1740,7 @@ class LymowMapCard extends HTMLElement {
     if (this._settingsOpen && !this._settingsValues) {
       const saved = localStorage.getItem("lymow_settings_values");
       const defaults = saved ? JSON.parse(saved) : {
-        move_speed: 0.6, cut_speed: 0.6, brush_speed: 0.6,
+        move_speed: 0.6, cut_speed: 5,
         path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
         perimeter_mow_dir: 0, obs_dec_mode: 0,
         clean_mode: 0, path_order: 0, line_follow_mode: 0,
@@ -1686,23 +1825,27 @@ class LymowMapCard extends HTMLElement {
     }
   }
 
-  async _applyZoneCutHeight() {
+  async _applyZoneConfig() {
     if (!this._hass || !this._config.mower_entity || !this._editHash || this._editType !== "go") return;
-    const input = this.shadowRoot.getElementById("zone-cut-height");
     const status = this.shadowRoot.querySelector(".zone-ch-status");
-    const mm = parseInt(input?.value, 10);
-    if (!Number.isFinite(mm) || mm < 20 || mm > 100) {
-      if (status) status.textContent = "⚠️ 20–100 mm";
-      return;
-    }
+    const ch  = parseInt(this.shadowRoot.getElementById("zs-cut-height")?.value, 10);
+    const ms  = parseFloat(this.shadowRoot.getElementById("zs-move-speed")?.value);
+    const ps  = parseInt(this.shadowRoot.getElementById("zs-path-spacing")?.value, 10);
+    const pl  = parseInt(this.shadowRoot.getElementById("zs-perimeter-laps")?.value, 10);
+    if (!Number.isFinite(ch) || ch < 20 || ch > 100) { if (status) status.textContent = "⚠️ cut height 20–100"; return; }
+    if (!Number.isFinite(ms) || ms < 0.1 || ms > 1.5) { if (status) status.textContent = "⚠️ speed 0.1–1.5"; return; }
     if (status) status.textContent = "Sending…";
+    const data = {
+      entity_id: this._config.mower_entity,
+      zone_hash_id: this._editHash,
+      cut_height: ch,
+      move_speed: ms,
+    };
+    if (Number.isFinite(ps) && ps >= 0) data.path_spacing = ps;
+    if (Number.isFinite(pl) && pl >= 0) data.perimeter_mow_laps = pl;
     try {
-      await this._hass.callService("lymow", "update_zone_cut_height", {
-        entity_id: this._config.mower_entity,
-        zone_hash_id: this._editHash,
-        cut_height_mm: mm,
-      });
-      if (status) status.textContent = `✓ ${mm} mm`;
+      await this._hass.callService("lymow", "set_zone_config", data);
+      if (status) status.textContent = `✓ Applied`;
       setTimeout(() => { if (status) status.textContent = ""; }, 3000);
     } catch (err) {
       if (status) status.textContent = `⚠️ ${err?.message || err}`;
@@ -1886,8 +2029,8 @@ class LymowMapCard extends HTMLElement {
     try {
       await this._hass.callService("lymow", "pin_and_go", {
         entity_id: this._config.mower_entity,
-        east_m: +enu.x.toFixed(3),
-        north_m: +enu.y.toFixed(3),
+        x: +enu.x.toFixed(3),
+        y: +enu.y.toFixed(3),
       });
     } catch (err) {
       console.warn("lymow-map-card: pin_and_go failed", err);
