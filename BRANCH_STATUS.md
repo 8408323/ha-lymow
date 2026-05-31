@@ -1834,8 +1834,66 @@ distinct answers, don't conflate them:
      dir), and an RTP-arrival counter, to pick between (a)/(b).
    - Env harness now also has `LYMOW_VIDEO_ONLY`, `LYMOW_FORCE_H264`,
      `LYMOW_MUNGE_OFFER` (+ `_munge_offer` adds `ice-options`, transport-cc/fir,
-     extmap, rtcp-rsize, extmap-allow-mixed, strips ssrc/msid). capture.py
-     KVS-WSS truncation raised 1400→8000 to capture full offers.
+     extmap, rtcp-rsize, extmap-allow-mixed, strips ssrc/msid), `LYMOW_DEBUG_ANSWER`,
+     `LYMOW_RTC_STATS`. capture.py KVS-WSS truncation raised 1400→8000.
+   - **UPDATE: PT mismatch RULED OUT + STANDALONE (no app) CONFIRMED.** Logged the
+     robot's answer to OUR offer: `m=video … 101`, `a=sendonly`,
+     `H264/90000 profile-level-id=42e01f`, robot ssrc — clean, PT 101 matches
+     aiortc. And critically, ran with the **app CLOSED** → still `recv SDP_ANSWER`
+     → `PC state: connected`. So the robot wakes & connects from `kvs/cmd` alone,
+     **no app needed** (the earlier "only the live app" belief was an artifact of
+     the missing `ice-options`). So hypothesis (a) is out; remaining frame blocker
+     is (b) media transport on this dev box (20+ docker/veth host candidates, no
+     working TURN-relay candidate) and/or (c) keyframe. **Best finished on a real
+     HA box with a clean network + a KVS TURN relay candidate, then wired into
+     `camera.py` Cloud(KVS) mode behind the LAN/Cloud selector.**
+
+   **✅ #97 SOLVED & PROVEN END-TO-END — REAL VIDEO via headless Chrome,
+   STANDALONE, NO APP (2026-05-30 ~23:30).** Deeper instrumentation showed the
+   real frame blocker wasn't network/decode at all: aiortc connected (local-LAN
+   pair) but received **0 RTP / 0 SRTP** packets — the robot streams to a proper
+   WebRTC client but not to aiortc (its DTLS-server-role/PLI/ICE handling never
+   pulls RTP, and aiortc resists being forced). So tested a **different stack**:
+   a headless **Chrome** KVS viewer (`/tmp/kvschrome/viewer.js`, playwright-core
+   → system `google-chrome`, fed by `kvs_prep.py` → `/tmp/kvs_cfg.json`). Result:
+   `pc:connected`, 640×480, **`framesDecoded:21`, `packetsReceived:113`**, and it
+   **saved a real frame** (robot dock AprilTags + live timestamp). Chrome's native
+   WebRTC completes the media exchange where aiortc stalls. **Conclusion: the
+   signaling recipe is 100% correct, the robot streams over the cloud with NO app,
+   and aiortc was the sole blocker.** PRODUCTION: use a Chrome/Pion-class media
+   stack — **`go2rtc` (already loaded in HA, Pion-based) is the natural fit**;
+   `api.py` already has `presign_signaling_url` + `start_video_session`. Next:
+   wire go2rtc (or a Pion helper) into `camera.py` as the Cloud(KVS) source behind
+   the LAN/Cloud selector and validate on the HA box.
+
+   **✅ SHIPPED: LAN/Cloud camera card (2026-05-30). Chose in-browser WebRTC over
+   go2rtc** — the Lovelace card already runs in a real browser (the exact stack
+   the Chrome test proved), so no extra server process, and go2rtc can't speak KVS
+   signaling natively anyway. Backend (tested, 100% cov): `api.viewer_client_id()`
+   (random prefix + `_userId_<sub>` from the access token) and
+   `coordinator.async_start_video_session` now also return turnkey `viewerWssUrl`
+   (SigV4-presigned signaling WSS), `viewerClientId`, and `webrtcIceServers`
+   (RTCPeerConnection-shaped). Surfaced via the existing `lymow.start_video_session`
+   service. Frontend: self-contained `www/lymow-camera-card.js` (registered via a
+   2nd `add_extra_js_url` in `__init__.py`) with a **LAN | Cloud** segmented toggle:
+   - **LAN** → `<img>` on `/api/camera_proxy_stream/<camera_entity>` → HA pulls
+     RTSP from the robot on the local network (traffic stays local).
+   - **Cloud** → in-browser KVS WebRTC (service → presigned WSS → RTCPeerConnection
+     recvonly H264 → `<video>`), browser↔AWS↔robot, bypassing HA's LAN reach.
+   Genuinely separate transports; switching stops the other; self-contained
+   element so the map card's `_render()` churn can't kill the live connection.
+   `camera.py` RTSP entity unchanged. **Validate in real HA**: deploy+restart, add
+   `custom:lymow-camera-card` (mower_entity + camera_entity), confirm a Cloud frame
+   (proven standalone via Chrome; the card mirrors that exact flow).
+
+   **Map-card camera button (opt-in).** `lymow-map-card` now takes `show_camera`
+   (default **false** — off until enabled), plus optional `camera_entity` /
+   `camera_default_source`. When `show_camera: true`, a 📹 toolbar button opens the
+   camera as a **modal overlay** that embeds `<lymow-camera-card>`. The overlay is
+   mounted in `document.body` (NOT the map's shadow root) so the map's `_render()`
+   churn can't tear down the live `<video>`/peer connection; closing it (✕, Esc, or
+   backdrop click) removes it from the DOM → camera card's `disconnectedCallback`
+   stops the cloud stream. `set hass` forwards hass to the open overlay card.
 
 ### Continuation, 2026-05-27 late evening (same supervisor session)
 
@@ -2158,6 +2216,71 @@ AUDIO_ERROR_{BATTERY_LOW, BLADE_STUCK, CLIFF, DOCK_FAIL, INI_FAIL, ROBOT_SLIP, S
 **Bytecode decoding is COMPLETE** — every message/field verified, and now the
 human-facing error/warning text + remediation are extracted too (not just codes).
 
+## 📋 2026-05-31: cleanReport DECODED + live-confirmed; app 3.0.7 verified
+
+**`cleanReport` (PbOutput f28 = PbCleanReport) — DECODED & wired in (commit
+e5e2d55).** This is the report the robot pushes at the end of a mow — the
+real-time counterpart to the polled REST clean-history. `decode_pboutput` now
+surfaces `state["cleanReport"]`. Field map (confirmed by cross-checking 5 captured
+reports field-for-field against the live REST `get-clean-history` record — identical
+numbers, and the live completion report was caught end-to-end at docking on
+2026-05-31):
+
+```
+f28 PbCleanReport
+  f1 date            epoch seconds — the TASK START/reference time, NOT dock time
+                     (a resumed multi-session task keeps its original start date)
+  f2 PbCleanSummary
+     f1 cleanTimeMin   cumulative mowing minutes (across charge cycles)
+     f2 cleanAreaM2    area cut (float32; omitted by proto3 when 0)
+     f3 {f2: mapHashId} which map/zone (sub-msg; f2 = hashId string)
+     f5 percent        task completion fraction 0–1 (decoder ×100 → %)
+     f6 mapTotalAreaM2 whole-map area (float32; constant per map)
+  f3 startType        1 = app/normal, 2 = interrupted/other
+  f4 [error_list]     repeated {f1 code, f2 percent(f32)} — error code + the
+                      progress-% at which it occurred (codes map to ERROR_DESCRIPTIONS)
+  f6 usedBatteryPct   battery consumed; CUMULATIVE so >100 for multi-cycle mows
+```
+
+Real live sample (the full ~1200 m² zone, completed across sessions): cleanTimeMin
+270, cleanAreaM2 1197, percent 100, usedBatteryPct 197 (~2 charge cycles), errorList
+[76@29%, 13@87%, 15@87%, 71@89%, 16@89%]. Tests use synthetic helper-built payloads
+(no captured bytes committed). **Gotcha for future sessions:** the app re-receives
+the *last* cleanReport on reconnect, and its `date` is the task-start time — so a
+"new" frame may show an old date. Tell live-vs-replayed apart by the **capture
+timestamp** (`capture.py` `_ts()` is **UTC**), not the report's `date`.
+
+**Scanning a capture for cleanReport (reusable recipe):** `capture.py` logs each
+MQTT publish as a topic line `[ts] MQTT ← /device/<thing>/pboutput (NB)` followed by
+`→ message: N pb bytes hex: <HEX>`. Pair each `pboutput` topic line with the next
+hex line, hex-decode, walk top-level protobuf fields, and flag frames containing
+field 28; then `decode_pboutput(bytes)["cleanReport"]`. The capture file is
+**append-mode**, so it accumulates many sessions — filter by capture timestamp.
+
+**Operational capture playbook (learned the hard way 2026-05-30/31):** to capture a
+robot→app push (like cleanReport) the **Lymow app must be open AND foreground on a
+proxied phone** at the moment it fires — backgrounding it (e.g. another app such as
+Plejd coming to the foreground) or letting the screen sleep drops the MQTT-over-WS
+socket and capture silently stops (file just stops growing). Checklist: phone proxy
+set to the mitmproxy host:8888; `mitmdump -s tools/capture.py --listen-host
+0.0.0.0 --listen-port 8888 --ssl-insecure` running; app foregrounded
+(`adb shell monkey -p com.lymow.app -c android.intent.category.LAUNCHER 1`); bump
+`settings put system screen_off_timeout 1800000`; verify the capture file is
+*growing* (not just that mitmproxy is alive). **When done: clear the phone proxy
+(`settings put global http_proxy :0`) on every proxied device BEFORE killing
+mitmproxy**, or those phones lose internet (dead proxy). Kill mitmproxy by its
+listening port, not `pkill -f` on a pattern that also appears in your own shell
+command (that self-terminates the shell).
+
+**App version is current: 3.0.7 (versionCode 362, 2026-05-31).** Pulled the live
+installed APK and diffed its JS bundle vs the prior build: only 12 new string
+literals (MQTT-reconnect fix, zone-settings clear logic, sign-in error handling,
+dock-on-error i18n) and **0 protobuf/enum/userCtrl changes** — 3.0.7 is bug-fixes
+only, our backend is current. Note: `assets/app.config` "version" is a STALE Expo
+string (says 2.1.14); the authoritative version is native `versionName`. There is
+NO expo-updates OTA layer — the bundle inside the installed APK IS the running code.
+(See the [[reference-apk-hermes-re]] memory for the full re-check + diff procedure.)
+
 **NEW fields now named & available for future HA features (numbers verified):**
 `vehLedStatus`/`camLedStatus` (robotConfig f13/f12, LED brightness 0–4 → a
 brightness select), `mowAngle` (schedule f10, per-task stripe angle),
@@ -2223,8 +2346,8 @@ way), plus `mowProgress`/`mowStripCount`/`currentTaskZoneHashId`.
   protobufjs exposes field *names* but field *numbers* are compiled into Hermes
   bytecode, so #37→name needs bytecode disassembly. Left un-decoded
   (no-assumptions) — fully characterized but not named.
-- `cleanReport` (PbOutput, fires at session end) — still pending capture
-  (monitor watching for the novel field number).
+- `cleanReport` (PbOutput f28, fires at session end) — ✅ **DECODED & live-confirmed
+  2026-05-31** (commit e5e2d55). See the "cleanReport DECODED" section below.
 
 ## 📋 2026-05-30: APK-VERIFIED PbOutput field→number map (Hermes v96 disasm)
 
@@ -2252,7 +2375,7 @@ LoadConstUInt8, larger use LoadConstInt).
   "intermittent =15"). f38 = aeRangeLevel (camera auto-exposure). Decoded (cb1ef05).
 - **f13 = path** (PbPath poses) — the coverage-path geometry's true home; not
   populated in captures yet, decode from f13 when a populated frame appears.
-- **f28 = cleanReport** — session-end report (monitor watches for it).
+- **f28 = cleanReport** — session-end report. ✅ DECODED & live-confirmed 2026-05-31 (e5e2d55).
 - f6=localizationInfo (we read as RTK pose — content matches); f8=iotCmd (carries
   the RTK-diag JSON we decode); f23=btMap is where the mower returns the map (our
   reader is right); f11=map appears unused for the query reply.
@@ -2284,8 +2407,8 @@ dropped mid-session.)
   QUERY_PATH reply didn't populate it; needs the right query trigger. **Top gap.**
 - `promptInfo` → **operation result codes** — PbPromptInfo = {mutateRet,
   selfCheckingRet, zoneRet}. Confirms command success/failure + self-check result.
-- `cleanReport` → **detailed per-session report** — PbCleanReport = {cleanInfo,
-  errorList, statusTimes}. Richer than the REST history we use.
+- `cleanReport` → ✅ **DECODED 2026-05-31 (e5e2d55)** — PbCleanReport, the
+  real-time per-session report. See the dedicated section below for the field map.
 - `cleanInfo.areaInfo.cleanZoneIds` → which zones were cleaned (area/progress is
   decoded; cleanZoneIds is not).
 - `wifiConfigRes` → Wi-Fi set result (and set_wifi is BLE-only — see #200).
