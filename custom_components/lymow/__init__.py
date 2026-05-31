@@ -26,14 +26,14 @@ _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
 _DASHBOARD_CREATED_KEY = f"{DOMAIN}_dashboard_created"
 
 
-def _card_url() -> str:
-    """Return card URL with integration version as cache buster."""
+def _card_url(name: str = "lymow-map-card.js") -> str:
+    """Return a card URL with the integration version as cache buster."""
     try:
         manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
         version = manifest.get("version", "0")
     except Exception:
         version = "0"
-    return f"/custom_components/{DOMAIN}/lymow-map-card.js?v={version}"
+    return f"/custom_components/{DOMAIN}/{name}?v={version}"
 
 
 _DASHBOARD_URL_PATH = "lymow-mower"
@@ -82,6 +82,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
             )
             add_extra_js_url(hass, _card_url())
+            add_extra_js_url(hass, _card_url("lymow-camera-card.js"))
         hass.data[_WWW_REGISTERED_KEY] = True
 
     session = async_get_clientsession(hass)

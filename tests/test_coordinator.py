@@ -2934,12 +2934,23 @@ async def test_async_start_video_session_chains_endpoints() -> None:
         return_value={"channelARN": "arn:test", "region": "eu-west-1", "credentials": creds}
     )
     api.get_signaling_channel_endpoint = AsyncMock(return_value={"WSS": "wss://v", "HTTPS": "https://r"})
-    api.get_ice_server_config = AsyncMock(return_value=[{"Uris": ["turn:x"]}])
+    api.get_ice_server_config = AsyncMock(
+        return_value=[{"Uris": ["turn:x"], "Username": "u", "Password": "p"}, "junk-non-dict"]
+    )
+    api.viewer_client_id = MagicMock(return_value="ha-lymow_abcd_userId_S")
+    api.presign_signaling_url = MagicMock(return_value="wss://v/?X-Amz-Signature=sig")
     result = await coord.async_start_video_session(THING)
     api.get_signaling_channel_endpoint.assert_awaited_once_with("arn:test", creds, region="eu-west-1")
     api.get_ice_server_config.assert_awaited_once_with("arn:test", "https://r", creds, region="eu-west-1")
     assert result["signalingEndpoints"] == {"WSS": "wss://v", "HTTPS": "https://r"}
-    assert result["iceServers"] == [{"Uris": ["turn:x"]}]
+    assert result["iceServers"] == [{"Uris": ["turn:x"], "Username": "u", "Password": "p"}, "junk-non-dict"]
+    # Turnkey browser-viewer config (non-dict ICE entries are filtered out)
+    api.presign_signaling_url.assert_called_once_with(
+        "wss://v", "arn:test", "ha-lymow_abcd_userId_S", creds, region="eu-west-1"
+    )
+    assert result["viewerClientId"] == "ha-lymow_abcd_userId_S"
+    assert result["viewerWssUrl"] == "wss://v/?X-Amz-Signature=sig"
+    assert result["webrtcIceServers"] == [{"urls": ["turn:x"], "username": "u", "credential": "p"}]
 
 
 async def test_async_start_video_session_no_creds_returns_base() -> None:
