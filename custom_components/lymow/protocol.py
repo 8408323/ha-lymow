@@ -1564,6 +1564,19 @@ def encode_query_map(queryIndex: int = 0) -> bytes:
     return pb
 
 
+def encode_query_robot_config() -> bytes:
+    """Encode a getRobotConfig command using the f9 sub-message format.
+
+    The robot does NOT respond to a plain userCtrl=35 (f5=35). The correct wire
+    format confirmed from app capture is PbInput{f2=version, f9={f10=1}}.
+    The f9 sub-message routes to the robot config handler; the marker f10=1
+    acts as a discriminator for the 'get all' query.
+    """
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(9, _field_i32(10, 1))  # PbInput.f9={f10=1} = getRobotConfig
+    return pb
+
+
 def encode_query_schedules() -> bytes:
     """Encode a query-schedules command (userCtrl=20)."""
     pb = _field_i32(2, PB_VERSION)

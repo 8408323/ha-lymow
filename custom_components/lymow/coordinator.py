@@ -47,6 +47,7 @@ from .mqtt import LymowMqttClient
 from .protocol import (
     encode_delete_zone,
     encode_query_map,
+    encode_query_robot_config,
     encode_query_schedules,
     encode_start_zones,
     encode_sync_map,
@@ -460,6 +461,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Receive an online/offline notification from MQTT."""
         patch = {"isOnline": is_online, "deviceState": "online" if is_online else "offline"}
         self.on_mqtt_state(thing_name, patch)
+        if is_online:
+            # Robot just came online — auto-query robot config so settings entities
+            # populate without user needing to call query_robot_config manually.
+            self.hass.async_create_task(self.async_query_robot_config(thing_name))
         if not is_online:
             device_label = next(
                 (
@@ -1069,7 +1074,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_CLEANING_SUMMARY)
 
     async def async_query_robot_config(self, thing_name: str) -> None:
-        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_ROBOT_CONFIG)
+        # Robot requires PbInput.f9={f10=1} format, not plain userCtrl=35.
+        await self._mqtt.async_publish_command(thing_name, encode_query_robot_config())
 
     async def async_query_path(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)

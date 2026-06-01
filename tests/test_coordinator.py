@@ -2165,7 +2165,9 @@ async def test_async_send_user_ctrl_publishes_command() -> None:
     [
         ("async_query_cleaning_info", 24),
         ("async_query_cleaning_summary", 34),
-        ("async_query_robot_config", 35),
+        # async_query_robot_config uses encode_query_robot_config() — f9 sub-message,
+        # not plain userCtrl=35 — tested separately below.
+        # ("async_query_robot_config", 35),  # removed: wrong encoding, see test below
         ("async_query_path", 23),
         ("async_query_channels", 39),
         ("async_query_run_time_config", 51),
@@ -2188,6 +2190,28 @@ async def test_query_helpers_publish_correct_userctrl(method_name: str, expected
     by_field = {fn: val for fn, _wt, val in _decode_fields(pb_bytes)}
     # userCtrl lives at field 5 — same convention as every other userCtrl-only command.
     assert by_field[5] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_query_robot_config_uses_f9_submessage() -> None:
+    """async_query_robot_config must use PbInput.f9={f10=1}, NOT plain userCtrl=35.
+
+    The robot silently ignores a plain userCtrl=35; confirmed from app capture
+    that getRobotConfig requires the f9 sub-command discriminator.
+    """
+    from lymow.protocol import _decode_fields
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_query_robot_config(THING)
+
+    assert mqtt.async_publish_command.await_count == 1
+    _thing, pb_bytes = mqtt.async_publish_command.call_args[0]
+    by_field = {fn: val for fn, _wt, val in _decode_fields(pb_bytes)}
+    # Must NOT use f5 (userCtrl); must use f9 sub-message with f10=1 inside.
+    assert 5 not in by_field, "must not send plain userCtrl=35"
+    assert isinstance(by_field.get(9), bytes)
+    inner = {fn: val for fn, _wt, val in _decode_fields(by_field[9])}
+    assert inner.get(10) == 1
 
 
 # ---------------------------------------------------------------------------
