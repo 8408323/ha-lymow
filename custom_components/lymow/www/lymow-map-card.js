@@ -72,6 +72,8 @@ class LymowMapCard extends HTMLElement {
     this._lastZoneCount = 0;
     this._settingsOpen = false;
     this._scheduleOpen = false;
+    this._backupOpen = false;
+    this._backupRenaming = null; // file key being renamed inline
     this._advancedOpen = false; // tracks <details class="sp-advanced"> open state across renders
     this._settingsValues = null;
     // 0=name, 1=area, 2=both, 3=none — persisted in localStorage across reloads
@@ -208,8 +210,8 @@ class LymowMapCard extends HTMLElement {
         if (this._drawingZone || this._drawNameStep) { this._cancelDraw(); break; }
         if (this._editing) { this._cancelEdit(); break; }
         if (this._pinAndGoMode) { this._togglePinAndGo(); break; }
-        if (this._settingsOpen || this._scheduleOpen) {
-          this._settingsOpen = false; this._scheduleOpen = false; this._render();
+        if (this._settingsOpen || this._scheduleOpen || this._backupOpen) {
+          this._settingsOpen = false; this._scheduleOpen = false; this._backupOpen = false; this._render();
         }
         break;
       case 'f': case 'F':
@@ -825,6 +827,9 @@ class LymowMapCard extends HTMLElement {
         const msV   = zc.moveSpeed   ?? 0.6;
         const psV   = z?.pathSpacing ?? zc.pathSpacing ?? 25;
         const plV   = zc.perimeterMowLaps ?? 1;
+        const smV   = zc.safeMarginMode   != null ? (zc.safeMarginMode ? 1 : 0) : 1;
+        const omV   = zc.turnOffOuterMotor ? 1 : 0;
+        const selStyle = "width:100%;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit";
         extraRow = `
           <div style="margin-top:6px;padding:6px 8px;background:var(--card-background-color,#1c1c1e);border-radius:8px;border:1px solid var(--divider-color,#333)">
             <div style="font-size:0.75em;font-weight:600;letter-spacing:0.05em;color:var(--secondary-text-color);margin-bottom:6px">ZONE SETTINGS</div>
@@ -841,6 +846,16 @@ class LymowMapCard extends HTMLElement {
               <span style="color:var(--secondary-text-color)">Perimeter laps</span>
               <input id="zs-perimeter-laps" type="number" min="0" max="5" step="1" value="${plV}"
                      style="width:64px;padding:2px 4px;font-size:0.9em;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit" />
+              <span style="color:var(--secondary-text-color)">Safe margin</span>
+              <select id="zs-safe-margin" style="${selStyle}">
+                <option value="1" ${smV === 1 ? "selected" : ""}>Offset edge</option>
+                <option value="0" ${smV === 0 ? "selected" : ""}>Precise edge</option>
+              </select>
+              <span style="color:var(--secondary-text-color)">Outer motor</span>
+              <select id="zs-outer-motor" style="${selStyle}">
+                <option value="0" ${omV === 0 ? "selected" : ""}>On</option>
+                <option value="1" ${omV === 1 ? "selected" : ""}>Off</option>
+              </select>
             </div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
               <button class="btn save" data-action="apply-zone-config" style="flex:1">✓ Apply zone settings</button>
@@ -868,13 +883,15 @@ class LymowMapCard extends HTMLElement {
         ? `<button class="btn pin${this._pinAndGoMode ? " settings-active" : ""}" data-action="pin" title="Pin-and-go: double-tap map to send robot to point">📍</button>` : "";
       const schedBtn = this._config.schedule_entity
         ? `<button class="btn sched${this._scheduleOpen ? " settings-active" : ""}" data-action="sched" title="Mowing schedules">📅</button>` : "";
+      const backupBtn = this._config.mower_entity
+        ? `<button class="btn backup${this._backupOpen ? " settings-active" : ""}" data-action="backup" title="Map backups">📦</button>` : "";
       const settingsBtn = this._config.mower_entity
         ? `<button class="btn settings${this._settingsOpen ? " settings-active" : ""}" data-action="settings" title="Mowing settings">⚙</button>` : "";
       const cameraBtn = this._config.show_camera
         ? `<button class="btn camera" data-action="camera" title="Onboard camera (LAN / Cloud)">📹</button>` : "";
       const expandBtn = `<button class="btn expand" data-action="expand" title="${this._expanded ? "Collapse [F]" : "Expand [F]"}">${this._expanded ? "⊠" : "⊞"}</button>`;
       const resetBtn = `<button class="btn reset" data-action="reset" title="Reset zoom [R]">⊡</button>`;
-      toolbar = `<div class="btn-row">${mowBtn}${mergeBtn}${editBtn}${pinBtn}${schedBtn}${settingsBtn}${cameraBtn}${expandBtn}${resetBtn}</div>`;
+      toolbar = `<div class="btn-row">${mowBtn}${mergeBtn}${editBtn}${pinBtn}${schedBtn}${backupBtn}${settingsBtn}${cameraBtn}${expandBtn}${resetBtn}</div>`;
     }
 
     // ── Legend with matching SVG symbols ─────────────────────────────────────
@@ -1053,6 +1070,50 @@ class LymowMapCard extends HTMLElement {
       </div>`;
     })() : "";
 
+    // ── Backup panel ──────────────────────────────────────────────────────────
+    const backupSensorState = this._config.backup_entity
+      ? this._hass?.states[this._config.backup_entity]
+      : (() => {
+          // Auto-detect: find the first backup_maps sensor for this mower's device
+          if (!this._hass) return null;
+          const mid = this._config.mower_entity;
+          const devId = mid ? Object.values(this._hass.entities || {}).find(e => e.entity_id === mid)?.device_id : null;
+          if (!devId) return null;
+          const sensorEid = Object.values(this._hass.entities || {}).find(
+            e => e.device_id === devId && e.entity_id?.includes("backup_maps")
+          )?.entity_id;
+          return sensorEid ? this._hass.states[sensorEid] : null;
+        })();
+    const backupList = backupSensorState?.attributes?.backups || [];
+    const backupPanel = (this._backupOpen && !this._editing) ? (() => {
+      const fmtTs = (ts) => {
+        if (!ts) return "";
+        try { return new Date(parseInt(ts) * 1000).toLocaleString(); } catch { return ""; }
+      };
+      const rows = backupList.map((b, i) => {
+        const label = b.name || fmtTs(b.backupTime) || `Backup ${i + 1}`;
+        const isRenaming = this._backupRenaming === b.file;
+        return `<div class="backup-row" data-file="${b.file || ""}">
+          ${isRenaming
+            ? `<input class="backup-rename-input" id="backup-rename-${i}" type="text" value="${label}"
+                 style="flex:1;padding:2px 5px;background:var(--input-fill-color,#2a2a2e);border:1px solid var(--divider-color,#444);border-radius:4px;color:inherit;font-size:0.85em"/>
+               <button class="backup-action-btn" data-backup-action="rename-ok" data-file="${b.file || ""}" data-idx="${i}" title="Save">✓</button>
+               <button class="backup-action-btn" data-backup-action="rename-cancel" title="Cancel">✕</button>`
+            : `<span class="backup-name" title="${b.file || ""}">${label}</span>
+               <span class="backup-date">${fmtTs(b.backupTime)}</span>
+               <button class="backup-action-btn" data-backup-action="restore" data-file="${b.file || ""}" title="Restore this backup">⟳</button>
+               <button class="backup-action-btn" data-backup-action="rename-start" data-file="${b.file || ""}" title="Rename">✏</button>
+               <button class="backup-action-btn backup-delete" data-backup-action="delete" data-file="${b.file || ""}" title="Delete">🗑</button>`}
+        </div>`;
+      }).join("");
+      return `<div class="settings-panel">
+        <div class="sp-title">Map backups (${backupList.length})</div>
+        <button class="sp-apply backup-create-btn" data-action="backup-create">+ Create backup</button>
+        <div class="backup-status"></div>
+        ${rows || "<div style='font-size:0.8em;color:var(--secondary-text-color);margin-top:4px'>No backups yet</div>"}
+      </div>`;
+    })() : "";
+
     const title = this._config.title ?? "Lymow Map";
 
     // Aspect ratio for the map area
@@ -1094,7 +1155,7 @@ class LymowMapCard extends HTMLElement {
         .btn.save { background: #2e7d32; }
         .btn.rename { background: #6a1b9a; flex: 1; min-width: 72px; }
         .btn.cancel { background: #757575; flex: 1; min-width: 60px; }
-        .btn.reset, .btn.expand, .btn.settings, .btn.sched, .btn.camera { background: #455a64; flex: 0; min-width: 36px; }
+        .btn.reset, .btn.expand, .btn.settings, .btn.sched, .btn.backup, .btn.camera { background: #455a64; flex: 0; min-width: 36px; }
         .btn.pin { background: #455a64; flex: 1; min-width: 72px; }
         .btn.settings-active { background: #ef6c00; }
         .rename-input { flex: 1; padding: 7px 8px; border: 1px solid var(--divider-color,#444); border-radius: 6px; background: var(--card-background-color,#1c1c1c); color: var(--primary-text-color); font-size: 0.85em; }
@@ -1126,6 +1187,14 @@ class LymowMapCard extends HTMLElement {
         .sched-time { font-weight: 700; color: var(--primary-text-color); min-width: 38px; }
         .sched-days { flex: 1; color: var(--secondary-text-color); }
         .sched-status { font-size: 0.9em; color: var(--secondary-text-color); }
+        .backup-row { display: flex; gap: 5px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--divider-color,#333); font-size: 0.82em; }
+        .backup-row:last-child { border-bottom: none; }
+        .backup-name { flex: 1; font-weight: 600; color: var(--primary-text-color); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .backup-date { font-size: 0.85em; color: var(--secondary-text-color); white-space: nowrap; }
+        .backup-action-btn { padding: 2px 6px; border: none; border-radius: 4px; cursor: pointer; background: #455a64; color: white; font-size: 0.82em; flex-shrink: 0; }
+        .backup-delete { background: #c62828; }
+        .backup-create-btn { margin-bottom: 6px; }
+        .backup-status { font-size: 0.78em; color: var(--secondary-text-color); min-height: 1.2em; }
         .msg { padding: 14px; color: var(--secondary-text-color); font-size: 0.9em; line-height: 1.5; }
         code { background: var(--code-editor-background-color,#f0f0f0); padding: 1px 4px; border-radius: 3px; }
         .legend { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 6px; font-size: 0.75em;
@@ -1179,6 +1248,7 @@ class LymowMapCard extends HTMLElement {
         ${toolbar}
         ${settingsPanel}
         ${schedulePanel}
+        ${backupPanel}
         <div class="legend">${legendItems}</div>
       </ha-card>`;
 
@@ -1349,6 +1419,50 @@ class LymowMapCard extends HTMLElement {
           case "merge":             this._mergeSelected(); break;
           case "apply-zone-cut-height": this._applyZoneConfig(); break;
           case "apply-zone-config":    this._applyZoneConfig(); break;
+          case "backup":            this._toggleBackup(); break;
+          case "backup-create":     this._createBackup(); break;
+        }
+      });
+    });
+
+    // Backup panel actions (restore / rename / delete)
+    this.shadowRoot.querySelectorAll("[data-backup-action]").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const file = btn.dataset.file;
+        switch (btn.dataset.backupAction) {
+          case "restore":
+            if (file) this._restoreBackup(file);
+            break;
+          case "rename-start":
+            this._backupRenaming = file || null;
+            this._render();
+            setTimeout(() => {
+              const idx = btn.dataset.idx;
+              const inp = this.shadowRoot.querySelector(`#backup-rename-${btn.closest(".backup-row")?.dataset?.idx ?? ""}`);
+              if (!inp) {
+                // fallback: find any backup-rename-input
+                const anyInp = this.shadowRoot.querySelector(".backup-rename-input");
+                if (anyInp) { anyInp.select(); anyInp.focus(); }
+              } else { inp.select(); inp.focus(); }
+            }, 30);
+            break;
+          case "rename-ok": {
+            const idx = btn.dataset.idx;
+            const inp = this.shadowRoot.querySelector(`#backup-rename-${idx}`);
+            const newName = inp?.value?.trim() || "";
+            if (file && newName) this._renameBackup(file, newName);
+            this._backupRenaming = null;
+            this._render();
+            break;
+          }
+          case "rename-cancel":
+            this._backupRenaming = null;
+            this._render();
+            break;
+          case "delete":
+            if (file) this._deleteBackup(file);
+            break;
         }
       });
     });
@@ -1745,6 +1859,7 @@ class LymowMapCard extends HTMLElement {
   _toggleSettings() {
     this._settingsOpen = !this._settingsOpen;
     this._scheduleOpen = false;
+    this._backupOpen = false;
     if (this._settingsOpen && !this._settingsValues) {
       const saved = localStorage.getItem("lymow_settings_values");
       const defaults = saved ? JSON.parse(saved) : {
@@ -1779,7 +1894,79 @@ class LymowMapCard extends HTMLElement {
   _toggleSchedule() {
     this._scheduleOpen = !this._scheduleOpen;
     this._settingsOpen = false;
+    this._backupOpen = false;
     this._render();
+  }
+
+  _toggleBackup() {
+    this._backupOpen = !this._backupOpen;
+    this._settingsOpen = false;
+    this._scheduleOpen = false;
+    this._backupRenaming = null;
+    this._render();
+  }
+
+  _backupStatus(msg) {
+    const el = this.shadowRoot.querySelector(".backup-status");
+    if (el) el.textContent = msg;
+  }
+
+  async _createBackup() {
+    if (!this._hass || !this._config.mower_entity) return;
+    this._backupStatus("Creating backup…");
+    try {
+      await this._hass.callService("lymow", "backup_map", { entity_id: this._config.mower_entity });
+      this._backupStatus("✓ Backup created (list updates in ~5 min)");
+      setTimeout(() => this._backupStatus(""), 5000);
+    } catch (err) {
+      this._backupStatus(`⚠️ ${err?.message || err}`);
+    }
+  }
+
+  async _restoreBackup(file) {
+    if (!this._hass || !this._config.mower_entity || !file) return;
+    this._backupStatus("Restoring…");
+    try {
+      await this._hass.callService("lymow", "restore_backup_map", {
+        entity_id: this._config.mower_entity,
+        object_key: file,
+      });
+      this._backupStatus("✓ Restored — map will update shortly");
+      setTimeout(() => this._backupStatus(""), 5000);
+    } catch (err) {
+      this._backupStatus(`⚠️ ${err?.message || err}`);
+    }
+  }
+
+  async _renameBackup(file, name) {
+    if (!this._hass || !this._config.mower_entity || !file || !name) return;
+    this._backupStatus("Renaming…");
+    try {
+      await this._hass.callService("lymow", "rename_backup_map", {
+        entity_id: this._config.mower_entity,
+        object_key: file,
+        name,
+      });
+      this._backupStatus("✓ Renamed");
+      setTimeout(() => this._backupStatus(""), 3000);
+    } catch (err) {
+      this._backupStatus(`⚠️ ${err?.message || err}`);
+    }
+  }
+
+  async _deleteBackup(file) {
+    if (!this._hass || !this._config.mower_entity || !file) return;
+    this._backupStatus("Deleting…");
+    try {
+      await this._hass.callService("lymow", "delete_backup_map", {
+        entity_id: this._config.mower_entity,
+        object_key: file,
+      });
+      this._backupStatus("✓ Deleted");
+      setTimeout(() => this._backupStatus(""), 3000);
+    } catch (err) {
+      this._backupStatus(`⚠️ ${err?.message || err}`);
+    }
   }
 
   _togglePinAndGo() {
@@ -1841,6 +2028,8 @@ class LymowMapCard extends HTMLElement {
     const ms  = parseFloat(this.shadowRoot.getElementById("zs-move-speed")?.value);
     const ps  = parseInt(this.shadowRoot.getElementById("zs-path-spacing")?.value, 10);
     const pl  = parseInt(this.shadowRoot.getElementById("zs-perimeter-laps")?.value, 10);
+    const sm  = parseInt(this.shadowRoot.getElementById("zs-safe-margin")?.value, 10);
+    const om  = parseInt(this.shadowRoot.getElementById("zs-outer-motor")?.value, 10);
     if (!Number.isFinite(ch) || ch < 20 || ch > 100) { if (status) status.textContent = "⚠️ cut height 20–100"; return; }
     if (!Number.isFinite(ms) || ms < 0.1 || ms > 1.5) { if (status) status.textContent = "⚠️ speed 0.1–1.5"; return; }
     if (status) status.textContent = "Sending…";
@@ -1852,6 +2041,8 @@ class LymowMapCard extends HTMLElement {
     };
     if (Number.isFinite(ps) && ps >= 0) data.path_spacing = ps;
     if (Number.isFinite(pl) && pl >= 0) data.perimeter_mow_laps = pl;
+    if (Number.isFinite(sm)) data.safe_margin_mode = sm;
+    if (Number.isFinite(om)) data.turn_off_outer_motor = om;
     try {
       await this._hass.callService("lymow", "set_zone_config", data);
       if (status) status.textContent = `✓ Applied`;

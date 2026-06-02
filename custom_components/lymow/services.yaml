@@ -130,6 +130,16 @@ ble_drive:
           step: 0.5
           unit_of_measurement: s
 
+backup_map:
+  name: Create backup map
+  description: >
+    Trigger the robot to create a map backup (userCtrl=44 FLOOR_BACKUP).
+    The backup will appear in the backup-maps sensor after the next refresh.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+
 restore_backup_map:
   name: Restore backup map
   description: >

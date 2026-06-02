@@ -61,6 +61,7 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_add_schedule = AsyncMock()
     coord.async_delete_schedule = AsyncMock()
     coord.async_toggle_schedule = AsyncMock()
+    coord.async_backup_map = AsyncMock()
     coord.async_restore_backup_map = AsyncMock()
     coord.async_delete_backup_map = AsyncMock()
     coord.async_rename_backup_map = AsyncMock()
@@ -254,15 +255,16 @@ async def test_async_setup_entry_registers_services() -> None:
     await async_setup_entry(hass, entry, lambda entities: None)
 
     # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
-    # + 1 set-device-name + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 rename-zone
-    # + 1 rename-nogo-zone + 1 rename-channel + 1 clear-schedules
-    # + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 update-nogo-polygon + 1 set-zone-enabled
-    # + 1 add-nogo-zone + 1 add-channel + 1 move-charging-station
-    # + 1 resume + 1 set-run-time-config + 1 set-network-priority + 1 set-recharge-resume + 1 set-device-settings
-    # + 1 set-headlight-schedule + 3 granular schedule (add/delete/toggle) + 1 set-pin + 1 set-wifi + 1 bind-rtk
+    # + 1 set-device-name + 4 backup-map (create/restore/delete/rename) + 1 ble_drive
+    # + 1 set-task-config + 1 rename-zone + 1 rename-nogo-zone + 1 rename-channel
+    # + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone
+    # + 1 update-nogo-polygon + 1 set-zone-enabled + 1 add-nogo-zone + 1 add-channel
+    # + 1 move-charging-station + 1 resume + 1 set-run-time-config + 1 set-network-priority
+    # + 1 set-recharge-resume + 1 set-device-settings + 1 set-headlight-schedule
+    # + 3 granular schedule (add/delete/toggle) + 1 set-pin + 1 set-wifi + 1 bind-rtk
     # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence
     # + 1 update-channel-settings + 1 get-clean-history.
-    assert hass.services.async_register.call_count == 55
+    assert hass.services.async_register.call_count == 56
 
 
 # ---------------------------------------------------------------------------
@@ -2207,6 +2209,25 @@ def test_discover_ble_address_matches_and_handles_empty(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # Backup-map management services
 # ---------------------------------------------------------------------------
+
+
+async def test_handle_backup_map_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {})
+    await handlers["backup_map"](call)
+    coord.async_backup_map.assert_awaited_once_with(THING)
+
+
+async def test_handle_create_backup_map_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    await handlers["backup_map"](_make_call(["lawn_mower.nope"], {}))
+    coord.async_backup_map.assert_not_called()
 
 
 async def test_handle_restore_backup_map_calls_coordinator() -> None:
