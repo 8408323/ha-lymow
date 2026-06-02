@@ -84,9 +84,15 @@ class _DeviceFeatureSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         return bool(value) if value is not None else None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        if self.is_on is True:
+            # Already on — skip REST PATCH to avoid duplicate cloud notifications
+            # (app may have set it; HA will see the change on the next poll).
+            return
         await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: True})
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        if self.is_on is False:
+            return
         await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: False})
 
 

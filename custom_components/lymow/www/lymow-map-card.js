@@ -1861,13 +1861,22 @@ class LymowMapCard extends HTMLElement {
     this._scheduleOpen = false;
     this._backupOpen = false;
     if (this._settingsOpen && !this._settingsValues) {
-      const saved = localStorage.getItem("lymow_settings_values");
-      const defaults = saved ? JSON.parse(saved) : {
-        move_speed: 0.6, cut_speed: 5,
-        path_spacing: 90, perimeter_mow_laps: 1, nogo_mow_laps: 1,
-        perimeter_mow_dir: 0, obs_dec_mode: 0,
-        clean_mode: 0, path_order: 0, safe_margin_mode: 1, turn_off_outer_motor: 0,
+      const hardDefaults = {
+        move_speed: 0.6, cut_speed: 4,
+        path_spacing: 35, perimeter_mow_laps: 1, nogo_mow_laps: 1,
+        perimeter_mow_dir: 2, obs_dec_mode: 2,
+        clean_mode: 1, path_order: 0, safe_margin_mode: 1, turn_off_outer_motor: 0,
       };
+      const saved = localStorage.getItem("lymow_settings_values");
+      let storedVals = {};
+      if (saved) {
+        try { storedVals = JSON.parse(saved); } catch { storedVals = {}; }
+      }
+      // Sanity-check integer fields: cut_speed must be 1–10 int; reject floats
+      if (typeof storedVals.cut_speed === 'number' && (storedVals.cut_speed < 1 || storedVals.cut_speed > 10 || !Number.isInteger(storedVals.cut_speed))) {
+        delete storedVals.cut_speed;
+      }
+      const defaults = { ...hardDefaults, ...storedVals };
       // Overlay live robot state (globalZoneConfig echo) when available so the
       // panel reflects what the robot actually has, not just what HA last sent.
       const ms = this._getMapData()?.mowingSettings;
