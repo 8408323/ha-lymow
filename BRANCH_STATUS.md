@@ -3395,7 +3395,22 @@ Entities showing `unknown` are PbRobotConfig-based (robot only echoes these duri
 
 The `switch.7b6521_find_robot_beep: on` — find-robot location feature is enabled (REST switch, reads from cloud). The `button.7b6521_find_my_robot_play_sound` was last pressed 2026-06-02T04:40 UTC (before this session).
 
+### Live mowing observations (2026-06-02, robot mowing ~8 min into KX1kGy)
+
+| Observation | Notes |
+|---|---|
+| Mowing badge ✅ | Green "Mowing" chip in status bar |
+| Robot pose updating live ✅ | Moved from (−0.01,−1.38) → (4.02,17.48) → (17.4,−30.9) over ~8 min |
+| Mow trail overlay ✅ | Bright teal convex hull grows as robot covers the top of KX1kGy |
+| Mow trail legend ✅ | "Mow trail" chip appears in legend during mowing |
+| `volume: 100.0` appears ✅ | After pressing Find My Robot Play Sound button, `number.7b6521_volume` flipped from `unknown` to `100.0` — robot processed the MQTT command and echoed robotConfig back. **Beeped?** — user to confirm. |
+| `auto_dock_on_error: on` ✅ | Became known during mowing (robot echoes robotConfig) |
+| `prefer_4g: off` ✅ | Also became known during mowing |
+| `rainy_mowing / charging_handbrake / vehicle_led: unknown` | PbTaskConfig / vehLedStatus NOT echoed during mowing on firmware v2.1.48.1 |
+| **globalZoneConfig absent during mowing** | **CONTRADICTS earlier BRANCH_STATUS claim** ("absent when docked, present when task active"). On this robot/firmware the opposite is true: globalZoneConfig IS present in docked-state query_map responses but IS absent when mowing. Per-zone zoneConfig IS present (and different from docked values: cutSpeed=6/Turbo, pathSpacing=30, perimeterLaps=2). Settings panel correctly shows docked-state values; those are stale while mowing. |
+
 ### Pending before next deploy
 
 1. Need proper deploy of `lymow-map-card.js` from `feat/map-lovelace-card` (065b9bc) — the JS on HA disk is b5ff1cc content (backup panel + safe_margin/outer_motor, but missing the `hardDefaults` cut_speed validation). Minor: stale 0.6 localStorage was cleared manually; new validation will catch future regressions once deployed.
 2. Backup panel: document that `backup_maps` sensor must be enabled or `backup_entity:` must be specified in the card YAML config for the panel to show data.
+3. globalZoneConfig availability: the BRANCH_STATUS claim that it's absent when docked / present when active is **INVERTED** on firmware v2.1.48.1 (was v2.1.43 at time of original capture). Document this and potentially add a query_map trigger on mowing-start to refresh global settings.
