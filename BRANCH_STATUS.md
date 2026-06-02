@@ -3317,11 +3317,21 @@ once bytes are in hand. Do NOT write the (D) encoder until (C) has bytes.
   6. Fullscreen toggle (F key / ⊞ button)
 - **Cannot browser-test from terminal** — needs interactive browser session.
 
+### Session 2026-06-02 (supervisor laptop) — card v0.2.8
+
+Shipped in commit `c0fc2e6`:
+- **📦 Backup panel** — new toolbar button; panel lists all backups (name + date) from
+  the `backup_maps` sensor; Create / Restore / Rename (inline) / Delete per-entry.
+  Auto-detects the sensor by device; explicit `backup_entity` config key as override.
+- **Per-zone settings extended** — safe-margin (Offset/Precise) and outer-motor (On/Off)
+  selects added to the zone config panel (alongside cut-height/speed/spacing/perimeter-laps).
+- **`lymow.backup_map` service** added — card-callable alternative to the `BackupMapButton`
+  entity; uses `entity_id` to create a backup (userCtrl=44). Covered by 2 new tests.
+- Version bumped to 0.2.8.
+
 ### Remaining work (frontend/supervisor)
-- Browser manual verification of the above map card features
-- Add backup management panel (📦) to map card — backend REST complete, no card UI yet
-- Consider adding per-zone settings panel extension: add Safe margin + Outer motor to
-  the zone config panel (currently only shows cut height, move speed, path spacing, perimeter laps)
+- Browser manual verification of card v0.2.8 features (backup panel, zone settings extension)
+- Check if the App-vs-HA feature matrix has any remaining card gaps to close
 
 ### Gaps still open (backend — need capture or supervised session)
 See the per-gap playbook above (gaps 3–9). Status:
