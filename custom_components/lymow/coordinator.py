@@ -461,9 +461,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         patch = {"isOnline": is_online, "deviceState": "online" if is_online else "offline"}
         self.on_mqtt_state(thing_name, patch)
         if is_online:
-            # Robot just came online — auto-query robot config so settings entities
-            # populate without user needing to call query_robot_config manually.
+            # Robot just came online — query both robotConfig and the map so all
+            # entity state populates without the user needing to call services.
+            # query_robot_config → PbOutput.f17 → vehicle_led, prefer_4g, auto_dock…
+            # query_map → PbMap.f8 taskConfig → rainy_mowing, charging_handbrake,
+            #             zone_order, return_to_dock_route
             self.hass.async_create_task(self.async_query_robot_config(thing_name))
+            self.hass.async_create_task(self.async_query_map(thing_name))
         if not is_online:
             device_label = next(
                 (

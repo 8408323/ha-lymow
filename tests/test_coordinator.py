@@ -682,6 +682,14 @@ def test_on_mqtt_online_sets_is_online_true() -> None:
     assert coord.data[THING]["deviceState"] == "online"
 
 
+def test_on_mqtt_online_schedules_robot_config_and_map_queries() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_online(THING, True)
+    assert create_task.call_count == 2  # query_robot_config + query_map
+
+
 def test_on_mqtt_online_sets_is_online_false() -> None:
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {}}
