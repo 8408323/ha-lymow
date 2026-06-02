@@ -330,6 +330,20 @@ async def test_theft_lock_switch_turn_on() -> None:
     coord.async_set_device_feature.assert_awaited_once_with(THING, theftLock=True)
 
 
+async def test_theft_lock_switch_turn_on_skips_when_already_on() -> None:
+    coord = _make_feature_coord({"theftLock": True})
+    e = TheftLockSwitch(coord, DEVICE)
+    await e.async_turn_on()
+    coord.async_set_device_feature.assert_not_called()
+
+
+async def test_theft_lock_switch_turn_off_skips_when_already_off() -> None:
+    coord = _make_feature_coord({"theftLock": False})
+    e = TheftLockSwitch(coord, DEVICE)
+    await e.async_turn_off()
+    coord.async_set_device_feature.assert_not_called()
+
+
 async def test_find_robot_switch_turn_on() -> None:
     coord = _make_feature_coord({})
     e = FindRobotSwitch(coord, DEVICE)
