@@ -3343,3 +3343,59 @@ See the per-gap playbook above (gaps 3–9). Status:
 - ✅ Gap 6 (WiFi write = BLE-only, MQTT raises): **DONE** — commit e4d8bb2 + issue #200.
 - ❌ Gap 4 (Channel OD toggle value confirm): `detectMode` assumed Smart=2/Touch=1 — needs toggle capture.
 - ❌ Gap 9 (Notification list REST endpoint): not captured.
+
+---
+
+## 🖥️ Browser testing session 2026-06-02 (supervisor laptop)
+
+Deployed v0.2.8 → v0.2.9 to HA and ran a full card/entity audit.
+
+### Card features tested (all pass unless noted)
+
+| Feature | Result | Notes |
+|---|---|---|
+| Map renders (zones/markers/badges) | ✅ | wsmjco 349 m², KX1kGy 1222 m², robot dot, RTK fixed badge, scale bar, north arrow |
+| Zoom / pan | ✅ | Mouse wheel + drag work |
+| Fullscreen (⊞ button) | ✅ | Fills viewport; Esc exits |
+| Edit mode (E / ✏ button) | ✅ | Zone selected, vertex handles visible |
+| Per-zone ZONE SETTINGS panel | ✅ | All 6 fields: cut height (60), move speed (0.40), path spacing (25), perimeter laps (1), **Safe margin: Offset edge**, **Outer motor: On** — new safe_margin/outer_motor controls confirmed |
+| Settings panel (⚙) — global | ✅ | Speed=0.6, path spacing=35, perimeter laps=1, Random, Detour, Advanced expands |
+| Settings panel — Advanced | ✅ | Safe margin + Outer motor dropdowns present |
+| Backup panel (📦) | ✅ panel opens | Shows 0 backups — `backup_maps` sensor is `entity_registry_enabled_default=False`; user must enable it OR add `backup_entity: sensor.xxx_backup_maps` to the card config |
+| Schedule panel (📅) | N/A | No schedules configured (sensor shows 0); button only appears when `schedule_entity` is in card config |
+| Settings cut_speed stale localStorage | ✅ fixed | Was showing `0.6` (stale from old field-map bug). Cleared localStorage; new code validates integer range on next reload |
+
+### Bugs diagnosed and fixed (v0.2.9, commit 065b9bc)
+
+**Bug 1 — Theft lock / find-robot switch double notification**
+
+- Root cause: `_DeviceFeatureSwitch.async_turn_on/off` sent the REST PATCH unconditionally, even if the feature was already in the desired state. This causes duplicate cloud notifications when:
+  1. App enables theft lock at T=0
+  2. HA's 30s poll hasn't run yet → HA shows "off"
+  3. User clicks "Turn on" in HA → second PATCH → duplicate notification
+- Fix: idempotency guard — skip PATCH if `is_on` already matches. Covered by 2 new tests.
+
+**Bug 2 — Theft lock / find-robot sync lag (app → HA)**
+
+- Root cause: REST polling inherent latency. HA reads these feature flags via `GET /prod/get-device-feature` every ~30s. When the **app** changes the state, HA doesn't see it until the next poll.
+- Status: **NOT a code bug** — REST-based switches have no real-time push. User should wait ~30s for HA to reflect app changes. After the idempotency fix, clicking "Turn on" when already on is a no-op, so the window for double-notification is much smaller.
+
+**Bug 3 — Find robot beep does nothing**
+
+- Root cause: encoding is **correct** (`10316a023064800101` = `PbInput{f13.audioVolume=100, f16=1}`, confirmed byte-exact against app BLE capture). But this is a `PbInput.f16` command — same pattern as `set_wifi` which is documented **BLE-only**. HA sends via MQTT; the robot likely only processes f16=1 via BLE.
+- Confirmation needed: **Please test with the robot actively mowing (NOT docked)**, pressing the Find My Robot button. It's possible the robot also ignores the command when docked.
+- If confirmed BLE-only: should raise a `HomeAssistantError("Find My Robot sound requires BLE proximity — use the Lymow app")` rather than silently doing nothing.
+
+### Entity state audit (2026-06-02)
+
+Entities showing `unknown` are PbRobotConfig-based (robot only echoes these during active mowing/diagnostics, not when docked):
+- `switch.7b6521_vehicle_led`, `rainy_mowing`, `charging_handbrake`, `prefer_4g`, `auto_dock_on_error` → expected unknown when docked
+- `select.7b6521_return_to_dock_route`, `zone_order` → same
+- `number.7b6521_volume`, `recharge_threshold`, `resume_threshold` → same
+
+The `switch.7b6521_find_robot_beep: on` — find-robot location feature is enabled (REST switch, reads from cloud). The `button.7b6521_find_my_robot_play_sound` was last pressed 2026-06-02T04:40 UTC (before this session).
+
+### Pending before next deploy
+
+1. Need proper deploy of `lymow-map-card.js` from `feat/map-lovelace-card` (065b9bc) — the JS on HA disk is b5ff1cc content (backup panel + safe_margin/outer_motor, but missing the `hardDefaults` cut_speed validation). Minor: stale 0.6 localStorage was cleared manually; new validation will catch future regressions once deployed.
+2. Backup panel: document that `backup_maps` sensor must be enabled or `backup_entity:` must be specified in the card YAML config for the panel to show data.
