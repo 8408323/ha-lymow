@@ -376,6 +376,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 title=f"Lymow — {device_label} done",
                 notification_id=f"{DOMAIN}_{thing_name}_done",
             )
+            # PbMap.f8 taskConfig (rainy_mowing, charging_handbrake, zone_order,
+            # return_to_dock_route) is only present in docked-state map responses.
+            # Re-query now so those switches populate after every mow session.
+            self.hass.async_create_task(self.async_query_map(thing_name))
 
         # Clear stale path cache when a new mow session starts (docked/waiting → mowing).
         # Without this the previous session's completed track masks current progress.
