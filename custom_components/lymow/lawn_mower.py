@@ -179,6 +179,7 @@ _RUN_TIME_CONFIG_SERVICE_FIELDS = {
     "move_speed": ("moveSpeed", "float", (0.1, 1.5)),
     "cut_speed": ("cutSpeed", "int", (0, 1000)),
 }
+_SERVICE_BACKUP_MAP = "backup_map"
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
 _SERVICE_RENAME_BACKUP_MAP = "rename_backup_map"
@@ -1173,6 +1174,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_rename_device(entity._thing_name, name)
 
+    async def handle_backup_map(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_backup_map(entity._thing_name)
+
     async def handle_restore_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         object_key: str = call.data[_ATTR_OBJECT_KEY]
@@ -1336,6 +1346,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_DEVICE_NAME, handle_set_device_name, schema=_SET_DEVICE_NAME_SCHEMA
     )
+    hass.services.async_register(DOMAIN, _SERVICE_BACKUP_MAP, handle_backup_map, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_RESTORE_BACKUP_MAP, handle_restore_backup_map, schema=_RESTORE_BACKUP_MAP_SCHEMA
     )
