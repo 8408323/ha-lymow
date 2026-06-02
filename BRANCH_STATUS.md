@@ -3409,8 +3409,62 @@ The `switch.7b6521_find_robot_beep: on` — find-robot location feature is enabl
 | `rainy_mowing / charging_handbrake / vehicle_led: unknown` | PbTaskConfig / vehLedStatus NOT echoed during mowing on firmware v2.1.48.1 |
 | **globalZoneConfig absent during mowing** | **CONTRADICTS earlier BRANCH_STATUS claim** ("absent when docked, present when task active"). On this robot/firmware the opposite is true: globalZoneConfig IS present in docked-state query_map responses but IS absent when mowing. Per-zone zoneConfig IS present (and different from docked values: cutSpeed=6/Turbo, pathSpacing=30, perimeterLaps=2). Settings panel correctly shows docked-state values; those are stale while mowing. |
 
-### Pending before next deploy
+---
 
-1. Need proper deploy of `lymow-map-card.js` from `feat/map-lovelace-card` (065b9bc) — the JS on HA disk is b5ff1cc content (backup panel + safe_margin/outer_motor, but missing the `hardDefaults` cut_speed validation). Minor: stale 0.6 localStorage was cleared manually; new validation will catch future regressions once deployed.
-2. Backup panel: document that `backup_maps` sensor must be enabled or `backup_entity:` must be specified in the card YAML config for the panel to show data.
-3. globalZoneConfig availability: the BRANCH_STATUS claim that it's absent when docked / present when active is **INVERTED** on firmware v2.1.48.1 (was v2.1.43 at time of original capture). Document this and potentially add a query_map trigger on mowing-start to refresh global settings.
+## 🛠 Supervisor session 2026-06-02 (continued) — all implemented changes
+
+### Commits shipped this session
+
+| Commit | What |
+|---|---|
+| `c0fc2e6` | feat(card): backup panel (📦) + per-zone safe_margin/outer_motor controls |
+| `b5ff1cc` | docs: supervisor session notes v0.2.8 |
+| `065b9bc` | **fix**: idempotency guard on REST feature switches; settings panel cut_speed localStorage validation (v0.2.9) |
+| `d2ca9a8` | docs: browser testing session 2026-06-02 audit |
+| `aa0e2da` | docs: live mowing observations |
+| `45f8a21` | **fix**: query_map on MQTT come-online so taskConfig switches populate at startup (v0.2.10) |
+
+### Why settings entities were unknown — root cause diagnosed
+
+The user noted: "all data can be retrieved from Lymow app at all stages". Investigation found two root causes:
+
+**Root cause 1 — taskConfig-based switches (rainy_mowing, charging_handbrake, return_to_dock_route, zone_order):**
+These read from `coordinator.data[thing]["mapData"]["taskConfig"]` which comes from PbMap.f8. PbMap.f8 only arrives in `query_map` responses, NOT in regular pboutput. The coordinator's `on_mqtt_online` was only calling `async_query_robot_config` on startup, not `async_query_map`. So these stayed `unknown` until someone manually called `lymow.query_map`.
+
+**Fix (v0.2.10, commit 45f8a21):** `on_mqtt_online` now schedules BOTH `async_query_robot_config` AND `async_query_map` when the robot comes online. These entities will now populate within a few seconds of HA startup or robot reconnect.
+
+**Root cause 2 — robotConfig-based switches (vehicle_led, and partially others):**
+These read from PbOutput.f17 (robotConfig). The coordinator sends `{f9:{f10=1}}` on startup to query this. The robot does respond (confirmed: `auto_dock_on_error`, `prefer_4g`, `volume` all became known). But `isOpenLed` (f7) stays unknown because proto3 omits default-false values — when LED is off, f7 is absent from the robotConfig message. The decoder interprets absence as "unknown" rather than "False".
+
+**Why we can't safely fix this with a proto3 zero-default treatment:** The coordinator uses deep-merge for robotConfig (partial echoes after writes should not wipe out previously-known fields). If we emit `isOpenLed=False` whenever f7 is absent in ANY robotConfig message, a partial echo (e.g. just `audioVolume=100` after Find-My-Robot) would incorrectly clobber a known `True` LED state.
+
+**Current status:** `vehicle_led` stays `unknown` until the user first toggles it (then the robot echoes back the new state explicitly). The app's advantage here is its persistent BLE connection which can read GATT characteristics at any time — HA can't replicate that without a Bluetooth entity.
+
+**Future fix option:** Add a `full_query=True` flag to `decode_robot_config` and use it only in the startup query path; partial echoes use `full_query=False`. Full-query responses would apply proto3 zero defaults; partial echoes would not.
+
+### Pending for next session / deploy
+
+1. **JS deploy pending**: `lymow-map-card.js` on HA disk is at commit `b5ff1cc` content. The repo is at `45f8a21`. Need to run in the HA terminal:
+   ```bash
+   curl -sL "https://raw.githubusercontent.com/8408323/ha-lymow/feat/map-lovelace-card/custom_components/lymow/www/lymow-map-card.js" \
+     -o /config/custom_components/lymow/www/lymow-map-card.js
+   curl -sL "https://raw.githubusercontent.com/8408323/ha-lymow/feat/map-lovelace-card/custom_components/lymow/coordinator.py" \
+     -o /config/custom_components/lymow/coordinator.py
+   ha core restart
+   ```
+   The terminal addon keeps intercepting keystrokes (HA global shortcuts); click INSIDE the xterm.js area before typing.
+
+2. **Backup panel shows 0 backups**: `sensor.7b6521_backup_maps` is disabled by default (`entity_registry_enabled_default=False`). To enable: HA Settings → Devices & Services → Lymow → sensor "Backup maps" → enable entity. OR add `backup_entity: sensor.7b6521_backup_maps` to the card YAML config.
+
+3. **Find Robot Beep — user confirmation pending**: The button was pressed during live mowing. `number.7b6521_volume` changed from `unknown` → `100.0`, confirming the MQTT command was received and processed. **Question: did the robot beep?** If yes → confirmed working over MQTT. If no → BLE-only restriction applies (same as set_wifi).
+
+4. **globalZoneConfig firmware note**: On firmware v2.1.48.1, `globalZoneConfig` (PbMap.f11) is present in DOCKED-state query_map responses but ABSENT during mowing. This is inverted from what was documented for v2.1.43. The settings panel correctly shows docked-state values when the robot is docked; those values are stale while mowing. Per-zone zoneConfig IS sent during mowing with active task values (cutSpeed=Turbo=6, pathSpacing=30, perimeterLaps=2).
+
+5. **30s sync lag for REST feature switches (theft_lock etc.)**: Inherent REST polling latency. When the app changes theft_lock/theft_detection, HA won't see it for up to 30s. The v0.2.9 idempotency guard prevents double cloud notifications when the user clicks "Turn on" while the app already has it on. This is the best HA can do without real-time push from the cloud.
+
+6. **`vehicle_led` proto3 fix** (optional, future): See root cause 2 above. Requires `full_query` flag in `decode_robot_config`. Not blocking for v1.
+
+### Current test counts and coverage
+
+- 1141 tests, 100% coverage (as of commit 45f8a21 / v0.2.10)
+- `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100 -q`
