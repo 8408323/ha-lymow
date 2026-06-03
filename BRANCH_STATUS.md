@@ -3464,7 +3464,44 @@ These read from PbOutput.f17 (robotConfig). The coordinator sends `{f9:{f10=1}}`
 
 6. **`vehicle_led` proto3 fix** (optional, future): See root cause 2 above. Requires `full_query` flag in `decode_robot_config`. Not blocking for v1.
 
+---
+
+## 🛠 Supervisor session 2026-06-03 — taskConfig root cause investigation
+
+### Deployed versions
+
+| Version | Commit | What |
+|---|---|---|
+| v0.2.10 | `45f8a21` | `on_mqtt_online` schedules `query_map` + `query_robot_config` at startup |
+| v0.2.11 | `eb535ff` | `_check_work_status_transition` also calls `query_map` on mow→dock |
+
+### Final confirmed root causes for "unknown" entities
+
+**`rainy_mowing`, `charging_handbrake`, `zone_order`, `return_to_dock_route` — permanently unknown via MQTT:**
+- These switches read from `coordinator.data[thing]["mapData"]["taskConfig"]` (decoded from PbMap.f8)
+- **PbMap.f8 is NEVER sent by the robot in MQTT query_map responses** — confirmed by checking `task_config` attribute on the map sensor after multiple `query_map` calls in both docked and mowing states, always absent
+- These switches are effectively **write-only** from HA: the user can turn rainy mowing on/off and the robot accepts it, but HA will never show the current state
+- The Lymow app reads these via BLE GATT characteristics — HA has no equivalent
+- **No fix possible without BLE or a REST endpoint** (not yet discovered)
+
+**`vehicle_led` — unknown because robot omits proto3 default-false:**
+- `isOpenLed` (PbRobotConfig.f7, bool) is omitted from robotConfig responses when LED is off (proto3 zero-default)
+- Robot DOES send robotConfig in pboutput (confirmed: `auto_dock_on_error`, `prefer_4g`, `volume` populate correctly)
+- Fix requires either: (a) `full_query` path in `decode_robot_config` that applies proto3 zero-defaults for persistent booleans, OR (b) accepting write-only semantics
+- Risk of (a): deep-merge collision if a partial echo also triggers the zero-default treatment
+- Status: deferred, not blocking
+
+**`mowing_settings` (globalZoneConfig) — works correctly when docked:**
+- Sensor exports `mowing_settings` (snake_case), card reads via `_getMapData()` which maps `a.mowing_settings → mowingSettings` ✅
+- Present in docked-state query_map responses; absent during mowing (firmware v2.1.48.1)
+- Live confirmed docked values: `cutHeight=60, moveSpeed=0.6, cutSpeed=4, pathSpacing=35, perimeterMowLaps=1, obsDecMode=2 (Detour), safeMarginMode=true`
+- Settings panel correctly populates from these values ✅
+
 ### Current test counts and coverage
 
-- 1141 tests, 100% coverage (as of commit 45f8a21 / v0.2.10)
+- 1141 tests, 100% coverage (as of commit `eb535ff` / v0.2.11)
 - `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100 -q`
+
+### Deployed to HA (v0.2.11 live as of 2026-06-03)
+
+All three Python files (`coordinator.py`, `switch.py`, `lawn_mower.py`) and the card JS (`lymow-map-card.js`) are at v0.2.11 content. Lovelace resources updated to `?v=0.2.11`.
