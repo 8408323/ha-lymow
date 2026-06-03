@@ -251,11 +251,22 @@ class VehicleLedSwitch(_RobotConfigBoolSwitch):
         from .protocol import SIGNAL_TURN_ON_VEHICLE_LIGHT
 
         await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_ON_VEHICLE_LIGHT)
+        self._set_led_optimistic(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         from .protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT
 
         await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
+        self._set_led_optimistic(False)
+
+    def _set_led_optimistic(self, state: bool) -> None:
+        if not (self.coordinator.data and self._thing_name in self.coordinator.data):
+            return
+        existing = self.coordinator.data[self._thing_name]
+        rc = {**existing.get("robotConfig", {}), "isOpenLed": state}
+        self.coordinator.async_set_updated_data(
+            {**self.coordinator.data, self._thing_name: {**existing, "robotConfig": rc}}
+        )
 
 
 class Prefer4gSwitch(_RobotConfigBoolSwitch):

@@ -2581,10 +2581,27 @@ def test_decode_robot_config_extracts_known_fields() -> None:
 def test_decode_robot_config_absent_fields_not_in_dict() -> None:
     from lymow.protocol import decode_robot_config
 
-    # Only metric_4g present — the other keys must NOT appear (so the merge
-    # doesn't blow away existing state with False/0 defaults).
+    # Only metric_4g present (no dockOnError) — NOT a full config dump so
+    # absent persistent bools must NOT appear (deep-merge safety preserved).
     assert decode_robot_config(_field_i32(11, 0)) == {"metric_4g": False}
     assert decode_robot_config(b"") == {}
+
+
+def test_decode_robot_config_full_config_applies_proto3_defaults() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # Both metric_4g (f11) and dockOnError (f22) present = full config dump.
+    # Absent persistent bools should be emitted as False (proto3 zero-default).
+    # isOpenLed absent → False so vehicle_led shows "off" instead of "unknown".
+    cfg = _field_i32(11, 1) + _field_i32(22, 1)  # metric_4g=True, dockOnError=True
+    out = decode_robot_config(cfg)
+    assert out["metric_4g"] is True
+    assert out["dockOnError"] is True
+    assert out["isOpenLed"] is False  # absent → proto3 default
+    assert out["cmdCellularSwitch"] is False  # absent → proto3 default
+    # Momentary commands must NOT be emitted even in full-config responses
+    assert "rcRaiseCutHeight" not in out
+    assert "rcLowerCutHeight" not in out
 
 
 def test_decode_robot_config_bool_rcRaise_rcLower_fields() -> None:
