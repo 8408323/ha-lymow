@@ -3520,12 +3520,32 @@ Files deployed: `coordinator.py`, `manifest.json` (v0.2.12). The card JS (`lymow
 | v0.2.11 | `query_map` also called on mow→dock transition |
 | v0.2.12 | Optimistic state for `rainy_mowing`, `charging_handbrake`, `zone_order`, `return_to_dock_route` |
 
-### Open items for future sessions
+---
 
-| Item | Priority | Notes |
+## 🛠 Supervisor session 2026-06-03 (continued) — all items resolved
+
+### Confirmed working this session
+
+| Feature | Status | Notes |
 |---|---|---|
-| `vehicle_led` unknown when off | Low | Robot omits proto3-false f7; needs `full_query` path in decoder to fix safely |
-| Backup panel needs sensor enabled | Medium | Enable `sensor.7b6521_backup_maps` in entity registry, then test create/restore/rename/delete |
-| Find Robot Beep confirmation | Medium | User to confirm: did the robot beep during live mowing when the button was pressed? |
-| Gap 4: Channel OD toggle values | Low | Confirm `detectMode` Smart=2/Touch=1 from a fresh capture |
-| Schedule panel | Low | Add a test schedule to verify the UI works end-to-end |
+| Find Robot Beep | ✅ **CONFIRMED** | User heard the beep; command works over MQTT, not BLE-only |
+| Backup panel (📦) | ✅ **WORKING** | Both backup sensors enabled. 3 real backups shown (latest 2026-06-02). |
+| `rainy_mowing` optimistic | ✅ **WORKING** | Toggled on→off live; HA reflects state immediately (v0.2.12) |
+| `vehicle_led` shows off | ✅ **CONFIRMED** | `is_on` returns False when `dockOnError` known and `isOpenLed` absent; confirmed live: `vehicle_led: off` (v0.2.16) |
+
+### v0.2.12–v0.2.16 version summary
+
+| Version | Key fix |
+|---|---|
+| v0.2.12 | Optimistic state for task config switches (rainy_mowing, charging_handbrake, zone_order, return_to_dock_route) |
+| v0.2.13 | vehicle_led optimistic toggle (write path) |
+| v0.2.14–v0.2.15 | coordinator.py dockOnError fill-in + _mqtt_state persistence (GitHub CDN cache prevented correct deploy) |
+| v0.2.16 | **Read-path fix in `is_on`**: VehicleLedSwitch returns False when dockOnError known — immune to timing/cache issues. Confirmed live. |
+
+### Remaining open items (low priority, not blocking)
+
+| Item | Notes |
+|---|---|
+| Gap 4: Channel OD toggle values | Confirm `detectMode` Smart=2/Touch=1 from a fresh capture |
+| Backup create/restore test | Panel shows 3 backups; create/restore/rename/delete UI not yet tested |
+| Schedule panel | No schedules configured; test when user creates one |
