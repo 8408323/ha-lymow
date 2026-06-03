@@ -69,10 +69,10 @@ class LymowCameraCard extends HTMLElement {
         .fs-btn { border:0; background:transparent; padding:4px 8px; cursor:pointer; color:var(--primary-text-color); font-size:18px; border-radius:4px; line-height:1; }
         .fs-btn:hover { background:var(--secondary-background-color); }
         .stage { position:relative; background:#000; aspect-ratio:4/3; width:100%; overflow:hidden; display:flex; align-items:center; justify-content:center; }
-        .stage ha-camera-stream, .stage video { width:100%; height:100%; object-fit:contain; background:#000; }
+        .stage img, .stage video { width:100%; height:100%; object-fit:contain; background:#000; display:block; }
         :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; overflow:hidden; }
         :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; min-height:0; overflow:hidden; }
-        :host(:fullscreen) .stage ha-camera-stream, :host(:fullscreen) .stage video { width:100%; height:100%; object-fit:contain; }
+        :host(:fullscreen) .stage img, :host(:fullscreen) .stage video { width:100%; height:100%; object-fit:contain; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }
@@ -87,7 +87,7 @@ class LymowCameraCard extends HTMLElement {
           <button class="fs-btn" title="Fullscreen">⛶</button>
         </div>
         <div class="stage">
-          <ha-camera-stream class="lan hidden"></ha-camera-stream>
+          <img class="lan hidden" alt="">
           <video class="cloud hidden" autoplay playsinline muted></video>
           <div class="status hidden"></div>
         </div>
@@ -95,7 +95,7 @@ class LymowCameraCard extends HTMLElement {
     this._els = {
       title: root.querySelector(".title"),
       seg: root.querySelectorAll(".seg button"),
-      lanStream: root.querySelector("ha-camera-stream.lan"),
+      lanStream: root.querySelector("img.lan"),
       video: root.querySelector("video.cloud"),
       status: root.querySelector(".status"),
       fsBtn: root.querySelector(".fs-btn"),
@@ -137,6 +137,9 @@ class LymowCameraCard extends HTMLElement {
   // ---- LAN: ha-camera-stream (WebRTC via go2rtc with ffmpeg transcoding) ----
   // go2rtc.yaml configures ffmpeg transcoding for this camera to inject IDR frames.
   // The robot's encoder never sends keyframes; go2rtc re-encodes to fix this.
+  // ---- LAN: JPEG snapshot polling via HA camera proxy ----
+  // Bypasses WebRTC/go2rtc entirely — no H.264, no green frames.
+  // Each JPEG is independent (no reference frame dependency).
   _renderLan() {
     const eid = this._config.camera_entity;
     const st = eid && this._hass && this._hass.states[eid];
@@ -148,27 +151,32 @@ class LymowCameraCard extends HTMLElement {
       this._setStatus("Robot offline (LAN) — try Cloud", true);
       return;
     }
-    if (this._lanActive) return; // already streaming
+    if (this._lanActive) return;
     this._lanActive = true;
     this._setStatus("");
-    // Recreate ha-camera-stream to force a fresh WebRTC connection each time.
-    // Reusing the element makes ha-camera-stream reconnect mid-GOP → green frames.
-    const stage = this._els.lanStream.parentNode;
-    const fresh = document.createElement("ha-camera-stream");
-    fresh.classList.add("lan");
-    stage.insertBefore(fresh, this._els.lanStream);
-    this._els.lanStream.remove();
-    this._els.lanStream = fresh;
-    fresh.hass = this._hass;
-    fresh.stateObj = st;
+    const token = st.attributes.access_token;
+    const base = `/api/camera_proxy/${eid}?token=${token}`;
+    const img = this._els.lanStream;
+    let prev = null;
+    const poll = () => {
+      if (!this._lanActive) return;
+      const url = `${base}&_=${Date.now()}`;
+      const next = new Image();
+      next.onload = () => {
+        if (!this._lanActive) return;
+        if (prev) URL.revokeObjectURL(prev);
+        img.src = next.src;
+        setTimeout(poll, 250); // ~4 fps — enough to show motion, not too heavy on the robot
+      };
+      next.onerror = () => { if (this._lanActive) setTimeout(poll, 1000); };
+      next.src = url;
+    };
+    poll();
   }
 
   _stopLan() {
     this._lanActive = false;
-    if (this._els && this._els.lanStream) {
-      this._els.lanStream.stateObj = null;
-      this._els.lanStream.hass = null;
-    }
+    if (this._els && this._els.lanStream) this._els.lanStream.src = "";
   }
 
   // ---- Cloud: in-browser AWS KVS WebRTC viewer ------------------------------
