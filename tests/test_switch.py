@@ -421,6 +421,25 @@ async def test_vehicle_led_switch_writes_via_signal_not_isOpenLed() -> None:
     coord_off.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
 
 
+async def test_vehicle_led_switch_optimistic_update_on_toggle() -> None:
+    coord = _make_robot_config_coord({"isOpenLed": False})
+    coord.data = {THING: {"robotConfig": {"isOpenLed": False}}}
+    # Make async_set_updated_data actually persist to coord.data
+    coord.async_set_updated_data.side_effect = lambda d: coord.__setattr__("data", d)
+    e = VehicleLedSwitch(coord, DEVICE)
+    await e.async_turn_on()
+    assert coord.data[THING]["robotConfig"]["isOpenLed"] is True
+    await e.async_turn_off()
+    assert coord.data[THING]["robotConfig"]["isOpenLed"] is False
+
+
+def test_vehicle_led_switch_optimistic_skipped_when_no_data() -> None:
+    coord = _make_robot_config_coord({})
+    coord.data = None
+    e = VehicleLedSwitch(coord, DEVICE)
+    e._set_led_optimistic(True)  # must not raise when coord.data is None
+
+
 # ---------------------------------------------------------------------------
 # Prefer4gSwitch — robotConfig.metric_4g (bool, on=4G/off=Wi-Fi)
 # ---------------------------------------------------------------------------

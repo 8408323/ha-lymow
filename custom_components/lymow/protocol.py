@@ -1032,17 +1032,26 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         v = _first(f, field_no)
         if v is not None:
             out[name] = _signed32(v)
-    for field_no, name in (
-        (4, "rcRaiseCutHeight"),
-        (5, "rcLowerCutHeight"),
-        (7, "isOpenLed"),
-        (10, "cmdCellularSwitch"),
-        (11, "metric_4g"),
-        (22, "dockOnError"),
+    # When both dockOnError (f22) and metric_4g (f11) are present the robot
+    # sent a full config dump (not a partial echo). In that case treat absent
+    # persistent bools as proto3 zero-default (False) so vehicle_led shows
+    # "off" rather than "unknown" when the LED is off at startup.
+    # Partial echoes (Find-My-Robot, signal, 4G toggle) only carry one field
+    # so the condition never triggers for them — deep-merge safety preserved.
+    is_full_config = _first(f, 22) is not None and _first(f, 11) is not None
+    for field_no, name, persistent in (
+        (4, "rcRaiseCutHeight", False),
+        (5, "rcLowerCutHeight", False),
+        (7, "isOpenLed", True),
+        (10, "cmdCellularSwitch", True),
+        (11, "metric_4g", True),
+        (22, "dockOnError", True),
     ):
         v = _first(f, field_no)
         if v is not None:
             out[name] = bool(v)
+        elif persistent and is_full_config:
+            out[name] = False
     for field_no, name in ((14, "headlightStart"), (15, "headlightEnd")):
         raw = _first(f, field_no)
         if isinstance(raw, bytes):
