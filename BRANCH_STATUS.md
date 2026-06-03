@@ -3502,6 +3502,30 @@ These read from PbOutput.f17 (robotConfig). The coordinator sends `{f9:{f10=1}}`
 - 1141 tests, 100% coverage (as of commit `eb535ff` / v0.2.11)
 - `uv run pytest tests/ --cov=custom_components/lymow --cov-fail-under=100 -q`
 
-### Deployed to HA (v0.2.11 live as of 2026-06-03)
+### v0.2.12 — optimistic state for write-only task config switches (commit 474d48e)
 
-All three Python files (`coordinator.py`, `switch.py`, `lawn_mower.py`) and the card JS (`lymow-map-card.js`) are at v0.2.11 content. Lovelace resources updated to `?v=0.2.11`.
+`async_set_device_settings` now immediately writes the new values into `coordinator.data[thing]["mapData"]["taskConfig"]` after the MQTT publish. Since the robot never echoes PbTaskConfig back via MQTT, this is the only way HA can reflect the current state. The wire inversion for `charging_handbrake` (UI-True → `disableChargingPark=False`) is handled here. Live-tested: `rainy_mowing` toggled on→off, HA reflected `on` and `off` correctly within ~1 second of each write. 1143 tests, 100% coverage.
+
+### Deployed to HA (v0.2.12 live as of 2026-06-03)
+
+Files deployed: `coordinator.py`, `manifest.json` (v0.2.12). The card JS (`lymow-map-card.js`) and all Python platform files are at the v0.2.11 content deployed earlier this session. Lovelace resources at `?v=0.2.12`.
+
+### Summary of all versions shipped this session (2026-06-02/03)
+
+| Version | Key change |
+|---|---|
+| v0.2.8 | Backup panel (📦) + per-zone Safe margin / Outer motor controls |
+| v0.2.9 | Idempotency guard for REST feature switches (no double theft-lock notifications); settings cut_speed localStorage validation |
+| v0.2.10 | `on_mqtt_online` now calls `query_map` + `query_robot_config` at startup |
+| v0.2.11 | `query_map` also called on mow→dock transition |
+| v0.2.12 | Optimistic state for `rainy_mowing`, `charging_handbrake`, `zone_order`, `return_to_dock_route` |
+
+### Open items for future sessions
+
+| Item | Priority | Notes |
+|---|---|---|
+| `vehicle_led` unknown when off | Low | Robot omits proto3-false f7; needs `full_query` path in decoder to fix safely |
+| Backup panel needs sensor enabled | Medium | Enable `sensor.7b6521_backup_maps` in entity registry, then test create/restore/rename/delete |
+| Find Robot Beep confirmation | Medium | User to confirm: did the robot beep during live mowing when the button was pressed? |
+| Gap 4: Channel OD toggle values | Low | Confirm `detectMode` Smart=2/Touch=1 from a fresh capture |
+| Schedule panel | Low | Add a test schedule to verify the UI works end-to-end |
