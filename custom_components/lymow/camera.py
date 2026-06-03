@@ -81,3 +81,4 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         if not url:
             return None
         return await async_get_image(self.coordinator.hass, url, width=width, height=height)
+

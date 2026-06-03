@@ -7,6 +7,7 @@
  *   camera_entity: camera.THING_camera      # required for the LAN view
  *   title: Lymow Camera                     # optional
  *   default_source: lan | cloud             # optional (default: lan)
+ *   lan_interval: 1000                      # optional — ms between LAN frames (default: 1000)
  *
  * Two genuinely separate transport paths:
  *   LAN   — ha-camera-stream picks the best path based on frontend_stream_type.
@@ -28,6 +29,7 @@ class LymowCameraCard extends HTMLElement {
     this._source = config.default_source === "cloud" ? "cloud" : "lan";
     this._built = false;
     this._lanActive = false;
+    this._lanInterval = Math.max(200, Math.min(10000, config.lan_interval ?? 1000));
   }
 
   set hass(hass) {
@@ -68,6 +70,10 @@ class LymowCameraCard extends HTMLElement {
         .seg button.on { background:var(--primary-color,#03a9f4); color:#fff; }
         .fs-btn { border:0; background:transparent; padding:4px 8px; cursor:pointer; color:var(--primary-text-color); font-size:18px; border-radius:4px; line-height:1; }
         .fs-btn:hover { background:var(--secondary-background-color); }
+        .interval-ctrl { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--secondary-text-color); }
+        .iv-btn { border:0; background:transparent; padding:2px 6px; cursor:pointer; color:var(--primary-text-color); font-size:14px; border-radius:4px; line-height:1; }
+        .iv-btn:hover { background:var(--secondary-background-color); }
+        .iv-val { min-width:36px; text-align:center; font-size:11px; }
         .stage { position:relative; background:#000; aspect-ratio:4/3; width:100%; overflow:hidden; display:flex; align-items:center; justify-content:center; }
         .stage img, .stage video { width:100%; height:100%; object-fit:contain; background:#000; display:block; }
         :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; overflow:hidden; }
@@ -84,6 +90,11 @@ class LymowCameraCard extends HTMLElement {
             <button data-src="lan">LAN</button>
             <button data-src="cloud">Cloud</button>
           </span>
+          <span class="interval-ctrl hidden">
+            <button class="iv-btn" data-delta="-200">−</button>
+            <span class="iv-val"></span>
+            <button class="iv-btn" data-delta="200">+</button>
+          </span>
           <button class="fs-btn" title="Fullscreen">⛶</button>
         </div>
         <div class="stage">
@@ -99,16 +110,22 @@ class LymowCameraCard extends HTMLElement {
       video: root.querySelector("video.cloud"),
       status: root.querySelector(".status"),
       fsBtn: root.querySelector(".fs-btn"),
+      intervalCtrl: root.querySelector(".interval-ctrl"),
+      intervalVal: root.querySelector(".iv-val"),
     };
     this._els.title.textContent = this._config.title || "Lymow Camera";
     this._els.seg.forEach((b) => b.addEventListener("click", () => this._select(b.dataset.src)));
     this._els.fsBtn.addEventListener("click", () => {
-      if (!document.fullscreenElement) {
-        this.requestFullscreen().catch(() => {});
-      } else {
-        document.exitFullscreen().catch(() => {});
-      }
+      if (!document.fullscreenElement) this.requestFullscreen().catch(() => {});
+      else document.exitFullscreen().catch(() => {});
     });
+    root.querySelectorAll(".iv-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        this._lanInterval = Math.max(200, Math.min(10000, this._lanInterval + parseInt(b.dataset.delta)));
+        this._updateIntervalDisplay();
+      });
+    });
+    this._updateIntervalDisplay();
     this._built = true;
   }
 
@@ -121,6 +138,7 @@ class LymowCameraCard extends HTMLElement {
   _select(src) {
     this._source = src;
     this._els.seg.forEach((b) => b.classList.toggle("on", b.dataset.src === src));
+    this._els.intervalCtrl.classList.toggle("hidden", src !== "lan");
     if (src === "lan") {
       this._stopCloud();
       this._els.video.classList.add("hidden");
@@ -132,6 +150,11 @@ class LymowCameraCard extends HTMLElement {
       this._els.video.classList.remove("hidden");
       this._startCloud();
     }
+  }
+
+  _updateIntervalDisplay() {
+    const s = this._lanInterval / 1000;
+    this._els.intervalVal.textContent = s < 1 ? `${this._lanInterval}ms` : `${s.toFixed(1)}s`;
   }
 
   // ---- LAN: ha-camera-stream (WebRTC via go2rtc with ffmpeg transcoding) ----
@@ -157,18 +180,19 @@ class LymowCameraCard extends HTMLElement {
     const token = st.attributes.access_token;
     const base = `/api/camera_proxy/${eid}?token=${token}`;
     const img = this._els.lanStream;
-    let prev = null;
+    // Pre-start the HLS stream so HA's ffmpeg process stays alive across polls.
+    // The first JPEG is still slow (~5s); subsequent ones reuse the open stream.
+    this._hass.callWS({ type: "camera/stream", entity_id: eid, format: "hls" }).catch(() => {});
     const poll = () => {
       if (!this._lanActive) return;
       const url = `${base}&_=${Date.now()}`;
       const next = new Image();
       next.onload = () => {
         if (!this._lanActive) return;
-        if (prev) URL.revokeObjectURL(prev);
         img.src = next.src;
-        setTimeout(poll, 250); // ~4 fps — enough to show motion, not too heavy on the robot
+        setTimeout(poll, this._lanInterval);
       };
-      next.onerror = () => { if (this._lanActive) setTimeout(poll, 1000); };
+      next.onerror = () => { if (this._lanActive) setTimeout(poll, Math.max(this._lanInterval, 2000)); };
       next.src = url;
     };
     poll();
