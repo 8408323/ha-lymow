@@ -27,6 +27,7 @@ class LymowCameraCard extends HTMLElement {
     this._config = config;
     this._source = config.default_source === "cloud" ? "cloud" : "lan";
     this._built = false;
+    this._hlsEid = null;
   }
 
   set hass(hass) {
@@ -71,6 +72,7 @@ class LymowCameraCard extends HTMLElement {
         .stage ha-camera-stream, .stage video { width:100%; height:100%; object-fit:contain; background:#000; }
         :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; }
         :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; }
+        :host(:fullscreen) .stage ha-camera-stream, :host(:fullscreen) .stage video { object-fit:contain; width:100%; height:100%; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }
@@ -132,7 +134,9 @@ class LymowCameraCard extends HTMLElement {
     }
   }
 
-  // ---- LAN: ha-camera-stream (routes to HLS via camera entity's StreamType.HLS) ----
+  // ---- LAN: ha-camera-stream (WebRTC via go2rtc with ffmpeg transcoding) ----
+  // go2rtc.yaml configures ffmpeg transcoding for this camera to inject IDR frames.
+  // The robot's encoder never sends keyframes; go2rtc re-encodes to fix this.
   _renderLan() {
     const eid = this._config.camera_entity;
     const st = eid && this._hass && this._hass.states[eid];
