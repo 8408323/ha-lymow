@@ -7,7 +7,9 @@
  *   camera_entity: camera.THING_camera      # required for the LAN view
  *   title: Lymow Camera                     # optional
  *   default_source: lan | cloud             # optional (default: lan)
- *   lan_interval: 1000                      # optional — ms between LAN frames (default: 1000)
+ *   lan_workers: 3                          # optional — parallel fetch workers (1-10, default: 3)
+ *                                           #   More workers = higher frame rate but heavier on HA.
+ *                                           #   Effective fps ≈ workers / generation_time_per_frame.
  *
  * Two genuinely separate transport paths:
  *   LAN   — ha-camera-stream picks the best path based on frontend_stream_type.
@@ -29,7 +31,7 @@ class LymowCameraCard extends HTMLElement {
     this._source = config.default_source === "cloud" ? "cloud" : "lan";
     this._built = false;
     this._lanActive = false;
-    this._lanInterval = Math.max(200, Math.min(10000, config.lan_interval ?? 1000));
+    this._lanWorkers = Math.max(1, Math.min(10, config.lan_workers ?? 3));
   }
 
   set hass(hass) {
@@ -91,9 +93,9 @@ class LymowCameraCard extends HTMLElement {
             <button data-src="cloud">Cloud</button>
           </span>
           <span class="interval-ctrl hidden">
-            <button class="iv-btn" data-delta="-200">−</button>
+            <button class="iv-btn" data-delta="-1">−</button>
             <span class="iv-val"></span>
-            <button class="iv-btn" data-delta="200">+</button>
+            <button class="iv-btn" data-delta="1">+</button>
           </span>
           <button class="fs-btn" title="Fullscreen">⛶</button>
         </div>
@@ -121,7 +123,7 @@ class LymowCameraCard extends HTMLElement {
     });
     root.querySelectorAll(".iv-btn").forEach((b) => {
       b.addEventListener("click", () => {
-        this._lanInterval = Math.max(200, Math.min(10000, this._lanInterval + parseInt(b.dataset.delta)));
+        this._lanWorkers = Math.max(1, Math.min(10, this._lanWorkers + parseInt(b.dataset.delta)));
         this._updateIntervalDisplay();
       });
     });
@@ -153,16 +155,15 @@ class LymowCameraCard extends HTMLElement {
   }
 
   _updateIntervalDisplay() {
-    const s = this._lanInterval / 1000;
-    this._els.intervalVal.textContent = s < 1 ? `${this._lanInterval}ms` : `${s.toFixed(1)}s`;
+    this._els.intervalVal.textContent = `${this._lanWorkers}×`;
   }
 
-  // ---- LAN: ha-camera-stream (WebRTC via go2rtc with ffmpeg transcoding) ----
-  // go2rtc.yaml configures ffmpeg transcoding for this camera to inject IDR frames.
-  // The robot's encoder never sends keyframes; go2rtc re-encodes to fix this.
-  // ---- LAN: JPEG snapshot polling via HA camera proxy ----
-  // Bypasses WebRTC/go2rtc entirely — no H.264, no green frames.
-  // Each JPEG is independent (no reference frame dependency).
+  // ---- LAN: concurrent JPEG pipeline via HA camera proxy --------------------
+  // N workers fetch simultaneously. HA's ffmpeg generates each frame (~2-5s).
+  // Effective fps ≈ N / generation_time. Workers are staggered at startup so
+  // frames arrive evenly spaced rather than in bursts. Only the most recently
+  // captured frame is shown; out-of-order completions are silently discarded.
+  // Max 10 in-flight requests to avoid flooding HA.
   _renderLan() {
     const eid = this._config.camera_entity;
     const st = eid && this._hass && this._hass.states[eid];
@@ -177,25 +178,47 @@ class LymowCameraCard extends HTMLElement {
     if (this._lanActive) return;
     this._lanActive = true;
     this._setStatus("");
+
     const token = st.attributes.access_token;
     const base = `/api/camera_proxy/${eid}?token=${token}`;
     const img = this._els.lanStream;
-    // Pre-start the HLS stream so HA's ffmpeg process stays alive across polls.
-    // The first JPEG is still slow (~5s); subsequent ones reuse the open stream.
+    // Pre-start HA's HLS stream so ffmpeg's RTSP connection stays warm.
     this._hass.callWS({ type: "camera/stream", entity_id: eid, format: "hls" }).catch(() => {});
-    const poll = () => {
-      if (!this._lanActive) return;
-      const url = `${base}&_=${Date.now()}`;
-      const next = new Image();
-      next.onload = () => {
-        if (!this._lanActive) return;
-        img.src = next.src;
-        setTimeout(poll, this._lanInterval);
-      };
-      next.onerror = () => { if (this._lanActive) setTimeout(poll, Math.max(this._lanInterval, 2000)); };
-      next.src = url;
+
+    let lastShownTs = 0; // monotonic capture-time stamp; only newer frames are shown
+
+    // Each worker runs in an infinite loop: fetch → show if newest → repeat.
+    // Stagger initial starts by estimatedGenerationMs/N so frames arrive evenly.
+    const estimatedGenerationMs = 5000;
+    const startWorker = (initialDelay) => {
+      setTimeout(() => {
+        const run = () => {
+          if (!this._lanActive) return;
+          const captureTs = Date.now();
+          const url = `${base}&_=${captureTs}`;
+          const next = new Image();
+          next.onload = () => {
+            if (!this._lanActive) return;
+            // Only display if this frame is newer than what's already shown.
+            if (captureTs > lastShownTs) {
+              lastShownTs = captureTs;
+              img.src = next.src;
+            }
+            run(); // immediately start next fetch — pipeline never idles
+          };
+          next.onerror = () => {
+            if (this._lanActive) setTimeout(run, 2000);
+          };
+          next.src = url;
+        };
+        run();
+      }, initialDelay);
     };
-    poll();
+
+    const n = this._lanWorkers;
+    for (let i = 0; i < n; i++) {
+      startWorker(Math.round((estimatedGenerationMs / n) * i));
+    }
   }
 
   _stopLan() {
