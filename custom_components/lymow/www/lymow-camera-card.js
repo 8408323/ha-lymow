@@ -9,8 +9,9 @@
  *   default_source: lan | cloud             # optional (default: lan)
  *
  * Two genuinely separate transport paths:
- *   LAN   — <img> from HA's camera_proxy_stream → HA pulls RTSP from the robot
- *           on the local network. Only works when HA can reach the robot.
+ *   LAN   — <ha-camera-stream> which HA tries in order: WebRTC (go2rtc) →
+ *           HLS (stream component) → MJPEG fallback. Smooth video when the
+ *           stream component is active; no ffmpeg-reconnect-per-frame latency.
  *   Cloud — in-browser AWS KVS WebRTC. The browser talks straight to AWS and
  *           the robot streams over its own internet link (works on 4G, away
  *           from home). The integration only hands us the signed session.
@@ -32,7 +33,7 @@ class LymowCameraCard extends HTMLElement {
     this._hass = hass;
     if (!this._built) return;
     if (this._source === "lan") this._renderLan();
-    else if (!this._pc) this._startCloud(); // (re)start once hass is available
+    else if (!this._pc) this._startCloud();
   }
 
   connectedCallback() {
@@ -42,6 +43,7 @@ class LymowCameraCard extends HTMLElement {
 
   disconnectedCallback() {
     this._stopCloud();
+    this._stopLan();
   }
 
   getCardSize() {
@@ -64,7 +66,7 @@ class LymowCameraCard extends HTMLElement {
         .seg button { border:0; background:transparent; padding:5px 14px; cursor:pointer; font:inherit; color:var(--primary-text-color); }
         .seg button.on { background:var(--primary-color,#03a9f4); color:#fff; }
         .stage { position:relative; background:#000; aspect-ratio:4/3; display:flex; align-items:center; justify-content:center; }
-        .stage img, .stage video { width:100%; height:100%; object-fit:contain; background:#000; }
+        .stage video, .stage ha-camera-stream { width:100%; height:100%; object-fit:contain; background:#000; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }
@@ -78,7 +80,7 @@ class LymowCameraCard extends HTMLElement {
           </span>
         </div>
         <div class="stage">
-          <img class="lan hidden" />
+          <ha-camera-stream class="lan hidden"></ha-camera-stream>
           <video class="cloud hidden" autoplay playsinline muted></video>
           <div class="status"></div>
         </div>
@@ -86,7 +88,7 @@ class LymowCameraCard extends HTMLElement {
     this._els = {
       title: root.querySelector(".title"),
       seg: root.querySelectorAll(".seg button"),
-      img: root.querySelector("img.lan"),
+      lanStream: root.querySelector("ha-camera-stream.lan"),
       video: root.querySelector("video.cloud"),
       status: root.querySelector(".status"),
     };
@@ -107,34 +109,40 @@ class LymowCameraCard extends HTMLElement {
     if (src === "lan") {
       this._stopCloud();
       this._els.video.classList.add("hidden");
-      this._els.img.classList.remove("hidden");
+      this._els.lanStream.classList.remove("hidden");
       this._renderLan();
     } else {
-      this._els.img.classList.add("hidden");
-      this._els.img.removeAttribute("src");
+      this._stopLan();
+      this._els.lanStream.classList.add("hidden");
       this._els.video.classList.remove("hidden");
       this._startCloud();
     }
   }
 
-  // ---- LAN: HA camera_proxy_stream (MJPEG over the local network) -----------
+  // ---- LAN: ha-camera-stream (WebRTC → HLS → MJPEG, chosen by HA) -----------
   _renderLan() {
     const eid = this._config.camera_entity;
     const st = eid && this._hass && this._hass.states[eid];
     if (!st) {
       this._setStatus(eid ? `${eid} unavailable` : "Set camera_entity for LAN view", true);
-      this._els.img.removeAttribute("src");
+      this._stopLan();
       return;
     }
     if (st.state === "unavailable") {
       this._setStatus("Robot offline (LAN) — try Cloud", true);
-      this._els.img.removeAttribute("src");
+      this._stopLan();
       return;
     }
-    const token = st.attributes.access_token;
-    const url = `/api/camera_proxy_stream/${eid}?token=${token}`;
-    if (this._els.img.getAttribute("src") !== url) this._els.img.setAttribute("src", url);
     this._setStatus("");
+    // ha-camera-stream picks the best available path automatically
+    this._els.lanStream.hass = this._hass;
+    this._els.lanStream.stateObj = st;
+  }
+
+  _stopLan() {
+    if (this._els && this._els.lanStream) {
+      this._els.lanStream.stateObj = null;
+    }
   }
 
   // ---- Cloud: in-browser AWS KVS WebRTC viewer ------------------------------
@@ -142,7 +150,7 @@ class LymowCameraCard extends HTMLElement {
     this._stopCloud();
     if (!this._hass) {
       this._setStatus("Loading…");
-      return; // set hass() will call back in once HA provides the connection
+      return;
     }
     const token = ++this._cloudToken | 0;
     this._cloudToken = token;
@@ -162,7 +170,7 @@ class LymowCameraCard extends HTMLElement {
       this._setStatus(`Session error: ${e.message || e}`, true);
       return;
     }
-    if (token !== this._cloudToken) return; // switched away while awaiting
+    if (token !== this._cloudToken) return;
     if (!session || !session.viewerWssUrl) {
       this._setStatus("Cloud camera unavailable (no signaling session)", true);
       return;
@@ -246,7 +254,6 @@ class LymowCameraCard extends HTMLElement {
       else this._setStatus("");
     }, FRAME_TIMEOUT_MS);
 
-    // Clear the "Connecting…" overlay as soon as frames actually render.
     this._els.video.onloadeddata = () => {
       if (token === this._cloudToken) this._setStatus("");
     };
@@ -284,7 +291,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "lymow-camera-card",
   name: "Lymow Camera",
-  description: "Onboard camera with a LAN (RTSP via HA) / Cloud (KVS WebRTC) source switch.",
+  description: "Onboard camera with a LAN (WebRTC/HLS/MJPEG via ha-camera-stream) / Cloud (KVS WebRTC) source switch.",
 });
 
 console.info("%c LYMOW-CAMERA-CARD ", "background:#43a047;color:#fff;border-radius:3px");
