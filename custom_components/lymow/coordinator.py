@@ -1056,6 +1056,24 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 charging_handbrake=charging_handbrake,
             ),
         )
+        # Optimistic update: the robot never echoes PbTaskConfig via MQTT, so
+        # we write the new wire values into coordinator data immediately so
+        # HA switches reflect the change without staying "unknown" forever.
+        if self.data and thing_name in self.data:
+            updates: dict[str, Any] = {}
+            if rainy_mowing is not None:
+                updates["rainCleaning"] = rainy_mowing
+            if charging_handbrake is not None:
+                updates["disableChargingPark"] = not charging_handbrake  # inverted: UI→wire
+            if zone_order is not None:
+                updates["zoneOrder"] = zone_order
+            if charging_mode is not None:
+                updates["chargingMode"] = charging_mode
+            if updates:
+                existing = self.data[thing_name]
+                map_data = {**existing.get("mapData", {})}
+                map_data["taskConfig"] = {**map_data.get("taskConfig", {}), **updates}
+                self.async_set_updated_data({**self.data, thing_name: {**existing, "mapData": map_data}})
 
     async def async_set_run_time_config(self, thing_name: str, **fields: Any) -> None:
         """Set run-time config parameters (USER_CTRL_SET_RUN_TIME_CONFIG).

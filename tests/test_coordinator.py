@@ -441,6 +441,32 @@ async def test_async_set_device_settings_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_device_settings_optimistic_update() -> None:
+    """Setting device settings immediately reflects in coordinator data (optimistic)."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {}}}
+    await coord.async_set_device_settings(
+        THING,
+        rainy_mowing=True,
+        charging_handbrake=True,
+        zone_order=1,
+        charging_mode=0,
+    )
+    tc = coord.data[THING]["mapData"]["taskConfig"]
+    assert tc["rainCleaning"] is True
+    assert tc["disableChargingPark"] is False  # inverted: UI-True → wire-False
+    assert tc["zoneOrder"] == 1
+    assert tc["chargingMode"] == 0
+
+
+@pytest.mark.asyncio
+async def test_async_set_device_settings_optimistic_skipped_when_no_data() -> None:
+    coord, _, _ = _make_coordinator()
+    # Should not raise even with no coordinator data
+    await coord.async_set_device_settings(THING, rainy_mowing=True)
+
+
+@pytest.mark.asyncio
 async def test_async_set_zone_config_publishes_userctrl_9_and_queries_map() -> None:
     """async_set_zone_config publishes a userCtrl=9 frame then re-queries the map."""
     from lymow.protocol import _decode_fields, _first
