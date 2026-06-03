@@ -49,6 +49,7 @@ class LymowCameraCard extends HTMLElement {
   disconnectedCallback() {
     this._stopCloud();
     this._stopLan();
+    if (this.classList.contains("wfs")) this._toggleWindowFS(false);
   }
 
   getCardSize() {
@@ -78,9 +79,15 @@ class LymowCameraCard extends HTMLElement {
         .iv-val { min-width:36px; text-align:center; font-size:11px; }
         .stage { position:relative; background:#000; aspect-ratio:4/3; width:100%; overflow:hidden; display:flex; align-items:center; justify-content:center; }
         .stage img, .stage video { width:100%; height:100%; object-fit:contain; background:#000; display:block; }
+        /* Native OS fullscreen (desktop only) */
         :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; overflow:hidden; }
         :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; min-height:0; overflow:hidden; }
         :host(:fullscreen) .stage img, :host(:fullscreen) .stage video { width:100%; height:100%; object-fit:contain; }
+        /* In-window fullscreen — fixed overlay covering entire browser viewport */
+        :host(.wfs) { position:fixed; inset:0; z-index:9999; display:block; }
+        :host(.wfs) ha-card { display:flex; flex-direction:column; width:100%; height:100%; overflow:hidden; border-radius:0; }
+        :host(.wfs) .stage { aspect-ratio:unset; flex:1; min-height:0; overflow:hidden; }
+        :host(.wfs) .stage img, :host(.wfs) .stage video { width:100%; height:100%; object-fit:contain; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }
@@ -97,7 +104,8 @@ class LymowCameraCard extends HTMLElement {
             <span class="iv-val"></span>
             <button class="iv-btn" data-delta="1">+</button>
           </span>
-          <button class="fs-btn" title="Fullscreen">⛶</button>
+          <button class="fs-btn wfs-btn" title="Expand in window">⤡</button>
+          <button class="fs-btn nfs-btn" title="Fullscreen">⛶</button>
         </div>
         <div class="stage">
           <img class="lan hidden" alt="">
@@ -111,16 +119,29 @@ class LymowCameraCard extends HTMLElement {
       lanStream: root.querySelector("img.lan"),
       video: root.querySelector("video.cloud"),
       status: root.querySelector(".status"),
-      fsBtn: root.querySelector(".fs-btn"),
+      wfsBtn: root.querySelector(".wfs-btn"),
+      nfsBtn: root.querySelector(".nfs-btn"),
       intervalCtrl: root.querySelector(".interval-ctrl"),
       intervalVal: root.querySelector(".iv-val"),
     };
     this._els.title.textContent = this._config.title || "Lymow Camera";
     this._els.seg.forEach((b) => b.addEventListener("click", () => this._select(b.dataset.src)));
-    this._els.fsBtn.addEventListener("click", () => {
-      if (!document.fullscreenElement) this.requestFullscreen().catch(() => {});
-      else document.exitFullscreen().catch(() => {});
+
+    // In-window fullscreen: fixed overlay covering the browser viewport. Works on iOS.
+    this._els.wfsBtn.addEventListener("click", () => this._toggleWindowFS());
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && this.classList.contains("wfs")) this._toggleWindowFS(false);
     });
+
+    // Native OS fullscreen: hidden on iOS/iPadOS where requestFullscreen() is unsupported.
+    if (!document.fullscreenEnabled) {
+      this._els.nfsBtn.classList.add("hidden");
+    } else {
+      this._els.nfsBtn.addEventListener("click", () => {
+        if (!document.fullscreenElement) this.requestFullscreen().catch(() => {});
+        else document.exitFullscreen().catch(() => {});
+      });
+    }
     root.querySelectorAll(".iv-btn").forEach((b) => {
       b.addEventListener("click", () => {
         this._lanWorkers = Math.max(1, Math.min(10, this._lanWorkers + parseInt(b.dataset.delta)));
@@ -129,6 +150,15 @@ class LymowCameraCard extends HTMLElement {
     });
     this._updateIntervalDisplay();
     this._built = true;
+  }
+
+  _toggleWindowFS(force) {
+    const on = force !== undefined ? force : !this.classList.contains("wfs");
+    this.classList.toggle("wfs", on);
+    // Prevent the page behind from scrolling while the overlay is open
+    document.body.style.overflow = on ? "hidden" : "";
+    // Flip icon: ⤡ when normal, ⤢ when expanded (so it acts as a close signal)
+    this._els.wfsBtn.textContent = on ? "⤢" : "⤡";
   }
 
   _setStatus(msg, isErr = false) {
