@@ -27,7 +27,7 @@ class LymowCameraCard extends HTMLElement {
     this._config = config;
     this._source = config.default_source === "cloud" ? "cloud" : "lan";
     this._built = false;
-    this._hlsEid = null;
+    this._lanActive = false;
   }
 
   set hass(hass) {
@@ -71,9 +71,8 @@ class LymowCameraCard extends HTMLElement {
         .stage { position:relative; background:#000; aspect-ratio:4/3; width:100%; overflow:hidden; display:flex; align-items:center; justify-content:center; }
         .stage ha-camera-stream, .stage video { width:100%; height:100%; object-fit:contain; background:#000; }
         :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; overflow:hidden; }
-        :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; min-height:0; }
-        :host(:fullscreen) .stage video { object-fit:contain; max-width:100%; max-height:100%; width:auto; height:auto; }
-        :host(:fullscreen) .stage ha-camera-stream { width:100%; height:100%; }
+        :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; min-height:0; overflow:hidden; }
+        :host(:fullscreen) .stage ha-camera-stream, :host(:fullscreen) .stage video { width:100%; height:100%; object-fit:contain; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }
@@ -143,22 +142,32 @@ class LymowCameraCard extends HTMLElement {
     const st = eid && this._hass && this._hass.states[eid];
     if (!st) {
       this._setStatus(eid ? `${eid} unavailable` : "Set camera_entity for LAN view", true);
-      this._stopLan();
       return;
     }
     if (st.state === "unavailable") {
       this._setStatus("Robot offline (LAN) — try Cloud", true);
-      this._stopLan();
       return;
     }
+    if (this._lanActive) return; // already streaming
+    this._lanActive = true;
     this._setStatus("");
-    this._els.lanStream.hass = this._hass;
-    this._els.lanStream.stateObj = st;
+    // Recreate ha-camera-stream to force a fresh WebRTC connection each time.
+    // Reusing the element makes ha-camera-stream reconnect mid-GOP → green frames.
+    const stage = this._els.lanStream.parentNode;
+    const fresh = document.createElement("ha-camera-stream");
+    fresh.classList.add("lan");
+    stage.insertBefore(fresh, this._els.lanStream);
+    this._els.lanStream.remove();
+    this._els.lanStream = fresh;
+    fresh.hass = this._hass;
+    fresh.stateObj = st;
   }
 
   _stopLan() {
+    this._lanActive = false;
     if (this._els && this._els.lanStream) {
       this._els.lanStream.stateObj = null;
+      this._els.lanStream.hass = null;
     }
   }
 
