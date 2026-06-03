@@ -9,9 +9,9 @@
  *   default_source: lan | cloud             # optional (default: lan)
  *
  * Two genuinely separate transport paths:
- *   LAN   — <ha-camera-stream> which HA tries in order: WebRTC (go2rtc) →
- *           HLS (stream component) → MJPEG fallback. Smooth video when the
- *           stream component is active; no ffmpeg-reconnect-per-frame latency.
+ *   LAN   — ha-hls-player: HA stream component keeps a persistent RTSP connection
+ *           and serves HLS segments. Smooth ~2-4s latency, no WebRTC green-frame
+ *           artifacts from go2rtc H.264 codec negotiation issues.
  *   Cloud — in-browser AWS KVS WebRTC. The browser talks straight to AWS and
  *           the robot streams over its own internet link (works on 4G, away
  *           from home). The integration only hands us the signed session.
@@ -27,6 +27,7 @@ class LymowCameraCard extends HTMLElement {
     this._config = config;
     this._source = config.default_source === "cloud" ? "cloud" : "lan";
     this._built = false;
+    this._hlsEid = null;
   }
 
   set hass(hass) {
@@ -65,8 +66,13 @@ class LymowCameraCard extends HTMLElement {
         .seg { display:inline-flex; border:1px solid var(--divider-color,#e0e0e0); border-radius:18px; overflow:hidden; }
         .seg button { border:0; background:transparent; padding:5px 14px; cursor:pointer; font:inherit; color:var(--primary-text-color); }
         .seg button.on { background:var(--primary-color,#03a9f4); color:#fff; }
+        .fs-btn { border:0; background:transparent; padding:4px 8px; cursor:pointer; color:var(--primary-text-color); font-size:18px; border-radius:4px; }
+        .fs-btn:hover { background:var(--secondary-background-color); }
         .stage { position:relative; background:#000; aspect-ratio:4/3; display:flex; align-items:center; justify-content:center; }
-        .stage video, .stage ha-camera-stream { width:100%; height:100%; object-fit:contain; background:#000; }
+        .stage ha-hls-player, .stage video { width:100%; height:100%; object-fit:contain; background:#000; }
+        :host(:fullscreen) ha-card { width:100vw; height:100vh; }
+        :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; }
+        :host(:fullscreen) ha-card { display:flex; flex-direction:column; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }
@@ -78,22 +84,32 @@ class LymowCameraCard extends HTMLElement {
             <button data-src="lan">LAN</button>
             <button data-src="cloud">Cloud</button>
           </span>
+          <button class="fs-btn" title="Fullscreen">⛶</button>
         </div>
         <div class="stage">
-          <ha-camera-stream class="lan hidden"></ha-camera-stream>
+          <ha-hls-player class="lan hidden" autoplay playsinline muted></ha-hls-player>
           <video class="cloud hidden" autoplay playsinline muted></video>
-          <div class="status"></div>
+          <div class="status hidden"></div>
         </div>
       </ha-card>`;
     this._els = {
       title: root.querySelector(".title"),
       seg: root.querySelectorAll(".seg button"),
-      lanStream: root.querySelector("ha-camera-stream.lan"),
+      lanStream: root.querySelector("ha-hls-player.lan"),
       video: root.querySelector("video.cloud"),
       status: root.querySelector(".status"),
+      stage: root.querySelector(".stage"),
+      fsBtn: root.querySelector(".fs-btn"),
     };
     this._els.title.textContent = this._config.title || "Lymow Camera";
     this._els.seg.forEach((b) => b.addEventListener("click", () => this._select(b.dataset.src)));
+    this._els.fsBtn.addEventListener("click", () => {
+      if (!document.fullscreenElement) {
+        this.requestFullscreen().catch(() => {});
+      } else {
+        document.exitFullscreen().catch(() => {});
+      }
+    });
     this._built = true;
   }
 
@@ -119,29 +135,44 @@ class LymowCameraCard extends HTMLElement {
     }
   }
 
-  // ---- LAN: ha-camera-stream (WebRTC → HLS → MJPEG, chosen by HA) -----------
+  // ---- LAN: ha-hls-player (HA stream component HLS — no WebRTC green artifacts) ----
   _renderLan() {
     const eid = this._config.camera_entity;
     const st = eid && this._hass && this._hass.states[eid];
     if (!st) {
       this._setStatus(eid ? `${eid} unavailable` : "Set camera_entity for LAN view", true);
-      this._stopLan();
       return;
     }
     if (st.state === "unavailable") {
       this._setStatus("Robot offline (LAN) — try Cloud", true);
-      this._stopLan();
       return;
     }
-    this._setStatus("");
-    // ha-camera-stream picks the best available path automatically
-    this._els.lanStream.hass = this._hass;
-    this._els.lanStream.stateObj = st;
+    if (this._hlsEid === eid) return; // already streaming this entity
+    this._hlsEid = eid;
+    this._setStatus("Starting stream…");
+    this._hass
+      .callWS({ type: "camera/stream", entity_id: eid, format: "hls" })
+      .then((result) => {
+        const player = this._els.lanStream;
+        player.hass = this._hass;
+        player.url = result.url;
+        player.autoplay = true;
+        player.muted = true;
+        player.controls = false;
+        player.playsinline = true;
+        this._setStatus("");
+      })
+      .catch((e) => {
+        this._setStatus(`Stream error: ${e.message || e}`, true);
+        this._hlsEid = null;
+      });
   }
 
   _stopLan() {
+    this._hlsEid = null;
     if (this._els && this._els.lanStream) {
-      this._els.lanStream.stateObj = null;
+      this._els.lanStream.hass = null;
+      this._els.lanStream.url = null;
     }
   }
 
@@ -202,27 +233,15 @@ class LymowCameraCard extends HTMLElement {
     ws.onmessage = async (ev) => {
       if (!ev.data || token !== this._cloudToken) return;
       let msg;
-      try {
-        msg = JSON.parse(ev.data);
-      } catch {
-        return;
-      }
+      try { msg = JSON.parse(ev.data); } catch { return; }
       if (!msg.messagePayload) return;
       let payload;
-      try {
-        payload = JSON.parse(atob(msg.messagePayload));
-      } catch {
-        return;
-      }
+      try { payload = JSON.parse(atob(msg.messagePayload)); } catch { return; }
       const kind = msg.messageType || msg.action;
       if (kind === "SDP_ANSWER") {
         await pc.setRemoteDescription({ type: "answer", sdp: payload.sdp });
       } else if (kind === "ICE_CANDIDATE") {
-        try {
-          await pc.addIceCandidate(payload);
-        } catch {
-          /* late/duplicate candidate */
-        }
+        try { await pc.addIceCandidate(payload); } catch { /* late/duplicate */ }
       }
     };
     ws.onerror = () => {
@@ -232,12 +251,10 @@ class LymowCameraCard extends HTMLElement {
       try {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        ws.send(
-          JSON.stringify({
-            action: "SDP_OFFER",
-            messagePayload: btoa(JSON.stringify({ type: "offer", sdp: pc.localDescription.sdp })),
-          })
-        );
+        ws.send(JSON.stringify({
+          action: "SDP_OFFER",
+          messagePayload: btoa(JSON.stringify({ type: "offer", sdp: pc.localDescription.sdp })),
+        }));
       } catch (e) {
         this._setStatus(`Offer error: ${e.message || e}`, true);
       }
@@ -261,37 +278,24 @@ class LymowCameraCard extends HTMLElement {
 
   _stopCloud() {
     this._cloudToken = (this._cloudToken | 0) + 1;
-    if (this._frameTimer) {
-      clearTimeout(this._frameTimer);
-      this._frameTimer = null;
-    }
-    if (this._ws) {
-      try {
-        this._ws.close();
-      } catch {
-        /* already closed */
-      }
-      this._ws = null;
-    }
-    if (this._pc) {
-      try {
-        this._pc.close();
-      } catch {
-        /* already closed */
-      }
-      this._pc = null;
-    }
+    if (this._frameTimer) { clearTimeout(this._frameTimer); this._frameTimer = null; }
+    if (this._ws) { try { this._ws.close(); } catch { /* already closed */ } this._ws = null; }
+    if (this._pc) { try { this._pc.close(); } catch { /* already closed */ } this._pc = null; }
     if (this._els && this._els.video) this._els.video.srcObject = null;
   }
 }
 
-customElements.define("lymow-camera-card", LymowCameraCard);
+if (!customElements.get("lymow-camera-card")) {
+  customElements.define("lymow-camera-card", LymowCameraCard);
+}
 
 window.customCards = window.customCards || [];
-window.customCards.push({
-  type: "lymow-camera-card",
-  name: "Lymow Camera",
-  description: "Onboard camera with a LAN (WebRTC/HLS/MJPEG via ha-camera-stream) / Cloud (KVS WebRTC) source switch.",
-});
+if (!window.customCards.find((c) => c.type === "lymow-camera-card")) {
+  window.customCards.push({
+    type: "lymow-camera-card",
+    name: "Lymow Camera",
+    description: "Onboard camera with LAN (HLS via HA stream) / Cloud (KVS WebRTC) source switch.",
+  });
+}
 
 console.info("%c LYMOW-CAMERA-CARD ", "background:#43a047;color:#fff;border-radius:3px");
