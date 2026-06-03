@@ -700,6 +700,21 @@ async def test_async_sync_timezone_publishes_offset_on_field_21() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_on_mqtt_state_fills_is_open_led_false_when_dock_on_error_known() -> None:
+    """Proto3 zero-default fill-in: once dockOnError is known, absent isOpenLed = False."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"robotConfig": {}}}
+    # First patch: only dockOnError arrives (LED is off but robot omits f7)
+    coord.on_mqtt_state(THING, {"robotConfig": {"dockOnError": True}})
+    assert coord.data[THING]["robotConfig"]["isOpenLed"] is False
+
+    # Once isOpenLed is set to True (user turns LED on), another dockOnError
+    # patch must NOT overwrite the known True state.
+    coord.data[THING]["robotConfig"]["isOpenLed"] = True
+    coord.on_mqtt_state(THING, {"robotConfig": {"dockOnError": True}})
+    assert coord.data[THING]["robotConfig"]["isOpenLed"] is True
+
+
 def test_on_mqtt_online_sets_is_online_true() -> None:
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {}}

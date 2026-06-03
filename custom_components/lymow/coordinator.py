@@ -302,6 +302,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             existing = self.data[thing_name]
             merged_patch_for_data = self._merge_nested_patch(existing, patch)
             merged = {**existing, **merged_patch_for_data}
+            # Proto3 zero-default fill-in: the robot omits isOpenLed when the
+            # LED is off. Once dockOnError is known (robot has replied to a
+            # config query), treat absent isOpenLed as False. Safe: once set,
+            # isOpenLed stays in data and this branch never fires again.
+            rc = merged.get("robotConfig", {})
+            if rc.get("dockOnError") is not None and "isOpenLed" not in rc:
+                merged = {**merged, "robotConfig": {**rc, "isOpenLed": False}}
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
