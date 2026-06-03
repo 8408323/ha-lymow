@@ -9,9 +9,9 @@
  *   default_source: lan | cloud             # optional (default: lan)
  *
  * Two genuinely separate transport paths:
- *   LAN   — ha-hls-player: HA stream component keeps a persistent RTSP connection
- *           and serves HLS segments. Smooth ~2-4s latency, no WebRTC green-frame
- *           artifacts from go2rtc H.264 codec negotiation issues.
+ *   LAN   — ha-camera-stream picks the best path based on frontend_stream_type.
+ *           The camera entity sets StreamType.HLS, bypassing go2rtc WebRTC
+ *           (which produces green H.264 artifacts). Result: clean HLS stream.
  *   Cloud — in-browser AWS KVS WebRTC. The browser talks straight to AWS and
  *           the robot streams over its own internet link (works on 4G, away
  *           from home). The integration only hands us the signed session.
@@ -27,7 +27,6 @@ class LymowCameraCard extends HTMLElement {
     this._config = config;
     this._source = config.default_source === "cloud" ? "cloud" : "lan";
     this._built = false;
-    this._hlsEid = null;
   }
 
   set hass(hass) {
@@ -66,13 +65,12 @@ class LymowCameraCard extends HTMLElement {
         .seg { display:inline-flex; border:1px solid var(--divider-color,#e0e0e0); border-radius:18px; overflow:hidden; }
         .seg button { border:0; background:transparent; padding:5px 14px; cursor:pointer; font:inherit; color:var(--primary-text-color); }
         .seg button.on { background:var(--primary-color,#03a9f4); color:#fff; }
-        .fs-btn { border:0; background:transparent; padding:4px 8px; cursor:pointer; color:var(--primary-text-color); font-size:18px; border-radius:4px; }
+        .fs-btn { border:0; background:transparent; padding:4px 8px; cursor:pointer; color:var(--primary-text-color); font-size:18px; border-radius:4px; line-height:1; }
         .fs-btn:hover { background:var(--secondary-background-color); }
         .stage { position:relative; background:#000; aspect-ratio:4/3; display:flex; align-items:center; justify-content:center; }
-        .stage ha-hls-player, .stage video { width:100%; height:100%; object-fit:contain; background:#000; }
-        :host(:fullscreen) ha-card { width:100vw; height:100vh; }
+        .stage ha-camera-stream, .stage video { width:100%; height:100%; object-fit:contain; background:#000; }
+        :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; }
         :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; }
-        :host(:fullscreen) ha-card { display:flex; flex-direction:column; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }
@@ -87,7 +85,7 @@ class LymowCameraCard extends HTMLElement {
           <button class="fs-btn" title="Fullscreen">⛶</button>
         </div>
         <div class="stage">
-          <ha-hls-player class="lan hidden" autoplay playsinline muted></ha-hls-player>
+          <ha-camera-stream class="lan hidden"></ha-camera-stream>
           <video class="cloud hidden" autoplay playsinline muted></video>
           <div class="status hidden"></div>
         </div>
@@ -95,10 +93,9 @@ class LymowCameraCard extends HTMLElement {
     this._els = {
       title: root.querySelector(".title"),
       seg: root.querySelectorAll(".seg button"),
-      lanStream: root.querySelector("ha-hls-player.lan"),
+      lanStream: root.querySelector("ha-camera-stream.lan"),
       video: root.querySelector("video.cloud"),
       status: root.querySelector(".status"),
-      stage: root.querySelector(".stage"),
       fsBtn: root.querySelector(".fs-btn"),
     };
     this._els.title.textContent = this._config.title || "Lymow Camera";
@@ -135,44 +132,28 @@ class LymowCameraCard extends HTMLElement {
     }
   }
 
-  // ---- LAN: ha-hls-player (HA stream component HLS — no WebRTC green artifacts) ----
+  // ---- LAN: ha-camera-stream (routes to HLS via camera entity's StreamType.HLS) ----
   _renderLan() {
     const eid = this._config.camera_entity;
     const st = eid && this._hass && this._hass.states[eid];
     if (!st) {
       this._setStatus(eid ? `${eid} unavailable` : "Set camera_entity for LAN view", true);
+      this._stopLan();
       return;
     }
     if (st.state === "unavailable") {
       this._setStatus("Robot offline (LAN) — try Cloud", true);
+      this._stopLan();
       return;
     }
-    if (this._hlsEid === eid) return; // already streaming this entity
-    this._hlsEid = eid;
-    this._setStatus("Starting stream…");
-    this._hass
-      .callWS({ type: "camera/stream", entity_id: eid, format: "hls" })
-      .then((result) => {
-        const player = this._els.lanStream;
-        player.hass = this._hass;
-        player.url = result.url;
-        player.autoplay = true;
-        player.muted = true;
-        player.controls = false;
-        player.playsinline = true;
-        this._setStatus("");
-      })
-      .catch((e) => {
-        this._setStatus(`Stream error: ${e.message || e}`, true);
-        this._hlsEid = null;
-      });
+    this._setStatus("");
+    this._els.lanStream.hass = this._hass;
+    this._els.lanStream.stateObj = st;
   }
 
   _stopLan() {
-    this._hlsEid = null;
     if (this._els && this._els.lanStream) {
-      this._els.lanStream.hass = null;
-      this._els.lanStream.url = null;
+      this._els.lanStream.stateObj = null;
     }
   }
 
