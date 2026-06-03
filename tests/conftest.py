@@ -439,8 +439,13 @@ except ImportError:
         ON_OFF = 1
         STREAM = 2
 
+    class _StreamType(str):
+        HLS = "hls"
+        WEB_RTC = "web_rtc"
+
     _ha_camera.Camera = _Camera  # type: ignore[attr-defined]
     _ha_camera.CameraEntityFeature = _CameraEntityFeature  # type: ignore[attr-defined]
+    _ha_camera.StreamType = _StreamType  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.camera", _ha_camera)
 
     # ── homeassistant.components.ffmpeg ───────────────────────────────────────

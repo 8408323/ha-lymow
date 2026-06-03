@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.components.camera import Camera, CameraEntityFeature, StreamType
 from homeassistant.components.ffmpeg import async_get_image
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -54,6 +54,10 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
     _attr_has_entity_name = True
     _attr_supported_features = CameraEntityFeature.STREAM
     _attr_icon = "mdi:cctv"
+    # Force HLS instead of WebRTC so ha-camera-stream skips go2rtc (which
+    # produces green H.264 artifacts due to codec negotiation mismatch with
+    # the robot's RTSP stream) and uses HA's stream component HLS path.
+    _attr_frontend_stream_type = StreamType.HLS
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         CoordinatorEntity.__init__(self, coordinator)
