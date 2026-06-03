@@ -707,6 +707,8 @@ def test_on_mqtt_state_fills_is_open_led_false_when_dock_on_error_known() -> Non
     # First patch: only dockOnError arrives (LED is off but robot omits f7)
     coord.on_mqtt_state(THING, {"robotConfig": {"dockOnError": True}})
     assert coord.data[THING]["robotConfig"]["isOpenLed"] is False
+    # Fill-in must also persist in _mqtt_state so the 30s REST poll doesn't revert
+    assert coord._mqtt_state[THING]["robotConfig"]["isOpenLed"] is False
 
     # Once isOpenLed is set to True (user turns LED on), another dockOnError
     # patch must NOT overwrite the known True state.
