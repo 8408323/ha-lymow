@@ -68,11 +68,12 @@ class LymowCameraCard extends HTMLElement {
         .seg button.on { background:var(--primary-color,#03a9f4); color:#fff; }
         .fs-btn { border:0; background:transparent; padding:4px 8px; cursor:pointer; color:var(--primary-text-color); font-size:18px; border-radius:4px; line-height:1; }
         .fs-btn:hover { background:var(--secondary-background-color); }
-        .stage { position:relative; background:#000; aspect-ratio:4/3; display:flex; align-items:center; justify-content:center; }
+        .stage { position:relative; background:#000; aspect-ratio:4/3; width:100%; overflow:hidden; display:flex; align-items:center; justify-content:center; }
         .stage ha-camera-stream, .stage video { width:100%; height:100%; object-fit:contain; background:#000; }
-        :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; }
-        :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; }
-        :host(:fullscreen) .stage ha-camera-stream, :host(:fullscreen) .stage video { object-fit:contain; width:100%; height:100%; }
+        :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; overflow:hidden; }
+        :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; min-height:0; }
+        :host(:fullscreen) .stage video { object-fit:contain; max-width:100%; max-height:100%; width:auto; height:auto; }
+        :host(:fullscreen) .stage ha-camera-stream { width:100%; height:100%; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }

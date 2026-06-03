@@ -2514,7 +2514,9 @@ class LymowMapCard extends HTMLElement {
   }
 }
 
-customElements.define("lymow-map-card", LymowMapCard);
+if (!customElements.get("lymow-map-card")) {
+  customElements.define("lymow-map-card", LymowMapCard);
+}
 
 window.customCards = window.customCards || [];
 window.customCards.push({
