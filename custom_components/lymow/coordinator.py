@@ -309,6 +309,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             rc = merged.get("robotConfig", {})
             if rc.get("dockOnError") is not None and "isOpenLed" not in rc:
                 merged = {**merged, "robotConfig": {**rc, "isOpenLed": False}}
+                # Also write into _mqtt_state so the 30s REST poll rebuilds
+                # with isOpenLed=False rather than reverting to unknown.
+                self._mqtt_state.setdefault(thing_name, {}).setdefault(
+                    "robotConfig", {}
+                )["isOpenLed"] = False
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
