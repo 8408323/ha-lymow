@@ -408,6 +408,17 @@ def test_vehicle_led_switch_reads_state_from_robot_config() -> None:
     assert off.is_on is False
 
 
+def test_vehicle_led_switch_off_when_dock_on_error_known_and_led_absent() -> None:
+    # dockOnError present, isOpenLed absent → proto3 default → LED is off
+    e = VehicleLedSwitch(_make_robot_config_coord({"dockOnError": True}), DEVICE)
+    assert e.is_on is False
+
+
+def test_vehicle_led_switch_unknown_when_no_robot_config() -> None:
+    e = VehicleLedSwitch(_make_robot_config_coord({}), DEVICE)
+    assert e.is_on is None
+
+
 async def test_vehicle_led_switch_writes_via_signal_not_isOpenLed() -> None:
     """Match the app's switchVehicleLed: write signal=10 (on) / 11 (off), not isOpenLed."""
     from lymow.protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT, SIGNAL_TURN_ON_VEHICLE_LIGHT

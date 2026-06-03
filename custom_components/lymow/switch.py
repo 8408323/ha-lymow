@@ -247,6 +247,18 @@ class VehicleLedSwitch(_RobotConfigBoolSwitch):
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Vehicle LED", "mdi:led-on")
 
+    @property
+    def is_on(self) -> bool | None:
+        rc = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
+        v = rc.get("isOpenLed")
+        if v is not None:
+            return bool(v)
+        # Proto3 zero-default: if dockOnError is known the robot replied to the
+        # config query, and absent isOpenLed means LED is off.
+        if rc.get("dockOnError") is not None:
+            return False
+        return None
+
     async def async_turn_on(self, **kwargs: Any) -> None:
         from .protocol import SIGNAL_TURN_ON_VEHICLE_LIGHT
 
