@@ -24,14 +24,20 @@ const FRAME_TIMEOUT_MS = 25000;
 
 class LymowCameraCard extends HTMLElement {
   setConfig(config) {
-    if (!config || !config.mower_entity) {
-      throw new Error("lymow-camera-card: 'mower_entity' is required");
+    // Accept both 'mower'/'camera' (short) and 'mower_entity'/'camera_entity' (long)
+    const cfg = {
+      ...config,
+      mower_entity: config.mower_entity || config.mower,
+      camera_entity: config.camera_entity || config.camera,
+    };
+    if (!cfg.mower_entity) {
+      throw new Error("lymow-camera-card: 'mower_entity' (or 'mower') is required");
     }
-    this._config = config;
-    this._source = config.default_source === "cloud" ? "cloud" : "lan";
+    this._config = cfg;
+    this._source = cfg.default_source === "cloud" ? "cloud" : "lan";
     this._built = false;
     this._lanActive = false;
-    this._lanWorkers = Math.max(1, Math.min(10, config.lan_workers ?? 3));
+    this._lanWorkers = Math.max(1, Math.min(10, cfg.lan_workers ?? 3));
   }
 
   set hass(hass) {
