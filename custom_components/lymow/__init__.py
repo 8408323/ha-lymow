@@ -54,6 +54,7 @@ _DASHBOARD_ENTITY_KEYS: dict[str, tuple[str, str]] = {
     "last_mow_duration": ("sensor", "_last_clean_duration"),
     "total_mow_sessions": ("sensor", "_clean_history_count"),
     "total_mowed_area": ("sensor", "_total_area_m2"),
+    "camera": ("camera", "_camera"),
 }
 
 
@@ -71,6 +72,33 @@ PLATFORMS = [
 ]
 
 
+async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
+    """Register card JS files as Lovelace resources if not already present.
+
+    add_extra_js_url() loads the script but custom element registration is
+    unreliable via that path on some HA setups. Lovelace's own resource loader
+    is more reliable, so we maintain both.  This is idempotent: existing entries
+    with the same URL are left untouched.
+    """
+    try:
+        from homeassistant.components.lovelace.resources import ResourceStorageCollection
+
+        lovelace = hass.data.get("lovelace")
+        if lovelace is None:
+            return
+        resources: ResourceStorageCollection = lovelace.get("resources")
+        if resources is None:
+            return
+        await resources.async_load()
+        existing = {item["url"] for item in resources.async_items()}
+        for js in ("lymow-map-card.js", "lymow-camera-card.js", "lymow-drive-card.js"):
+            url = _card_url(js)
+            if url not in existing:
+                await resources.async_create_item({"res_type": "module", "url": url})
+    except Exception:  # noqa: BLE001
+        pass  # Non-fatal; add_extra_js_url is the fallback
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register www/ static path and inject the Lovelace card once per HA run.
     # add_extra_js_url() makes HA load the module on every Lovelace page so
@@ -81,8 +109,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await hass.http.async_register_static_paths(
                 [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
             )
-            add_extra_js_url(hass, _card_url())
-            add_extra_js_url(hass, _card_url("lymow-camera-card.js"))
+            # add_extra_js_url registers the script but custom element registration
+            # is unreliable via that path. Register as Lovelace resources too so
+            # Lovelace's own resource loader (which works reliably) handles them.
+            for js in ("lymow-map-card.js", "lymow-camera-card.js", "lymow-drive-card.js"):
+                add_extra_js_url(hass, _card_url(js))
+            await _ensure_lovelace_resources(hass)
         hass.data[_WWW_REGISTERED_KEY] = True
 
     session = async_get_clientsession(hass)
@@ -240,9 +272,22 @@ def _build_dashboard_config(entities: dict[str, str]) -> ConfigType:
     if conn := pick("connectivity", "firmware", "battery"):
         sensor_cards.append({"type": "entities", "title": "Connectivity", "entities": conn})
 
+    drive_cards: list[ConfigType] = []
+    if "mower" in entities:
+        drive_card: ConfigType = {
+            "type": "custom:lymow-drive-card",
+            "mower_entity": entities["mower"],
+            "title": "Drive",
+        }
+        if "camera" in entities:
+            drive_card["camera_entity"] = entities["camera"]
+        drive_cards.append(drive_card)
+
     views: list[ConfigType] = []
     if map_cards:
         views.append({"title": "Map", "path": "map", "icon": "mdi:map", "cards": map_cards})
+    if drive_cards:
+        views.append({"title": "Drive", "path": "drive", "icon": "mdi:gamepad-variant", "cards": drive_cards})
     if sensor_cards:
         views.append({"title": "Sensors", "path": "sensors", "icon": "mdi:gauge", "cards": sensor_cards})
     return {"views": views}
