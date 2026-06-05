@@ -30,7 +30,7 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 from typing import Any
 
 from homeassistant.components.camera import Camera, CameraEntityFeature, StreamType
-from homeassistant.components.ffmpeg import async_get_image
+from homeassistant.components.ffmpeg import async_get_image, get_ffmpeg_manager
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -152,9 +152,12 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
 
         # Generous analyzeduration/probesize so FFmpeg waits for the first
         # IDR+SPS+PPS that LIVE555 sends inline before the stream starts.
+        # Use HA's configured ffmpeg binary so we find it even when "ffmpeg" is
+        # not on the system PATH (common in HA OS / Supervised installs).
+        ffmpeg_bin = get_ffmpeg_manager(self.hass).binary
         # -c:v copy remuxes without re-encoding: minimal CPU, no quality loss.
         self._proxy_proc = await asyncio.create_subprocess_exec(
-            "ffmpeg",
+            ffmpeg_bin,
             "-loglevel", "warning",
             "-rtsp_transport", "tcp",
             "-analyzeduration", "5000000",
@@ -203,6 +206,20 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         if self._hls_port is not None and self._hls_dir is not None:
             return f"http://127.0.0.1:{self._hls_port}/stream.m3u8"
         return self._stream_url()
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        # Explicitly include frontend_stream_type so ha-camera-stream in the
+        # Lovelace card chooses ha-hls-player instead of ha-web-rtc-player.
+        # HA's Camera.state_attributes should do this via _attr_frontend_stream_type
+        # but some HA versions / go2rtc setups override it back to web_rtc.
+        attrs: dict = {"frontend_stream_type": "hls"}
+        url = self._stream_url()
+        if url:
+            attrs["rtsp_url"] = url
+        if self._hls_port is not None and self._hls_dir is not None:
+            attrs["hls_proxy_url"] = f"http://127.0.0.1:{self._hls_port}/stream.m3u8"
+        return attrs
 
     async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
         # Fast path: extract a frame from the latest HLS segment already on
