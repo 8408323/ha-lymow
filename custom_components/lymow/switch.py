@@ -415,11 +415,9 @@ class RechargeResumeSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         return (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("rrConfig") or {}
 
     @property
-    def is_on(self) -> bool | None:
+    def is_on(self) -> bool:
         value = self._rr_config.get("enable")
-        if not isinstance(value, bool):
-            return None
-        return value
+        return bool(value) if isinstance(value, bool) else False
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

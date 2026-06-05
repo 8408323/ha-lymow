@@ -141,7 +141,7 @@ class LymowSettingsCard extends HTMLElement {
         <span class="label"></span>
         <button class="apply-btn" id="hl-save">Save</button>
       </div>
-      <div class="status" id="hl-status"></div>
+      <div class="status" id="hl-status">Schedule set in the Lymow app is not readable — save here once to sync.</div>
     </div>`;
   }
 
@@ -244,7 +244,7 @@ class LymowSettingsCard extends HTMLElement {
         </div>
         <button class="apply-btn" id="pin-save">Set PIN</button>
       </div>
-      <div class="status" id="pin-status">PIN is write-only — current PIN is not shown by the robot.</div>
+      <div class="status" id="pin-status">Write-only — the robot does not return the current PIN. Set a new one to update it.</div>
     </div>`;
   }
 
@@ -468,9 +468,27 @@ class LymowSettingsCard extends HTMLElement {
     if (!this._hass || !this._root) return;
     const sections = this._config.sections;
     const mowerSt = this._hass.states[this._config.mower_entity];
-    const devName = mowerSt?.attributes?.device_name || "";
+    const attrs = mowerSt?.attributes || {};
+
+    // Device name
     const devInput = this._root.getElementById("dev-name");
-    if (devInput && devName && !devInput.value) devInput.value = devName;
+    if (devInput && attrs.device_name && !devInput.value) devInput.value = attrs.device_name;
+
+    // Headlight schedule — pre-fill from mower entity attributes (populated from robotConfig)
+    if (sections.includes("headlight")) {
+      const tog = this._root.getElementById("hl-enable");
+      const startInp = this._root.getElementById("hl-start");
+      const endInp = this._root.getElementById("hl-end");
+      if (tog && !this._hlPopulated) {
+        const enabled = attrs.headlight_enabled === true;
+        tog.checked = enabled;
+        tog.dispatchEvent(new Event("change"));
+        if (enabled && attrs.headlight_start) startInp.value = attrs.headlight_start;
+        if (enabled && attrs.headlight_end) endInp.value = attrs.headlight_end;
+        if (attrs.headlight_enabled !== undefined) this._hlPopulated = true;
+      }
+    }
+
     if (sections.includes("zone_config") || sections.includes("start_zone")) {
       this._populateZoneSelectors();
     }
