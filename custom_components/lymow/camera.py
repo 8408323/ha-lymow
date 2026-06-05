@@ -191,10 +191,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
                 "-rtsp_transport", "tcp",
                 "-analyzeduration", "5000000",
                 "-probesize", "5000000",
-                # genpts: regenerate timestamps so LIVE555's non-monotonic
-                # timestamps don't cause segment stall / random playback lags.
-                "-fflags", "+genpts",
-                "-i", rtsp_url,
+                    "-i", rtsp_url,
                 "-c:v", "copy",
                 "-f", "hls",
                 "-hls_time", str(self._hls_segment_secs),

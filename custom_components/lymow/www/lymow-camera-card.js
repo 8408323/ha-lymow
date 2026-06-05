@@ -41,7 +41,7 @@ class LymowCameraCard extends HTMLElement {
     this._hass = hass;
     if (!this._built) return;
     if (this._source === "lan") {
-      this._renderLan();
+      if (!this._restarting) this._renderLan(); // don't interfere during proxy restart
       if (this._lanActive && this._lanMode === "stream" && this._els?.lanStream) {
         const eid = this._config.camera_entity;
         const st = eid && hass.states[eid];
@@ -260,28 +260,16 @@ class LymowCameraCard extends HTMLElement {
     const eid = this._config.camera_entity;
     if (!eid || !this._hass) return;
 
-    // Stop current stream and show countdown while proxy restarts
+    // Block hass-setter from restarting the stream mid-wait
+    this._restarting = true;
     this._stopLan();
-    this._lanActive = false;
-
-    const RESTART_SECS = 8;
-    let remaining = RESTART_SECS;
-    this._setStatus(`Restarting… ${remaining}s`);
-    const tick = setInterval(() => {
-      remaining--;
-      if (remaining > 0) {
-        this._setStatus(`Restarting… ${remaining}s`);
-      } else {
-        clearInterval(tick);
-      }
-    }, 1000);
+    this._setStatus("Restarting stream…");
 
     this._hass.callService("lymow", "set_hls_quality", { entity_id: eid, segment_seconds: secs })
       .then(() => {
-        // Wait the full countdown, then restart with a fresh stream element
-        const delay = Math.max(0, remaining * 1000 + 500);
+        // Wait for proxy to stop, restart and write its first segments (~8s)
         setTimeout(() => {
-          clearInterval(tick);
+          this._restarting = false;
           this._setStatus("");
           this._lanActive = false;
           if (this._source === "lan" && this._lanMode === "stream") {
@@ -289,10 +277,10 @@ class LymowCameraCard extends HTMLElement {
             this._els.lanStream.classList.remove("hidden");
             this._renderLan();
           }
-        }, delay + 1000); // +1s extra buffer
+        }, 9000);
       })
       .catch(e => {
-        clearInterval(tick);
+        this._restarting = false;
         this._setStatus(String(e), true);
       });
   }
