@@ -1461,7 +1461,7 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         map_data = self._device_data.get("mapData") or {}
-        return {
+        attrs: dict[str, Any] = {
             "zones": [
                 {
                     "hash_id": z.get("hashId", ""),
@@ -1471,3 +1471,21 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
                 for z in map_data.get("goZones", [])
             ]
         }
+        rc = self._device_data.get("robotConfig") or {}
+        hl_start = rc.get("headlightStart")
+        hl_end = rc.get("headlightEnd")
+        # Only emit headlight state when HA has the data — the robot's config GET
+        # response omits these fields, so absent ≠ disabled.
+        if hl_start and hl_end:
+            is_enabled = (
+                hl_start.get("hour", 0) != 0 or hl_start.get("minute", 0) != 0
+                or hl_end.get("hour", 0) != 0 or hl_end.get("minute", 0) != 0
+            )
+            attrs["headlight_enabled"] = is_enabled
+            if is_enabled:
+                attrs["headlight_start"] = f"{hl_start['hour']:02d}:{hl_start['minute']:02d}"
+                attrs["headlight_end"] = f"{hl_end['hour']:02d}:{hl_end['minute']:02d}"
+        rr = rc.get("rrConfig") or {}
+        if rr:
+            attrs["rr_enabled"] = bool(rr.get("enable", False))
+        return attrs
