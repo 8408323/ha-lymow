@@ -11,7 +11,7 @@
  *   set_device_name, set_pin, bind_rtk, set_geofence
  */
 
-const ALL_SECTIONS = ["headlight", "run_time", "device", "pin", "rtk", "geofence"];
+const ALL_SECTIONS = ["headlight", "run_time", "device", "pin", "rtk", "wifi", "geofence"];
 
 class LymowSettingsCard extends HTMLElement {
   setConfig(config) {
@@ -82,6 +82,7 @@ class LymowSettingsCard extends HTMLElement {
         ${sections.includes("device") ? this._tplDevice() : ""}
         ${sections.includes("pin") ? this._tplPin() : ""}
         ${sections.includes("rtk") ? this._tplRtk() : ""}
+        ${sections.includes("wifi") ? this._tplWifi() : ""}
         ${sections.includes("geofence") ? this._tplGeofence() : ""}
       </ha-card>`;
 
@@ -92,6 +93,7 @@ class LymowSettingsCard extends HTMLElement {
     if (sections.includes("device")) this._wireDevice();
     if (sections.includes("pin")) this._wirePin();
     if (sections.includes("rtk")) this._wireRtk();
+    if (sections.includes("wifi")) this._wireWifi();
     if (sections.includes("geofence")) this._wireGeofence();
 
     this._built = true;
@@ -186,6 +188,28 @@ class LymowSettingsCard extends HTMLElement {
     </div>`;
   }
 
+  _tplWifi() {
+    return `<div class="section" id="sec-wifi">
+      <div class="sec-title"><span class="sec-icon">📶</span> Wi-Fi provisioning</div>
+      <div class="field-row">
+        <span class="label">SSID</span>
+        <input type="text" id="wifi-ssid" placeholder="Network name">
+      </div>
+      <div class="field-row">
+        <span class="label">Password</span>
+        <div class="pin-wrap">
+          <input type="password" id="wifi-pw" placeholder="Leave empty for open network">
+          <button class="eye-btn" id="wifi-eye">👁️</button>
+        </div>
+      </div>
+      <div class="field-row">
+        <span class="label"></span>
+        <button class="apply-btn" id="wifi-save">Provision</button>
+      </div>
+      <div class="status" id="wifi-status">Robot must be nearby (BLE range). Existing Wi-Fi connection will be replaced.</div>
+    </div>`;
+  }
+
   _tplGeofence() {
     return `<div class="section" id="sec-geofence">
       <div class="sec-title"><span class="sec-icon">🗺️</span> Geofence centre</div>
@@ -267,6 +291,21 @@ class LymowSettingsCard extends HTMLElement {
       const id = this._root.getElementById("rtk-base-id").value.trim();
       if (!id) { this._setStatus("rtk-status", "Enter a base station ID.", true); return; }
       this._call("bind_rtk", { base_id: id }, "rtk-status");
+    });
+  }
+
+  _wireWifi() {
+    const root = this._root;
+    root.getElementById("wifi-eye").addEventListener("click", () => {
+      const inp = root.getElementById("wifi-pw");
+      inp.type = inp.type === "password" ? "text" : "password";
+    });
+    root.getElementById("wifi-save").addEventListener("click", () => {
+      const ssid = root.getElementById("wifi-ssid").value.trim();
+      const pw = root.getElementById("wifi-pw").value;
+      if (!ssid) { this._setStatus("wifi-status", "Enter the Wi-Fi network name (SSID).", true); return; }
+      if (!confirm(`Provision the mower to join "${ssid}"?\n\nThe robot must be within Bluetooth range and the existing Wi-Fi connection will be replaced.`)) return;
+      this._call("set_wifi", { ssid, password: pw }, "wifi-status");
     });
   }
 

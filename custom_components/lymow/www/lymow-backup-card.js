@@ -35,7 +35,12 @@ class LymowBackupCard extends HTMLElement {
   _sensorId() {
     if (this._config.backup_sensor) return this._config.backup_sensor;
     const base = this._config.mower_entity.split(".")[1];
-    return `sensor.${base}_backup_maps`;
+    if (!this._hass) return `sensor.${base}_backup_maps`;
+    const found = Object.keys(this._hass.states).find(
+      id => id.startsWith("sensor.") && id.includes(base) &&
+            Array.isArray(this._hass.states[id].attributes?.backups)
+    );
+    return found || `sensor.${base}_backup_maps`;
   }
 
   _backupButtonId() {
@@ -106,9 +111,11 @@ class LymowBackupCard extends HTMLElement {
     }
     list.innerHTML = "";
     backups.forEach(b => {
-      const key = b.map_file || b.object_key || "";
-      const name = b.name || key.split("/").pop() || "Backup";
-      const ts = b.backup_time ? new Date(b.backup_time * 1000).toLocaleString() : "";
+      // API returns {file, name, backupTime} — 'file' is the S3 object key
+      const key = b.file || b.map_file || b.object_key || "";
+      const name = (b.name && b.name.trim()) ? b.name : (key.split("/").pop() || "Backup");
+      const rawTs = b.backupTime || b.backup_time;
+      const ts = rawTs ? new Date(rawTs * 1000).toLocaleString() : "";
 
       const row = document.createElement("div");
       row.className = "row";

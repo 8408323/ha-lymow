@@ -994,20 +994,20 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         await self._mqtt.async_publish_command(thing_name, encode_bind_rtk(base_id))
 
-    async def async_set_wifi(self, thing_name: str, ssid: str, password: str) -> None:
-        """Provision the mower's Wi-Fi — BLE-only, not supported over MQTT.
+    async def async_set_wifi(self, address: str, ssid: str, password: str) -> None:
+        """Provision the mower's Wi-Fi over BLE.
 
-        The wire format (``encode_set_wifi``) is confirmed, but a live test
-        (2026-05-30) showed the robot ignores the command over the cloud/MQTT
-        transport this integration uses, while start/zone-config commands over
-        the same path work. Wi-Fi provisioning goes over BLE GATT, which this
-        integration has no path to — so fail loudly rather than silently no-op.
-        See https://github.com/8408323/ha-lymow/issues/200. Creds never logged.
+        Sends PbInput{f17:{f1:ssid, f2:password, f5:3}} base64-encoded to the
+        drive characteristic.  Uses a fresh BLE controller (not the shared drive
+        one) so a running drive session is not interrupted.  Creds never logged.
         """
-        # ssid/password validated by encode_set_wifi when a BLE transport exists.
-        raise HomeAssistantError(
-            "Wi-Fi provisioning is BLE-only and not supported over the cloud connection (see issue #200)"
-        )
+        import base64
+
+        from .protocol import encode_set_wifi
+
+        payload = base64.b64encode(encode_set_wifi(ssid, password))
+        controller = LymowBleController(address)
+        await controller.async_write_once(payload)
 
     async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
         """Set PbRobotConfig fields on the robot — currently just network priority.

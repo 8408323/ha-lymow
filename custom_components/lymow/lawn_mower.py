@@ -1139,11 +1139,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         ssid: str = call.data["ssid"]
         password: str = call.data["password"]
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
-        for eid in entity_ids:
-            entity = entity_map.get(eid)
-            if entity is None:
-                continue
-            await coordinator.async_set_wifi(entity._thing_name, ssid, password)
+        targeted = [entity_map[eid] for eid in entity_ids if eid in entity_map]
+        if not targeted:
+            return
+        address = (entry.options.get(CONF_BLE_ADDRESS) or "").strip()
+        if not address:
+            ble_name = (coordinator.data.get(targeted[0]._thing_name) or {}).get("deviceBluetooth")
+            address = _discover_ble_address(hass, ble_name or "") or ""
+        if not address:
+            raise ServiceValidationError(
+                "Couldn't find the robot over Bluetooth — make sure it's powered and in range, "
+                "or set its BLE address in the Lymow integration options."
+            )
+        await coordinator.async_set_wifi(address, ssid, password)
 
     async def handle_set_device_settings(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
