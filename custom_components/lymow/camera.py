@@ -179,28 +179,45 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
 
         # Generous analyzeduration/probesize so FFmpeg waits for the first
         # IDR+SPS+PPS that LIVE555 sends inline before the stream starts.
-        # Use HA's configured ffmpeg binary so we find it even when "ffmpeg" is
-        # not on the system PATH (common in HA OS / Supervised installs).
-        ffmpeg_bin = get_ffmpeg_manager(self.hass).binary
+        try:
+            ffmpeg_bin = get_ffmpeg_manager(self.hass).binary
+        except Exception:
+            ffmpeg_bin = "ffmpeg"
         # -c:v copy remuxes without re-encoding: minimal CPU, no quality loss.
-        self._proxy_proc = await asyncio.create_subprocess_exec(
-            ffmpeg_bin,
-            "-loglevel", "warning",
-            "-rtsp_transport", "tcp",
-            "-analyzeduration", "5000000",
-            "-probesize", "5000000",
-            "-i", rtsp_url,
-            "-c:v", "copy",
-            "-f", "hls",
-            "-hls_time", str(self._hls_segment_secs),
-            "-hls_list_size", "4",
-            "-hls_flags", "delete_segments+append_list+omit_endlist",
-            "-hls_segment_filename", os.path.join(self._hls_dir, "seg%03d.ts"),
-            os.path.join(self._hls_dir, "stream.m3u8"),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        _LOGGER.debug("Lymow HLS proxy started (pid=%s) for %s", self._proxy_proc.pid, rtsp_url)
+        try:
+            self._proxy_proc = await asyncio.create_subprocess_exec(
+                ffmpeg_bin,
+                "-loglevel", "warning",
+                "-rtsp_transport", "tcp",
+                "-analyzeduration", "5000000",
+                "-probesize", "5000000",
+                # genpts: regenerate timestamps so LIVE555's non-monotonic
+                # timestamps don't cause segment stall / random playback lags.
+                "-fflags", "+genpts",
+                "-i", rtsp_url,
+                "-c:v", "copy",
+                "-f", "hls",
+                "-hls_time", str(self._hls_segment_secs),
+                "-hls_list_size", "4",
+                "-hls_flags", "delete_segments+append_list+omit_endlist",
+                "-hls_segment_filename", os.path.join(self._hls_dir, "seg%03d.ts"),
+                os.path.join(self._hls_dir, "stream.m3u8"),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            _LOGGER.debug("Lymow HLS proxy started (pid=%s) for %s", self._proxy_proc.pid, rtsp_url)
+        except Exception as exc:
+            # ffmpeg not found or failed to spawn — reset state so stream_source()
+            # falls back to raw RTSP and go2rtc can still provide a stream.
+            _LOGGER.warning("Lymow HLS proxy could not start (%s); falling back to direct RTSP", exc)
+            if self._http_server:
+                self._http_server.shutdown()
+                self._http_server = None
+            if self._hls_dir:
+                shutil.rmtree(self._hls_dir, ignore_errors=True)
+            self._hls_dir = None
+            self._hls_port = None
+            self._proxy_ip = None
 
     async def _stop_proxy(self) -> None:
         if self._proxy_proc is not None:
@@ -236,9 +253,15 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         return f"rtsp://{ip}:{RTSP_PORT}/{RTSP_PATH}" if ip else None
 
     async def stream_source(self) -> str | None:
-        """Local HLS playlist when the proxy is running; raw RTSP as fallback."""
+        """Local HLS playlist when the proxy has written segments; raw RTSP otherwise.
+
+        Only return the proxy URL once segments exist so go2rtc/HA stream never
+        get pointed at an empty HTTP directory (which makes WebRTC negotiation fail).
+        """
         if self._hls_port is not None and self._hls_dir is not None:
-            return f"http://127.0.0.1:{self._hls_port}/stream.m3u8"
+            import glob as _glob
+            if _glob.glob(os.path.join(self._hls_dir, "seg*.ts")):
+                return f"http://127.0.0.1:{self._hls_port}/stream.m3u8"
         return self._stream_url()
 
     @property
@@ -255,7 +278,9 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         if url:
             attrs["rtsp_url"] = url
         if self._hls_port is not None and self._hls_dir is not None:
-            attrs["hls_proxy_url"] = f"http://127.0.0.1:{self._hls_port}/stream.m3u8"
+            import glob as _glob
+            if _glob.glob(os.path.join(self._hls_dir, "seg*.ts")):
+                attrs["hls_proxy_url"] = f"http://127.0.0.1:{self._hls_port}/stream.m3u8"
         return attrs
 
     async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:

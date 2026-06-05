@@ -507,6 +507,8 @@ set_hls_quality:
               value: "2"
             - label: "4 s — smooth"
               value: "4"
+            - label: "8 s — very smooth"
+              value: "8"
 
 bind_rtk:
   name: Bind RTK base
