@@ -91,7 +91,14 @@ async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
             return
         await resources.async_load()
         existing = {item["url"] for item in resources.async_items()}
-        for js in ("lymow-map-card.js", "lymow-camera-card.js", "lymow-drive-card.js"):
+        for js in (
+                "lymow-map-card.js",
+                "lymow-camera-card.js",
+                "lymow-drive-card.js",
+                "lymow-schedule-card.js",
+                "lymow-backup-card.js",
+                "lymow-settings-card.js",
+            ):
             url = _card_url(js)
             if url not in existing:
                 await resources.async_create_item({"res_type": "module", "url": url})
@@ -112,7 +119,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # add_extra_js_url registers the script but custom element registration
             # is unreliable via that path. Register as Lovelace resources too so
             # Lovelace's own resource loader (which works reliably) handles them.
-            for js in ("lymow-map-card.js", "lymow-camera-card.js", "lymow-drive-card.js"):
+            for js in (
+                "lymow-map-card.js",
+                "lymow-camera-card.js",
+                "lymow-drive-card.js",
+                "lymow-schedule-card.js",
+                "lymow-backup-card.js",
+                "lymow-settings-card.js",
+            ):
                 add_extra_js_url(hass, _card_url(js))
             await _ensure_lovelace_resources(hass)
         hass.data[_WWW_REGISTERED_KEY] = True
@@ -283,11 +297,29 @@ def _build_dashboard_config(entities: dict[str, str]) -> ConfigType:
             drive_card["camera_entity"] = entities["camera"]
         drive_cards.append(drive_card)
 
+    schedule_cards: list[ConfigType] = []
+    if "mower" in entities:
+        schedule_cards.append({"type": "custom:lymow-schedule-card", "mower_entity": entities["mower"]})
+
+    backup_cards: list[ConfigType] = []
+    if "mower" in entities:
+        backup_cards.append({"type": "custom:lymow-backup-card", "mower_entity": entities["mower"]})
+
+    advanced_cards: list[ConfigType] = []
+    if "mower" in entities:
+        advanced_cards.append({"type": "custom:lymow-settings-card", "mower_entity": entities["mower"]})
+
     views: list[ConfigType] = []
     if map_cards:
         views.append({"title": "Map", "path": "map", "icon": "mdi:map", "cards": map_cards})
     if drive_cards:
         views.append({"title": "Drive", "path": "drive", "icon": "mdi:gamepad-variant", "cards": drive_cards})
+    if schedule_cards:
+        views.append({"title": "Schedules", "path": "schedules", "icon": "mdi:clock-outline", "cards": schedule_cards})
+    if backup_cards:
+        views.append({"title": "Backups", "path": "backups", "icon": "mdi:database-arrow-up", "cards": backup_cards})
+    if advanced_cards:
+        views.append({"title": "Advanced", "path": "advanced", "icon": "mdi:cog-outline", "cards": advanced_cards})
     if sensor_cards:
         views.append({"title": "Sensors", "path": "sensors", "icon": "mdi:gauge", "cards": sensor_cards})
     return {"views": views}
