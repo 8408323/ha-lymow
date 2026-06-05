@@ -206,10 +206,19 @@ class LymowCameraCard extends HTMLElement {
 
   _setLanMode(mode) {
     if (this._source !== "lan") { this._lanMode = mode; this._updateModeUI(); return; }
-    this._stopLan();
+    const wasStream = this._lanMode === "stream";
+    this._stopLan(); // recycles ha-camera-stream when switching away from stream
     this._lanMode = mode;
     this._updateModeUI();
     this._lanActive = false;
+    // Show the correct element before rendering
+    if (mode === "snap") {
+      this._els.lanStream.classList.add("hidden");
+      this._els.snapImg.classList.remove("hidden");
+    } else {
+      this._els.snapImg.classList.add("hidden");
+      this._els.lanStream.classList.remove("hidden");
+    }
     this._renderLan();
   }
 
@@ -224,16 +233,42 @@ class LymowCameraCard extends HTMLElement {
   _setHlsQuality(secs) {
     const eid = this._config.camera_entity;
     if (!eid || !this._hass) return;
+
+    // Stop current stream and show countdown while proxy restarts
+    this._stopLan();
+    this._lanActive = false;
+
+    const RESTART_SECS = 8;
+    let remaining = RESTART_SECS;
+    this._setStatus(`Restarting… ${remaining}s`);
+    const tick = setInterval(() => {
+      remaining--;
+      if (remaining > 0) {
+        this._setStatus(`Restarting… ${remaining}s`);
+      } else {
+        clearInterval(tick);
+      }
+    }, 1000);
+
     this._hass.callService("lymow", "set_hls_quality", { entity_id: eid, segment_seconds: secs })
       .then(() => {
-        this._setStatus("Restarting stream…");
-        // Stop stream display — it will restart via stateObj update when proxy reconnects
-        if (this._lanActive && this._lanMode === "stream") {
+        // Wait the full countdown, then restart with a fresh stream element
+        const delay = Math.max(0, remaining * 1000 + 500);
+        setTimeout(() => {
+          clearInterval(tick);
+          this._setStatus("");
           this._lanActive = false;
-          setTimeout(() => this._renderLan(), 6000); // give proxy ~6s to restart
-        }
+          if (this._source === "lan" && this._lanMode === "stream") {
+            this._recycleLanStream();
+            this._els.lanStream.classList.remove("hidden");
+            this._renderLan();
+          }
+        }, delay + 1000); // +1s extra buffer
       })
-      .catch(e => this._setStatus(String(e), true));
+      .catch(e => {
+        clearInterval(tick);
+        this._setStatus(String(e), true);
+      });
   }
 
   _updateIntervalDisplay() {
@@ -320,8 +355,22 @@ class LymowCameraCard extends HTMLElement {
 
   _stopLan() {
     this._lanActive = false;
-    if (this._els?.lanStream) { this._els.lanStream.stateObj = null; this._els.lanStream.hass = null; }
     if (this._els?.snapImg) this._els.snapImg.src = "";
+    this._recycleLanStream();
+  }
+
+  // Replace ha-camera-stream element so the next _renderLan() gets a clean
+  // element with no existing WebRTC session. Updating stateObj alone on an
+  // established session doesn't trigger renegotiation.
+  _recycleLanStream() {
+    const old = this._els?.lanStream;
+    if (!old) return;
+    old.stateObj = null;
+    old.hass = null;
+    const fresh = document.createElement("ha-camera-stream");
+    fresh.className = old.className;
+    old.parentNode?.replaceChild(fresh, old);
+    this._els.lanStream = fresh;
   }
 
   // ---- Cloud: in-browser AWS KVS WebRTC viewer ------------------------------
