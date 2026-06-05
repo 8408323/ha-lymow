@@ -120,11 +120,11 @@ class LymowCameraCard extends HTMLElement {
             <button data-mode="stream" title="Smooth continuous stream">▶</button>
             <button data-mode="snap" title="Periodic snapshots — adjustable FPS">📷</button>
           </span>
-          <select class="quality-sel hidden" title="HLS segment duration — shorter=faster/choppier, longer=smoother">
-            <option value="0.5">0.5 s</option>
-            <option value="1">1 s</option>
-            <option value="2" selected>2 s ▾</option>
-            <option value="4">4 s</option>
+          <select class="quality-sel hidden" title="Stream smoothness — longer buffers play more smoothly but add a few seconds of delay before the image reaches you. Shorter buffers are more responsive but may stutter briefly between clips.">
+            <option value="0.5">0.5 s — very responsive</option>
+            <option value="1">1 s — responsive</option>
+            <option value="2" selected>2 s — balanced</option>
+            <option value="4">4 s — smooth</option>
           </select>
           <span class="interval-ctrl hidden">
             <button class="iv-btn" data-delta="-0.5">−</button>

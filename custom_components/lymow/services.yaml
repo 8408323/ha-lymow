@@ -480,29 +480,28 @@ set_wifi:
           type: password
 
 set_hls_quality:
-  name: Set camera HLS quality
+  name: Set camera stream quality
   description: >
-    Adjust the HLS stream segment duration for the onboard camera proxy.
-    Shorter segments = lower latency but periodic stutter at segment boundaries.
-    Longer segments = smoother playback but more initial delay.
-    The proxy restarts immediately; expect a 5-second black screen while it
-    reconnects and buffers the first segments.
+    Adjust the stream buffer size for the onboard camera.
+    Shorter buffers are more responsive but may stutter briefly between clips.
+    Longer buffers play more smoothly but add a few seconds of delay.
+    The camera restarts immediately; expect a brief black screen while it reconnects.
   target:
     entity:
       integration: lymow
       domain: camera
   fields:
     segment_seconds:
-      name: Segment duration (s)
-      description: HLS segment duration in seconds (0.5 = fast/choppy, 2 = balanced, 4 = smooth).
+      name: Buffer size (seconds)
+      description: How many seconds of video to buffer per clip (0.5 = very responsive, 2 = balanced, 4 = smooth).
       required: true
       example: 2
       selector:
         select:
           options:
-            - label: "0.5 s — minimum latency (choppy)"
+            - label: "0.5 s — very responsive"
               value: "0.5"
-            - label: "1 s — low latency"
+            - label: "1 s — responsive"
               value: "1"
             - label: "2 s — balanced (default)"
               value: "2"
