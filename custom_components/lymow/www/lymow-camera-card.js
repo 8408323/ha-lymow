@@ -132,7 +132,6 @@ class LymowCameraCard extends HTMLElement {
             <option value="1">1s</option>
             <option value="2" selected>2s</option>
             <option value="4">4s</option>
-            <option value="8">8s</option>
           </select>
           <span class="interval-ctrl hidden">
             <button class="iv-btn" data-delta="-0.5">−</button>
