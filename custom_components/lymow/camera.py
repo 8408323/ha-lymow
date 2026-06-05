@@ -205,6 +205,17 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         return self._stream_url()
 
     async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
+        # Fast path: extract a frame from the latest HLS segment already on
+        # disk. Avoids opening a new RTSP connection per snapshot request —
+        # ffmpeg reads a local file in ~100-300 ms vs 2-5 s over RTSP.
+        if self._hls_dir is not None:
+            import glob as _glob
+            segs = sorted(_glob.glob(os.path.join(self._hls_dir, "seg*.ts")))
+            if segs:
+                frame = await async_get_image(self.coordinator.hass, segs[-1], width=width, height=height)
+                if frame:
+                    return frame
+        # Fallback: grab directly from RTSP (used before proxy starts or if it crashed)
         url = self._stream_url()
         if not url:
             return None

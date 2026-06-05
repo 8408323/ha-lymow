@@ -222,7 +222,9 @@ class _RobotConfigBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     def is_on(self) -> bool | None:
         config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
         value = config.get(self._config_key)
-        return bool(value) if value is not None else None
+        # Return False when the robot hasn't sent its config yet rather than
+        # None (which causes HA to display ⚡ instead of an interactive toggle).
+        return bool(value) if value is not None else False
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_robot_config(self._thing_name, **{self._config_key: True})
@@ -257,7 +259,7 @@ class VehicleLedSwitch(_RobotConfigBoolSwitch):
         # config query, and absent isOpenLed means LED is off.
         if rc.get("dockOnError") is not None:
             return False
-        return None
+        return False  # default: off until robot confirms otherwise
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         from .protocol import SIGNAL_TURN_ON_VEHICLE_LIGHT
@@ -348,7 +350,9 @@ class _DeviceSettingsBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntit
         tc = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData", {}).get("taskConfig") or {}
         value = tc.get(self._wire_key)
         if not isinstance(value, bool):
-            return None
+            # Return False when taskConfig hasn't arrived yet rather than None
+            # (None causes HA to display ⚡ instead of an interactive toggle).
+            return False
         return self._ui_from_wire(value)
 
     async def async_turn_on(self, **kwargs: Any) -> None:

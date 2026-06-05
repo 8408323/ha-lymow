@@ -227,6 +227,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._last_ota_check: dict[str, datetime] = {}
         # Lazily-created BLE manual-drive transport, reused across drive calls.
         self._ble_controller: LymowBleController | None = None
+        # Tracks devices that already had startup queries (robotConfig + map)
+        # fired. Without this, restarting HA while the robot is already online
+        # never triggers on_mqtt_online, so robotConfig/taskConfig stay unknown.
+        self._startup_queried: set[str] = set()
         # Channel names have no protobuf field — store HA-side so renames survive
         # MQTT polls. Keyed by thing_name → {hashId → name}. Lost on HA restart;
         # the card's localStorage covers the browser-side persistence gap.
@@ -529,6 +533,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     **self._mqtt_state.get(thing, {}),
                 }
                 result[thing] = merged
+                # Fire robotConfig + map queries once per HA session so
+                # switch entities (vehicle_led, rainy_mowing, etc.) populate
+                # even when the robot was already online before HA started.
+                if thing not in self._startup_queried and merged.get("isOnline"):
+                    self._startup_queried.add(thing)
+                    self.hass.async_create_task(self.async_query_robot_config(thing))
+                    self.hass.async_create_task(self.async_query_map(thing))
             return result
         except Exception as err:
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
