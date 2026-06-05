@@ -8,10 +8,11 @@
  *   sections: [headlight, run_time, device, pin, rtk, geofence]  # optional — all shown by default
  *
  * Services called: lymow.set_headlight_schedule, set_run_time_config,
- *   set_device_name, set_pin, bind_rtk, set_geofence
+ *   set_zone_config, start_zone, resume, set_device_name, set_pin, bind_rtk,
+ *   set_wifi, set_geofence
  */
 
-const ALL_SECTIONS = ["headlight", "run_time", "device", "pin", "rtk", "wifi", "geofence"];
+const ALL_SECTIONS = ["headlight", "run_time", "zone_config", "start_zone", "resume", "device", "pin", "rtk", "wifi", "geofence"];
 
 class LymowSettingsCard extends HTMLElement {
   setConfig(config) {
@@ -79,6 +80,9 @@ class LymowSettingsCard extends HTMLElement {
         <div class="card-header">${this._config.title || "Advanced Settings"}</div>
         ${sections.includes("headlight") ? this._tplHeadlight() : ""}
         ${sections.includes("run_time") ? this._tplRunTime() : ""}
+        ${sections.includes("zone_config") ? this._tplZoneConfig() : ""}
+        ${sections.includes("start_zone") ? this._tplStartZone() : ""}
+        ${sections.includes("resume") ? this._tplResume() : ""}
         ${sections.includes("device") ? this._tplDevice() : ""}
         ${sections.includes("pin") ? this._tplPin() : ""}
         ${sections.includes("rtk") ? this._tplRtk() : ""}
@@ -90,6 +94,9 @@ class LymowSettingsCard extends HTMLElement {
 
     if (sections.includes("headlight")) this._wireHeadlight();
     if (sections.includes("run_time")) this._wireRunTime();
+    if (sections.includes("zone_config")) this._wireZoneConfig();
+    if (sections.includes("start_zone")) this._wireStartZone();
+    if (sections.includes("resume")) this._wireResume();
     if (sections.includes("device")) this._wireDevice();
     if (sections.includes("pin")) this._wirePin();
     if (sections.includes("rtk")) this._wireRtk();
@@ -146,6 +153,56 @@ class LymowSettingsCard extends HTMLElement {
         <button class="apply-btn" id="rt-save">Apply</button>
       </div>
       <div class="status" id="rt-status"></div>
+    </div>`;
+  }
+
+  _tplZoneConfig() {
+    return `<div class="section" id="sec-zone-config">
+      <div class="sec-title"><span class="sec-icon">🌿</span> Zone mowing config</div>
+      <div class="field-row">
+        <span class="label">Zone</span>
+        <select id="zc-zone" style="flex:1;background:var(--input-fill-color,var(--secondary-background-color));color:var(--primary-text-color);border:1px solid var(--divider-color,#e0e0e0);border-radius:4px;padding:4px 8px;font-size:14px;">
+          <option value="">— select zone —</option>
+        </select>
+      </div>
+      <div class="field-row">
+        <span class="label">Cut height</span>
+        <input type="range" id="zc-cut-height" min="20" max="100" step="5" value="60">
+        <span class="range-val" id="zc-cut-height-val">60 mm</span>
+      </div>
+      <div class="field-row">
+        <span class="label">Move speed</span>
+        <input type="range" id="zc-move-speed" min="0.1" max="1.5" step="0.1" value="0.8">
+        <span class="range-val" id="zc-move-speed-val">0.8 m/s</span>
+      </div>
+      <div class="field-row">
+        <span class="label"></span>
+        <button class="apply-btn" id="zc-save">Apply to zone</button>
+      </div>
+      <div class="status" id="zc-status"></div>
+    </div>`;
+  }
+
+  _tplStartZone() {
+    return `<div class="section" id="sec-start-zone">
+      <div class="sec-title"><span class="sec-icon">▶️</span> Mow specific zones</div>
+      <div id="sz-zone-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+      <div class="field-row">
+        <span class="label"></span>
+        <button class="apply-btn" id="sz-start">Start selected</button>
+      </div>
+      <div class="status" id="sz-status">Select one or more zones, then tap Start.</div>
+    </div>`;
+  }
+
+  _tplResume() {
+    return `<div class="section" id="sec-resume">
+      <div class="sec-title"><span class="sec-icon">⏭️</span> Resume mowing</div>
+      <div class="field-row">
+        <span class="label"></span>
+        <button class="apply-btn" id="resume-btn">Resume</button>
+      </div>
+      <div class="status" id="resume-status">Resumes a paused or interrupted mow without restarting it.</div>
     </div>`;
   }
 
@@ -265,6 +322,77 @@ class LymowSettingsCard extends HTMLElement {
     });
   }
 
+  _wireZoneConfig() {
+    const root = this._root;
+    [["zc-cut-height", "zc-cut-height-val", " mm"], ["zc-move-speed", "zc-move-speed-val", " m/s"]].forEach(([id, valId, suffix]) => {
+      const inp = root.getElementById(id);
+      const val = root.getElementById(valId);
+      inp.addEventListener("input", () => { val.textContent = parseFloat(inp.value).toFixed(id === "zc-move-speed" ? 1 : 0) + suffix; });
+    });
+    root.getElementById("zc-save").addEventListener("click", () => {
+      const hashId = root.getElementById("zc-zone").value;
+      if (!hashId) { this._setStatus("zc-status", "Select a zone first.", true); return; }
+      this._call("set_zone_config", {
+        zone_hash_id: hashId,
+        cut_height: parseInt(root.getElementById("zc-cut-height").value),
+        move_speed: parseFloat(root.getElementById("zc-move-speed").value),
+      }, "zc-status");
+    });
+  }
+
+  _wireStartZone() {
+    const root = this._root;
+    root.getElementById("sz-start").addEventListener("click", () => {
+      const selected = [...root.querySelectorAll(".sz-chip.on")].map(c => c.dataset.hashId);
+      if (!selected.length) { this._setStatus("sz-status", "Select at least one zone.", true); return; }
+      this._call("start_zone", { zone_hash_ids: selected }, "sz-status");
+    });
+    this._populateZoneSelectors();
+  }
+
+  _wireResume() {
+    this._root.getElementById("resume-btn").addEventListener("click", () => {
+      this._call("resume", {}, "resume-status");
+    });
+  }
+
+  _populateZoneSelectors() {
+    if (!this._hass) return;
+    const mowerSt = this._hass.states[this._config.mower_entity];
+    const zones = mowerSt?.attributes?.zones || [];
+    if (!zones.length) return;
+
+    // Zone config dropdown
+    const zcSel = this._root.getElementById("zc-zone");
+    if (zcSel && zcSel.options.length <= 1) {
+      zones.forEach(z => {
+        const opt = document.createElement("option");
+        opt.value = z.hash_id;
+        opt.textContent = `Zone ${z.hash_id.slice(0, 4)} (${Math.round(z.area_m2)} m²)`;
+        zcSel.appendChild(opt);
+      });
+    }
+
+    // Start zone chips
+    const list = this._root.getElementById("sz-zone-list");
+    if (list && !list.children.length) {
+      zones.forEach(z => {
+        const btn = document.createElement("button");
+        btn.className = "apply-btn sz-chip";
+        btn.style.cssText = "background:transparent;color:var(--primary-text-color);border:1px solid var(--divider-color,#e0e0e0);padding:4px 12px;font-size:12px;";
+        btn.textContent = `Zone ${z.hash_id.slice(0, 4)} · ${Math.round(z.area_m2)} m²`;
+        btn.dataset.hashId = z.hash_id;
+        btn.addEventListener("click", () => {
+          btn.classList.toggle("on");
+          btn.style.background = btn.classList.contains("on") ? "var(--primary-color,#03a9f4)" : "transparent";
+          btn.style.color = btn.classList.contains("on") ? "#fff" : "var(--primary-text-color)";
+          btn.style.borderColor = btn.classList.contains("on") ? "var(--primary-color,#03a9f4)" : "var(--divider-color,#e0e0e0)";
+        });
+        list.appendChild(btn);
+      });
+    }
+  }
+
   _wireDevice() {
     this._root.getElementById("dev-save").addEventListener("click", () => {
       const name = this._root.getElementById("dev-name").value.trim();
@@ -323,13 +451,14 @@ class LymowSettingsCard extends HTMLElement {
 
   _populateFromState() {
     if (!this._hass || !this._root) return;
-    const base = this._thing();
-    const states = this._hass.states;
-    // Pre-fill device name from any sensor that has it
-    const mowerSt = states[this._config.mower_entity];
+    const sections = this._config.sections;
+    const mowerSt = this._hass.states[this._config.mower_entity];
     const devName = mowerSt?.attributes?.device_name || "";
     const devInput = this._root.getElementById("dev-name");
     if (devInput && devName && !devInput.value) devInput.value = devName;
+    if (sections.includes("zone_config") || sections.includes("start_zone")) {
+      this._populateZoneSelectors();
+    }
   }
 
   _call(service, data, statusId) {
