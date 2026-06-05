@@ -43,14 +43,17 @@ class LymowCameraCard extends HTMLElement {
     if (this._source === "lan") {
       this._renderLan();
       if (this._lanActive && this._lanMode === "stream" && this._els?.lanStream) {
-        this._els.lanStream.hass = hass;
         const eid = this._config.camera_entity;
         const st = eid && hass.states[eid];
-        if (st) this._els.lanStream.stateObj = st;
+        // Only push hass/stateObj on ha-camera-stream (fallback path)
+        if (this._els.lanStream.tagName === "HA-CAMERA-STREAM") {
+          this._els.lanStream.hass = hass;
+          if (st) this._els.lanStream.stateObj = st;
+        }
         // Sync quality selector from entity attribute
         const segSecs = st?.attributes?.hls_segment_seconds;
         if (segSecs != null && this._els.qualitySel) {
-          const closest = ["0.5","1","2","4"].reduce((a,b) => Math.abs(b-segSecs) < Math.abs(a-segSecs) ? b : a);
+          const closest = ["0.5","1","2","4","8"].reduce((a,b) => Math.abs(b-segSecs) < Math.abs(a-segSecs) ? b : a);
           this._els.qualitySel.value = closest;
         }
       }
@@ -120,11 +123,12 @@ class LymowCameraCard extends HTMLElement {
             <button data-mode="stream" title="Smooth continuous stream">▶</button>
             <button data-mode="snap" title="Periodic snapshots — adjustable FPS">📷</button>
           </span>
-          <select class="quality-sel hidden" title="Stream smoothness — longer buffers play more smoothly but add a few seconds of delay before the image reaches you. Shorter buffers are more responsive but may stutter briefly between clips.">
-            <option value="0.5">0.5 s — very responsive</option>
-            <option value="1">1 s — responsive</option>
-            <option value="2" selected>2 s — balanced</option>
-            <option value="4">4 s — smooth</option>
+          <select class="quality-sel hidden" title="Stream smoothness — longer buffers give smoother video but add a few seconds of delay. Shorter buffers are more responsive but may stutter briefly between clips.">
+            <option value="0.5">0.5s</option>
+            <option value="1">1s</option>
+            <option value="2" selected>2s</option>
+            <option value="4">4s</option>
+            <option value="8">8s</option>
           </select>
           <span class="interval-ctrl hidden">
             <button class="iv-btn" data-delta="-0.5">−</button>
@@ -282,8 +286,7 @@ class LymowCameraCard extends HTMLElement {
     if (src === "lan") {
       this._stopCloud();
       this._els.video.classList.add("hidden");
-      this._els.lanStream.classList.remove("hidden");
-      this._renderLan();
+      this._renderLan(); // _renderLan manages lanStream visibility itself
     } else {
       this._stopLan();
       this._els.lanStream.classList.add("hidden");
@@ -292,15 +295,13 @@ class LymowCameraCard extends HTMLElement {
     }
   }
 
-  // ---- LAN: stream mode (ha-camera-stream + HLS proxy) ----------------------
-  // camera.py spawns FFmpeg with -analyzeduration 5s / -probesize 5MB so it
-  // waits for LIVE555's first IDR+SPS+PPS frame. stream_source() returns the
-  // local HLS URL → ha-camera-stream plays clean, smooth video.
+  // ---- LAN: stream mode (ha-camera-stream) -----------------------------------
+  // ha-camera-stream uses go2rtc WebRTC, fed from our local HLS proxy via
+  // stream_source(). The proxy provides clean keyframe-aligned segments so
+  // go2rtc gets no green frames. Segment duration controls stutter frequency.
   //
   // ---- LAN: snap mode (JPEG polling pipeline) --------------------------------
-  // N parallel workers keep fetching new frames from HA's camera proxy.
-  // Use +/− to adjust worker count (= effective fps).  Fallback when robot
-  // is out of LAN range but still reachable via HA's image endpoint.
+  // Single loop polling HA's camera proxy at the target FPS.
   _renderLan() {
     const eid = this._config.camera_entity;
     const st = eid && this._hass && this._hass.states[eid];
@@ -323,8 +324,10 @@ class LymowCameraCard extends HTMLElement {
     } else {
       this._els.snapImg.classList.add("hidden");
       this._els.lanStream.classList.remove("hidden");
-      this._els.lanStream.hass = this._hass;
-      this._els.lanStream.stateObj = st;
+      if (this._els.lanStream.tagName === "HA-CAMERA-STREAM") {
+        this._els.lanStream.hass = this._hass;
+        this._els.lanStream.stateObj = st;
+      }
     }
   }
 
@@ -359,16 +362,14 @@ class LymowCameraCard extends HTMLElement {
     this._recycleLanStream();
   }
 
-  // Replace ha-camera-stream element so the next _renderLan() gets a clean
-  // element with no existing WebRTC session. Updating stateObj alone on an
-  // established session doesn't trigger renegotiation.
+  // Replace with a fresh ha-camera-stream so the next _renderLan() starts a
+  // clean WebRTC negotiation instead of reusing a stale session.
   _recycleLanStream() {
     const old = this._els?.lanStream;
     if (!old) return;
-    old.stateObj = null;
-    old.hass = null;
+    if (old.tagName === "HA-CAMERA-STREAM") { old.stateObj = null; old.hass = null; }
     const fresh = document.createElement("ha-camera-stream");
-    fresh.className = old.className;
+    fresh.className = "lan hidden";
     old.parentNode?.replaceChild(fresh, old);
     this._els.lanStream = fresh;
   }
