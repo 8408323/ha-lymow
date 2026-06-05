@@ -1,19 +1,16 @@
 """Camera entity for the Lymow robot's onboard camera.
 
-The robot exposes its camera as a **local RTSP h264 stream** on the LAN
-(``rtsp://<robot_ip>:10022/h264ESVideoTest``, 640x480).
+The robot exposes its camera as a local RTSP H.264 stream on the LAN
+(``rtsp://<robot_ip>:10022/h264ESVideoTest``, 640×480).
 
-Root cause of the green-frame problem: the robot's LIVE555 RTSP server does
-not include SPS/PPS parameter sets in the SDP DESCRIBE response — it sends
-them inline just before the first IDR frame.  HA's stream component passes the
-raw RTSP URL to libav with a probe timeout too short to wait for that IDR,
-causing the decoder to start without the parameter sets it needs.
+Green-frame root cause: LIVE555 doesn't include SPS/PPS in the SDP DESCRIBE
+response — it sends them inline just before the first IDR frame.  Both HA's
+libav and go2rtc start decoding before those arrive → green frames.
 
-Fix: on entity startup we spawn our own FFmpeg process with generous
-``analyzeduration`` / ``probesize`` flags (enough to catch the first IDR),
-remux stream segments into an HLS playlist in a temp dir, and serve that
-playlist from a localhost HTTP server.  ``stream_source()`` returns the local
-HLS URL so HA's stream component gets clean, keyframe-aligned segments.
+Fix: spawn FFmpeg with generous analyzeduration/probesize, wait for the first
+IDR+SPS+PPS, then re-mux to a continuous MPEG-TS stream piped to an asyncio
+TCP server on localhost.  stream_source() returns that HTTP URL so go2rtc gets
+a clean, unbroken feed with no HLS segment boundaries.
 """
 
 from __future__ import annotations
@@ -21,12 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
-import shutil
 import socket
-import tempfile
-import threading
-from http.server import HTTPServer, SimpleHTTPRequestHandler
 from typing import Any
 
 from homeassistant.components.camera import Camera, CameraEntityFeature, StreamType
@@ -42,8 +34,8 @@ from .entity import lymow_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
-# Robot-state keys that may carry the LAN IP, in priority order.
 _IP_KEYS = ("ipAddress", "wifiIp", "ip_address")
+_CHUNK = 32768  # bytes per FFmpeg stdout read
 
 
 async def async_setup_entry(
@@ -51,33 +43,10 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    import voluptuous as vol
-    from homeassistant.helpers import config_validation as cv
-
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = [LymowCamera(coordinator, device) for device in coordinator.devices]
     if entities:
         async_add_entities(entities)
-
-    entity_map: dict[str, LymowCamera] = {e.entity_id: e for e in entities}
-
-    async def handle_set_hls_quality(call: "homeassistant.core.ServiceCall") -> None:  # type: ignore[name-defined]
-        secs = float(call.data["segment_seconds"])
-        for eid in call.data.get("entity_id", []):
-            cam = entity_map.get(eid)
-            if cam:
-                await cam.async_set_hls_segment_seconds(secs)
-
-    if not hass.services.has_service(DOMAIN, "set_hls_quality"):
-        hass.services.async_register(
-            DOMAIN,
-            "set_hls_quality",
-            handle_set_hls_quality,
-            schema=vol.Schema({
-                vol.Required("entity_id"): cv.entity_ids,
-                vol.Required("segment_seconds"): vol.Coerce(float),
-            }),
-        )
 
 
 def _robot_ip(data: dict[str, Any]) -> str | None:
@@ -95,11 +64,13 @@ def _free_port() -> int:
 
 
 class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
-    """The robot's onboard camera, served via a local FFmpeg HLS proxy.
+    """Robot camera, re-streamed as continuous MPEG-TS over localhost HTTP.
 
-    The proxy bridges the gap between LIVE555's late-arriving parameter sets
-    and HA's short libav probe window.  Segments are served from localhost so
-    the stream component never touches the RTSP stream directly.
+    FFmpeg connects to the robot RTSP with a 5-second probe window so it
+    captures the SPS/PPS that LIVE555 sends inline before the first IDR.
+    The remuxed MPEG-TS bytes are piped into an asyncio TCP server; each
+    HTTP client (go2rtc) receives a broadcast of every chunk.  No segment
+    files, no periodic stutter at segment boundaries.
     """
 
     _attr_has_entity_name = True
@@ -116,15 +87,12 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         self._attr_device_info = lymow_device_info(self.coordinator, device)
 
         self._proxy_proc: asyncio.subprocess.Process | None = None
-        self._http_server: HTTPServer | None = None
-        self._http_thread: threading.Thread | None = None
-        self._hls_dir: str | None = None
-        self._hls_port: int | None = None
-        self._proxy_ip: str | None = None  # robot IP the running proxy is tied to
-        # HLS segment duration in seconds — shorter = lower latency but choppier;
-        # longer = smoother but more buffering. Changeable at runtime via
-        # async_set_hls_segment_seconds(); persists until HA restart.
-        self._hls_segment_secs: float = 2.0
+        self._ts_server: asyncio.Server | None = None
+        self._ts_port: int | None = None
+        self._ts_reader_task: asyncio.Task | None = None
+        # Each connected HTTP client gets its own asyncio.Queue of TS chunks.
+        self._ts_clients: list[asyncio.Queue[bytes | None]] = []
+        self._proxy_ip: str | None = None
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -157,33 +125,21 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         if not rtsp_url:
             return
 
-        self._hls_dir = tempfile.mkdtemp(prefix="lymow_hls_")
-        self._hls_port = _free_port()
+        self._ts_port = _free_port()
         self._proxy_ip = _robot_ip((self.coordinator.data or {}).get(self._thing_name) or {})
-        hls_dir = self._hls_dir
+        self._ts_clients = []
 
-        class _Handler(SimpleHTTPRequestHandler):
-            def __init__(self, *a: Any, **kw: Any) -> None:
-                super().__init__(*a, directory=hls_dir, **kw)
-
-            def log_message(self, fmt: str, *args: Any) -> None:  # noqa: ARG002
-                pass  # suppress per-request noise from HA logs
-
-        self._http_server = HTTPServer(("127.0.0.1", self._hls_port), _Handler)
-        self._http_thread = threading.Thread(
-            target=self._http_server.serve_forever,
-            daemon=True,
-            name=f"lymow_hls_{self._thing_name}",
+        self._ts_server = await asyncio.start_server(
+            self._handle_ts_client,
+            "127.0.0.1",
+            self._ts_port,
         )
-        self._http_thread.start()
 
-        # Generous analyzeduration/probesize so FFmpeg waits for the first
-        # IDR+SPS+PPS that LIVE555 sends inline before the stream starts.
         try:
             ffmpeg_bin = get_ffmpeg_manager(self.hass).binary
         except Exception:
             ffmpeg_bin = "ffmpeg"
-        # -c:v copy remuxes without re-encoding: minimal CPU, no quality loss.
+
         try:
             self._proxy_proc = await asyncio.create_subprocess_exec(
                 ffmpeg_bin,
@@ -191,56 +147,114 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
                 "-rtsp_transport", "tcp",
                 "-analyzeduration", "5000000",
                 "-probesize", "5000000",
-                    "-i", rtsp_url,
+                "-i", rtsp_url,
                 "-c:v", "copy",
-                "-f", "hls",
-                "-hls_time", str(self._hls_segment_secs),
-                "-hls_list_size", "4",
-                "-hls_flags", "delete_segments+append_list+omit_endlist",
-                "-hls_segment_filename", os.path.join(self._hls_dir, "seg%03d.ts"),
-                os.path.join(self._hls_dir, "stream.m3u8"),
-                stdout=asyncio.subprocess.DEVNULL,
+                "-f", "mpegts",
+                "pipe:1",
+                stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            _LOGGER.debug("Lymow HLS proxy started (pid=%s) for %s", self._proxy_proc.pid, rtsp_url)
+            self._ts_reader_task = self.hass.async_create_task(
+                self._read_ffmpeg_stdout()
+            )
+            _LOGGER.debug("Lymow MPEG-TS proxy started (pid=%s) for %s", self._proxy_proc.pid, rtsp_url)
         except Exception as exc:
-            # ffmpeg not found or failed to spawn — reset state so stream_source()
-            # falls back to raw RTSP and go2rtc can still provide a stream.
-            _LOGGER.warning("Lymow HLS proxy could not start (%s); falling back to direct RTSP", exc)
-            if self._http_server:
-                self._http_server.shutdown()
-                self._http_server = None
-            if self._hls_dir:
-                shutil.rmtree(self._hls_dir, ignore_errors=True)
-            self._hls_dir = None
-            self._hls_port = None
+            _LOGGER.warning("Lymow proxy could not start (%s); falling back to direct RTSP", exc)
+            self._ts_server.close()
+            self._ts_server = None
+            self._ts_port = None
+            self._ts_clients = []
             self._proxy_ip = None
 
     async def _stop_proxy(self) -> None:
+        if self._ts_reader_task is not None:
+            self._ts_reader_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._ts_reader_task
+            self._ts_reader_task = None
+
         if self._proxy_proc is not None:
             with contextlib.suppress(ProcessLookupError):
                 self._proxy_proc.terminate()
                 await self._proxy_proc.wait()
             self._proxy_proc = None
 
-        if self._http_server is not None:
-            self._http_server.shutdown()
-            self._http_server = None
-            self._http_thread = None
+        if self._ts_server is not None:
+            self._ts_server.close()
+            await self._ts_server.wait_closed()
+            self._ts_server = None
 
-        if self._hls_dir and os.path.isdir(self._hls_dir):
-            shutil.rmtree(self._hls_dir, ignore_errors=True)
-            self._hls_dir = None
-
-        self._hls_port = None
+        for q in self._ts_clients:
+            with contextlib.suppress(asyncio.QueueFull):
+                q.put_nowait(None)
+        self._ts_clients = []
+        self._ts_port = None
         self._proxy_ip = None
 
-    # ── quality control ───────────────────────────────────────────────────
+    async def _handle_ts_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        """Serve one HTTP client with the live MPEG-TS stream."""
+        try:
+            # Consume all HTTP request headers before responding.
+            line = await asyncio.wait_for(reader.readline(), timeout=5.0)
+            if not line.lower().startswith(b"get "):
+                return
+            while True:
+                hdr = await asyncio.wait_for(reader.readline(), timeout=5.0)
+                if hdr in (b"\r\n", b"\n", b""):
+                    break
+            writer.write(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: video/mp2t\r\n"
+                b"Cache-Control: no-cache\r\n"
+                b"Connection: keep-alive\r\n"
+                b"\r\n"
+            )
+            await writer.drain()
+        except Exception:
+            writer.close()
+            return
 
-    async def async_set_hls_segment_seconds(self, seconds: float) -> None:
-        """Change HLS segment duration and restart the proxy immediately."""
-        self._hls_segment_secs = max(0.5, min(4.0, float(seconds)))
-        await self._restart_proxy()
+        # Register as a broadcast recipient and stream until disconnected.
+        q: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=256)
+        self._ts_clients.append(q)
+        try:
+            while True:
+                chunk = await asyncio.wait_for(q.get(), timeout=15.0)
+                if chunk is None:
+                    break
+                writer.write(chunk)
+                await writer.drain()
+        except (asyncio.TimeoutError, ConnectionError, Exception):
+            pass
+        finally:
+            if q in self._ts_clients:
+                self._ts_clients.remove(q)
+            writer.close()
+
+    async def _read_ffmpeg_stdout(self) -> None:
+        """Read FFmpeg MPEG-TS output and broadcast to every active client."""
+        assert self._proxy_proc is not None
+        assert self._proxy_proc.stdout is not None
+        try:
+            while True:
+                chunk = await self._proxy_proc.stdout.read(_CHUNK)
+                if not chunk:
+                    break
+                slow: list[asyncio.Queue[bytes | None]] = []
+                for q in list(self._ts_clients):
+                    try:
+                        q.put_nowait(chunk)
+                    except asyncio.QueueFull:
+                        slow.append(q)
+                for q in slow:
+                    if q in self._ts_clients:
+                        self._ts_clients.remove(q)
+        finally:
+            for q in list(self._ts_clients):
+                with contextlib.suppress(asyncio.QueueFull):
+                    q.put_nowait(None)
 
     # ── camera interface ───────────────────────────────────────────────────
 
@@ -250,45 +264,24 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         return f"rtsp://{ip}:{RTSP_PORT}/{RTSP_PATH}" if ip else None
 
     async def stream_source(self) -> str | None:
-        """Raw RTSP URL so go2rtc gets a continuous stream without segment boundaries.
-
-        go2rtc reads RTSP as an unbroken live feed — no HLS segment fetches,
-        no periodic stutter. The local HLS proxy is kept only for
-        async_camera_image (fast JPEG snapshots).
-        """
+        """MPEG-TS proxy URL when available, raw RTSP as fallback."""
+        if self._ts_port is not None and self._proxy_proc is not None:
+            return f"http://127.0.0.1:{self._ts_port}/stream.ts"
         return self._stream_url()
 
     @property
     def extra_state_attributes(self) -> dict:
-        # Explicitly include frontend_stream_type so ha-camera-stream in the
-        # Lovelace card chooses ha-hls-player instead of ha-web-rtc-player.
-        # HA's Camera.state_attributes should do this via _attr_frontend_stream_type
-        # but some HA versions / go2rtc setups override it back to web_rtc.
-        attrs: dict = {
-            "frontend_stream_type": "hls",
-            "hls_segment_seconds": self._hls_segment_secs,
-        }
+        attrs: dict = {"frontend_stream_type": "hls"}
         url = self._stream_url()
         if url:
             attrs["rtsp_url"] = url
-        if self._hls_port is not None and self._hls_dir is not None:
-            import glob as _glob
-            if _glob.glob(os.path.join(self._hls_dir, "seg*.ts")):
-                attrs["hls_proxy_url"] = f"http://127.0.0.1:{self._hls_port}/stream.m3u8"
+        if self._ts_port is not None and self._proxy_proc is not None:
+            attrs["mpegts_proxy_url"] = f"http://127.0.0.1:{self._ts_port}/stream.ts"
         return attrs
 
-    async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
-        # Fast path: extract a frame from the latest HLS segment already on
-        # disk. Avoids opening a new RTSP connection per snapshot request —
-        # ffmpeg reads a local file in ~100-300 ms vs 2-5 s over RTSP.
-        if self._hls_dir is not None:
-            import glob as _glob
-            segs = sorted(_glob.glob(os.path.join(self._hls_dir, "seg*.ts")))
-            if segs:
-                frame = await async_get_image(self.coordinator.hass, segs[-1], width=width, height=height)
-                if frame:
-                    return frame
-        # Fallback: grab directly from RTSP (used before proxy starts or if it crashed)
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
         url = self._stream_url()
         if not url:
             return None
