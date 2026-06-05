@@ -250,15 +250,12 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         return f"rtsp://{ip}:{RTSP_PORT}/{RTSP_PATH}" if ip else None
 
     async def stream_source(self) -> str | None:
-        """Local HLS playlist when the proxy has written segments; raw RTSP otherwise.
+        """Raw RTSP URL so go2rtc gets a continuous stream without segment boundaries.
 
-        Only return the proxy URL once segments exist so go2rtc/HA stream never
-        get pointed at an empty HTTP directory (which makes WebRTC negotiation fail).
+        go2rtc reads RTSP as an unbroken live feed — no HLS segment fetches,
+        no periodic stutter. The local HLS proxy is kept only for
+        async_camera_image (fast JPEG snapshots).
         """
-        if self._hls_port is not None and self._hls_dir is not None:
-            import glob as _glob
-            if _glob.glob(os.path.join(self._hls_dir, "seg*.ts")):
-                return f"http://127.0.0.1:{self._hls_port}/stream.m3u8"
         return self._stream_url()
 
     @property
