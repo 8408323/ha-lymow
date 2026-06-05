@@ -50,12 +50,13 @@ class LymowCameraCard extends HTMLElement {
           this._els.lanStream.hass = hass;
           if (st) this._els.lanStream.stateObj = st;
         }
-        // Sync quality selector from entity attribute
+        // Sync quality selector value from entity attribute
         const segSecs = st?.attributes?.hls_segment_seconds;
         if (segSecs != null && this._els.qualitySel) {
           const closest = ["0.5","1","2","4","8"].reduce((a,b) => Math.abs(b-segSecs) < Math.abs(a-segSecs) ? b : a);
           this._els.qualitySel.value = closest;
         }
+        this._updateProxyHint();
       }
     } else if (!this._pc) this._startCloud();
   }
@@ -110,6 +111,9 @@ class LymowCameraCard extends HTMLElement {
         :host(.wfs) .stage ha-camera-stream, :host(.wfs) .stage video, :host(.wfs) .stage img.snap { width:100%; height:100%; object-fit:contain; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
+        .ffmpeg-hint { padding:8px 12px; font-size:12px; color:var(--secondary-text-color); display:flex; align-items:center; gap:6px; border-top:1px solid var(--divider-color,#e0e0e0); }
+        .ffmpeg-hint a { color:var(--primary-color,#03a9f4); text-decoration:none; }
+        .ffmpeg-hint a:hover { text-decoration:underline; }
         .hidden { display:none !important; }
       </style>
       <ha-card>
@@ -144,6 +148,11 @@ class LymowCameraCard extends HTMLElement {
           <video class="cloud hidden" autoplay playsinline muted></video>
           <div class="status hidden"></div>
         </div>
+        <div class="ffmpeg-hint hidden">
+          ℹ️ Install the
+          <a href="https://my.home-assistant.io/redirect/supervisor_addon/?addon=core_ffmpeg" target="_blank" rel="noopener">FFmpeg add-on</a>
+          to enable stream quality settings and smoother video.
+        </div>
       </ha-card>`;
     this._els = {
       title: root.querySelector(".title"),
@@ -158,6 +167,7 @@ class LymowCameraCard extends HTMLElement {
       intervalCtrl: root.querySelector(".interval-ctrl"),
       intervalVal: root.querySelector(".iv-val"),
       qualitySel: root.querySelector(".quality-sel"),
+      ffmpegHint: root.querySelector(".ffmpeg-hint"),
     };
     this._els.title.textContent = this._config.title || "Lymow Camera";
     this._els.seg.forEach((b) => b.addEventListener("click", () => this._select(b.dataset.src)));
@@ -231,7 +241,19 @@ class LymowCameraCard extends HTMLElement {
     this._els.modeSeg.forEach((b) => b.classList.toggle("on", b.dataset.mode === this._lanMode));
     this._els.modeSeg.forEach((b) => b.parentElement.style.display = isLan ? "" : "none");
     this._els.intervalCtrl.classList.toggle("hidden", !(isLan && this._lanMode === "snap"));
-    this._els.qualitySel.classList.toggle("hidden", !(isLan && this._lanMode === "stream"));
+    // Quality selector and ffmpeg hint depend on both mode AND proxy state
+    this._updateProxyHint();
+  }
+
+  _updateProxyHint() {
+    const eid = this._config?.camera_entity;
+    const st = eid && this._hass?.states[eid];
+    const proxyActive = !!(st?.attributes?.hls_proxy_url);
+    const isLanStream = this._source === "lan" && this._lanMode === "stream";
+    // Hide quality selector when proxy isn't running (controls do nothing)
+    this._els.qualitySel?.classList.toggle("hidden", !(isLanStream && proxyActive));
+    // Show install hint only in LAN stream mode when proxy is absent
+    this._els.ffmpegHint?.classList.toggle("hidden", !(isLanStream && !proxyActive));
   }
 
   _setHlsQuality(secs) {
