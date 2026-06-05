@@ -73,12 +73,12 @@ PLATFORMS = [
 
 
 async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
-    """Register card JS files as Lovelace resources if not already present.
+    """Register card JS files as Lovelace resources, updating stale version URLs.
 
-    add_extra_js_url() loads the script but custom element registration is
-    unreliable via that path on some HA setups. Lovelace's own resource loader
-    is more reliable, so we maintain both.  This is idempotent: existing entries
-    with the same URL are left untouched.
+    Checks each expected JS file by base name. If an entry already exists
+    with a different ?v= query string (old version), it is updated in-place
+    so only one copy is registered per card. This prevents double-loading
+    which causes 'custom element already defined' config errors.
     """
     try:
         from homeassistant.components.lovelace.resources import ResourceStorageCollection
@@ -90,7 +90,15 @@ async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
         if resources is None:
             return
         await resources.async_load()
-        existing = {item["url"] for item in resources.async_items()}
+        # Build a map of base JS filename → (resource_id, current_url)
+        base_to_item: dict[str, tuple[str, str]] = {}
+        for item in resources.async_items():
+            url: str = item.get("url", "")
+            # Strip query string to get base path
+            base = url.split("?")[0]
+            if f"/custom_components/{DOMAIN}/" in base:
+                base_to_item[base] = (item["id"], url)
+
         for js in (
                 "lymow-map-card.js",
                 "lymow-camera-card.js",
@@ -99,9 +107,17 @@ async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
                 "lymow-backup-card.js",
                 "lymow-settings-card.js",
             ):
-            url = _card_url(js)
-            if url not in existing:
-                await resources.async_create_item({"res_type": "module", "url": url})
+            wanted_url = _card_url(js)
+            base_path = wanted_url.split("?")[0]
+            if base_path in base_to_item:
+                res_id, current_url = base_to_item[base_path]
+                if current_url != wanted_url:
+                    # Version changed — update the existing entry
+                    await resources.async_update_item(
+                        res_id, {"res_type": "module", "url": wanted_url}
+                    )
+            else:
+                await resources.async_create_item({"res_type": "module", "url": wanted_url})
     except Exception:  # noqa: BLE001
         pass  # Non-fatal; add_extra_js_url is the fallback
 
