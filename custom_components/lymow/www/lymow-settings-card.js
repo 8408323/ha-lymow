@@ -13,6 +13,7 @@
  */
 
 const ALL_SECTIONS = ["headlight", "run_time", "zone_config", "start_zone", "resume", "device", "pin", "rtk", "wifi", "geofence"];
+const ADVANCED_SECTIONS = ["device", "pin", "rtk", "wifi", "geofence"];
 
 class LymowSettingsCard extends HTMLElement {
   setConfig(config) {
@@ -75,19 +76,33 @@ class LymowSettingsCard extends HTMLElement {
         .status { font-size:11px; color:var(--secondary-text-color); margin-top:4px; min-height:16px; }
         .status.err { color:var(--error-color,#f44336); }
         .status.ok { color:var(--success-color,#4caf50); }
+        details.adv-group { border-top:1px solid var(--divider-color,#e0e0e0); }
+        details.adv-group > summary {
+          list-style:none; display:flex; align-items:center; gap:8px;
+          padding:12px 16px; cursor:pointer; font-size:14px; font-weight:600;
+          color:var(--secondary-text-color); user-select:none;
+        }
+        details.adv-group > summary::-webkit-details-marker { display:none; }
+        details.adv-group > summary .adv-arrow { margin-left:auto; transition:transform .2s; }
+        details.adv-group[open] > summary .adv-arrow { transform:rotate(180deg); }
+        details.adv-group > summary:hover { color:var(--primary-text-color); }
       </style>
       <ha-card>
-        <div class="card-header">${this._config.title || "Advanced Settings"}</div>
+        <div class="card-header">${this._config.title || "Settings"}</div>
         ${sections.includes("headlight") ? this._tplHeadlight() : ""}
         ${sections.includes("run_time") ? this._tplRunTime() : ""}
         ${sections.includes("zone_config") ? this._tplZoneConfig() : ""}
         ${sections.includes("start_zone") ? this._tplStartZone() : ""}
         ${sections.includes("resume") ? this._tplResume() : ""}
-        ${sections.includes("device") ? this._tplDevice() : ""}
-        ${sections.includes("pin") ? this._tplPin() : ""}
-        ${sections.includes("rtk") ? this._tplRtk() : ""}
-        ${sections.includes("wifi") ? this._tplWifi() : ""}
-        ${sections.includes("geofence") ? this._tplGeofence() : ""}
+        ${ADVANCED_SECTIONS.some(s => sections.includes(s)) ? `
+        <details class="adv-group">
+          <summary>⚙ Advanced<span class="adv-arrow">▼</span></summary>
+          ${sections.includes("device") ? this._tplDevice() : ""}
+          ${sections.includes("pin") ? this._tplPin() : ""}
+          ${sections.includes("rtk") ? this._tplRtk() : ""}
+          ${sections.includes("wifi") ? this._tplWifi() : ""}
+          ${sections.includes("geofence") ? this._tplGeofence() : ""}
+        </details>` : ""}
       </ha-card>`;
 
     this._root = root;
@@ -482,6 +497,6 @@ if (!customElements.get("lymow-settings-card")) {
 }
 window.customCards = window.customCards || [];
 if (!window.customCards.find(c => c.type === "lymow-settings-card")) {
-  window.customCards.push({ type: "lymow-settings-card", name: "Lymow Advanced Settings", description: "Headlight schedule, run-time config, device name, PIN, RTK bind, geofence." });
+  window.customCards.push({ type: "lymow-settings-card", name: "Lymow Settings", description: "Headlight schedule, run-time config, device name, PIN, RTK bind, geofence. Advanced settings collapsible." });
 }
 console.info("%c LYMOW-SETTINGS-CARD ", "background:#37474f;color:#fff;border-radius:3px");
