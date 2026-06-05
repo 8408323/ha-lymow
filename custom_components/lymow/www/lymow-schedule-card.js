@@ -36,9 +36,14 @@ class LymowScheduleCard extends HTMLElement {
 
   _sensorId() {
     if (this._config.schedule_sensor) return this._config.schedule_sensor;
-    // Derive from mower entity: lawn_mower.7b6521 → sensor.7b6521_schedules
+    // Search hass.states for a sensor with a 'schedules' attribute belonging to this device
     const base = this._config.mower_entity.split(".")[1];
-    return `sensor.${base}_schedules`;
+    if (!this._hass) return `sensor.${base}_schedules`;
+    const found = Object.keys(this._hass.states).find(
+      id => id.startsWith("sensor.") && id.includes(base) &&
+            Array.isArray(this._hass.states[id].attributes?.schedules)
+    );
+    return found || `sensor.${base}_schedules`;
   }
 
   _schedules() {
@@ -162,10 +167,12 @@ class LymowScheduleCard extends HTMLElement {
       const days = (s.dayOfWeek || []).map(d => DAYS[d] ?? `d${d}`).join(" ");
       const utcH = s.hour ?? 0;
       const utcM = s.minute ?? 0;
-      // Convert UTC to local
-      const d = new Date();
-      d.setUTCHours(utcH, utcM, 0, 0);
-      const timeStr = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      // Robot stores UTC time; timeZone field is hours offset (e.g. 2 = UTC+2)
+      const tzOffset = (s.timeZone ?? 0) * 60; // minutes
+      const localMins = utcH * 60 + utcM + tzOffset;
+      const lh = ((localMins / 60) % 24 + 24) % 24 | 0;
+      const lm = ((localMins % 60) + 60) % 60;
+      const timeStr = `${String(lh).padStart(2, "0")}:${String(lm).padStart(2, "0")}`;
       const zoneStr = (s.zones && s.zones.length) ? `Zones: ${s.zones.join(", ")}` : "All zones";
 
       row.innerHTML = `
