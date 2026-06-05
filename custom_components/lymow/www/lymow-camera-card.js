@@ -245,14 +245,10 @@ class LymowCameraCard extends HTMLElement {
   }
 
   _updateProxyHint() {
-    const eid = this._config?.camera_entity;
-    const st = eid && this._hass?.states[eid];
-    const proxyActive = !!(st?.attributes?.hls_proxy_url);
-    const isLanStream = this._source === "lan" && this._lanMode === "stream";
-    // Hide quality selector when proxy isn't running (controls do nothing)
-    this._els.qualitySel?.classList.toggle("hidden", !(isLanStream && proxyActive));
-    // Show install hint only in LAN stream mode when proxy is absent
-    this._els.ffmpegHint?.classList.toggle("hidden", !(isLanStream && !proxyActive));
+    // Quality selector and FFmpeg hint are no longer relevant for the live stream
+    // (stream_source() uses direct RTSP, not the HLS proxy). Hide both permanently.
+    this._els.qualitySel?.classList.add("hidden");
+    this._els.ffmpegHint?.classList.add("hidden");
   }
 
   _setHlsQuality(secs) {
