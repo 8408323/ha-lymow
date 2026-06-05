@@ -51,10 +51,33 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    import voluptuous as vol
+    from homeassistant.helpers import config_validation as cv
+
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = [LymowCamera(coordinator, device) for device in coordinator.devices]
     if entities:
         async_add_entities(entities)
+
+    entity_map: dict[str, LymowCamera] = {e.entity_id: e for e in entities}
+
+    async def handle_set_hls_quality(call: "homeassistant.core.ServiceCall") -> None:  # type: ignore[name-defined]
+        secs = float(call.data["segment_seconds"])
+        for eid in call.data.get("entity_id", []):
+            cam = entity_map.get(eid)
+            if cam:
+                await cam.async_set_hls_segment_seconds(secs)
+
+    if not hass.services.has_service(DOMAIN, "set_hls_quality"):
+        hass.services.async_register(
+            DOMAIN,
+            "set_hls_quality",
+            handle_set_hls_quality,
+            schema=vol.Schema({
+                vol.Required("entity_id"): cv.entity_ids,
+                vol.Required("segment_seconds"): vol.Coerce(float),
+            }),
+        )
 
 
 def _robot_ip(data: dict[str, Any]) -> str | None:
@@ -98,6 +121,10 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         self._hls_dir: str | None = None
         self._hls_port: int | None = None
         self._proxy_ip: str | None = None  # robot IP the running proxy is tied to
+        # HLS segment duration in seconds — shorter = lower latency but choppier;
+        # longer = smoother but more buffering. Changeable at runtime via
+        # async_set_hls_segment_seconds(); persists until HA restart.
+        self._hls_segment_secs: float = 2.0
 
     # ── lifecycle ──────────────────────────────────────────────────────────
 
@@ -165,9 +192,9 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
             "-i", rtsp_url,
             "-c:v", "copy",
             "-f", "hls",
-            "-hls_time", "1",
-            "-hls_list_size", "3",
-            "-hls_flags", "delete_segments+append_list",
+            "-hls_time", str(self._hls_segment_secs),
+            "-hls_list_size", "4",
+            "-hls_flags", "delete_segments+append_list+omit_endlist",
             "-hls_segment_filename", os.path.join(self._hls_dir, "seg%03d.ts"),
             os.path.join(self._hls_dir, "stream.m3u8"),
             stdout=asyncio.subprocess.DEVNULL,
@@ -194,6 +221,13 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         self._hls_port = None
         self._proxy_ip = None
 
+    # ── quality control ───────────────────────────────────────────────────
+
+    async def async_set_hls_segment_seconds(self, seconds: float) -> None:
+        """Change HLS segment duration and restart the proxy immediately."""
+        self._hls_segment_secs = max(0.5, min(8.0, float(seconds)))
+        await self._restart_proxy()
+
     # ── camera interface ───────────────────────────────────────────────────
 
     def _stream_url(self) -> str | None:
@@ -213,7 +247,10 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         # Lovelace card chooses ha-hls-player instead of ha-web-rtc-player.
         # HA's Camera.state_attributes should do this via _attr_frontend_stream_type
         # but some HA versions / go2rtc setups override it back to web_rtc.
-        attrs: dict = {"frontend_stream_type": "hls"}
+        attrs: dict = {
+            "frontend_stream_type": "hls",
+            "hls_segment_seconds": self._hls_segment_secs,
+        }
         url = self._stream_url()
         if url:
             attrs["rtsp_url"] = url

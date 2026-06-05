@@ -47,6 +47,12 @@ class LymowCameraCard extends HTMLElement {
         const eid = this._config.camera_entity;
         const st = eid && hass.states[eid];
         if (st) this._els.lanStream.stateObj = st;
+        // Sync quality selector from entity attribute
+        const segSecs = st?.attributes?.hls_segment_seconds;
+        if (segSecs != null && this._els.qualitySel) {
+          const closest = ["0.5","1","2","4"].reduce((a,b) => Math.abs(b-segSecs) < Math.abs(a-segSecs) ? b : a);
+          this._els.qualitySel.value = closest;
+        }
       }
     } else if (!this._pc) this._startCloud();
   }
@@ -81,6 +87,7 @@ class LymowCameraCard extends HTMLElement {
         .seg { display:inline-flex; border:1px solid var(--divider-color,#e0e0e0); border-radius:18px; overflow:hidden; }
         .seg button { border:0; background:transparent; padding:5px 14px; cursor:pointer; font:inherit; color:var(--primary-text-color); }
         .seg button.on { background:var(--primary-color,#03a9f4); color:#fff; }
+        .quality-sel { border:1px solid var(--divider-color,#e0e0e0); border-radius:14px; background:transparent; color:var(--primary-text-color); padding:3px 8px; font-size:12px; cursor:pointer; }
         .fs-btn { border:0; background:transparent; padding:4px 8px; cursor:pointer; color:var(--primary-text-color); font-size:18px; border-radius:4px; line-height:1; }
         .fs-btn:hover { background:var(--secondary-background-color); }
         .interval-ctrl { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:var(--secondary-text-color); }
@@ -113,6 +120,12 @@ class LymowCameraCard extends HTMLElement {
             <button data-mode="stream" title="Smooth continuous stream">▶</button>
             <button data-mode="snap" title="Periodic snapshots — adjustable FPS">📷</button>
           </span>
+          <select class="quality-sel hidden" title="HLS segment duration — shorter=faster/choppier, longer=smoother">
+            <option value="0.5">0.5 s</option>
+            <option value="1">1 s</option>
+            <option value="2" selected>2 s ▾</option>
+            <option value="4">4 s</option>
+          </select>
           <span class="interval-ctrl hidden">
             <button class="iv-btn" data-delta="-0.5">−</button>
             <span class="iv-val"></span>
@@ -140,6 +153,7 @@ class LymowCameraCard extends HTMLElement {
       nfsBtn: root.querySelector(".nfs-btn"),
       intervalCtrl: root.querySelector(".interval-ctrl"),
       intervalVal: root.querySelector(".iv-val"),
+      qualitySel: root.querySelector(".quality-sel"),
     };
     this._els.title.textContent = this._config.title || "Lymow Camera";
     this._els.seg.forEach((b) => b.addEventListener("click", () => this._select(b.dataset.src)));
@@ -157,6 +171,7 @@ class LymowCameraCard extends HTMLElement {
     });
     this._updateModeUI();
     this._updateIntervalDisplay();
+    this._els.qualitySel.addEventListener("change", () => this._setHlsQuality(parseFloat(this._els.qualitySel.value)));
 
     this._els.wfsBtn.addEventListener("click", () => this._toggleWindowFS());
     document.addEventListener("keydown", (e) => {
@@ -203,6 +218,22 @@ class LymowCameraCard extends HTMLElement {
     this._els.modeSeg.forEach((b) => b.classList.toggle("on", b.dataset.mode === this._lanMode));
     this._els.modeSeg.forEach((b) => b.parentElement.style.display = isLan ? "" : "none");
     this._els.intervalCtrl.classList.toggle("hidden", !(isLan && this._lanMode === "snap"));
+    this._els.qualitySel.classList.toggle("hidden", !(isLan && this._lanMode === "stream"));
+  }
+
+  _setHlsQuality(secs) {
+    const eid = this._config.camera_entity;
+    if (!eid || !this._hass) return;
+    this._hass.callService("lymow", "set_hls_quality", { entity_id: eid, segment_seconds: secs })
+      .then(() => {
+        this._setStatus("Restarting stream…");
+        // Stop stream display — it will restart via stateObj update when proxy reconnects
+        if (this._lanActive && this._lanMode === "stream") {
+          this._lanActive = false;
+          setTimeout(() => this._renderLan(), 6000); // give proxy ~6s to restart
+        }
+      })
+      .catch(e => this._setStatus(String(e), true));
   }
 
   _updateIntervalDisplay() {
