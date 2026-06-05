@@ -239,7 +239,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
 
     async def async_set_hls_segment_seconds(self, seconds: float) -> None:
         """Change HLS segment duration and restart the proxy immediately."""
-        self._hls_segment_secs = max(0.5, min(8.0, float(seconds)))
+        self._hls_segment_secs = max(0.5, min(4.0, float(seconds)))
         await self._restart_proxy()
 
     # ── camera interface ───────────────────────────────────────────────────

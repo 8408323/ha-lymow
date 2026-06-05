@@ -6,7 +6,7 @@ import json
 import logging
 from pathlib import Path
 
-from homeassistant.components.frontend import add_extra_js_url
+
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -132,18 +132,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await hass.http.async_register_static_paths(
                 [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
             )
-            # add_extra_js_url registers the script but custom element registration
-            # is unreliable via that path. Register as Lovelace resources too so
-            # Lovelace's own resource loader (which works reliably) handles them.
-            for js in (
-                "lymow-map-card.js",
-                "lymow-camera-card.js",
-                "lymow-drive-card.js",
-                "lymow-schedule-card.js",
-                "lymow-backup-card.js",
-                "lymow-settings-card.js",
-            ):
-                add_extra_js_url(hass, _card_url(js))
+            # Use Lovelace resources (not add_extra_js_url) as the sole loader.
+            # add_extra_js_url + Lovelace resources both fire on every page load,
+            # causing duplicate customElements.define() calls → config errors.
             await _ensure_lovelace_resources(hass)
         hass.data[_WWW_REGISTERED_KEY] = True
 
