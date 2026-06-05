@@ -89,6 +89,9 @@ class LymowScheduleCard extends HTMLElement {
         .days-row { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px; }
         .day-chip { padding:4px 8px; border-radius:12px; font-size:12px; cursor:pointer; border:1px solid var(--divider-color,#e0e0e0); background:transparent; color:var(--primary-text-color); }
         .day-chip.on { background:var(--primary-color,#03a9f4); color:#fff; border-color:var(--primary-color,#03a9f4); }
+        .zone-row { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:8px; }
+        .zone-chip { padding:3px 8px; border-radius:12px; font-size:11px; cursor:pointer; border:1px solid var(--divider-color,#e0e0e0); background:transparent; color:var(--primary-text-color); }
+        .zone-chip.on { background:var(--secondary-color,#4caf50); color:#fff; border-color:var(--secondary-color,#4caf50); }
         .field-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
         .field-label { font-size:13px; min-width:80px; color:var(--secondary-text-color); }
         input[type=time], input[type=text] { background:var(--card-background-color,#fff); color:var(--primary-text-color); border:1px solid var(--divider-color,#e0e0e0); border-radius:4px; padding:4px 8px; font-size:14px; }
@@ -115,6 +118,10 @@ class LymowScheduleCard extends HTMLElement {
           <div class="field-row">
             <span class="field-label">Time (local)</span>
             <input type="time" id="time-input" value="08:00">
+          </div>
+          <div class="field-row">
+            <span class="field-label">Zones</span>
+            <div class="zone-row" id="zone-chips"><span style="font-size:11px;color:var(--secondary-text-color)">Loading…</span></div>
           </div>
           <div class="repeat-row">
             <input type="checkbox" id="repeat-chk" checked>
@@ -199,15 +206,57 @@ class LymowScheduleCard extends HTMLElement {
 
   _toggleForm(show) {
     this._root.querySelector(".form").classList.toggle("hidden", !show);
+    if (show) this._populateZoneChips();
+  }
+
+  _populateZoneChips() {
+    const container = this._root.getElementById("zone-chips");
+    if (!container || !this._hass) return;
+    const zones = this._zones();
+    if (!zones.length) {
+      container.innerHTML = `<span style="font-size:11px;color:var(--secondary-text-color)">All zones (no zone entities found)</span>`;
+      return;
+    }
+    container.innerHTML = "";
+    // "All zones" chip
+    const allBtn = document.createElement("button");
+    allBtn.className = "zone-chip on";
+    allBtn.textContent = "All zones";
+    allBtn.dataset.zoneId = "__all__";
+    allBtn.addEventListener("click", () => {
+      // Toggle all-zones: if clicking all, deselect others; if clicking specific, deselect all
+      const isAll = !allBtn.classList.contains("on");
+      allBtn.classList.toggle("on", isAll);
+      if (isAll) container.querySelectorAll(".zone-chip:not([data-zone-id='__all__'])").forEach(c => c.classList.remove("on"));
+    });
+    container.appendChild(allBtn);
+    zones.forEach(z => {
+      const btn = document.createElement("button");
+      btn.className = "zone-chip";
+      btn.textContent = z.name.replace(/^Zone\s+/i, "");
+      btn.dataset.zoneId = z.id;
+      btn.addEventListener("click", () => {
+        btn.classList.toggle("on");
+        // If any specific zone selected, deselect "All zones"
+        const anyOn = [...container.querySelectorAll(".zone-chip:not([data-zone-id='__all__'])")].some(c => c.classList.contains("on"));
+        allBtn.classList.toggle("on", !anyOn);
+      });
+      container.appendChild(btn);
+    });
   }
 
   _saveSchedule() {
     const chips = this._root.querySelectorAll(".day-chip.on");
     const days = [...chips].map(c => parseInt(c.dataset.day));
-    const timeVal = this._root.getElementById("time-input").value; // "HH:MM" local
+    const timeVal = this._root.getElementById("time-input").value;
     const repeat = this._root.getElementById("repeat-chk").checked;
 
     if (!timeVal) { this._setStatus("Please set a time.", true); return; }
+
+    // Collect selected zone IDs (empty = all zones)
+    const allOn = this._root.querySelector(".zone-chip[data-zone-id='__all__']")?.classList.contains("on");
+    const zoneChips = [...this._root.querySelectorAll(".zone-chip.on")].filter(c => c.dataset.zoneId !== "__all__");
+    const zones = (allOn || !zoneChips.length) ? [] : zoneChips.map(c => c.dataset.zoneId);
 
     // Convert local time to UTC
     const [lh, lm] = timeVal.split(":").map(Number);
@@ -216,13 +265,16 @@ class LymowScheduleCard extends HTMLElement {
     const utcH = d.getUTCHours();
     const utcM = d.getUTCMinutes();
 
-    this._callService("add_schedule", {
+    const payload = {
       hour: utcH,
       minute: utcM,
       day_of_week: days.length ? days : [0, 1, 2, 3, 4, 5, 6],
       repeated: repeat,
       disabled: false,
-    }).then(() => {
+    };
+    if (zones.length) payload.zones = zones;
+
+    this._callService("add_schedule", payload).then(() => {
       this._toggleForm(false);
       this._setStatus("Schedule added.");
     }).catch(e => this._setStatus(String(e), true));

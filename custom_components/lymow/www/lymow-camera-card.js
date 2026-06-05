@@ -7,9 +7,8 @@
  *   camera_entity: camera.THING_camera      # required for the LAN view
  *   title: Lymow Camera                     # optional
  *   default_source: lan | cloud             # optional (default: lan)
- *   lan_workers: 3                          # optional — parallel fetch workers (1-10, default: 3)
- *                                           #   More workers = higher frame rate but heavier on HA.
- *                                           #   Effective fps ≈ workers / generation_time_per_frame.
+ *   lan_workers: 3       # optional — JPEG snapshot workers when in Snap mode (1-10, default 3)
+ *   default_lan_mode: stream | snap  # optional (default: stream)
  *
  * Two genuinely separate transport paths:
  *   LAN   — ha-camera-stream picks the best path based on frontend_stream_type.
@@ -35,16 +34,24 @@ class LymowCameraCard extends HTMLElement {
     }
     this._config = cfg;
     this._source = cfg.default_source === "cloud" ? "cloud" : "lan";
+    this._lanMode = cfg.default_lan_mode === "snap" ? "snap" : "stream";
+    this._lanWorkers = Math.max(1, Math.min(10, cfg.lan_workers ?? 3));
     this._built = false;
     this._lanActive = false;
-    this._lanWorkers = Math.max(1, Math.min(10, cfg.lan_workers ?? 3));
   }
 
   set hass(hass) {
     this._hass = hass;
     if (!this._built) return;
-    if (this._source === "lan") this._renderLan();
-    else if (!this._pc) this._startCloud();
+    if (this._source === "lan") {
+      this._renderLan();
+      if (this._lanActive && this._lanMode === "stream" && this._els?.lanStream) {
+        this._els.lanStream.hass = hass;
+        const eid = this._config.camera_entity;
+        const st = eid && hass.states[eid];
+        if (st) this._els.lanStream.stateObj = st;
+      }
+    } else if (!this._pc) this._startCloud();
   }
 
   connectedCallback() {
@@ -84,16 +91,16 @@ class LymowCameraCard extends HTMLElement {
         .iv-btn:hover { background:var(--secondary-background-color); }
         .iv-val { min-width:36px; text-align:center; font-size:11px; }
         .stage { position:relative; background:#000; aspect-ratio:4/3; width:100%; overflow:hidden; display:flex; align-items:center; justify-content:center; }
-        .stage img, .stage video { width:100%; height:100%; object-fit:contain; background:#000; display:block; }
+        .stage ha-camera-stream, .stage video, .stage img.snap { width:100%; height:100%; object-fit:contain; background:#000; display:block; }
         /* Native OS fullscreen (desktop only) */
         :host(:fullscreen) ha-card { display:flex; flex-direction:column; width:100vw; height:100vh; overflow:hidden; }
         :host(:fullscreen) .stage { aspect-ratio:unset; flex:1; min-height:0; overflow:hidden; }
-        :host(:fullscreen) .stage img, :host(:fullscreen) .stage video { width:100%; height:100%; object-fit:contain; }
+        :host(:fullscreen) .stage ha-camera-stream, :host(:fullscreen) .stage video, :host(:fullscreen) .stage img.snap { width:100%; height:100%; object-fit:contain; }
         /* In-window fullscreen — fixed overlay covering entire browser viewport */
         :host(.wfs) { position:fixed; inset:0; z-index:9999; display:block; }
         :host(.wfs) ha-card { display:flex; flex-direction:column; width:100%; height:100%; overflow:hidden; border-radius:0; }
         :host(.wfs) .stage { aspect-ratio:unset; flex:1; min-height:0; overflow:hidden; }
-        :host(.wfs) .stage img, :host(.wfs) .stage video { width:100%; height:100%; object-fit:contain; }
+        :host(.wfs) .stage ha-camera-stream, :host(.wfs) .stage video, :host(.wfs) .stage img.snap { width:100%; height:100%; object-fit:contain; }
         .status { position:absolute; color:#eee; font-size:14px; text-align:center; padding:0 16px; }
         .status.err { color:#ff8a80; }
         .hidden { display:none !important; }
@@ -105,6 +112,10 @@ class LymowCameraCard extends HTMLElement {
             <button data-src="lan">LAN</button>
             <button data-src="cloud">Cloud</button>
           </span>
+          <span class="seg mode-seg">
+            <button data-mode="stream" title="HLS stream — smooth continuous video">▶</button>
+            <button data-mode="snap" title="JPEG snapshots — adjustable frame rate">📷</button>
+          </span>
           <span class="interval-ctrl hidden">
             <button class="iv-btn" data-delta="-1">−</button>
             <span class="iv-val"></span>
@@ -114,15 +125,18 @@ class LymowCameraCard extends HTMLElement {
           <button class="fs-btn nfs-btn" title="Fullscreen">⛶</button>
         </div>
         <div class="stage">
-          <img class="lan hidden" alt="">
+          <ha-camera-stream class="lan hidden"></ha-camera-stream>
+          <img class="snap hidden" alt="">
           <video class="cloud hidden" autoplay playsinline muted></video>
           <div class="status hidden"></div>
         </div>
       </ha-card>`;
     this._els = {
       title: root.querySelector(".title"),
-      seg: root.querySelectorAll(".seg button"),
-      lanStream: root.querySelector("img.lan"),
+      seg: root.querySelectorAll(".seg:not(.mode-seg) button"),
+      modeSeg: root.querySelectorAll(".mode-seg button"),
+      lanStream: root.querySelector("ha-camera-stream.lan"),
+      snapImg: root.querySelector("img.snap"),
       video: root.querySelector("video.cloud"),
       status: root.querySelector(".status"),
       wfsBtn: root.querySelector(".wfs-btn"),
@@ -132,14 +146,21 @@ class LymowCameraCard extends HTMLElement {
     };
     this._els.title.textContent = this._config.title || "Lymow Camera";
     this._els.seg.forEach((b) => b.addEventListener("click", () => this._select(b.dataset.src)));
+    this._els.modeSeg.forEach((b) => b.addEventListener("click", () => this._setLanMode(b.dataset.mode)));
+    root.querySelectorAll(".iv-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        this._lanWorkers = Math.max(1, Math.min(10, this._lanWorkers + parseInt(b.dataset.delta)));
+        this._updateIntervalDisplay();
+      });
+    });
+    this._updateModeUI();
+    this._updateIntervalDisplay();
 
-    // In-window fullscreen: fixed overlay covering the browser viewport. Works on iOS.
     this._els.wfsBtn.addEventListener("click", () => this._toggleWindowFS());
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && this.classList.contains("wfs")) this._toggleWindowFS(false);
     });
 
-    // Native OS fullscreen: hidden on iOS/iPadOS where requestFullscreen() is unsupported.
     if (!document.fullscreenEnabled) {
       this._els.nfsBtn.classList.add("hidden");
     } else {
@@ -148,13 +169,6 @@ class LymowCameraCard extends HTMLElement {
         else document.exitFullscreen().catch(() => {});
       });
     }
-    root.querySelectorAll(".iv-btn").forEach((b) => {
-      b.addEventListener("click", () => {
-        this._lanWorkers = Math.max(1, Math.min(10, this._lanWorkers + parseInt(b.dataset.delta)));
-        this._updateIntervalDisplay();
-      });
-    });
-    this._updateIntervalDisplay();
     this._built = true;
   }
 
@@ -173,10 +187,30 @@ class LymowCameraCard extends HTMLElement {
     this._els.status.classList.toggle("hidden", !msg);
   }
 
+  _setLanMode(mode) {
+    if (this._source !== "lan") { this._lanMode = mode; this._updateModeUI(); return; }
+    this._stopLan();
+    this._lanMode = mode;
+    this._updateModeUI();
+    this._lanActive = false;
+    this._renderLan();
+  }
+
+  _updateModeUI() {
+    const isLan = this._source === "lan";
+    this._els.modeSeg.forEach((b) => b.classList.toggle("on", b.dataset.mode === this._lanMode));
+    this._els.modeSeg.forEach((b) => b.parentElement.style.display = isLan ? "" : "none");
+    this._els.intervalCtrl.classList.toggle("hidden", !(isLan && this._lanMode === "snap"));
+  }
+
+  _updateIntervalDisplay() {
+    this._els.intervalVal.textContent = `${this._lanWorkers}×`;
+  }
+
   _select(src) {
     this._source = src;
     this._els.seg.forEach((b) => b.classList.toggle("on", b.dataset.src === src));
-    this._els.intervalCtrl.classList.toggle("hidden", src !== "lan");
+    this._updateModeUI();
     if (src === "lan") {
       this._stopCloud();
       this._els.video.classList.add("hidden");
@@ -190,16 +224,15 @@ class LymowCameraCard extends HTMLElement {
     }
   }
 
-  _updateIntervalDisplay() {
-    this._els.intervalVal.textContent = `${this._lanWorkers}×`;
-  }
-
-  // ---- LAN: concurrent JPEG pipeline via HA camera proxy --------------------
-  // N workers fetch simultaneously. HA's ffmpeg generates each frame (~2-5s).
-  // Effective fps ≈ N / generation_time. Workers are staggered at startup so
-  // frames arrive evenly spaced rather than in bursts. Only the most recently
-  // captured frame is shown; out-of-order completions are silently discarded.
-  // Max 10 in-flight requests to avoid flooding HA.
+  // ---- LAN: stream mode (ha-camera-stream + HLS proxy) ----------------------
+  // camera.py spawns FFmpeg with -analyzeduration 5s / -probesize 5MB so it
+  // waits for LIVE555's first IDR+SPS+PPS frame. stream_source() returns the
+  // local HLS URL → ha-camera-stream plays clean, smooth video.
+  //
+  // ---- LAN: snap mode (JPEG polling pipeline) --------------------------------
+  // N parallel workers keep fetching new frames from HA's camera proxy.
+  // Use +/− to adjust worker count (= effective fps).  Fallback when robot
+  // is out of LAN range but still reachable via HA's image endpoint.
   _renderLan() {
     const eid = this._config.camera_entity;
     const st = eid && this._hass && this._hass.states[eid];
@@ -215,51 +248,49 @@ class LymowCameraCard extends HTMLElement {
     this._lanActive = true;
     this._setStatus("");
 
+    if (this._lanMode === "snap") {
+      this._els.lanStream.classList.add("hidden");
+      this._els.snapImg.classList.remove("hidden");
+      this._startSnapWorkers(eid, st);
+    } else {
+      this._els.snapImg.classList.add("hidden");
+      this._els.lanStream.classList.remove("hidden");
+      this._els.lanStream.hass = this._hass;
+      this._els.lanStream.stateObj = st;
+    }
+  }
+
+  _startSnapWorkers(eid, st) {
     const token = st.attributes.access_token;
     const base = `/api/camera_proxy/${eid}?token=${token}`;
-    const img = this._els.lanStream;
-    // Pre-start HA's HLS stream so ffmpeg's RTSP connection stays warm.
-    this._hass.callWS({ type: "camera/stream", entity_id: eid, format: "hls" }).catch(() => {});
-
-    let lastShownTs = 0; // monotonic capture-time stamp; only newer frames are shown
-
-    // Each worker runs in an infinite loop: fetch → show if newest → repeat.
-    // Stagger initial starts by estimatedGenerationMs/N so frames arrive evenly.
-    const estimatedGenerationMs = 5000;
-    const startWorker = (initialDelay) => {
+    const img = this._els.snapImg;
+    let lastTs = 0;
+    const estimatedMs = 5000;
+    const startWorker = (delay) => {
       setTimeout(() => {
         const run = () => {
-          if (!this._lanActive) return;
-          const captureTs = Date.now();
-          const url = `${base}&_=${captureTs}`;
+          if (!this._lanActive || this._lanMode !== "snap") return;
+          const ts = Date.now();
           const next = new Image();
           next.onload = () => {
-            if (!this._lanActive) return;
-            // Only display if this frame is newer than what's already shown.
-            if (captureTs > lastShownTs) {
-              lastShownTs = captureTs;
-              img.src = next.src;
-            }
-            run(); // immediately start next fetch — pipeline never idles
+            if (!this._lanActive || this._lanMode !== "snap") return;
+            if (ts > lastTs) { lastTs = ts; img.src = next.src; }
+            run();
           };
-          next.onerror = () => {
-            if (this._lanActive) setTimeout(run, 2000);
-          };
-          next.src = url;
+          next.onerror = () => { if (this._lanActive) setTimeout(run, 2000); };
+          next.src = `${base}&_=${ts}`;
         };
         run();
-      }, initialDelay);
+      }, delay);
     };
-
     const n = this._lanWorkers;
-    for (let i = 0; i < n; i++) {
-      startWorker(Math.round((estimatedGenerationMs / n) * i));
-    }
+    for (let i = 0; i < n; i++) startWorker(Math.round((estimatedMs / n) * i));
   }
 
   _stopLan() {
     this._lanActive = false;
-    if (this._els && this._els.lanStream) this._els.lanStream.src = "";
+    if (this._els?.lanStream) { this._els.lanStream.stateObj = null; this._els.lanStream.hass = null; }
+    if (this._els?.snapImg) this._els.snapImg.src = "";
   }
 
   // ---- Cloud: in-browser AWS KVS WebRTC viewer ------------------------------
