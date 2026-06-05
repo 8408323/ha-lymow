@@ -7,16 +7,13 @@
  *   camera_entity: camera.THING_camera      # required for the LAN view
  *   title: Lymow Camera                     # optional
  *   default_source: lan | cloud             # optional (default: lan)
- *   lan_workers: 3       # optional — JPEG snapshot workers when in Snap mode (1-10, default 3)
- *   default_lan_mode: stream | snap  # optional (default: stream)
+ *   default_lan_mode: stream | snap         # optional (default: stream)
+ *   snap_fps: 2                             # optional — target FPS in Snap mode (0.5-5, default 2)
  *
- * Two genuinely separate transport paths:
- *   LAN   — ha-camera-stream picks the best path based on frontend_stream_type.
- *           The camera entity sets StreamType.HLS, bypassing go2rtc WebRTC
- *           (which produces green H.264 artifacts). Result: clean HLS stream.
- *   Cloud — in-browser AWS KVS WebRTC. The browser talks straight to AWS and
- *           the robot streams over its own internet link (works on 4G, away
- *           from home). The integration only hands us the signed session.
+ * Two transport paths:
+ *   LAN Stream  — smooth continuous video via HA's stream component.
+ *   LAN Snap    — periodic JPEG snapshots at configurable FPS (adjustable in UI).
+ *   Cloud       — in-browser AWS KVS WebRTC, works away from home.
  */
 
 const FRAME_TIMEOUT_MS = 25000;
@@ -35,7 +32,7 @@ class LymowCameraCard extends HTMLElement {
     this._config = cfg;
     this._source = cfg.default_source === "cloud" ? "cloud" : "lan";
     this._lanMode = cfg.default_lan_mode === "snap" ? "snap" : "stream";
-    this._lanWorkers = Math.max(1, Math.min(10, cfg.lan_workers ?? 3));
+    this._snapFps = Math.max(0.5, Math.min(5, cfg.snap_fps ?? 2));
     this._built = false;
     this._lanActive = false;
   }
@@ -113,13 +110,13 @@ class LymowCameraCard extends HTMLElement {
             <button data-src="cloud">Cloud</button>
           </span>
           <span class="seg mode-seg">
-            <button data-mode="stream" title="HLS stream — smooth continuous video">▶</button>
-            <button data-mode="snap" title="JPEG snapshots — adjustable frame rate">📷</button>
+            <button data-mode="stream" title="Smooth continuous stream">▶</button>
+            <button data-mode="snap" title="Periodic snapshots — adjustable FPS">📷</button>
           </span>
           <span class="interval-ctrl hidden">
-            <button class="iv-btn" data-delta="-1">−</button>
+            <button class="iv-btn" data-delta="-0.5">−</button>
             <span class="iv-val"></span>
-            <button class="iv-btn" data-delta="1">+</button>
+            <button class="iv-btn" data-delta="0.5">+</button>
           </span>
           <button class="fs-btn wfs-btn" title="Expand in window">⤡</button>
           <button class="fs-btn nfs-btn" title="Fullscreen">⛶</button>
@@ -149,8 +146,13 @@ class LymowCameraCard extends HTMLElement {
     this._els.modeSeg.forEach((b) => b.addEventListener("click", () => this._setLanMode(b.dataset.mode)));
     root.querySelectorAll(".iv-btn").forEach((b) => {
       b.addEventListener("click", () => {
-        this._lanWorkers = Math.max(1, Math.min(10, this._lanWorkers + parseInt(b.dataset.delta)));
+        this._snapFps = Math.round(Math.max(0.5, Math.min(5, this._snapFps + parseFloat(b.dataset.delta))) * 2) / 2;
         this._updateIntervalDisplay();
+        // Restart snap workers with new rate if already running
+        if (this._lanActive && this._lanMode === "snap") {
+          this._lanActive = false;
+          this._renderLan();
+        }
       });
     });
     this._updateModeUI();
@@ -204,7 +206,7 @@ class LymowCameraCard extends HTMLElement {
   }
 
   _updateIntervalDisplay() {
-    this._els.intervalVal.textContent = `${this._lanWorkers}×`;
+    this._els.intervalVal.textContent = `${this._snapFps % 1 === 0 ? this._snapFps : this._snapFps.toFixed(1)} fps`;
   }
 
   _select(src) {
@@ -264,27 +266,25 @@ class LymowCameraCard extends HTMLElement {
     const token = st.attributes.access_token;
     const base = `/api/camera_proxy/${eid}?token=${token}`;
     const img = this._els.snapImg;
-    let lastTs = 0;
-    const estimatedMs = 5000;
-    const startWorker = (delay) => {
-      setTimeout(() => {
-        const run = () => {
-          if (!this._lanActive || this._lanMode !== "snap") return;
-          const ts = Date.now();
-          const next = new Image();
-          next.onload = () => {
-            if (!this._lanActive || this._lanMode !== "snap") return;
-            if (ts > lastTs) { lastTs = ts; img.src = next.src; }
-            run();
-          };
-          next.onerror = () => { if (this._lanActive) setTimeout(run, 2000); };
-          next.src = `${base}&_=${ts}`;
-        };
-        run();
-      }, delay);
+    const targetMs = () => 1000 / this._snapFps;
+
+    // Single polling loop: fires at target FPS, waits for each response
+    // before scheduling the next. Shows achieved FPS in the label.
+    const run = () => {
+      if (!this._lanActive || this._lanMode !== "snap") return;
+      const started = Date.now();
+      const next = new Image();
+      next.onload = () => {
+        if (!this._lanActive || this._lanMode !== "snap") return;
+        img.src = next.src;
+        const elapsed = Date.now() - started;
+        const wait = Math.max(0, targetMs() - elapsed);
+        setTimeout(run, wait);
+      };
+      next.onerror = () => { if (this._lanActive) setTimeout(run, 1000); };
+      next.src = `${base}&_=${Date.now()}`;
     };
-    const n = this._lanWorkers;
-    for (let i = 0; i < n; i++) startWorker(Math.round((estimatedMs / n) * i));
+    run();
   }
 
   _stopLan() {
