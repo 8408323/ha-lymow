@@ -293,6 +293,9 @@ def _build_pboutput(
     is_recharging: int = 0,
     wifi_signal: int | None = None,
     lte_signal: int | None = None,
+    bt_signal: int | None = None,
+    wifi_working: bool | None = None,
+    lte_working: bool | None = None,
     robot_state: int | None = None,
     error_codes: list[int] | None = None,
     warning_codes: list[int] | None = None,
@@ -314,6 +317,12 @@ def _build_pboutput(
         robot_info += _field_i32(3, wifi_signal)
     if lte_signal is not None:
         robot_info += _field_i32(4, lte_signal)
+    if bt_signal is not None:
+        robot_info += _field_i32(5, bt_signal)
+    if wifi_working is not None:
+        robot_info += _field_i32(9, 1 if wifi_working else 0)
+    if lte_working is not None:
+        robot_info += _field_i32(10, 1 if lte_working else 0)
 
     # PbDeviceProfile (sub-message, field 10)
     profile = b""
@@ -1502,6 +1511,8 @@ def _build_pboutput_with_extras(
     mow_strip_count: int | None = None,
     mow_progress: float | None = None,
     current_task_zone: str | None = None,
+    remain_clean_time_sec: int | None = None,
+    map_area_m2: float | None = None,
     pose_east_m: float | None = None,
     pose_north_m: float | None = None,
     pose_theta_rad: float | None = None,
@@ -1524,8 +1535,12 @@ def _build_pboutput_with_extras(
             rtk += _field_i32(4, rtk_status)
         out += _field_bytes(6, rtk)
 
-    # Area info (field 12): f1=missionTimeMin, f2=totalAreaM2, f5=mowProgress
-    if any(v is not None for v in (total_area_m2, mow_strip_count, mow_progress, current_task_zone)):
+    # Area info (field 12): f1=missionTimeMin, f2=totalAreaM2, f4=remainCleanTime,
+    # f5=mowProgress, f6=mapArea
+    if any(
+        v is not None
+        for v in (total_area_m2, mow_strip_count, mow_progress, current_task_zone, remain_clean_time_sec, map_area_m2)
+    ):
         area = b""
         if mow_strip_count is not None:
             area += _field_i32(1, mow_strip_count)
@@ -1533,8 +1548,12 @@ def _build_pboutput_with_extras(
             area += _field_f32(2, total_area_m2)
         if current_task_zone is not None:
             area += _field_bytes(3, _field_i32(1, 1) + _field_str(2, current_task_zone))
+        if remain_clean_time_sec is not None:
+            area += _field_i32(4, remain_clean_time_sec)
         if mow_progress is not None:
             area += _field_f32(5, mow_progress)
+        if map_area_m2 is not None:
+            area += _field_f32(6, map_area_m2)
         out += _field_bytes(12, area)
 
     # Robot pose ENU (field 14)
@@ -1673,7 +1692,8 @@ def test_decode_pboutput_camera_diagnostics() -> None:
     pb = _field_i32(2, PB_VERSION) + _field_i32(37, 15) + _field_i32(38, 3)
     state = decode_pboutput(pb)
     assert state["heatedLensTimes"] == 15
-    assert state["aeRangeLevel"] == 3
+    # f38 is surfaced as its AE_RANGE_LEVELS label (gear 3 → "3"), not the raw int.
+    assert state["aeRangeLevel"] == "3"
 
 
 def test_decode_pboutput_current_task_zone() -> None:
@@ -1882,6 +1902,142 @@ def test_decode_pboutput_mow_fields_absent_when_not_set() -> None:
     state = decode_pboutput(pb)
     assert "mowStripCount" not in state
     assert "mowProgress" not in state
+
+
+def test_decode_pboutput_remain_clean_time_decoded() -> None:
+    """f12.f4 → remainCleanTimeSec — used by the new ETA sensor."""
+    pb = _build_pboutput_with_extras(remain_clean_time_sec=1830)
+    state = decode_pboutput(pb)
+    assert state["remainCleanTimeSec"] == 1830
+
+
+def test_decode_pboutput_map_area_decoded() -> None:
+    """f12.f6 → mapAreaM2 — the total map area (much larger than per-task)."""
+    pb = _build_pboutput_with_extras(map_area_m2=4250.0)
+    state = decode_pboutput(pb)
+    assert abs(state["mapAreaM2"] - 4250.0) < 1.0
+
+
+def test_decode_pboutput_heated_lens_times_decoded_as_counter() -> None:
+    """PbOutput.f37 = uint32 — lens heater fire count, monotonically
+    increasing. Surfaces as ``heatedLensTimes`` for a maintenance sensor."""
+    pb = _build_pboutput() + _field_i32(37, 42)
+    state = decode_pboutput(pb)
+    assert state["heatedLensTimes"] == 42
+
+
+def test_decode_pboutput_no_heated_lens_times_key_when_field37_absent() -> None:
+    """When the robot doesn't report f37 (older firmware / no camera lens
+    on this SKU), the key must stay absent so the sensor doesn't show 0
+    as if the heater has fired zero times."""
+    assert "heatedLensTimes" not in decode_pboutput(_build_pboutput())
+
+
+def test_decode_pboutput_heated_lens_times_zero_surfaces() -> None:
+    """A reported 0 IS meaningful — the heater hasn't fired yet this install.
+    Distinct from "field absent" → key absent."""
+    pb = _build_pboutput() + _field_i32(37, 0)
+    assert decode_pboutput(pb)["heatedLensTimes"] == 0
+
+
+def test_decode_pboutput_heated_lens_times_drops_sign_extended_negative() -> None:
+    """``_decode_varint`` always returns unsigned, so a sign-extended int32
+    -1 (0xFFFFFFFFFFFFFFFF on the wire) would surface as 4-billion+ if we
+    only checked ``>= 0``. ``_signed32`` interprets the wrap-around as -1,
+    which we reject so the sensor doesn't render a nonsense counter."""
+    # _field_i32(37, -1) emits a 10-byte varint = 0xFFFFFFFFFFFFFFFF
+    pb = _build_pboutput() + _field_i32(37, -1)
+    assert "heatedLensTimes" not in decode_pboutput(pb)
+
+
+def test_decode_pboutput_ae_range_level_resolves_to_label() -> None:
+    """PbOutput.f38 is the camera auto-exposure gear int enum 0..7 — the
+    decoder maps it to the AE_RANGE_LEVELS label so a plain LymowSensor
+    reads the string directly. Spot-check NONE (0), an in-range gear, and MAX (7)."""
+    assert decode_pboutput(_build_pboutput() + _field_i32(38, 0))["aeRangeLevel"] == "NONE"
+    assert decode_pboutput(_build_pboutput() + _field_i32(38, 3))["aeRangeLevel"] == "3"
+    assert decode_pboutput(_build_pboutput() + _field_i32(38, 7))["aeRangeLevel"] == "MAX"
+
+
+def test_decode_pboutput_ae_range_level_drops_out_of_range() -> None:
+    """An unknown gear value (firmware drift or wire corruption) must drop
+    the key rather than render an "AE Gear 42" phantom label."""
+    assert "aeRangeLevel" not in decode_pboutput(_build_pboutput() + _field_i32(38, 42))
+    # Sign-extended -1 wraps to 0xFFFFFFFFFFFFFFFF; ``_signed32`` interprets
+    # it as -1, which is outside [0, 7].
+    assert "aeRangeLevel" not in decode_pboutput(_build_pboutput() + _field_i32(38, -1))
+
+
+def test_decode_pboutput_no_ae_range_level_key_when_field38_absent() -> None:
+    assert "aeRangeLevel" not in decode_pboutput(_build_pboutput())
+
+
+def test_decode_pboutput_output_ctrl_resolves_to_label() -> None:
+    """PbOutput.f18 = outputCtrl varint enum — surfaces as the label string
+    from OUTPUT_CTRLS so a sensor renders ``QUERY_MAP`` rather than ``1``."""
+    assert decode_pboutput(_build_pboutput() + _field_i32(18, 1))["outputCtrl"] == "QUERY_MAP"
+    assert decode_pboutput(_build_pboutput() + _field_i32(18, 8))["outputCtrl"] == "SYNC_MAP"
+    assert decode_pboutput(_build_pboutput() + _field_i32(18, 0))["outputCtrl"] == "NONE"
+
+
+def test_decode_pboutput_output_ctrl_drops_unknown_codes() -> None:
+    """An outputCtrl outside OUTPUT_CTRLS (firmware drift) drops the key
+    rather than render a phantom label."""
+    assert "outputCtrl" not in decode_pboutput(_build_pboutput() + _field_i32(18, 99))
+    # Sign-extended -1 → _signed32 returns -1, not in OUTPUT_CTRLS.
+    assert "outputCtrl" not in decode_pboutput(_build_pboutput() + _field_i32(18, -1))
+
+
+def test_decode_pboutput_no_output_ctrl_key_when_field18_absent() -> None:
+    assert "outputCtrl" not in decode_pboutput(_build_pboutput())
+
+
+def test_decode_pboutput_clean_info_all_fields_together() -> None:
+    """All five PbCleanInfo fields coexist in one PbOutput.f12 sub-message."""
+    pb = _build_pboutput_with_extras(
+        mow_strip_count=120,
+        total_area_m2=350.0,
+        remain_clean_time_sec=900,
+        mow_progress=0.45,
+        map_area_m2=1500.0,
+    )
+    state = decode_pboutput(pb)
+    # f1 is surfaced as missionTimeMin (minutes; live-confirmed) — not mowStripCount.
+    assert state["missionTimeMin"] == 120
+    assert abs(state["totalTaskAreaM2"] - 350.0) < 1.0
+    assert state["remainCleanTimeSec"] == 900
+    assert abs(state["mowProgress"] - 45.0) < 1.0
+    assert abs(state["mapAreaM2"] - 1500.0) < 1.0
+
+
+def test_decode_pboutput_remain_and_map_area_absent_when_not_set() -> None:
+    """New PbCleanInfo fields stay out of state when the wire doesn't carry them
+    — partial frames must not introduce zero values."""
+    pb = _build_pboutput_with_extras(mow_strip_count=5)
+    state = decode_pboutput(pb)
+    assert "remainCleanTimeSec" not in state
+    assert "mapAreaM2" not in state
+
+
+def test_decode_pboutput_charging_station_loc_from_f24() -> None:
+    """PbOutput.f24 (PbPose) → live chargingStationLoc {x, y, theta}; a partial
+    pose (no theta) surfaces only the fields present, and wire-type drift on a
+    field is skipped rather than crashing."""
+    from lymow.protocol import PB_VERSION
+
+    pose = _field_f32(1, 1.5) + _field_f32(2, 2.5) + _field_f32(3, 0.25)
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(24, pose)
+    dock = decode_pboutput(pb)["chargingStationLoc"]
+    assert dock["x"] == pytest.approx(1.5)
+    assert dock["y"] == pytest.approx(2.5)
+    assert dock["theta"] == pytest.approx(0.25)
+
+    # Partial (x/y only) + a drifted theta (length-delimited instead of fixed32) →
+    # theta dropped, x/y kept, no crash.
+    partial = _field_f32(1, 3.0) + _field_f32(2, 4.0) + _field_bytes(3, b"junk")
+    pb2 = _field_i32(2, PB_VERSION) + _field_bytes(24, partial)
+    dock2 = decode_pboutput(pb2)["chargingStationLoc"]
+    assert dock2 == {"x": pytest.approx(3.0), "y": pytest.approx(4.0)}
 
 
 # ---------------------------------------------------------------------------
@@ -2627,6 +2783,185 @@ def test_decode_pboutput_surfaces_robot_config_under_robotConfig_key() -> None:
 
 def test_decode_pboutput_no_robotConfig_key_when_field17_absent() -> None:
     assert "robotConfig" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
+# ---------------------------------------------------------------------------
+# decode_clean_report (PbOutput.f28 — QUERY_CLEANING_SUMMARY reply)
+# ---------------------------------------------------------------------------
+
+
+def test_decode_clean_report_all_scalar_fields() -> None:
+    """PbCleanReport: f1 cleanStartTime, f3 mowEndType, f6 usedBattery."""
+    from lymow.protocol import decode_clean_report
+
+    payload = _field_i32(1, 1_700_000_000) + _field_i32(3, 1) + _field_i32(6, 35)
+    assert decode_clean_report(payload) == {
+        "cleanStartTime": 1_700_000_000,
+        "mowEndType": 1,
+        "usedBattery": 35,
+    }
+
+
+def test_decode_clean_report_drops_out_of_range_values() -> None:
+    """Untrusted wire: bound mowEndType to the APK enum (0-2) and usedBattery
+    to a percentage; drop a non-positive start time so HA doesn't surface 1970,
+    and drop a huge start time so ``datetime.fromtimestamp`` can't OverflowError
+    downstream — cap at the POSIX-portable int32 ceiling (year 2038)."""
+    from lymow.protocol import decode_clean_report
+
+    assert decode_clean_report(_field_i32(1, 0)) == {}
+    assert decode_clean_report(_field_i32(3, 99)) == {}
+    assert decode_clean_report(_field_i32(6, 150)) == {}
+    # Boundary: max accepted is 2^31-1 (year 2038)
+    assert decode_clean_report(_field_i32(1, 2_147_483_647)) == {"cleanStartTime": 2_147_483_647}
+    # Boundary: one past the cap is rejected
+    assert decode_clean_report(_field_i32(1, 2_147_483_648)) == {}
+
+
+def test_decode_clean_report_empty_returns_empty_dict() -> None:
+    from lymow.protocol import decode_clean_report
+
+    assert decode_clean_report(b"") == {}
+
+
+def test_decode_clean_report_status_times_packed_int32() -> None:
+    """PbCleanReport.f5 is a packed repeated int32 — seconds per workStatus
+    indexed by enum value. Verified against the encoder's int32+ldelim pattern."""
+    from lymow.protocol import _encode_varint, _field_bytes, decode_clean_report
+
+    # Three statuses: 120s, 0s, 60s
+    packed = _encode_varint(120) + _encode_varint(0) + _encode_varint(60)
+    assert decode_clean_report(_field_bytes(5, packed))["statusTimes"] == [120, 0, 60]
+
+
+def test_decode_clean_report_status_times_clamps_preserves_index_alignment() -> None:
+    """Bound each duration at [0, one year of seconds] so a misaligned varint
+    can't surface a wildly large 64-bit value — but CLAMP rather than drop:
+    statusTimes[i] must keep mapping to workStatus == i. A mid-array out-of-
+    range entry becoming 0 preserves the position of the entries after it."""
+    from lymow.protocol import _encode_varint, _field_bytes, decode_clean_report
+
+    packed = _encode_varint(100) + _encode_varint(31_536_001) + _encode_varint(200)
+    assert decode_clean_report(_field_bytes(5, packed))["statusTimes"] == [100, 31_536_000, 200]
+    # Negative wire values (sign-extended varint) clamp to 0 too.
+    neg_packed = _encode_varint(50) + _encode_varint(0xFFFFFFFF) + _encode_varint(75)
+    assert decode_clean_report(_field_bytes(5, neg_packed))["statusTimes"] == [50, 0, 75]
+
+
+def test_decode_clean_report_status_times_concatenates_multiple_segments() -> None:
+    """Protobuf wire permits a packed-repeated field to be split across
+    multiple key/value segments — decoders must concatenate them. Two f5
+    segments with [10, 20] and [30] must surface as [10, 20, 30]."""
+    from lymow.protocol import _encode_varint, _field_bytes, decode_clean_report
+
+    seg1 = _field_bytes(5, _encode_varint(10) + _encode_varint(20))
+    seg2 = _field_bytes(5, _encode_varint(30))
+    assert decode_clean_report(seg1 + seg2)["statusTimes"] == [10, 20, 30]
+
+
+def test_decode_clean_report_status_times_absent_when_empty_bytes() -> None:
+    """A zero-length f5 has no entries — don't surface an empty list."""
+    from lymow.protocol import _field_bytes, decode_clean_report
+
+    assert "statusTimes" not in decode_clean_report(_field_bytes(5, b""))
+
+
+def test_decode_clean_report_error_list_single_entry() -> None:
+    """PbErrorList sub-message: f1 code (varint int32), f2 percent (float32
+    fraction 0..1, converted to a 0..100 attribute matching mowProgress)."""
+    from lymow.protocol import _field_bytes, _field_f32, decode_clean_report
+
+    entry = _field_i32(1, 64) + _field_f32(2, 0.73)
+    out = decode_clean_report(_field_bytes(4, entry))
+    assert out["errorList"] == [{"code": 64, "percent": 73.0}]
+
+
+def test_decode_clean_report_error_list_multiple_entries_preserve_order() -> None:
+    """Repeated non-packed sub-messages: each PbErrorList is its own f4
+    occurrence — every appearance must surface, in wire order."""
+    from lymow.protocol import _field_bytes, _field_f32, decode_clean_report
+
+    e1 = _field_bytes(4, _field_i32(1, 31) + _field_f32(2, 0.10))
+    e2 = _field_bytes(4, _field_i32(1, 55) + _field_f32(2, 0.50))
+    assert decode_clean_report(e1 + e2)["errorList"] == [
+        {"code": 31, "percent": 10.0},
+        {"code": 55, "percent": 50.0},
+    ]
+
+
+def test_decode_clean_report_error_list_drops_out_of_range_percent() -> None:
+    """A misaligned f2 float that decodes outside [0, 1] (NaN, -inf, 1.5…)
+    surfaces with code only — better to lose the percent than to render NaN."""
+    from lymow.protocol import _field_bytes, _field_f32, decode_clean_report
+
+    entry = _field_i32(1, 31) + _field_f32(2, 5.0)
+    assert decode_clean_report(_field_bytes(4, entry))["errorList"] == [{"code": 31}]
+
+
+def test_decode_clean_report_error_list_absent_when_no_f4() -> None:
+    from lymow.protocol import decode_clean_report
+
+    assert "errorList" not in decode_clean_report(_field_i32(1, 1_700_000_000))
+
+
+def test_decode_clean_report_error_list_skips_empty_entries() -> None:
+    """A PbErrorList with neither code nor percent decodes to {} — drop it
+    rather than surface a placeholder entry."""
+    from lymow.protocol import _field_bytes, decode_clean_report
+
+    assert "errorList" not in decode_clean_report(_field_bytes(4, b""))
+
+
+def test_decode_clean_report_error_list_skips_wire_type_drift_for_percent() -> None:
+    """f2 is wire-type 5 (fixed32) per the encoder, but the wire is
+    untrusted — if a malformed payload sends f2 as length-delimited bytes,
+    ``_decode_f32`` would otherwise raise. The decoder must surface the
+    code (and drop the percent) rather than blow up the whole report."""
+    from lymow.protocol import _field_bytes, decode_clean_report
+
+    entry = _field_i32(1, 31) + _field_bytes(2, b"x")
+    assert decode_clean_report(_field_bytes(4, entry))["errorList"] == [{"code": 31}]
+
+
+def test_decode_pboutput_surfaces_clean_report_under_cleanReport_key() -> None:
+    pb = _build_pboutput(work_status=2) + _field_bytes(28, _field_i32(1, 1_700_000_000) + _field_i32(3, 2))
+    # cleanReport is decoded inline: f1 → date (epoch), f3 → startType.
+    assert decode_pboutput(pb)["cleanReport"] == {"date": 1_700_000_000, "startType": 2}
+
+
+def test_decode_pboutput_no_cleanReport_key_when_field28_absent() -> None:
+    assert "cleanReport" not in decode_pboutput(_build_pboutput(work_status=1))
+
+
+def test_decode_pboutput_no_cleanReport_key_when_field28_empty() -> None:
+    """An empty PbCleanReport (no scalar fields present) should NOT surface a
+    truthy ``cleanReport`` entry — otherwise the sensor would render with
+    everything None."""
+    pb = _build_pboutput(work_status=2) + _field_bytes(28, b"")
+    assert "cleanReport" not in decode_pboutput(pb)
+
+
+def test_decode_pboutput_surfaces_theft_lock_engaged_bool_for_field_27() -> None:
+    """PbOutput.f27 is a bool (writer.bool tag 216 = (27<<3)|0) — surface as
+    Python bool under ``theftLockEngaged`` (NOT ``theftLock``, which is the
+    REST feature toggle key owned by TheftLockSwitch)."""
+    assert decode_pboutput(_build_pboutput(work_status=2) + _field_i32(27, 1))["theftLockEngaged"] is True
+    assert decode_pboutput(_build_pboutput(work_status=2) + _field_i32(27, 0))["theftLockEngaged"] is False
+
+
+def test_decode_pboutput_does_not_clobber_rest_theftLock_key() -> None:
+    """Regression: PbOutput.f27 must not write to ``theftLock`` since that
+    key belongs to /update-device-feature (the REST feature toggle). Mixing
+    them would cause MQTT updates to silently flip the feature switch
+    between REST polls."""
+    state = decode_pboutput(_build_pboutput(work_status=2) + _field_i32(27, 1))
+    assert "theftLock" not in state
+
+
+def test_decode_pboutput_no_theft_lock_engaged_key_when_field27_absent() -> None:
+    """When the robot doesn't report f27, the sensor must stay ``None`` —
+    surfacing False would imply we know the lock is disengaged."""
+    assert "theftLockEngaged" not in decode_pboutput(_build_pboutput(work_status=1))
 
 
 # ---------------------------------------------------------------------------

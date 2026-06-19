@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/8408323/ha-lymow/security/advisories/new
+    about: Please report suspected security issues privately, not as a public issue.
+  - name: Home Assistant community
+    url: https://community.home-assistant.io/
+    about: General Home Assistant questions and setup help.

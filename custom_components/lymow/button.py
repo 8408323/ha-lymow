@@ -13,6 +13,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
+    SIGNAL_TURN_OFF_CAMERA_LIGHT,
     USER_CTRL_ABORT_OTA,
     USER_CTRL_CHARGING_STATION_RESET,
     USER_CTRL_CLEAR_ALL_ZONES_CHANNELS,
@@ -42,6 +43,7 @@ async def async_setup_entry(
         entities.extend(
             [
                 LockRobotButton(coordinator, device),
+                CancelTaskButton(coordinator, device),
                 SelfCheckButton(coordinator, device),
                 ForceReinitButton(coordinator, device),
                 ChargingStationResetButton(coordinator, device),
@@ -56,6 +58,8 @@ async def async_setup_entry(
                 DockAndForgetProgressButton(coordinator, device),
                 FindMyRobotPlaySoundButton(coordinator, device),
                 SyncTimezoneButton(coordinator, device, hass),
+                BtBroadcastButton(coordinator, device),
+                CameraLightOffNowButton(coordinator, device),
             ]
         )
     if entities:
@@ -102,6 +106,66 @@ class SyncTimezoneButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
         await self.coordinator.async_sync_timezone(self._thing_name, await self._current_offset_seconds())
 
 
+class BtBroadcastButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
+    """Manually trigger the mower to start advertising BLE so HA/the app can
+    reconnect without a power cycle.
+
+    Wire: ``PbRobotConfig.signal = SocSignal.SIGNAL_TURN_ON_BT_BROADCAST (12)``
+    over the no-userCtrl robotConfig path (Hermes #9506 PbRobotConfig encoder).
+    Disabled by default — most installs don't need it, and a stray press can
+    interfere with an in-flight pairing on the phone app.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:bluetooth-connect"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Re-advertise Bluetooth"
+        self._attr_unique_id = f"{self._thing_name}_bt_broadcast"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    async def async_press(self) -> None:
+        from .const import SIGNAL_TURN_ON_BT_BROADCAST
+
+        await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_ON_BT_BROADCAST)
+
+
+class CameraLightOffNowButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
+    """One-shot "Turn camera light off now" — fires the same SocSignal the
+    app fires when a user disables Night Mode (per Hermes ``setNightMode``
+    #9019: it tacks ``SIGNAL_TURN_OFF_CAMERA_LIGHT`` onto its schedule write
+    to kill the light immediately, regardless of where in the window we are).
+
+    **Does NOT disable the Night Mode schedule** — the next scheduled open
+    time will still turn the light back on. Use ``lymow.set_night_mode``
+    with ``enable=false`` if you want to suppress the schedule too. Handy
+    here for automation shortcuts like a motion-triggered "lights out".
+    Functionally overlaps with ``CameraLightSelect.select_option("Off")``
+    (which also exposes Low/Medium/High brightness), so disabled by default
+    to avoid double entries on the device card.
+
+    Wire: ``PbRobotConfig.signal = SIGNAL_TURN_OFF_CAMERA_LIGHT (7)`` over
+    the no-userCtrl robotConfig path.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:lightbulb-off"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Camera light off now"
+        self._attr_unique_id = f"{self._thing_name}_camera_light_off_now"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_OFF_CAMERA_LIGHT)
+
+
 class _UserCtrlButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
     """Base class for buttons that send a userCtrl command via MQTT."""
 
@@ -136,6 +200,21 @@ class SelfCheckButton(_UserCtrlButton):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Self-check", "mdi:tools")
+
+
+class CancelTaskButton(_UserCtrlButton):
+    """Cancel the current mowing task and return to dock — the app's
+    Settings → Cancel Task action. Distinct from the lawn-mower entity's
+    DOCK service (RECHARGE_DOCK=33, which preserves task progress); this
+    one (USER_CTRL_DOCK=2) ends the task before docking.
+    """
+
+    _user_ctrl = USER_CTRL_DOCK
+    _key = "cancel_task"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Cancel task", "mdi:cancel")
 
 
 class ForceReinitButton(_UserCtrlButton):

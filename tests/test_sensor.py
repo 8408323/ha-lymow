@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.const import UnitOfTime
 from lymow.sensor import (
     SENSORS,
     LymowErrorSensor,
@@ -145,7 +147,7 @@ def test_error_sensor_surfaced_code_includes_remediation() -> None:
     desc = next(d for d in SENSORS if d.key == "error_code")
     sensor = LymowErrorSensor(coord, DEVICE, desc)
     attrs = sensor.extra_state_attributes
-    assert attrs["description"] == "Navigation Internal Error"
+    assert attrs["description"] == "Action timeout"
     assert attrs["remediation"] == ERROR_REMEDIATION[71]
 
 
@@ -163,7 +165,7 @@ def test_error_sensor_warning_codes_included_when_present() -> None:
     sensor = LymowErrorSensor(coord, DEVICE, desc)
     attrs = sensor.extra_state_attributes
     assert attrs["warning_codes"] == [1, 999]
-    assert attrs["warning_descriptions"] == ["Wheel over current", "Unknown (999)"]
+    assert attrs["warning_descriptions"] == ["Wheel over-current", "Unknown (999)"]
 
 
 def test_error_sensor_warning_codes_absent_when_missing() -> None:
@@ -180,6 +182,44 @@ def test_error_sensor_error_codes_included_when_present() -> None:
     sensor = LymowErrorSensor(coord, DEVICE, desc)
     attrs = sensor.extra_state_attributes
     assert attrs["error_codes"] == [7]
+
+
+def test_error_sensor_emits_warning_descriptions_when_warning_codes_present() -> None:
+    """warning_codes → warning_descriptions: every code maps to its APK label."""
+    coord = _make_coord({"errorCode": 0, "warningCodes": [1, 19]})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert attrs["warning_descriptions"] == ["Wheel over-current", "Localisation: RTK signal bad"]
+
+
+def test_error_sensor_emits_error_descriptions_when_error_codes_present() -> None:
+    coord = _make_coord({"errorCode": 0, "errorCodes": [55, 64]})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert attrs["error_descriptions"] == ["Charging station not found", "Robot inside no-go zone"]
+
+
+def test_error_sensor_unknown_warning_code_falls_back_to_unknown_label() -> None:
+    """Untrusted wire data — a future firmware code shouldn't break the sensor."""
+    coord = _make_coord({"errorCode": 0, "warningCodes": [9999]})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert "Unknown (9999)" in attrs["warning_descriptions"]
+
+
+def test_error_sensor_non_numeric_code_does_not_crash_sensor() -> None:
+    """A malformed cloud payload (non-numeric entry in warningCodes /
+    errorCodes) must not raise during attribute rendering — the sensor
+    should fall back to an "Unknown" label so state updates keep flowing."""
+    coord = _make_coord({"errorCode": 0, "warningCodes": ["junk"], "errorCodes": [None]})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert attrs["warning_descriptions"] == ["Unknown ('junk')"]
+    assert attrs["error_descriptions"] == ["Unknown (None)"]
 
 
 def test_error_sensor_native_value_none_treated_as_zero() -> None:
@@ -334,6 +374,58 @@ def test_map_sensor_extra_attrs_has_charging_station() -> None:
     assert sensor.extra_state_attributes["charging_station"] == cs
 
 
+def test_map_sensor_prefers_live_charging_station_loc_over_map_derived() -> None:
+    """PbOutput.f24 ``chargingStationLoc`` is the live update channel; when
+    both the map-query dock and the live dock are present and the live one
+    is full, it wins so the card reflects a moved dock immediately."""
+    map_cs = {"x": 1.0, "y": 2.0, "theta": 0.0}
+    live_cs = {"x": 1.5, "y": 2.5, "theta": 0.1}
+    coord = _make_coord({"mapData": {"chargingStation": map_cs}, "chargingStationLoc": live_cs})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["charging_station"] == live_cs
+
+
+def test_map_sensor_merges_partial_live_dock_over_map_dock() -> None:
+    """``chargingStationLoc`` can legally be partial (e.g. only ``y`` if
+    only the north coordinate changed). A wholesale replacement would
+    drop ``x`` / ``theta`` and break the card's geometry; the merge
+    behavior keeps the map fields underneath."""
+    map_cs = {"x": 1.0, "y": 2.0, "theta": 0.5}
+    live_cs = {"y": 9.9}  # partial — only north
+    coord = _make_coord({"mapData": {"chargingStation": map_cs}, "chargingStationLoc": live_cs})
+    sensor = LymowMapSensor(coord, DEVICE)
+    # x and theta survive from map; y is the fresher live value
+    assert sensor.extra_state_attributes["charging_station"] == {"x": 1.0, "y": 9.9, "theta": 0.5}
+
+
+def test_map_sensor_uses_live_dock_when_no_map_dock_yet() -> None:
+    """If we have a live PbOutput.f24 update before any QUERY_MAP reply
+    has populated mapData.chargingStation, the live one still surfaces."""
+    live_cs = {"x": 3.0, "y": 4.0}
+    coord = _make_coord({"mapData": {}, "chargingStationLoc": live_cs})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["charging_station"] == live_cs
+
+
+def test_map_sensor_ignores_empty_live_dock_dict() -> None:
+    """An empty ``chargingStationLoc`` dict (shouldn't happen — the decoder
+    omits the key when no scalars are present — but defend regardless) must
+    fall back to the map-derived dock rather than rendering an empty dict."""
+    map_cs = {"x": 1.0, "y": 2.0}
+    coord = _make_coord({"mapData": {"chargingStation": map_cs}, "chargingStationLoc": {}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["charging_station"] == map_cs
+
+
+def test_map_sensor_ignores_non_dict_live_dock() -> None:
+    """A future-mangled state where ``chargingStationLoc`` is the wrong
+    type (string, list…) must not crash the sensor — fall back to map."""
+    map_cs = {"x": 1.0, "y": 2.0}
+    coord = _make_coord({"mapData": {"chargingStation": map_cs}, "chargingStationLoc": "junk"})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["charging_station"] == map_cs
+
+
 def test_map_sensor_extra_attrs_includes_robot_pose() -> None:
     coord = _make_coord({"poseEastM": 0.1, "poseNorthM": 0.2, "poseThetaRad": 0.3, "mapData": {}})
     sensor = LymowMapSensor(coord, DEVICE)
@@ -451,12 +543,56 @@ def test_mission_time_sensor_returns_value() -> None:
 
 
 def test_mission_time_sensor_is_duration_minutes() -> None:
-    from homeassistant.components.sensor import SensorDeviceClass
-    from homeassistant.const import UnitOfTime
 
     desc = next(s for s in SENSORS if s.key == "mission_time")
     assert desc.device_class == SensorDeviceClass.DURATION
     assert desc.native_unit_of_measurement == UnitOfTime.MINUTES
+
+
+def test_heated_lens_times_sensor_reads_counter_state() -> None:
+    """PbOutput.f37 → heatedLensTimes; sensor surfaces the live counter."""
+    coord = _make_coord({"heatedLensTimes": 17})
+    desc = next(s for s in SENSORS if s.key == "heated_lens_times")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 17
+
+
+def test_heated_lens_times_sensor_metadata_is_a_total_increasing_counter() -> None:
+    """The heater count only goes up over the install lifetime — TOTAL_INCREASING
+    so HA's long-term-stats handle it correctly."""
+    desc = next(s for s in SENSORS if s.key == "heated_lens_times")
+    assert desc.state_class == SensorStateClass.TOTAL_INCREASING
+    assert desc.entity_registry_enabled_default is False
+
+
+def test_ae_range_level_sensor_reads_label_string() -> None:
+    """The label string is stored directly by decode_pboutput — the sensor
+    renders the AE gear name (NONE / 1..6 / MAX) without re-mapping."""
+    coord = _make_coord({"aeRangeLevel": "MAX"})
+    desc = next(s for s in SENSORS if s.key == "ae_range_level")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "MAX"
+
+
+def test_ae_range_level_sensor_disabled_by_default() -> None:
+    """Diagnostic field — most users won't care about camera AE tuning."""
+    desc = next(s for s in SENSORS if s.key == "ae_range_level")
+    assert desc.entity_registry_enabled_default is False
+
+
+def test_output_ctrl_sensor_reads_label_string() -> None:
+    """outputCtrl is the robot's "what I'm replying to" indicator; the
+    decoder stores the label string so the sensor renders it directly."""
+    coord = _make_coord({"outputCtrl": "QUERY_MAP"})
+    desc = next(s for s in SENSORS if s.key == "output_ctrl")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "QUERY_MAP"
+
+
+def test_output_ctrl_sensor_disabled_by_default() -> None:
+    """Diagnostic — useful for traffic debugging but noise on a normal card."""
+    desc = next(s for s in SENSORS if s.key == "output_ctrl")
+    assert desc.entity_registry_enabled_default is False
 
 
 # ---------------------------------------------------------------------------
@@ -560,12 +696,12 @@ def test_sim_id_sensor_reads_value() -> None:
     assert sensor.native_value == "89320420000094505458"
 
 
-def test_wifi_ssid_sensor_reads_dotted_path() -> None:
-    """``value_key="networkInfo.wifiSsid"`` walks the nested networkInfo dict."""
-    coord = _make_coord({"networkInfo": {"wifiSsid": "Haraldsson"}})
-    desc = next(s for s in SENSORS if s.key == "wifi_ssid")
+def test_dotted_value_key_sensor_walks_nested_dict() -> None:
+    """``value_key="networkInfo.cellularIp"`` walks the nested networkInfo dict."""
+    coord = _make_coord({"networkInfo": {"cellularIp": "100.116.126.140"}})
+    desc = next(s for s in SENSORS if s.key == "cellular_ip")
     sensor = LymowSensor(coord, DEVICE, desc)
-    assert sensor.native_value == "Haraldsson"
+    assert sensor.native_value == "100.116.126.140"
 
 
 def test_lcd_pin_sensor_disabled_by_default_diagnostic_and_reads_value() -> None:
@@ -1006,3 +1142,387 @@ async def test_async_setup_entry_registers_remaining_area_sensor() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
     assert any(isinstance(e, LymowRemainingAreaSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# LymowLastCleanSensor — PbCleanReport timestamp + end-type + battery
+# ---------------------------------------------------------------------------
+
+
+def test_last_clean_sensor_native_value_is_utc_timestamp() -> None:
+    from datetime import UTC, datetime
+
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"cleanStartTime": 1_700_000_000}})
+    e = LymowLastCleanSensor(coord, DEVICE)
+    assert e.native_value == datetime.fromtimestamp(1_700_000_000, tz=UTC)
+
+
+def test_last_clean_sensor_native_value_none_when_missing() -> None:
+    from lymow.sensor import LymowLastCleanSensor
+
+    assert LymowLastCleanSensor(_make_coord(None), DEVICE).native_value is None
+    assert LymowLastCleanSensor(_make_coord({}), DEVICE).native_value is None
+    assert LymowLastCleanSensor(_make_coord({"cleanReport": {}}), DEVICE).native_value is None
+
+
+def test_last_clean_sensor_native_value_none_when_start_invalid() -> None:
+    """A non-int or non-positive timestamp must not surface as a 1970-epoch date."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    assert LymowLastCleanSensor(_make_coord({"cleanReport": {"cleanStartTime": 0}}), DEVICE).native_value is None
+    assert LymowLastCleanSensor(_make_coord({"cleanReport": {"cleanStartTime": "bad"}}), DEVICE).native_value is None
+
+
+def test_last_clean_sensor_attrs_resolve_end_type_and_battery() -> None:
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"cleanStartTime": 1_700_000_000, "mowEndType": 1, "usedBattery": 30}})
+    e = LymowLastCleanSensor(coord, DEVICE)
+    assert e.extra_state_attributes == {"end_type": "COMPLETED", "used_battery_pct": 30}
+
+
+def test_last_clean_sensor_drops_out_of_range_end_type() -> None:
+    """The decoder filters mowEndType to 0-2; if anything else ever reaches
+    the sensor (skipped decoder, future test fixture), drop it silently
+    rather than rendering a fake 'UNKNOWN_*' label."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"mowEndType": 7}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
+
+
+def test_last_clean_sensor_attrs_include_status_times_breakdown() -> None:
+    """statusTimes packed-int32 array surfaces as both the raw per-status
+    breakdown (so a card can render each bucket) and a total."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"statusTimes": [120, 0, 60, 30]}})
+    attrs = LymowLastCleanSensor(coord, DEVICE).extra_state_attributes
+    assert attrs == {"status_times_sec": [120, 0, 60, 30], "total_active_sec": 210}
+
+
+def test_last_clean_sensor_attrs_omit_empty_status_times() -> None:
+    """An empty statusTimes list shouldn't render as a zero-total attribute —
+    suppress so the card can fall back to 'no data'."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"statusTimes": []}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
+
+
+def test_last_clean_sensor_attrs_include_error_list_with_descriptions() -> None:
+    """errorList entries surface with their ERROR_DESCRIPTIONS label so the
+    card can render the human-readable cause without re-implementing the
+    lookup itself."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": [{"code": 64, "percent": 73.0}, {"code": 55}]}})
+    attrs = LymowLastCleanSensor(coord, DEVICE).extra_state_attributes
+    assert attrs["error_list"] == [
+        {"code": 64, "percent": 73.0, "description": "Robot inside no-go zone"},
+        {"code": 55, "description": "Charging station not found"},
+    ]
+
+
+def test_last_clean_sensor_attrs_label_unknown_error_code() -> None:
+    """An error code outside ERROR_DESCRIPTIONS surfaces with an Unknown(NN)
+    label so the card still has *something* to render."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": [{"code": 9999}]}})
+    attrs = LymowLastCleanSensor(coord, DEVICE).extra_state_attributes
+    assert attrs["error_list"] == [{"code": 9999, "description": "Unknown (9999)"}]
+
+
+def test_last_clean_sensor_attrs_skip_malformed_error_entries() -> None:
+    """A future malformed decode that puts a non-dict or no-code entry into
+    errorList must not blow up attr rendering — silently skip the bad one."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": [{"code": 31}, "not a dict", {"percent": 50.0}]}})
+    attrs = LymowLastCleanSensor(coord, DEVICE).extra_state_attributes
+    assert attrs["error_list"] == [{"code": 31, "description": "Low battery"}]
+
+
+def test_last_clean_sensor_attrs_omit_empty_error_list() -> None:
+    """An empty errorList shouldn't render — let the card render the no-errors
+    case the same way it handles no-cleanReport-at-all."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": []}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
+
+
+def test_last_clean_sensor_attrs_omit_error_list_when_filter_drops_all_entries() -> None:
+    """If every entry in the raw errorList is malformed (no int code), the
+    filter empties the list — drop the attribute entirely rather than render
+    an empty-array placeholder."""
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = _make_coord({"cleanReport": {"errorList": ["junk", {"percent": 50.0}]}})
+    assert LymowLastCleanSensor(coord, DEVICE).extra_state_attributes == {}
+
+
+def test_last_clean_sensor_attrs_empty_when_no_report() -> None:
+    from lymow.sensor import LymowLastCleanSensor
+
+    assert LymowLastCleanSensor(_make_coord({}), DEVICE).extra_state_attributes == {}
+
+
+def test_last_clean_sensor_unique_id_and_disabled_default() -> None:
+    from lymow.sensor import LymowLastCleanSensor
+
+    e = LymowLastCleanSensor(_make_coord({}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_last_mow_session"
+    assert e._attr_name == "Last mow session"
+    assert e._attr_entity_registry_enabled_default is False
+
+
+async def test_async_setup_entry_registers_last_clean_sensor() -> None:
+    from unittest.mock import MagicMock
+
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowLastCleanSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert any(isinstance(e, LymowLastCleanSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# LymowRobotTimezoneSensor — robotConfig.timezoneOffset (signed seconds east of UTC)
+# ---------------------------------------------------------------------------
+
+
+def _make_tz_coord(offset_seconds: int | None = None) -> MagicMock:
+    state: dict = {"robotConfig": {}}
+    if offset_seconds is not None:
+        state["robotConfig"]["timezoneOffset"] = offset_seconds
+    return _make_coord(state)
+
+
+def test_robot_timezone_sensor_metadata_and_disabled_default() -> None:
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    e = LymowRobotTimezoneSensor(_make_tz_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_robot_timezone"
+    assert e._attr_name == "Robot timezone"
+    # Disabled by default — most users only need the Sync Timezone button.
+    assert e._attr_entity_registry_enabled_default is False
+
+
+def test_robot_timezone_sensor_formats_positive_offset_as_signed_hhmm() -> None:
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    e = LymowRobotTimezoneSensor(_make_tz_coord(9 * 3600), DEVICE)  # Asia/Tokyo
+    assert e.native_value == "+09:00"
+    assert e.extra_state_attributes == {"offset_seconds": 9 * 3600, "offset_hours": 9.0}
+
+
+def test_robot_timezone_sensor_formats_negative_offset_and_half_hour() -> None:
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    # America/New_York during standard time: UTC-5
+    e_ny = LymowRobotTimezoneSensor(_make_tz_coord(-5 * 3600), DEVICE)
+    assert e_ny.native_value == "-05:00"
+    assert e_ny.extra_state_attributes == {"offset_seconds": -5 * 3600, "offset_hours": -5.0}
+
+    # Asia/Kolkata: UTC+5:30 — half-hour offset must format correctly.
+    e_in = LymowRobotTimezoneSensor(_make_tz_coord(5 * 3600 + 30 * 60), DEVICE)
+    assert e_in.native_value == "+05:30"
+    assert e_in.extra_state_attributes["offset_hours"] == 5.5
+
+
+def test_robot_timezone_sensor_unknown_when_offset_missing_or_out_of_bounds() -> None:
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    # Field absent → unknown (rather than guessing UTC). Both the state and the
+    # attribute dict drop out so HA doesn't show a stale offset under an
+    # already-unknown state.
+    e_missing = LymowRobotTimezoneSensor(_make_tz_coord(None), DEVICE)
+    assert e_missing.native_value is None
+    assert e_missing.extra_state_attributes is None
+    # Non-int wire payload (e.g. a string the robot shouldn't send but might
+    # if firmware ever changes types) → unknown rather than crashing the
+    # bound check or stringifying garbage. Build the state dict directly so
+    # we can put a non-int in the slot _make_tz_coord otherwise restricts.
+    coord_str = MagicMock()
+    coord_str.data = {THING: {"robotConfig": {"timezoneOffset": "+09:00"}}}
+    assert LymowRobotTimezoneSensor(coord_str, DEVICE).native_value is None
+    # Outside the [-12h, +14h] real-world range — drop as hostile.
+    assert LymowRobotTimezoneSensor(_make_tz_coord(15 * 3600), DEVICE).native_value is None
+    assert LymowRobotTimezoneSensor(_make_tz_coord(-13 * 3600), DEVICE).native_value is None
+    # Sub-minute offset — no real timezone has one; rejecting prevents the
+    # ±HH:MM formatter from silently truncating stray seconds (e.g. 5h0m33s
+    # would render as "+05:00" and lie about the actual configured value).
+    assert LymowRobotTimezoneSensor(_make_tz_coord(5 * 3600 + 33), DEVICE).native_value is None
+
+
+async def test_async_setup_entry_registers_robot_timezone_sensor() -> None:
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowRobotTimezoneSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert any(isinstance(e, LymowRobotTimezoneSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# LymowHeadlightWindowSensor — robotConfig.openLedTime / closeLedTime
+# ---------------------------------------------------------------------------
+
+
+def _make_hw_coord(open_tz: dict | None = None, close_tz: dict | None = None) -> MagicMock:
+    state: dict = {"robotConfig": {}}
+    if open_tz is not None:
+        state["robotConfig"]["openLedTime"] = open_tz
+    if close_tz is not None:
+        state["robotConfig"]["closeLedTime"] = close_tz
+    return _make_coord(state)
+
+
+def test_headlight_window_sensor_metadata_and_disabled_default() -> None:
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    e = LymowHeadlightWindowSensor(_make_hw_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_headlight_window"
+    assert e._attr_name == "Headlight schedule"
+    assert e._attr_entity_registry_enabled_default is False
+
+
+def test_headlight_window_sensor_formats_window_with_en_dash() -> None:
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    e = LymowHeadlightWindowSensor(
+        _make_hw_coord({"hour": 21, "minute": 0}, {"hour": 6, "minute": 30}),
+        DEVICE,
+    )
+    # En-dash (U+2013), matches the app's UI typography.
+    assert e.native_value == "21:00–06:30"
+    assert e.extra_state_attributes == {"open_time": "21:00", "close_time": "06:30"}
+
+
+def test_headlight_window_sensor_unknown_when_either_end_missing() -> None:
+    """One end missing → unknown state, but the present end still shows up in
+    attributes so the user can spot which side dropped."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    only_open = LymowHeadlightWindowSensor(_make_hw_coord({"hour": 21, "minute": 0}, None), DEVICE)
+    assert only_open.native_value is None
+    assert only_open.extra_state_attributes == {"open_time": "21:00", "close_time": None}
+
+    only_close = LymowHeadlightWindowSensor(_make_hw_coord(None, {"hour": 6, "minute": 0}), DEVICE)
+    assert only_close.native_value is None
+    assert only_close.extra_state_attributes == {"open_time": None, "close_time": "06:00"}
+
+
+def test_headlight_window_sensor_unknown_when_robot_config_missing() -> None:
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    # No robotConfig key at all → state unknown, no attributes (avoids a
+    # bare {"open_time": None, "close_time": None} attribute dict that
+    # would just be noise in the UI).
+    e = LymowHeadlightWindowSensor(_make_coord({}), DEVICE)
+    assert e.native_value is None
+    assert e.extra_state_attributes is None
+
+
+def test_headlight_window_sensor_unknown_when_wire_payload_not_dict() -> None:
+    """decode_robot_config already validates, but guard the sensor too in
+    case state is built from a different source someday."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    coord = MagicMock()
+    coord.data = {THING: {"robotConfig": {"openLedTime": "21:00", "closeLedTime": 600}}}
+    assert LymowHeadlightWindowSensor(coord, DEVICE).native_value is None
+
+
+def test_headlight_window_sensor_unknown_when_robot_config_not_dict() -> None:
+    """A non-dict ``robotConfig`` from a malformed cache hydrate (list, str,
+    int, …) must not crash ``.get`` — the sensor returns unknown."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    for bad in ([], ["junk"], "not-a-dict", 42):
+        coord = MagicMock()
+        coord.data = {THING: {"robotConfig": bad}}
+        e = LymowHeadlightWindowSensor(coord, DEVICE)
+        assert e.native_value is None
+        assert e.extra_state_attributes is None
+
+
+def test_headlight_window_sensor_unknown_when_outer_layers_not_dict() -> None:
+    """The same defensive guard applies to every layer above ``robotConfig``:
+    a truthy non-dict at ``coordinator.data`` or ``data[thing]`` (e.g. from a
+    malformed cache hydrate) must drop to unknown, not raise AttributeError
+    halfway through the walk. Build the entity with a sane coordinator (so
+    DeviceInfo construction works), then mutate coordinator.data to the
+    abnormal shape and re-read."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    # coordinator.data itself flips to a non-dict.
+    e_data = LymowHeadlightWindowSensor(_make_coord({}), DEVICE)
+    e_data.coordinator.data = "not-a-dict"
+    assert e_data.native_value is None
+    assert e_data.extra_state_attributes is None
+
+    # data[thing] flips to a non-dict.
+    e_thing = LymowHeadlightWindowSensor(_make_coord({}), DEVICE)
+    e_thing.coordinator.data = {THING: ["bogus"]}
+    assert e_thing.native_value is None
+    assert e_thing.extra_state_attributes is None
+
+
+def test_headlight_window_sensor_unknown_when_partial_or_out_of_range_dict() -> None:
+    """A dict missing one key, with wrong types, or with out-of-range values
+    must return None — never raise during state rendering."""
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    # Missing 'minute' key.
+    coord_missing = MagicMock()
+    coord_missing.data = {THING: {"robotConfig": {"openLedTime": {"hour": 21}}}}
+    assert LymowHeadlightWindowSensor(coord_missing, DEVICE).native_value is None
+    # Non-int 'hour'.
+    coord_str_hour = MagicMock()
+    coord_str_hour.data = {THING: {"robotConfig": {"openLedTime": {"hour": "21", "minute": 0}}}}
+    assert LymowHeadlightWindowSensor(coord_str_hour, DEVICE).native_value is None
+    # Out-of-range hour.
+    e_bad_hour = LymowHeadlightWindowSensor(_make_hw_coord({"hour": 24, "minute": 0}, None), DEVICE)
+    assert e_bad_hour.native_value is None
+    # Out-of-range minute.
+    e_bad_min = LymowHeadlightWindowSensor(_make_hw_coord({"hour": 5, "minute": 60}, None), DEVICE)
+    assert e_bad_min.native_value is None
+
+
+async def test_async_setup_entry_registers_headlight_window_sensor() -> None:
+    from lymow.const import DOMAIN
+    from lymow.sensor import LymowHeadlightWindowSensor
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {}}
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    assert any(isinstance(e, LymowHeadlightWindowSensor) for e in added)

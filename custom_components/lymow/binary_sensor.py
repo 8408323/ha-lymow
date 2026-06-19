@@ -29,6 +29,9 @@ async def async_setup_entry(
                 RechargingBinarySensor(coordinator, device),
                 StolenBinarySensor(coordinator, device),
                 DeviceLockedBinarySensor(coordinator, device),
+                WifiWorkingBinarySensor(coordinator, device),
+                LteWorkingBinarySensor(coordinator, device),
+                TheftLockBinarySensor(coordinator, device),
             ]
         )
     if entities:
@@ -102,6 +105,57 @@ class DeviceLockedBinarySensor(_LymowBinarySensor):
     @property
     def is_on(self) -> bool | None:
         """LOCK device class: ``on`` means *unlocked*. Invert the underlying flag."""
+        value = self._device_data.get(self._field)
+        if value is None:
+            return None
+        return not bool(value)
+
+
+class WifiWorkingBinarySensor(_LymowBinarySensor):
+    """Live Wi-Fi link state from PbRobotInfo.wifiWorking (field 9, bool)."""
+
+    _field = "wifiWorking"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Wi-Fi link", "wifi_working")
+
+
+class LteWorkingBinarySensor(_LymowBinarySensor):
+    """Live LTE link state from PbRobotInfo.lteWorking (f10, bool) — distinct from the radio-on switch."""
+
+    _field = "lteWorking"
+    _attr_device_class = BinarySensorDeviceClass.CONNECTIVITY
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "LTE link", "lte_working")
+
+
+class TheftLockBinarySensor(_LymowBinarySensor):
+    """Live anti-theft lock state from PbOutput.f27 — whether the lock is
+    currently engaged on the robot.
+
+    Distinct from the REST ``theftLock`` feature flag (read/written by
+    ``TheftLockSwitch``), which is whether the *feature is enabled*. The
+    decoder writes this under ``theftLockEngaged`` to keep the two values
+    from clobbering each other when MQTT updates land between REST polls.
+    Also distinct from ``DeviceLockedBinarySensor`` (account-level lock)
+    and ``StolenBinarySensor`` (the stolen-alert flag).
+    """
+
+    _field = "theftLockEngaged"
+    _attr_device_class = BinarySensorDeviceClass.LOCK
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Anti-theft lock", "theft_lock")
+
+    @property
+    def is_on(self) -> bool | None:
+        """LOCK device class: ``on`` means *unlocked*. Invert the wire flag
+        so True = locked-on-wire renders as off (= "locked" in the UI)."""
         value = self._device_data.get(self._field)
         if value is None:
             return None

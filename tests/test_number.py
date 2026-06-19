@@ -185,6 +185,59 @@ async def test_async_setup_entry_registers_listener() -> None:
     coord.async_add_listener.assert_called_once()
 
 
+async def test_async_setup_entry_skips_async_add_entities_when_no_devices() -> None:
+    """Empty devices list must not call async_add_entities with an empty batch."""
+    from lymow.const import DOMAIN
+
+    coord = MagicMock()
+    coord.devices = []
+    coord.data = {}
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    add_calls: list[list] = []
+    await async_setup_entry(hass, entry, lambda entities: add_calls.append(list(entities)))
+    # The platform still wires its listener for late device adds, but it must
+    # NOT call async_add_entities with an empty batch.
+    assert all(batch for batch in add_calls), f"empty batch passed to async_add_entities: {add_calls}"
+
+
+async def test_async_setup_entry_listener_skips_already_added_zones() -> None:
+    """Listener re-firing on same map data must skip zones already in `added`."""
+    from lymow.const import DOMAIN
+
+    coord = _make_coord({"mapData": {"goZones": [_ZONE]}})
+    coord.devices = [DEVICE]
+
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    captured_callback = None
+
+    def _register_listener(cb):
+        nonlocal captured_callback
+        captured_callback = cb
+        return lambda: None
+
+    coord.async_add_listener.side_effect = _register_listener
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    initial_zone_count = sum(1 for e in added if isinstance(e, ZoneCutHeightNumber))
+    assert initial_zone_count == 1
+
+    # Listener fires again — same map data, same hashId → no new entity added.
+    captured_callback()
+    final_zone_count = sum(1 for e in added if isinstance(e, ZoneCutHeightNumber))
+    assert final_zone_count == 1, "duplicate zone entity created on second listener fire"
+
+
 async def test_async_setup_entry_listener_callback_adds_new_zones() -> None:
     """Listener callback dynamically adds new zone entities when data updates."""
     from lymow.const import DOMAIN
@@ -436,6 +489,8 @@ def _make_rr_coord(rr_config: dict | None) -> MagicMock:
     coord.devices = [DEVICE]
     coord.async_set_recharge_resume = AsyncMock()
     coord.async_set_robot_config = AsyncMock()
+    coord.async_set_run_time_config = AsyncMock()
+    coord.async_set_geofence_radius = AsyncMock()
     coord.get_rtk_guard_threshold = MagicMock(return_value=1)
     coord.async_add_listener = MagicMock(return_value=lambda: None)
     return coord
@@ -504,3 +559,107 @@ async def test_async_setup_entry_registers_rr_thresholds_per_device() -> None:
 
     assert any(isinstance(e, RechargeBatteryThresholdNumber) for e in added)
     assert any(isinstance(e, ResumeBatteryThresholdNumber) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# Live runtime-config Numbers — cutHeight / moveSpeed / cutSpeed
+# (USER_CTRL_SET_RUN_TIME_CONFIG; optimistic state under data[thing]["runTimeConfig"])
+# ---------------------------------------------------------------------------
+
+
+def _make_runtime_coord(runtime_config: dict | None) -> MagicMock:
+    from unittest.mock import AsyncMock
+
+    coord = MagicMock()
+    coord.devices = [DEVICE]
+    coord.data = {THING: {"runTimeConfig": dict(runtime_config)} if runtime_config is not None else {}}
+    coord.async_set_run_time_config = AsyncMock()
+    coord.async_set_robot_config = AsyncMock()
+    coord.async_set_recharge_resume = AsyncMock()
+    coord.async_set_geofence_radius = AsyncMock()
+    coord.get_rtk_guard_threshold = MagicMock(return_value=1)
+    coord.async_add_listener = MagicMock(return_value=lambda: None)
+    return coord
+
+
+def test_live_cut_height_unknown_until_first_write() -> None:
+    from lymow.number import LiveCutHeightNumber
+
+    e = LiveCutHeightNumber(_make_runtime_coord(None), DEVICE)
+    assert e.native_value is None
+    assert e._attr_unique_id == f"{THING}_live_cut_height"
+    assert e._attr_entity_registry_enabled_default is False
+
+
+def test_live_cut_height_reflects_cached_state() -> None:
+    from lymow.number import LiveCutHeightNumber
+
+    e = LiveCutHeightNumber(_make_runtime_coord({"cutHeight": 45}), DEVICE)
+    assert e.native_value == 45.0
+
+
+def test_live_cut_height_none_on_malformed_runtime_config() -> None:
+    """Coordinator state is untrusted: a non-dict runTimeConfig or a non-numeric
+    field value must surface as None instead of raising."""
+    from lymow.number import LiveCutHeightNumber
+
+    coord = _make_runtime_coord(None)
+    coord.data = {THING: {"runTimeConfig": "not a dict"}}
+    assert LiveCutHeightNumber(coord, DEVICE).native_value is None
+    coord.data = {THING: {"runTimeConfig": ["x"]}}
+    assert LiveCutHeightNumber(coord, DEVICE).native_value is None
+    assert LiveCutHeightNumber(_make_runtime_coord({"cutHeight": "60"}), DEVICE).native_value is None
+    # Bool is a subclass of int but is not a meaningful cut height; reject it
+    # so a buggy write doesn't render the slider at 1mm.
+    assert LiveCutHeightNumber(_make_runtime_coord({"cutHeight": True}), DEVICE).native_value is None
+
+
+async def test_live_cut_height_set_writes_run_time_config_as_int() -> None:
+    from lymow.number import LiveCutHeightNumber
+
+    coord = _make_runtime_coord(None)
+    await LiveCutHeightNumber(coord, DEVICE).async_set_native_value(60)
+    coord.async_set_run_time_config.assert_awaited_once_with(THING, cutHeight=60)
+
+
+def test_live_move_speed_reflects_cached_state() -> None:
+    from lymow.number import LiveMoveSpeedNumber
+
+    e = LiveMoveSpeedNumber(_make_runtime_coord({"moveSpeed": 0.6}), DEVICE)
+    assert e.native_value == 0.6
+
+
+async def test_live_move_speed_set_writes_run_time_config_as_float() -> None:
+    """moveSpeed is a float on the wire (PbRunTimeConfig field 4, fixed32) —
+    must not be coerced to int by the entity."""
+    from lymow.number import LiveMoveSpeedNumber
+
+    coord = _make_runtime_coord(None)
+    await LiveMoveSpeedNumber(coord, DEVICE).async_set_native_value(0.4)
+    coord.async_set_run_time_config.assert_awaited_once_with(THING, moveSpeed=0.4)
+
+
+async def test_live_cut_speed_set_writes_run_time_config_as_int() -> None:
+    from lymow.number import LiveCutSpeedNumber
+
+    coord = _make_runtime_coord(None)
+    await LiveCutSpeedNumber(coord, DEVICE).async_set_native_value(200)
+    coord.async_set_run_time_config.assert_awaited_once_with(THING, cutSpeed=200)
+
+
+async def test_async_setup_entry_registers_live_runtime_config_numbers() -> None:
+    from lymow.const import DOMAIN
+
+    coord = _make_runtime_coord(None)
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+
+    types = {type(e).__name__ for e in added}
+    assert "LiveCutHeightNumber" in types
+    assert "LiveMoveSpeedNumber" in types
+    assert "LiveCutSpeedNumber" in types

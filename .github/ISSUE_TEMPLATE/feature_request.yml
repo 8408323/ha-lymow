@@ -1,0 +1,40 @@
+name: Feature request
+description: Suggest a capability or improvement for the integration.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This is an unofficial, reverse-engineered integration. Features generally
+        have to be observed in the Lymow app's traffic before they can be implemented,
+        so app-parity context helps a lot.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the use case, not just the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What entity / service / behavior would you like to see in Home Assistant?
+    validations:
+      required: true
+  - type: dropdown
+    id: app-parity
+    attributes:
+      label: Does the official Lymow app already do this?
+      options:
+        - "Yes — the app has this feature"
+        - "No — this would be new behavior"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

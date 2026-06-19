@@ -662,7 +662,11 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     else:
         state["warningCodes"] = []
 
-    # PbRobotInfo (field 5)
+    # PbRobotInfo (field 5) — field map verified against PbRobotInfo.encode
+    # (Hermes fn #9734 at offset 0x004b842c): f1 robotStatus, f2 battery,
+    # f3 wifiSignalQuality, f4 lteSignalQuality, f5 btSignalQuality,
+    # f6 workStatus, f7 isRecharging, f8 isCharging, f9 wifiWorking,
+    # f10 lteWorking. All int32 / bool varints.
     robot_info_raw = _first(fields, 5)
     if isinstance(robot_info_raw, bytes):
         ri = _decode_fields(robot_info_raw)
@@ -695,7 +699,8 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             state["lteWorking"] = bool(lte_working)
 
     # PbDeviceProfile (field 10). f3 softwareVersion ("v2.1.48.1") live-confirmed
-    # 2026-05-30 (matches REST get-device-info.softwareVersion). f4 wifiSsid,
+    # 2026-05-30 (matches REST get-device-info.softwareVersion). f10 wheelVer /
+    # f11 knifeVer are hardware-component version strings (diagnostic). f4 wifiSsid,
     # f8 rtkBaseId, f9 simIccid are also present here but deliberately NOT
     # surfaced — they are sensitive identifiers (see security rules).
     profile_raw = _first(fields, 10)
@@ -708,6 +713,8 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             (5, "ipAddress"),
             (6, "macAddress"),
             (7, "sn"),
+            (10, "wheelVer"),
+            (11, "knifeVer"),
         ):
             val = _first(dp, field_no)
             if isinstance(val, bytes):
@@ -784,23 +791,24 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         mission_min = _first(area_fields, 1)
         if mission_min is not None:
             state["missionTimeMin"] = _signed32(mission_min)
+        # Bound the decoded fraction so a NaN/inf from a misaligned/corrupt
+        # payload can't surface as a garbage sensor state.
         progress_raw = _first(area_fields, 5)
-        if progress_raw is not None:
-            state["mowProgress"] = round(_decode_f32(progress_raw) * 100, 1)
+        if isinstance(progress_raw, int):
+            pct = _decode_f32(progress_raw)
+            if 0.0 <= pct <= 1.0:
+                state["mowProgress"] = round(pct * 100, 1)
         task_zone_raw = _first(area_fields, 3)
         if isinstance(task_zone_raw, bytes):
             hash_raw = _first(_decode_fields(task_zone_raw), 2)
             if isinstance(hash_raw, bytes):
                 state["currentTaskZoneHashId"] = hash_raw.decode("utf-8", errors="replace")
-
-    # Camera diagnostics — field names from the APK PbOutput.encode disassembly
-    # (Hermes v96, verified 2026-05-30): f37 heatedLensTimes (varint — count of
-    # camera-lens defog/de-ice heater activations; the earlier "intermittent
-    # f37=15" mystery), f38 aeRangeLevel (varint — camera auto-exposure level).
-    for field_no, key in ((37, "heatedLensTimes"), (38, "aeRangeLevel")):
-        v = _first(fields, field_no)
-        if v is not None:
-            state[key] = _signed32(v)
+        remain_raw = _first(area_fields, 4)
+        if remain_raw is not None:
+            state["remainCleanTimeSec"] = _signed32(remain_raw)
+        map_area_raw = _first(area_fields, 6)
+        if map_area_raw is not None:
+            state["mapAreaM2"] = _decode_f32(map_area_raw)
 
     # Wi-Fi sub-message (field 22): f6=rssiDbm (UTF-8 string like "-77")
     wifi22_raw = _first(fields, 22)
@@ -842,6 +850,34 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
                     poses.append({"east": _decode_f32(e), "north": _decode_f32(n)})
         if poses:
             state["coveragePoses"] = poses
+    # Live charging-station pose (PbOutput field 24 = PbPose — same sub-message
+    # type as f14, per PbOutput.encode in the APK). The map-query path already
+    # decodes the dock under ``mapData.chargingStation`` as ``{x, y, theta}``;
+    # this is the LIVE update channel — pushed whenever the dock moves or is
+    # re-detected without re-querying the full map. Surfaced under
+    # ``chargingStationLoc`` (top-level state, same ``{x, y, theta}`` shape as
+    # the map-derived entry) so a card can pick whichever is fresher.
+    dock_raw = _first(fields, 24)
+    if isinstance(dock_raw, bytes):
+        dock_fields = _decode_fields(dock_raw)
+        d_east = _first(dock_fields, 1)
+        d_north = _first(dock_fields, 2)
+        d_theta = _first(dock_fields, 3)
+        dock: dict[str, float] = {}
+        # f1/f2/f3 are wire-type 5 (fixed32) per PbPose.encode, so ``_first``
+        # should return an int — but the wire is untrusted, so a malformed
+        # payload could send the same field number with a length-delimited
+        # wire type and surface bytes here. ``_decode_f32`` would then raise
+        # on ``struct.pack`` of bytes; explicit ``isinstance(int)`` keeps
+        # the decoder robust to wire-type drift.
+        if isinstance(d_east, int):
+            dock["x"] = _decode_f32(d_east)
+        if isinstance(d_north, int):
+            dock["y"] = _decode_f32(d_north)
+        if isinstance(d_theta, int):
+            dock["theta"] = _decode_f32(d_theta)
+        if dock:
+            state["chargingStationLoc"] = dock
 
     # Mowing schedules: PbOutput field 16 = PbSchedules { tasks(1) = [PbSchedule] }.
     # The QUERY_SCHEDULES reply carries the full list (verified against a live
@@ -982,6 +1018,64 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if l2:
             state["rtkL2"] = l2
 
+    # Anti-theft lock live state (PbOutput field 27 = bool — from PbOutput.encode
+    # tag 216 = (27<<3)|0 writing writer.bool). Surfaced under a distinct key
+    # from the REST ``theftLock`` (which is the user-set feature toggle written
+    # by ``TheftLockSwitch`` via /update-device-feature). PbOutput.f27 is the
+    # robot's report of whether the lock is *currently engaged*; the REST flag
+    # is whether the feature is *enabled* — both must coexist without one
+    # overwriting the other when MQTT updates land between REST polls.
+    theft_lock = _first(fields, 27)
+    if isinstance(theft_lock, int):
+        state["theftLockEngaged"] = bool(theft_lock)
+
+    # Camera-lens heater fire count (PbOutput.f37 = uint32 — per PbOutput.encode
+    # tag 296 = (37<<3)|0 writing ``writer.uint32``). The lens heater fires when
+    # the camera detects condensation / fog. A monotonically-increasing counter
+    # — useful as a maintenance metric ("the heater has fired N times this
+    # install") and as a coarse weather/condition indicator.
+    #
+    # ``_decode_varint`` always returns an unsigned int, so a sign-extended
+    # int32 (e.g. -1 encoded as a 10-byte varint = 0xFFFFFFFFFFFFFFFF) would
+    # surface as a 4-billion+ counter. Interpret through ``_signed32`` first
+    # so the unsigned wrap-around becomes a negative int (which we then
+    # reject), and cap at int32-max to keep the counter in a sensor-friendly
+    # range.
+    heated_lens = _first(fields, 37)
+    if isinstance(heated_lens, int):
+        signed = _signed32(heated_lens)
+        if 0 <= signed <= 2_147_483_647:
+            state["heatedLensTimes"] = signed
+
+    # Camera auto-exposure gear (PbOutput.f38 = int32 enum, tag 304 =
+    # (38<<3)|0 writing ``writer.int32``). Values 0..7 per PbOutput.verify
+    # (Hermes fn #9066) — labels extracted from PbOutput.fromObject
+    # (Hermes fn #9067) around the aeRangeLevel name-and-value branch.
+    # The label is surfaced (not the raw int) so a plain LymowSensor reads
+    # it directly — out-of-range wire data drops the key rather than
+    # rendering a phantom "AE Gear 42".
+    ae_raw = _first(fields, 38)
+    if isinstance(ae_raw, int):
+        from .const import AE_RANGE_LEVELS
+
+        signed = _signed32(ae_raw)
+        if signed in AE_RANGE_LEVELS:
+            state["aeRangeLevel"] = AE_RANGE_LEVELS[signed]
+
+    # outputCtrl (PbOutput.f18 = varint enum, tag 144 = (18<<3)|0 with
+    # ``writer.uint32``). Tells you what the robot is replying to — e.g. a
+    # pboutput with outputCtrl=QUERY_MAP is the answer to a userCtrl=19
+    # query. Surfaced as the label string via OUTPUT_CTRLS so a plain
+    # LymowSensor reads it directly. An unknown code (firmware drift)
+    # drops the key rather than rendering a phantom label.
+    out_ctrl = _first(fields, 18)
+    if isinstance(out_ctrl, int):
+        from .const import OUTPUT_CTRLS
+
+        signed = _signed32(out_ctrl)
+        if signed in OUTPUT_CTRLS:
+            state["outputCtrl"] = OUTPUT_CTRLS[signed]
+
     return state
 
 
@@ -1116,6 +1210,87 @@ def decode_rr_config(data: bytes) -> dict[str, Any]:
     return out
 
 
+def decode_clean_report(data: bytes) -> dict[str, Any]:
+    """Decode a PbCleanReport sub-message — the QUERY_CLEANING_SUMMARY reply.
+
+    Field map from PbCleanReport.encode (Hermes fn #9794):
+      f1 cleanStartTime (varint, unix seconds — Long on the wire),
+      f2 cleanInfo PbCleanInfo (skipped here — already decoded for live session),
+      f3 mowEndType enum (0=MOW_END_NONE, 1=MOW_END_100, 2=MOW_END_USER_CANCEL),
+      f4 errorList repeated PbErrorList — each entry surfaces as
+                  ``{code: int, percent: int 0-100}``. On the wire f2 is a
+                  float32 fraction (0..1) per PbErrorList.encode #9782; the
+                  decoder scales it to 0..100 so the attribute matches
+                  ``mowProgress``.
+      f5 statusTimes packed repeated int32 — seconds spent in each workStatus,
+                     indexed by the enum value (array[i] = seconds at status i),
+      f6 usedBattery (varint int32, percent).
+
+    Only present-fields surface so a partial payload doesn't clobber state.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    start = _first(f, 1)
+    # cleanStartTime is a Long on the wire — a malformed (or sign-extended)
+    # huge varint could overflow ``datetime.fromtimestamp`` downstream, so
+    # cap at the POSIX-portable int32 epoch ceiling (year 2038). Anything
+    # beyond it is almost certainly garbage from a misaligned decode.
+    if isinstance(start, int) and 0 < start <= 2_147_483_647:
+        out["cleanStartTime"] = start
+    end_type = _first(f, 3)
+    if isinstance(end_type, int) and 0 <= end_type <= 2:
+        out["mowEndType"] = end_type
+    # PbErrorList entries (f4): non-packed repeated sub-messages — every
+    # occurrence is its own length-delimited segment.
+    errors = [_decode_error_list_entry(seg) for seg in _all(f, 4) if isinstance(seg, bytes)]
+    errors = [e for e in errors if e]
+    if errors:
+        out["errorList"] = errors
+    # Concatenate every f5 segment before unpacking — protobuf permits a
+    # packed-repeated field to be split across multiple key/value occurrences,
+    # which decoders must rejoin (using ``_first`` would drop later segments).
+    status_times_segments = [seg for seg in _all(f, 5) if isinstance(seg, bytes) and seg]
+    if status_times_segments:
+        decoded = _decode_packed_int32s(b"".join(status_times_segments))
+        # Clamp each entry to [0, one year of seconds] so a misaligned or
+        # sign-extended varint can't surface a wildly large duration — but
+        # preserve positional semantics: statusTimes[i] still maps to
+        # workStatus == i, so we clamp rather than drop.
+        out["statusTimes"] = [max(0, min(s, 31_536_000)) for s in decoded]
+    used = _first(f, 6)
+    if isinstance(used, int) and 0 <= used <= 100:
+        out["usedBattery"] = used
+    return out
+
+
+def _decode_error_list_entry(data: bytes) -> dict[str, Any]:
+    """Decode a PbErrorList sub-message — wire from PbErrorList.encode #9782.
+
+    Fields: f1 code (varint int32), f2 percent (float32 — session progress
+    at which the error fired). Both are optional; an entry with neither
+    surfaces as ``{}`` which the caller drops.
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    code = _first(f, 1)
+    if isinstance(code, int):
+        out["code"] = _signed32(code)
+    # f2 is wire-type 5 (fixed32) per the encoder, so ``_first`` should
+    # return an int — but the wire is untrusted, so a malformed payload
+    # could send the same field number with a length-delimited wire type
+    # and surface bytes here. ``_decode_f32`` would then raise on
+    # ``struct.pack`` of bytes; explicit isinstance(int) keeps the decoder
+    # robust to wire-type drift.
+    pct_raw = _first(f, 2)
+    if isinstance(pct_raw, int):
+        pct = _decode_f32(pct_raw)
+        # Wire is fraction 0..1 mirroring PbCleanInfo.mowProgress; bound it
+        # so a misaligned float can't surface a -inf / NaN attribute.
+        if 0.0 <= pct <= 1.0:
+            out["percent"] = round(pct * 100, 1)
+    return out
+
+
 def decode_schedule_entry(data: bytes) -> dict[str, Any]:
     """Decode a PbSchedule into a flat dict.
 
@@ -1240,6 +1415,7 @@ _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "raiseCutHeight": (2, "bool"),
     "lowerCutHeight": (3, "bool"),
     "moveSpeed": (4, "float"),
+    "brushSpeed": (5, "int"),
     "cutSpeed": (6, "int"),
     "cleanMode": (7, "int"),
     "stripeAngle": (8, "int"),  # signed: -1 = Optimized (auto), else 0-179°
@@ -1335,9 +1511,10 @@ _ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "dockOnError": (22, "bool"),  # auto-dock when the mower errors out
 }
 
-# Selected signal-values published via PbRobotConfig.signal (field 8) — they
-# fire a one-shot device action rather than persisting a config field. Numeric
-# values come from the SocSignal enum in the APK (Hermes string-id 40889).
+# SocSignal codes used by the codec itself. The broader SocSignal enum lives
+# in const.py (Hermes value table at offset 0x00488eb0) — only the two below
+# stay here because they're referenced directly from this module's encoder
+# / by the matching VehicleLedSwitch in switch.py.
 SIGNAL_TURN_ON_VEHICLE_LIGHT = 10
 SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11
 # Emitted by the app on the robotConfig.signal field when the headlight auto
@@ -1576,8 +1753,10 @@ def encode_set_device_settings(
                                     we invert here.
 
     Note: this is a *different* PbTaskConfig from the broader 18-field map
-    in ``_TASK_CONFIG_FIELDS`` (which is actually a PbZoneConfig per APK fn
-    #9432 — pre-existing labelling bug, tracked separately).
+    in ``_ZONE_CONFIG_FIELDS`` — those fields are PbZoneConfig (constructor
+    Hermes #9432, encoder #9434) and are published over this same userCtrl=36
+    / PbInput.taskConfig wire path by ``encode_set_task_config``; #157 tracks
+    the rewire to the proper PbMap.goZones[i].zoneConfig path.
 
     Only the provided parameters are sent; ``None`` is skipped so partial
     writes preserve the other fields on the robot side.

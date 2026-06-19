@@ -246,6 +246,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._mqtt_state: dict[str, dict[str, Any]] = {}
         # Track work status per device to detect important transitions.
         self._prev_work_status: dict[str, int] = {}
+        # Track online state so on_mqtt_online only fires the persistent-notification
+        # on a True → False transition. Without this, a dismissed offline notification
+        # re-appears on every subsequent offline message — annoying when the broker
+        # repeatedly re-asserts the same state. Default None means "never observed".
+        self._prev_online: dict[str, bool | None] = {}
         # Cached backup-map snapshot per device: (fetched_at, fields).
         self._backup_map_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
         # RTK auto-pause guard: per-device knobs and tracking.
@@ -519,6 +524,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Receive an online/offline notification from MQTT."""
         patch = {"isOnline": is_online, "deviceState": "online" if is_online else "offline"}
         self.on_mqtt_state(thing_name, patch)
+        prev_online = self._prev_online.get(thing_name)
+        self._prev_online[thing_name] = is_online
         if is_online:
             # Robot just came online — query both robotConfig and the map so all
             # entity state populates without the user needing to call services.
@@ -527,7 +534,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             #             zone_order, return_to_dock_route
             self.hass.async_create_task(self.async_query_robot_config(thing_name))
             self.hass.async_create_task(self.async_query_map(thing_name))
-        if not is_online:
+        # Fire the offline notification only on a True/None → False transition so
+        # consecutive offline pushes don't re-create a dismissed notification.
+        if not is_online and prev_online is not False:
             device_label = next(
                 (
                     d.get("deviceName") or d.get("sn") or thing_name
@@ -1245,10 +1254,25 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         overrides settings on the currently-running task. Only the provided
         PbRunTimeConfig fields are sent; see :data:`protocol._RUN_TIME_CONFIG_FIELDS`
         for the supported names.
+
+        Successful writes are mirrored into
+        ``self.data[thing_name]["runTimeConfig"]`` so the Live cut-height /
+        move-speed / cut-speed Number entities reflect what the user just set
+        — the integration doesn't yet decode QUERY_RUN_TIME_CONFIG replies.
         """
         from .protocol import encode_set_run_time_config
 
         await self._mqtt.async_publish_command(thing_name, encode_set_run_time_config(**fields))
+        patch = {name: value for name, value in fields.items() if value is not None}
+        if patch and self.data and thing_name in self.data:
+            # Cached runTimeConfig comes from a wire decode path that may not
+            # exist yet (we don't decode QUERY_RUN_TIME_CONFIG replies) — if a
+            # future malformed payload puts a non-dict here, the dict-union
+            # below would TypeError and turn a successful publish into a
+            # failed service call. Coerce non-dict cache to an empty baseline.
+            cached = self.data[thing_name].get("runTimeConfig")
+            existing = (cached if isinstance(cached, dict) else {}) | patch
+            self._publish_device_patch(thing_name, {"runTimeConfig": existing})
 
     async def _publish_userctrl(self, thing_name: str, code: int) -> None:
         """Publish a bare ``userCtrl=code`` pbinput — for the read-only QUERY_*
@@ -1795,7 +1819,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         patch = self._ota_patch_from_check(data)
         if patch:
             self._ota_state.setdefault(thing_name, {}).update(patch)
-            self._publish_ota_patch(thing_name, patch)
+            self._publish_device_patch(thing_name, patch)
         return data
 
     async def async_install_firmware_update(self, thing_name: str, object_key: str) -> str | None:
@@ -1809,7 +1833,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         result = await self._client.create_ota_job(thing_name, object_key)
         job_id = result.get("jobId") if isinstance(result, dict) else None
         self._ota_state.setdefault(thing_name, {})["otaJobId"] = job_id
-        self._publish_ota_patch(thing_name, {"otaJobId": job_id})
+        self._publish_device_patch(thing_name, {"otaJobId": job_id})
         return job_id
 
     async def async_get_ota_progress(self, thing_name: str, job_id: str) -> dict[str, Any]:
@@ -1823,11 +1847,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         status = result.get("status") if isinstance(result, dict) else None
         if isinstance(status, str) and status in _OTA_TERMINAL_STATUSES:
             self._ota_state.get(thing_name, {}).pop("otaJobId", None)
-            self._publish_ota_patch(thing_name, {"otaJobId": None})
+            self._publish_device_patch(thing_name, {"otaJobId": None})
         return result
 
-    def _publish_ota_patch(self, thing_name: str, patch: dict[str, Any]) -> None:
-        """Merge ``patch`` into self.data[thing_name] and publish a fresh snapshot."""
+    def _publish_device_patch(self, thing_name: str, patch: dict[str, Any]) -> None:
+        """Merge ``patch`` into self.data[thing_name] and publish a fresh snapshot.
+
+        Generic — used by OTA progress writes and by optimistic-state writes for
+        run-time-config Numbers / device-settings entities. No-op if the device
+        isn't in coordinator data yet (avoids seeding pre-poll).
+        """
         if not self.data or thing_name not in self.data:
             return
         new_device = {**self.data[thing_name], **patch}

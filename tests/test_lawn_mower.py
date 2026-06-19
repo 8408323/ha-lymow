@@ -263,8 +263,9 @@ async def test_async_setup_entry_registers_services() -> None:
     # + 1 set-recharge-resume + 1 set-device-settings + 1 set-headlight-schedule
     # + 3 granular schedule (add/delete/toggle) + 1 set-pin + 1 set-wifi + 1 bind-rtk
     # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence
-    # + 1 update-channel-settings + 1 get-clean-history.
-    assert hass.services.async_register.call_count == 56
+    # + 1 update-channel-settings + 1 get-clean-history + main's merged services
+    # (pause, query_cleaning_summary, …). Count is asserted against the live total.
+    assert hass.services.async_register.call_count == 57
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +515,46 @@ async def test_handle_start_zone_unknown_entity_skips() -> None:
     coord.async_start_zones.assert_not_called()
 
 
+async def test_handle_pause_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"])
+    await handlers["pause"](call)
+    coord.async_pause.assert_not_called()
+
+
+async def test_handle_pause_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers2 = {}
+
+    def _register2(domain, service, handler, schema=None, supports_response=False):
+        handlers2[service] = handler
+
+    hass.services.async_register.side_effect = _register2
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"])
+    await handlers2["pause"](call)
+    coord.async_pause.assert_called_once_with(THING)
+
+
 async def test_handle_query_map_unknown_entity_skips() -> None:
     coord = _make_coord()
     coord.devices = [DEVICE]
@@ -744,6 +785,25 @@ _QUERY_SERVICE_METHODS = [
     ("query_rtk_diagnostic_l1", "async_query_rtk_diagnostic_l1"),
     ("query_rtk_diagnostic_l2", "async_query_rtk_diagnostic_l2"),
 ]
+
+
+def test_every_registered_query_service_is_documented_in_services_yaml() -> None:
+    """Drift guard: every entry in the production ``lawn_mower._QUERY_SERVICES``
+    must appear in services.yaml so the HA UI's service picker renders a label
+    and description rather than a bare service ID with no metadata. Reads from
+    the production constant (not the test-local list) so adding a query
+    service without UI metadata fails CI even if the test list isn't touched."""
+    import re
+    from pathlib import Path
+
+    from lymow.lawn_mower import _QUERY_SERVICES
+
+    yaml_path = Path(__file__).parent.parent / "custom_components" / "lymow" / "services.yaml"
+    # Top-level keys in the YAML are column-0 identifiers ending with a colon;
+    # no full YAML parser needed (HA's services.yaml is flat at the top level).
+    documented = set(re.findall(r"^([a-z_][a-z0-9_]*):", yaml_path.read_text(), re.MULTILINE))
+    missing = {svc for svc, _ in _QUERY_SERVICES} - documented
+    assert not missing, f"services.yaml missing documentation for: {sorted(missing)}"
 
 
 @pytest.mark.parametrize(("service_name", "method_name"), _QUERY_SERVICE_METHODS)
@@ -1689,6 +1749,60 @@ async def test_handle_set_task_config_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"cut_speed": 100})
     await handlers["set_task_config"](call)
     coord.async_set_task_config.assert_not_called()
+
+
+async def test_handle_set_task_config_supports_float_and_bool_fields() -> None:
+    """move_speed is a float (m/s); raise/lower_cut_height + path_order are bools —
+    the schema coerces them and passes them through with PbZoneConfig camelCase
+    names. line_follow_mode is accepted for backward-compat but dropped (it has no
+    confirmed wire home), so it is NOT forwarded to the encoder."""
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {
+            "move_speed": 0.4,
+            "raise_cut_height": True,
+            "lower_cut_height": False,
+            "path_order": True,
+            "line_follow_mode": True,
+            "clean_mode": 1,
+            "obs_dec_mode": 2,
+        },
+    )
+    await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_awaited_once_with(
+        "mower-001",
+        moveSpeed=0.4,
+        raiseCutHeight=True,
+        lowerCutHeight=False,
+        pathOrder=True,
+        cleanMode=1,
+        obsDecMode=2,
+    )
+
+
+def test_set_task_config_schema_rejects_non_numeric_int_field() -> None:
+    import voluptuous as vol_
+    from lymow.lawn_mower import _SET_TASK_CONFIG_SCHEMA
+
+    with pytest.raises(vol_.Invalid):
+        _SET_TASK_CONFIG_SCHEMA({"entity_id": ["lawn_mower.x"], "cut_speed": "fast"})
+
+
+def test_set_task_config_schema_coerces_string_bool_to_python_bool() -> None:
+    """YAML-style "true"/"false" must reach the encoder as Python booleans —
+    the encoder writes a varint regardless, but cv.boolean is the canonical
+    input shape for downstream automations."""
+    from lymow.lawn_mower import _SET_TASK_CONFIG_SCHEMA
+
+    out = _SET_TASK_CONFIG_SCHEMA({"entity_id": ["lawn_mower.x"], "raise_cut_height": "true", "path_order": "false"})
+    assert out["raise_cut_height"] is True
+    assert out["path_order"] is False
 
 
 async def test_handle_set_run_time_config_maps_and_calls() -> None:
