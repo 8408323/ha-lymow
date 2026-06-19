@@ -3827,3 +3827,45 @@ change needed. zone0 reverted to Cross Pattern OFF. **Per-zone parity is 100%.**
 Net remaining app→HA gaps: only **Voice Pack** (niche mower voice-language packs;
 needs a download-capture to RE the wire, then a Select + service) and the
 user-deferred **Edit-Boundary** map drive (userCtrl 10/11, needs robot movement).
+
+---
+
+## ✅ Global Channel settings now settable + f8=stripeAngle PROVEN — 2026-06-19 (commit eb7201a)
+
+**Channel-config settability (last audit gap closed).** The global Channel
+settings (Channel Obstacle Detection / Channel Deck Height / Raise Omni Wheels on
+Channel) were decoded but not writable. `encode_set_task_config` now splits the
+write into `globalZoneConfig` (PbMap.f11) + `globalChannelConfig` (PbMap.f12) —
+exactly as the app's Save sends both. New `set_task_config` params:
+`channel_detect_mode` (f1, Smart=2/Touch=1), `channel_deck_height` (f2, mm),
+`channel_raise_omni` (f3). Encoder output matches the captured app frame
+byte-for-byte: `f12 = 0802103c1800`.
+
+**f8 = stripeAngle DEFINITIVELY PROVEN (resolves the enabledZoneMask ambiguity).**
+A stale APK note had f8 commented as "enabledZoneMask (uint64 bitmask)" — which
+collides with stripeAngle because Optimized encodes as -1 = all-ones, identical
+bytes. Drove a live disambiguation via ADB+btsnoop: set Mowing Settings → Global →
+Advanced → Stripe Angle to **User-Defined 90°**, Save → Keep Custom (userCtrl=49):
+- captured write `globalZoneConfig.f8 = 90` (the exact angle set) ⟹ f8 is stripeAngle, NOT a zone bitmask.
+- restored to Optimized → `f8 = -1` (the 10-byte sign-extended varint `40 ffffffffffffffffff01`, byte-identical to the app). User's setting left at Optimized.
+Whole globalZoneConfig map re-cross-checked live: cutHeight f1=60, moveSpeed f4=0.6,
+cutSpeed f6=4, **stripeAngle f8 (90/-1)**, pathSpacing f9=35, perimeterMowLaps
+f10=1, perimeterMowDir f11=2, noGoMowLaps f12=1, obsDecMode f13=2(Smart), pathOrder
+f14=1, startProgress f15=0, relativeCleanDir f16, safeMarginMode f17=1,
+turnOffOuterMotor f18=0, followDetectMode f19=2(Smart); globalChannelConfig
+detectMode=2/cutHeight=60/channelLift=0. Also exposed the two
+previously-decoded-but-unsettable fields `stripe_angle` (f8) and
+`follow_detect_mode` (f19, Perimeter Obstacle Detection) as service params.
+services.yaml documents all five new fields.
+
+**Deployed + verified live:** protocol.py / lawn_mower.py / services.yaml scp'd to
+HA (192.168.1.99), `homeassistant.restart` via REST. Integration reloads clean;
+`lawn_mower.7b6521` = docked, all platforms present. Local suite 1177 passed, ruff
+clean. (Total coverage 97.3% locally is the pre-existing camera.py/bluetooth.py
+gap on this branch — deferred to the 2026-07-01 CI pass per maintainer; touched
+modules protocol.py/lawn_mower.py remain 100%.)
+
+**Voice Pack** remains the only cloud-feature gap (seen live this session: English
+"In Use", French/German/Spanish/Italian downloadable) — niche, needs a
+download-capture to RE the wire. Edit-Boundary map drive still user-deferred
+(movement).
