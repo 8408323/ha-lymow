@@ -312,6 +312,9 @@ async def test_rtk_guard_handles_non_int_rtk_value_as_noop() -> None:
     coord, _, _ = _make_coordinator()
     coord.set_rtk_guard_enabled(THING, True)
     coord.data = {THING: {"workStatus": WORK_STATUS_MOWING}}
+    # Suppress the unrelated mow-path auto-poll (also async_create_task) so this
+    # asserts only that the RTK guard itself does not act on a garbage value.
+    coord._path_poll_pending[THING] = True
 
     # Patch is otherwise legal — workStatus also moves so we know on_mqtt_state ran.
     coord.on_mqtt_state(THING, {"rtkStatus": "garbage", "workStatus": WORK_STATUS_MOWING})

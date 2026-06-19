@@ -69,18 +69,37 @@ _SERVICE_RESUME = "resume"
 _SERVICE_QUERY_SCHEDULES = "query_schedules"
 _SERVICE_START_VIDEO_SESSION = "start_video_session"
 _SERVICE_UPDATE_ZONE_POLYGON = "update_zone_polygon"
+_SERVICE_UPDATE_NOGO_POLYGON = "update_nogo_polygon"
+_SERVICE_UPDATE_ZONE_CUT_HEIGHT = "update_zone_cut_height"
+_SERVICE_SET_ZONE_CONFIG = "set_zone_config"
+_SERVICE_SET_GEOFENCE = "set_geofence"
+_SERVICE_UPDATE_CHANNEL_SETTINGS = "update_channel_settings"
+_SERVICE_GET_CLEAN_HISTORY = "get_clean_history"
 _SERVICE_ADD_ZONE = "add_zone"
+_SERVICE_ADD_NOGO_ZONE = "add_nogo_zone"
+_SERVICE_ADD_CHANNEL = "add_channel"
 _SERVICE_MERGE_ZONES = "merge_zones"
 _SERVICE_PIN_AND_GO = "pin_and_go"
 _SERVICE_SPLIT_ZONE = "split_zone"
 _SERVICE_RENAME_ZONE = "rename_zone"
+_SERVICE_RENAME_NOGO_ZONE = "rename_nogo_zone"
+_SERVICE_RENAME_CHANNEL = "rename_channel"
+_SERVICE_SET_ZONE_ENABLED = "set_zone_enabled"
+_SERVICE_MOVE_CHARGING_STATION = "move_charging_station"
+_ATTR_IS_ENABLED = "is_enabled"
 _SERVICE_CLEAR_SCHEDULES = "clear_schedules"
 _SERVICE_SET_SCHEDULES = "set_schedules"
+_SERVICE_ADD_SCHEDULE = "add_schedule"
+_SERVICE_DELETE_SCHEDULE = "delete_schedule"
+_SERVICE_TOGGLE_SCHEDULE = "toggle_schedule"
 _SERVICE_SET_TASK_CONFIG = "set_task_config"
 _SERVICE_SET_RUN_TIME_CONFIG = "set_run_time_config"
 _SERVICE_SET_NETWORK_PRIORITY = "set_network_priority"
 _SERVICE_SET_RECHARGE_RESUME = "set_recharge_resume"
-_SERVICE_SET_NIGHT_MODE = "set_night_mode"
+_SERVICE_SET_HEADLIGHT_SCHEDULE = "set_headlight_schedule"
+_SERVICE_SET_PIN = "set_pin"
+_SERVICE_SET_WIFI = "set_wifi"
+_SERVICE_BIND_RTK = "bind_rtk"
 _SERVICE_SET_DEVICE_SETTINGS = "set_device_settings"
 _SERVICE_SET_DEVICE_NAME = "set_device_name"
 _ATTR_PREFERRED = "preferred"
@@ -89,9 +108,9 @@ _ATTR_RR_PERIOD_START = "period_start"
 _ATTR_RR_PERIOD_END = "period_end"
 _ATTR_RR_RECHARGE_BAT = "recharge_bat"
 _ATTR_RR_RESUME_BAT = "resume_bat"
-_ATTR_NM_OPEN_TIME = "open_time"
-_ATTR_NM_CLOSE_TIME = "close_time"
-_ATTR_NM_ENABLE = "enable"
+_ATTR_HL_ENABLE = "enable"
+_ATTR_HL_START = "start"
+_ATTR_HL_END = "end"
 _ATTR_DS_CHARGING_MODE = "charging_mode"
 _ATTR_DS_ZONE_ORDER = "zone_order"
 _ATTR_DS_RAINY_MOWING = "rainy_mowing"
@@ -117,10 +136,12 @@ _CHARGING_MODE_CHOICES = {_service_label(name): value for value, name in CHARGIN
 _ZONE_ORDER_CHOICES = {_service_label(name): value for value, name in ZONE_ORDERS.items()}
 
 # Service-field (snake_case) → PbTaskConfig field (camelCase). A safe, intuitive
-# subset of PbTaskConfig; the encoder supports more. ``move_speed`` is a float
-# (m/s); the rest are ints. ``raise_cut_height``/``lower_cut_height`` and the
-# bool toggles (``path_order``/``line_follow_mode``) are coerced via cv.boolean
-# (see _TASK_CONFIG_BOOL_FIELDS below) and emitted as varints by the encoder.
+# subset of PbTaskConfig; the encoder supports more. All optional ints.
+# Service-field (snake_case) → PbZoneConfig field (camelCase). Field numbers
+# are in protocol._TASK_CONFIG_FIELDS (live-confirmed 2026-05-30). Dropped
+# line_follow_mode + brush_speed: neither has a confirmed wire home, so they
+# are silently ignored if a caller (e.g. the current card) still sends them.
+# Added safe_margin_mode + turn_off_outer_motor (confirmed f17/f18).
 _TASK_CONFIG_SERVICE_FIELDS = {
     "move_speed": "moveSpeed",
     "path_spacing": "pathSpacing",
@@ -128,13 +149,31 @@ _TASK_CONFIG_SERVICE_FIELDS = {
     "perimeter_mow_dir": "perimeterMowDir",
     "nogo_mow_laps": "noGoMowLaps",
     "cut_speed": "cutSpeed",
-    "brush_speed": "brushSpeed",
     "obs_dec_mode": "obsDecMode",
+    "follow_detect_mode": "followDetectMode",
     "clean_mode": "cleanMode",
+    "stripe_angle": "stripeAngle",
     "path_order": "pathOrder",
-    "line_follow_mode": "lineFollowMode",
+    "relative_clean_dir": "relativeCleanDir",
+    "safe_margin_mode": "safeMarginMode",
+    "turn_off_outer_motor": "turnOffOuterMotor",
     "raise_cut_height": "raiseCutHeight",
     "lower_cut_height": "lowerCutHeight",
+    # Global channel settings — ride in PbMap.f12 globalChannelConfig.
+    "channel_detect_mode": "channelDetectMode",
+    "channel_deck_height": "channelDeckHeight",
+    "channel_raise_omni": "channelRaiseOmni",
+}
+# Fields that accept floats rather than ints.
+_TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}
+# Fields that accept booleans (encoded as 0/1 in protobuf).
+_TASK_CONFIG_BOOL_FIELDS = {
+    "path_order",
+    "safe_margin_mode",
+    "turn_off_outer_motor",
+    "raise_cut_height",
+    "lower_cut_height",
+    "channel_raise_omni",
 }
 # Service fields the encoder wants as floats rather than ints.
 _TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}
@@ -153,6 +192,7 @@ _RUN_TIME_CONFIG_SERVICE_FIELDS = {
     "move_speed": ("moveSpeed", "float", (0.1, 1.5)),
     "cut_speed": ("cutSpeed", "int", (0, 1000)),
 }
+_SERVICE_BACKUP_MAP = "backup_map"
 _SERVICE_RESTORE_BACKUP_MAP = "restore_backup_map"
 _SERVICE_DELETE_BACKUP_MAP = "delete_backup_map"
 _SERVICE_RENAME_BACKUP_MAP = "rename_backup_map"
@@ -284,11 +324,88 @@ _UPDATE_ZONE_POLYGON_SCHEMA = vol.Schema(
         vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
     }
 )
+_UPDATE_NOGO_POLYGON_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_NOGO_HASH_ID): cv.string,
+        vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
+    }
+)
+_UPDATE_ZONE_CUT_HEIGHT_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Required(_ATTR_CUT_HEIGHT_MM): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+_GET_CLEAN_HISTORY_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Optional("page", default=0): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        vol.Optional("page_size", default=15): vol.All(vol.Coerce(int), vol.Range(min=1, max=100)),
+    }
+)
+_UPDATE_CHANNEL_SETTINGS_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_CHANNEL_HASH_ID): cv.string,
+        vol.Optional(_ATTR_CUT_HEIGHT_MM): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+        vol.Optional("channel_lift"): vol.All(vol.Coerce(int), vol.Range(min=0, max=2)),
+    }
+)
+_SET_GEOFENCE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Optional("latitude"): vol.All(vol.Coerce(float), vol.Range(min=-90, max=90)),
+        vol.Optional("longitude"): vol.All(vol.Coerce(float), vol.Range(min=-180, max=180)),
+        vol.Optional("radius_m"): vol.All(vol.Coerce(int), vol.Range(min=10, max=500)),
+        vol.Optional("name"): cv.string,
+        vol.Optional("index"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+    }
+)
+# set_zone_config supports the same PbZoneConfig fields as set_task_config, but
+# scoped to one zone (or many) and using the app's userCtrl=9 wire path instead
+# of full sync_map. The cut_height field is shared with _TASK_CONFIG_SERVICE_FIELDS
+# semantically but encoded separately (field 1 of PbZoneConfig vs f9/f10/etc).
+_SET_ZONE_CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Optional(_ATTR_IS_ENABLED): cv.boolean,
+        vol.Optional("cut_height"): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+        **{
+            vol.Optional(k): (
+                vol.Coerce(float)
+                if k in _TASK_CONFIG_FLOAT_FIELDS
+                else cv.boolean
+                if k in _TASK_CONFIG_BOOL_FIELDS
+                else vol.Coerce(int)
+            )
+            for k in _TASK_CONFIG_SERVICE_FIELDS
+        },
+    }
+)
 _ADD_ZONE_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
         vol.Optional(_ATTR_NAME, default=""): cv.string,
+        vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
+    }
+)
+_ADD_NOGO_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=3)),
+        vol.Optional("parent_zone_hash_id", default=""): cv.string,
+    }
+)
+_ADD_CHANNEL_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_POLYGON): vol.All([_POINT_SCHEMA], vol.Length(min=2)),
+        vol.Optional("zone1_hash_id", default=""): cv.string,
+        vol.Optional("zone2_hash_id", default=""): cv.string,
         vol.Optional(_ATTR_CUT_HEIGHT_MM, default=40): vol.All(vol.Coerce(int), vol.Range(min=20, max=100)),
     }
 )
@@ -309,21 +426,54 @@ _RENAME_ZONE_SCHEMA = vol.Schema(
         vol.Required(_ATTR_NAME): cv.string,
     }
 )
-
-
-def _task_config_validator(field: str):
-    """Per-field schema validator: float / bool / int based on its semantic kind."""
-    if field in _TASK_CONFIG_FLOAT_FIELDS:
-        return vol.Coerce(float)
-    if field in _TASK_CONFIG_BOOL_FIELDS:
-        return cv.boolean
-    return vol.Coerce(int)
-
-
+_RENAME_NOGO_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_NOGO_HASH_ID): cv.string,
+        vol.Required(_ATTR_NAME): cv.string,
+    }
+)
+_RENAME_CHANNEL_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("channel_hash_id"): cv.string,
+        vol.Required(_ATTR_NAME): cv.string,
+    }
+)
+_SET_ZONE_ENABLED_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+        vol.Required(_ATTR_IS_ENABLED): cv.boolean,
+    }
+)
+_MOVE_CHARGING_STATION_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_X): vol.Coerce(float),
+        vol.Required(_ATTR_Y): vol.Coerce(float),
+        vol.Optional("theta"): vol.Coerce(float),
+    }
+)
+# Deprecated params accepted-but-ignored so existing callers (the current
+# Lovelace card still sends these) don't get a validation error. Neither has
+# a confirmed PbZoneConfig wire home, so the handler drops them (they are not
+# in _TASK_CONFIG_SERVICE_FIELDS). Remove once the card stops sending them.
+_TASK_CONFIG_IGNORED_FIELDS = {"line_follow_mode": cv.boolean, "brush_speed": vol.Coerce(int)}
 _SET_TASK_CONFIG_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
-        **{vol.Optional(k): _task_config_validator(k) for k in _TASK_CONFIG_SERVICE_FIELDS},
+        **{
+            vol.Optional(k): (
+                vol.Coerce(float)
+                if k in _TASK_CONFIG_FLOAT_FIELDS
+                else cv.boolean
+                if k in _TASK_CONFIG_BOOL_FIELDS
+                else vol.Coerce(int)
+            )
+            for k in _TASK_CONFIG_SERVICE_FIELDS
+        },
+        **{vol.Optional(k): v for k, v in _TASK_CONFIG_IGNORED_FIELDS.items()},
     }
 )
 _SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
@@ -363,17 +513,31 @@ _SET_RECHARGE_RESUME_SCHEMA = vol.Schema(
         vol.Optional(_ATTR_RR_RESUME_BAT): vol.All(vol.Coerce(int), vol.Range(min=0, max=100)),
     }
 )
-# Night mode (Settings → Headlight) — the app's setNightMode call. All three
-# params are required: the app rewrites the full window on each press, and
-# ``enable`` controls whether SIGNAL_TURN_OFF_CAMERA_LIGHT is co-published to
-# kill the light immediately (true=schedule on, false=schedule on + light off
-# now).
-_SET_NIGHT_MODE_SCHEMA = vol.Schema(
+_SET_HEADLIGHT_SCHEDULE_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
-        vol.Required(_ATTR_NM_OPEN_TIME): _to_hour_minute,
-        vol.Required(_ATTR_NM_CLOSE_TIME): _to_hour_minute,
-        vol.Required(_ATTR_NM_ENABLE): cv.boolean,
+        vol.Required(_ATTR_HL_ENABLE): cv.boolean,
+        vol.Optional(_ATTR_HL_START): _to_hour_minute,
+        vol.Optional(_ATTR_HL_END): _to_hour_minute,
+    }
+)
+_SET_PIN_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("pin"): vol.All(cv.string, vol.Match(r"^\d{4}$", msg="pin must be exactly 4 digits")),
+    }
+)
+_SET_WIFI_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("ssid"): vol.All(cv.string, vol.Length(min=1)),
+        vol.Optional("password", default=""): cv.string,
+    }
+)
+_BIND_RTK_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("base_id"): vol.All(cv.string, vol.Length(min=1)),
     }
 )
 _SCHEDULE_ENTRY_SCHEMA = vol.Schema(
@@ -390,6 +554,30 @@ _SET_SCHEDULES_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_SCHEDULES): vol.All(cv.ensure_list, [_SCHEDULE_ENTRY_SCHEMA]),
+    }
+)
+_ADD_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
+        vol.Required("minute"): vol.All(vol.Coerce(int), vol.Range(min=0, max=59)),
+        vol.Optional("day_of_week", default=list): vol.All(cv.ensure_list, [_to_day_int]),
+        vol.Optional("zones", default=list): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("repeated", default=True): cv.boolean,
+        vol.Optional("disabled", default=False): cv.boolean,
+    }
+)
+_DELETE_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("id"): vol.Coerce(int),
+    }
+)
+_TOGGLE_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required("id"): vol.Coerce(int),
+        vol.Required("disabled"): cv.boolean,
     }
 )
 _SET_DEVICE_NAME_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids, vol.Required(_ATTR_NAME): cv.string})
@@ -540,6 +728,87 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_update_zone_polygon(entity._thing_name, hash_id, polygon)
 
+    async def handle_update_nogo_polygon(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
+        polygon: list[dict] = call.data[_ATTR_POLYGON]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_update_nogo_polygon(entity._thing_name, hash_id, polygon)
+
+    async def handle_update_zone_cut_height(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
+        mm: int = call.data[_ATTR_CUT_HEIGHT_MM]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_update_zone_cut_height(entity._thing_name, hash_id, mm)
+
+    async def handle_get_clean_history(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        page: int = call.data["page"]
+        page_size: int = call.data["page_size"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        result: dict[str, list[dict[str, Any]]] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            result[eid] = await coordinator.async_get_clean_history(entity._thing_name, page=page, page_size=page_size)
+        return {"history": result}
+
+    async def handle_update_channel_settings(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_CHANNEL_HASH_ID]
+        kwargs: dict[str, Any] = {}
+        if _ATTR_CUT_HEIGHT_MM in call.data:
+            kwargs["cut_height_mm"] = call.data[_ATTR_CUT_HEIGHT_MM]
+        if "channel_lift" in call.data:
+            kwargs["channel_lift"] = call.data["channel_lift"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_update_channel_settings(entity._thing_name, hash_id, **kwargs)
+
+    async def handle_set_geofence(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        kwargs: dict[str, Any] = {}
+        for k in ("latitude", "longitude", "radius_m", "name", "index"):
+            if k in call.data:
+                kwargs[k] = call.data[k]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_geofence(entity._thing_name, **kwargs)
+
+    async def handle_set_zone_config(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
+        update: dict[str, Any] = {"hashId": hash_id}
+        if _ATTR_IS_ENABLED in call.data:
+            update["isEnabled"] = call.data[_ATTR_IS_ENABLED]
+        if "cut_height" in call.data:
+            update["cutHeight"] = call.data["cut_height"]
+        for svc_key, proto_key in _TASK_CONFIG_SERVICE_FIELDS.items():
+            if svc_key in call.data:
+                update[proto_key] = call.data[svc_key]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_zone_config(entity._thing_name, [update])
+
     async def handle_add_zone(call: ServiceCall) -> dict[str, Any]:
         entity_ids: list[str] = call.data["entity_id"]
         polygon: list[dict] = call.data[_ATTR_POLYGON]
@@ -552,6 +821,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             new_id = await coordinator.async_add_zone(entity._thing_name, polygon, name=name, cut_height_mm=cut_height)
+            new_ids[eid] = new_id
+        return {"hash_ids": new_ids}
+
+    async def handle_add_nogo_zone(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        polygon: list[dict] = call.data[_ATTR_POLYGON]
+        parent_hash_id: str = call.data.get("parent_zone_hash_id", "")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        new_ids: dict[str, str] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            new_id = await coordinator.async_add_nogo_zone(
+                entity._thing_name, polygon, parent_zone_hash_id=parent_hash_id
+            )
+            new_ids[eid] = new_id
+        return {"hash_ids": new_ids}
+
+    async def handle_add_channel(call: ServiceCall) -> dict[str, Any]:
+        entity_ids: list[str] = call.data["entity_id"]
+        polygon: list[dict] = call.data[_ATTR_POLYGON]
+        zone1: str = call.data.get("zone1_hash_id", "")
+        zone2: str = call.data.get("zone2_hash_id", "")
+        cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        new_ids: dict[str, str] = {}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            new_id = await coordinator.async_add_channel(
+                entity._thing_name, polygon, zone1_hash_id=zone1, zone2_hash_id=zone2, cut_height_mm=cut_height
+            )
             new_ids[eid] = new_id
         return {"hash_ids": new_ids}
 
@@ -667,6 +970,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_schedules(entity._thing_name, entries)
 
+    async def handle_add_schedule(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_add_schedule(
+                entity._thing_name,
+                hour=call.data["hour"],
+                minute=call.data["minute"],
+                day_of_week=call.data["day_of_week"],
+                zones=call.data["zones"],
+                is_repeated=call.data["repeated"],
+                is_disabled=call.data["disabled"],
+            )
+
+    async def handle_delete_schedule(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        schedule_id: int = call.data["id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_delete_schedule(entity._thing_name, schedule_id)
+
+    async def handle_toggle_schedule(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        schedule_id: int = call.data["id"]
+        disabled: bool = call.data["disabled"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_toggle_schedule(entity._thing_name, schedule_id, disabled=disabled)
+
     async def handle_rename_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
@@ -677,6 +1018,51 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             await coordinator.async_rename_zone(entity._thing_name, hash_id, name)
+
+    async def handle_rename_nogo_zone(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
+        name: str = call.data[_ATTR_NAME]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_rename_nogo_zone(entity._thing_name, hash_id, name)
+
+    async def handle_rename_channel(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data["channel_hash_id"]
+        name: str = call.data[_ATTR_NAME]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_rename_channel(entity._thing_name, hash_id, name)
+
+    async def handle_set_zone_enabled(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
+        is_enabled: bool = call.data[_ATTR_IS_ENABLED]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_update_zone_enabled(entity._thing_name, hash_id, is_enabled)
+
+    async def handle_move_charging_station(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        x: float = call.data[_ATTR_X]
+        y: float = call.data[_ATTR_Y]
+        theta: float | None = call.data.get("theta")
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_move_charging_station(entity._thing_name, x, y, theta)
 
     async def handle_set_task_config(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
@@ -736,19 +1122,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 continue
             await coordinator.async_set_recharge_resume(entity._thing_name, **rr_kwargs)
 
-    async def handle_set_night_mode(call: ServiceCall) -> None:
+    async def handle_set_headlight_schedule(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        nm_kwargs = {
-            "open_time": call.data[_ATTR_NM_OPEN_TIME],
-            "close_time": call.data[_ATTR_NM_CLOSE_TIME],
-            "enable": call.data[_ATTR_NM_ENABLE],
-        }
+        enable: bool = call.data[_ATTR_HL_ENABLE]
+        start = call.data.get(_ATTR_HL_START)
+        end = call.data.get(_ATTR_HL_END)
+        if enable and (start is None or end is None):
+            raise ServiceValidationError("set_headlight_schedule: enabling requires both start and end.")
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
-            await coordinator.async_set_night_mode(entity._thing_name, **nm_kwargs)
+            await coordinator.async_set_headlight_schedule(entity._thing_name, enable=enable, start=start, end=end)
+
+    async def handle_set_pin(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        pin: str = call.data["pin"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_set_pin(entity._thing_name, pin)
+
+    async def handle_bind_rtk(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        base_id: str = call.data["base_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_bind_rtk(entity._thing_name, base_id)
+
+    async def handle_set_wifi(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        ssid: str = call.data["ssid"]
+        password: str = call.data["password"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        targeted = [entity_map[eid] for eid in entity_ids if eid in entity_map]
+        if not targeted:
+            return
+        address = (entry.options.get(CONF_BLE_ADDRESS) or "").strip()
+        if not address:
+            ble_name = (coordinator.data.get(targeted[0]._thing_name) or {}).get("deviceBluetooth")
+            address = _discover_ble_address(hass, ble_name or "") or ""
+        if not address:
+            raise ServiceValidationError(
+                "Couldn't find the robot over Bluetooth — make sure it's powered and in range, "
+                "or set its BLE address in the Lymow integration options."
+            )
+        await coordinator.async_set_wifi(address, ssid, password)
 
     async def handle_set_device_settings(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
@@ -778,6 +1203,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             await coordinator.async_rename_device(entity._thing_name, name)
+
+    async def handle_backup_map(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            await coordinator.async_backup_map(entity._thing_name)
 
     async def handle_restore_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
@@ -858,10 +1292,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         DOMAIN, _SERVICE_UPDATE_ZONE_POLYGON, handle_update_zone_polygon, schema=_UPDATE_ZONE_POLYGON_SCHEMA
     )
     hass.services.async_register(
+        DOMAIN, _SERVICE_UPDATE_NOGO_POLYGON, handle_update_nogo_polygon, schema=_UPDATE_NOGO_POLYGON_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_UPDATE_ZONE_CUT_HEIGHT,
+        handle_update_zone_cut_height,
+        schema=_UPDATE_ZONE_CUT_HEIGHT_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_SET_ZONE_CONFIG,
+        handle_set_zone_config,
+        schema=_SET_ZONE_CONFIG_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_SET_GEOFENCE,
+        handle_set_geofence,
+        schema=_SET_GEOFENCE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_UPDATE_CHANNEL_SETTINGS,
+        handle_update_channel_settings,
+        schema=_UPDATE_CHANNEL_SETTINGS_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_GET_CLEAN_HISTORY,
+        handle_get_clean_history,
+        schema=_GET_CLEAN_HISTORY_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
         DOMAIN,
         _SERVICE_ADD_ZONE,
         handle_add_zone,
         schema=_ADD_ZONE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_ADD_NOGO_ZONE,
+        handle_add_nogo_zone,
+        schema=_ADD_NOGO_ZONE_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_ADD_CHANNEL,
+        handle_add_channel,
+        schema=_ADD_CHANNEL_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
     hass.services.async_register(
@@ -895,6 +1377,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_DEVICE_NAME, handle_set_device_name, schema=_SET_DEVICE_NAME_SCHEMA
     )
+    hass.services.async_register(DOMAIN, _SERVICE_BACKUP_MAP, handle_backup_map, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_RESTORE_BACKUP_MAP, handle_restore_backup_map, schema=_RESTORE_BACKUP_MAP_SCHEMA
     )
@@ -917,13 +1400,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_RECHARGE_RESUME, handle_set_recharge_resume, schema=_SET_RECHARGE_RESUME_SCHEMA
     )
-    hass.services.async_register(DOMAIN, _SERVICE_SET_NIGHT_MODE, handle_set_night_mode, schema=_SET_NIGHT_MODE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN,
+        _SERVICE_SET_HEADLIGHT_SCHEDULE,
+        handle_set_headlight_schedule,
+        schema=_SET_HEADLIGHT_SCHEDULE_SCHEMA,
+    )
+    hass.services.async_register(DOMAIN, _SERVICE_SET_PIN, handle_set_pin, schema=_SET_PIN_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_SET_WIFI, handle_set_wifi, schema=_SET_WIFI_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_BIND_RTK, handle_bind_rtk, schema=_BIND_RTK_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_SET_DEVICE_SETTINGS, handle_set_device_settings, schema=_SET_DEVICE_SETTINGS_SCHEMA
     )
     hass.services.async_register(DOMAIN, _SERVICE_RENAME_ZONE, handle_rename_zone, schema=_RENAME_ZONE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, _SERVICE_RENAME_NOGO_ZONE, handle_rename_nogo_zone, schema=_RENAME_NOGO_ZONE_SCHEMA
+    )
+    hass.services.async_register(DOMAIN, _SERVICE_RENAME_CHANNEL, handle_rename_channel, schema=_RENAME_CHANNEL_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, _SERVICE_SET_ZONE_ENABLED, handle_set_zone_enabled, schema=_SET_ZONE_ENABLED_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_MOVE_CHARGING_STATION, handle_move_charging_station, schema=_MOVE_CHARGING_STATION_SCHEMA
+    )
     hass.services.async_register(DOMAIN, _SERVICE_CLEAR_SCHEDULES, handle_clear_schedules, schema=_ENTITY_ID_SCHEMA)
     hass.services.async_register(DOMAIN, _SERVICE_SET_SCHEDULES, handle_set_schedules, schema=_SET_SCHEDULES_SCHEMA)
+    hass.services.async_register(DOMAIN, _SERVICE_ADD_SCHEDULE, handle_add_schedule, schema=_ADD_SCHEDULE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, _SERVICE_DELETE_SCHEDULE, handle_delete_schedule, schema=_DELETE_SCHEDULE_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_TOGGLE_SCHEDULE, handle_toggle_schedule, schema=_TOGGLE_SCHEDULE_SCHEMA
+    )
 
 
 class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
@@ -976,7 +1484,7 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         map_data = self._device_data.get("mapData") or {}
-        return {
+        attrs: dict[str, Any] = {
             "zones": [
                 {
                     "hash_id": z.get("hashId", ""),
@@ -986,3 +1494,23 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
                 for z in map_data.get("goZones", [])
             ]
         }
+        rc = self._device_data.get("robotConfig") or {}
+        hl_start = rc.get("headlightStart")
+        hl_end = rc.get("headlightEnd")
+        # Only emit headlight state when HA has the data — the robot's config GET
+        # response omits these fields, so absent ≠ disabled.
+        if hl_start and hl_end:
+            is_enabled = (
+                hl_start.get("hour", 0) != 0
+                or hl_start.get("minute", 0) != 0
+                or hl_end.get("hour", 0) != 0
+                or hl_end.get("minute", 0) != 0
+            )
+            attrs["headlight_enabled"] = is_enabled
+            if is_enabled:
+                attrs["headlight_start"] = f"{hl_start['hour']:02d}:{hl_start['minute']:02d}"
+                attrs["headlight_end"] = f"{hl_end['hour']:02d}:{hl_end['minute']:02d}"
+        rr = rc.get("rrConfig") or {}
+        if rr:
+            attrs["rr_enabled"] = bool(rr.get("enable", False))
+        return attrs

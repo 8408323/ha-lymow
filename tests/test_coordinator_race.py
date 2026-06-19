@@ -191,9 +191,12 @@ async def test_two_concurrent_async_sync_map_calls_both_publish() -> None:
     # reached publish (its payload landed in the list) without task_a having
     # returned. A serialising implementation would have task_b parked outside
     # `_slow_publish` here, so the list would still hold only one entry.
-    assert len(published_in_order) == 2, (
+    # async_sync_map publishes the SYNC_MAP then a follow-up QUERY_MAP, so task_b
+    # contributes ≥1 entry; the proof of non-serialisation is that task_b reached
+    # publish (≥2 total) while task_a is still parked on its first publish.
+    assert len(published_in_order) >= 2, (
         "second async_sync_map call did NOT reach publish while the first was parked "
-        f"— got {len(published_in_order)} entries, expected 2. Likely a regression "
+        f"— got {len(published_in_order)} entries, expected ≥2. Likely a regression "
         "that serialises commands (e.g. added a Lock around publish)."
     )
     assert not task_a.done(), "task_a should still be parked on publish_finished"

@@ -84,9 +84,15 @@ class _DeviceFeatureSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         return bool(value) if value is not None else None
 
     async def async_turn_on(self, **kwargs: Any) -> None:
+        if self.is_on is True:
+            # Already on — skip REST PATCH to avoid duplicate cloud notifications
+            # (app may have set it; HA will see the change on the next poll).
+            return
         await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: True})
 
     async def async_turn_off(self, **kwargs: Any) -> None:
+        if self.is_on is False:
+            return
         await self.coordinator.async_set_device_feature(self._thing_name, **{self._feature_key: False})
 
 
@@ -216,7 +222,14 @@ class _RobotConfigBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     def is_on(self) -> bool | None:
         config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
         value = config.get(self._config_key)
-        return bool(value) if value is not None else None
+        # Absent ⇒ proto3 default (False): the robot omits a bool that's off, so
+        # an interactive off-toggle is correct, not the ⚡ that None renders as.
+        # Present-but-malformed ⇒ unknown (don't coerce untrusted wire data).
+        if value is None:
+            return False
+        if not isinstance(value, bool):
+            return None
+        return value
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_robot_config(self._thing_name, **{self._config_key: True})
@@ -245,11 +258,22 @@ class VehicleLedSwitch(_RobotConfigBoolSwitch):
         from .protocol import SIGNAL_TURN_ON_VEHICLE_LIGHT
 
         await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_ON_VEHICLE_LIGHT)
+        self._set_led_optimistic(True)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         from .protocol import SIGNAL_TURN_OFF_VEHICLE_LIGHT
 
         await self.coordinator.async_set_robot_config(self._thing_name, signal=SIGNAL_TURN_OFF_VEHICLE_LIGHT)
+        self._set_led_optimistic(False)
+
+    def _set_led_optimistic(self, state: bool) -> None:
+        if not (self.coordinator.data and self._thing_name in self.coordinator.data):
+            return
+        existing = self.coordinator.data[self._thing_name]
+        rc = {**existing.get("robotConfig", {}), "isOpenLed": state}
+        self.coordinator.async_set_updated_data(
+            {**self.coordinator.data, self._thing_name: {**existing, "robotConfig": rc}}
+        )
 
 
 class Prefer4gSwitch(_RobotConfigBoolSwitch):
@@ -318,7 +342,12 @@ class _DeviceSettingsBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntit
     def is_on(self) -> bool | None:
         tc = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData", {}).get("taskConfig") or {}
         value = tc.get(self._wire_key)
-        if not isinstance(value, bool):
+        # Absent ⇒ proto3 default (wire False), then apply the UI inversion — so
+        # e.g. an omitted disableChargingPark reads as "handbrake on", not None
+        # (which renders as ⚡). Present-but-malformed ⇒ unknown, don't coerce.
+        if value is None:
+            value = False
+        elif not isinstance(value, bool):
             return None
         return self._ui_from_wire(value)
 
@@ -384,6 +413,9 @@ class RechargeResumeSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         value = self._rr_config.get("enable")
+        # Absent ⇒ proto3 default (off); present-but-malformed ⇒ unknown.
+        if value is None:
+            return False
         if not isinstance(value, bool):
             return None
         return value

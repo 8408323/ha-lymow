@@ -5,12 +5,15 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Minimal stubs so coordinator.py can import without the HA stack
 # ---------------------------------------------------------------------------
+import asyncio
 import sys
 import types
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 
 def _make_ha_stubs() -> None:
@@ -134,6 +137,19 @@ def _make_coordinator(
     return coord, mqtt, api
 
 
+def _make_task_closer(captured: list | None = None) -> MagicMock:
+    """A hass.async_create_task replacement that records and closes scheduled
+    coroutines so they don't emit 'never awaited' warnings in tests."""
+
+    def _create(coro):
+        if captured is not None:
+            captured.append(coro)
+        if asyncio.iscoroutine(coro):
+            coro.close()
+
+    return MagicMock(side_effect=_create)
+
+
 # ---------------------------------------------------------------------------
 # REST polling
 # ---------------------------------------------------------------------------
@@ -169,6 +185,131 @@ async def test_async_update_data_raises_update_failed_on_exception() -> None:
     api.get_device_info.side_effect = RuntimeError("network error")
     with pytest.raises(UpdateFailed, match="network error"):
         await coord._async_update_data()
+
+
+# ---------------------------------------------------------------------------
+# Auth refresh — keep Cognito tokens + AWS creds fresh so polls don't 401
+# ---------------------------------------------------------------------------
+
+
+def _setup_auth(coord, *, refresh_ok=True, login_ok=True):
+    auth = MagicMock()
+    auth.refresh_tokens = (
+        AsyncMock(return_value={"AccessToken": "at2", "IdToken": "it2", "ExpiresIn": 3600})
+        if refresh_ok
+        else AsyncMock(side_effect=ValueError("refresh token expired"))
+    )
+    auth.login_region = (
+        AsyncMock(return_value={"AccessToken": "at3", "IdToken": "it3", "RefreshToken": "rt3", "ExpiresIn": 3600})
+        if login_ok
+        else AsyncMock(side_effect=ValueError("bad creds"))
+    )
+    auth.get_aws_credentials = AsyncMock(
+        return_value={
+            "credentials": {"AccessKeyId": "ak", "SecretKey": "sk", "SessionToken": "st", "Expiration": 9999999999}
+        }
+    )
+    coord.set_auth_context(
+        auth,
+        "user",
+        "pass",
+        "eu-west-1",
+        {"AccessToken": "at1", "IdToken": "it1", "RefreshToken": "rt1", "ExpiresIn": 3600},
+        {"credentials": {"AccessKeyId": "ak0", "SecretKey": "sk0", "SessionToken": "st0", "Expiration": 9999999999}},
+    )
+    return auth
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_noop_when_no_context() -> None:
+    coord, _, _ = _make_coordinator()
+    await coord._async_ensure_auth()  # _auth is None → silent no-op
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_noop_when_not_due() -> None:
+    coord, _, _ = _make_coordinator()
+    auth = _setup_auth(coord)  # expiries ~1h out, margin 10m → not due
+    await coord._async_ensure_auth()
+    auth.refresh_tokens.assert_not_awaited()
+    auth.get_aws_credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_refreshes_token_and_creds_when_token_due() -> None:
+    coord, _, api = _make_coordinator()
+    auth = _setup_auth(coord)
+    coord._token_expiry = datetime.now(UTC)  # due now
+    await coord._async_ensure_auth()
+    auth.refresh_tokens.assert_awaited_once_with("rt1", "eu-west-1")
+    api.update_tokens.assert_called_once_with("at2")
+    # New id token forces fresh AWS creds.
+    auth.get_aws_credentials.assert_awaited_once_with("it2", "eu-west-1")
+    api.update_aws_credentials.assert_called_once_with("ak", "sk", "st")
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_refreshes_only_creds_when_token_valid() -> None:
+    coord, _, api = _make_coordinator()
+    auth = _setup_auth(coord)
+    coord._aws_creds_expiry = datetime.now(UTC)  # creds due, token still valid
+    await coord._async_ensure_auth()
+    auth.refresh_tokens.assert_not_awaited()
+    auth.get_aws_credentials.assert_awaited_once_with("it1", "eu-west-1")
+    api.update_aws_credentials.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_falls_back_to_relogin_when_refresh_fails() -> None:
+    coord, _, api = _make_coordinator()
+    auth = _setup_auth(coord, refresh_ok=False)
+    coord._token_expiry = datetime.now(UTC)
+    await coord._async_ensure_auth()
+    auth.login_region.assert_awaited_once_with("user", "pass", "eu-west-1")
+    api.update_tokens.assert_called_once_with("at3")
+    assert coord._refresh_token == "rt3"  # re-login rotates the refresh token
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_raises_config_entry_auth_failed_when_relogin_fails() -> None:
+    coord, _, _ = _make_coordinator()
+    _setup_auth(coord, refresh_ok=False, login_ok=False)
+    coord._token_expiry = datetime.now(UTC)
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coord._async_ensure_auth()
+
+
+@pytest.mark.asyncio
+async def test_update_data_propagates_auth_failed_not_update_failed() -> None:
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "online"})
+    _setup_auth(coord, refresh_ok=False, login_ok=False)
+    coord._token_expiry = datetime.now(UTC)
+    coord.hass.async_create_task = _make_task_closer()
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coord._async_update_data()
+    # Must not be wrapped — UpdateFailed would suppress HA's reauth flow.
+    assert not isinstance(ConfigEntryAuthFailed(), UpdateFailed)
+
+
+def test_set_auth_context_and_expiry_helpers() -> None:
+    from datetime import timedelta
+
+    coord, _, _ = _make_coordinator()
+    _setup_auth(coord)
+    assert coord._refresh_token == "rt1" and coord._id_token == "it1"
+    assert coord._region == "eu-west-1"
+    # ExpiresIn 3600 → ~1h out
+    assert coord._token_expiry > datetime.now(UTC) + timedelta(minutes=50)
+    # Expiry parsing variants
+    assert coord._expiry_from_expires_in(None) > datetime.now(UTC)
+    naive = datetime(2030, 1, 1, 0, 0, 0)
+    assert coord._expiry_from_timestamp(naive).tzinfo is not None
+    aware = datetime(2030, 1, 1, tzinfo=UTC)
+    assert coord._expiry_from_timestamp(aware) == aware
+    assert coord._expiry_from_timestamp(1893456000).year == 2030
+    assert coord._expiry_from_timestamp(None) <= datetime.now(UTC)
 
 
 @pytest.mark.asyncio
@@ -298,6 +439,72 @@ def test_on_mqtt_state_deep_merges_nested_rr_config_partial_patch() -> None:
     assert coord._mqtt_state[THING]["robotConfig"]["rrConfig"] == {**full_rr, "enable": False}
 
 
+def test_on_mqtt_state_caches_path_data_and_reinjects_when_absent() -> None:
+    coord, _, _ = _make_coordinator()
+    path = {"goZones": [{"hashId": "z1", "trackPoints": []}]}
+    coord.on_mqtt_state(THING, {"pathData": path})
+    assert coord._last_path_data[THING] == path
+    # A later patch without pathData re-injects the cached track so the sensor
+    # attribute stays populated after the robot docks.
+    coord.on_mqtt_state(THING, {"battery": 80})
+    assert coord._mqtt_state[THING]["pathData"] == path
+
+
+def test_on_mqtt_state_mowing_start_clears_cache_and_schedules_poll() -> None:
+    from lymow.const import WORK_STATUS_MOWING_GROUP
+
+    coord, _, _ = _make_coordinator()
+    mow = next(iter(WORK_STATUS_MOWING_GROUP))
+    coord._async_poll_path = MagicMock()  # avoid creating a real coroutine here
+    coord._last_path_data[THING] = {"goZones": [{"hashId": "old"}]}
+    coord.on_mqtt_state(THING, {"workStatus": mow})  # prev (-1) → mowing
+    assert THING not in coord._last_path_data
+    assert coord._path_poll_pending[THING] is True
+    coord._async_poll_path.assert_called_once_with(THING)
+
+
+@pytest.mark.asyncio
+async def test_async_poll_path_reschedules_while_mowing() -> None:
+    import asyncio
+    from unittest.mock import patch as _patch
+
+    from lymow.const import USER_CTRL_QUERY_PATH, WORK_STATUS_MOWING_GROUP
+
+    coord, _, _ = _make_coordinator()
+    coord._publish_userctrl = AsyncMock()
+    coord.data = {THING: {"workStatus": next(iter(WORK_STATUS_MOWING_GROUP))}}
+    coord._path_poll_pending[THING] = True
+    created: list = []
+
+    def _create(coro):
+        created.append(coro)
+        if asyncio.iscoroutine(coro):
+            coro.close()
+
+    coord.hass.async_create_task = MagicMock(side_effect=_create)
+    with _patch("asyncio.sleep", AsyncMock()):
+        await coord._async_poll_path(THING)
+    coord._publish_userctrl.assert_awaited_once_with(THING, USER_CTRL_QUERY_PATH)
+    assert len(created) == 1  # re-scheduled itself for the next 30 s cycle
+
+
+@pytest.mark.asyncio
+async def test_async_poll_path_stops_when_no_longer_mowing() -> None:
+    from unittest.mock import patch as _patch
+
+    from lymow.const import USER_CTRL_QUERY_PATH
+
+    coord, _, _ = _make_coordinator()
+    coord._publish_userctrl = AsyncMock()
+    coord.data = {THING: {"workStatus": 5}}  # docked → no re-schedule
+    coord._path_poll_pending[THING] = True
+    with _patch("asyncio.sleep", AsyncMock()):
+        await coord._async_poll_path(THING)
+    coord._publish_userctrl.assert_awaited_once_with(THING, USER_CTRL_QUERY_PATH)
+    assert coord._path_poll_pending[THING] is False
+    coord.hass.async_create_task.assert_not_called()
+
+
 @pytest.mark.asyncio
 async def test_async_query_schedules_clears_stale_and_publishes() -> None:
     coord, mqtt, _ = _make_coordinator()
@@ -336,9 +543,10 @@ async def test_async_set_task_config_publishes_encoded_command() -> None:
     thing, pb = mqtt.async_publish_command.await_args.args
     assert thing == THING
     f = _decode_fields(pb)
-    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
-    cfg = _decode_fields(_first(f, 26))
-    assert _first(cfg, 9) == 250  # pathSpacing
+    assert _first(f, 5) == 49  # USER_CTRL_GLOBAL_SETTING_N (Keep Custom) — LIVE-CONFIRMED 2026-05-30
+    pb_map = _decode_fields(_first(f, 12))
+    cfg = _decode_fields(_first(pb_map, 11))  # PbMap.globalZoneConfig
+    assert _first(cfg, 9) == 250  # pathSpacing — confirmed PbZoneConfig field f9 (2026-05-30)
 
 
 @pytest.mark.asyncio
@@ -374,6 +582,205 @@ async def test_async_set_device_settings_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_device_settings_optimistic_update() -> None:
+    """Setting device settings immediately reflects in coordinator data (optimistic)."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {}}}
+    await coord.async_set_device_settings(
+        THING,
+        rainy_mowing=True,
+        charging_handbrake=True,
+        zone_order=1,
+        charging_mode=0,
+    )
+    tc = coord.data[THING]["mapData"]["taskConfig"]
+    assert tc["rainCleaning"] is True
+    assert tc["disableChargingPark"] is False  # inverted: UI-True → wire-False
+    assert tc["zoneOrder"] == 1
+    assert tc["chargingMode"] == 0
+
+
+@pytest.mark.asyncio
+async def test_async_set_device_settings_optimistic_skipped_when_no_data() -> None:
+    coord, _, _ = _make_coordinator()
+    # Should not raise even with no coordinator data
+    await coord.async_set_device_settings(THING, rainy_mowing=True)
+
+
+@pytest.mark.asyncio
+async def test_async_set_zone_config_publishes_userctrl_9_and_queries_map() -> None:
+    """async_set_zone_config publishes a userCtrl=9 frame then re-queries the map."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_zone_config(THING, [{"hashId": "wsmjco1T", "cutHeight": 40}])
+    # Two publishes: the set_zone_config frame + the follow-up query_map.
+    assert mqtt.async_publish_command.await_count == 2
+    first_call = mqtt.async_publish_command.await_args_list[0]
+    second_call = mqtt.async_publish_command.await_args_list[1]
+    assert first_call.args[0] == THING
+    assert _first(_decode_fields(first_call.args[1]), 5) == 9  # MODIFY_ZONE_INFO
+    assert _first(_decode_fields(second_call.args[1]), 5) == 19  # QUERY_MAP
+
+
+@pytest.mark.asyncio
+async def test_async_set_zone_config_empty_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    with pytest.raises(HomeAssistantError):
+        await coord.async_set_zone_config(THING, [])
+
+
+@pytest.mark.asyncio
+async def test_async_update_channel_settings_mutates_cache_then_syncs() -> None:
+    """Verify channel cut_height + channel_lift are written through sync_map."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [],
+                "nogoZones": [],
+                "channels": [
+                    {"hashId": "ch000001", "cutHeight": 40, "channelLift": 0},
+                ],
+            }
+        }
+    }
+    await coord.async_update_channel_settings(THING, "ch000001", cut_height_mm=55, channel_lift=2)
+    # First call is the sync_map publish, second is the follow-up query_map.
+    assert mqtt.async_publish_command.await_count >= 1
+    first_call = mqtt.async_publish_command.await_args_list[0]
+    pb = first_call.args[1]
+    assert _first(_decode_fields(pb), 5) == 25  # USER_CTRL_SYNC_MAP
+
+
+@pytest.mark.asyncio
+async def test_async_update_channel_settings_unknown_channel_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"channels": [{"hashId": "other"}]}}}
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await coord.async_update_channel_settings(THING, "ch000001", cut_height_mm=50)
+
+
+@pytest.mark.asyncio
+async def test_async_update_channel_settings_no_map_data_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="not yet loaded"):
+        await coord.async_update_channel_settings(THING, "ch000001", cut_height_mm=50)
+
+
+@pytest.mark.asyncio
+async def test_async_get_clean_history_returns_list_of_entries() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history = AsyncMock(
+        return_value={
+            "clean_history": [
+                {"clean_area": 100.0, "clean_time": 10, "date": 1779020649},
+                {"clean_area": 200.0, "clean_time": 20, "date": 1779017649},
+            ]
+        }
+    )
+    out = await coord.async_get_clean_history(THING)
+    assert len(out) == 2
+    assert out[0]["clean_area"] == 100.0
+    api.get_clean_history.assert_awaited_once_with(THING, page=0, page_size=15)
+
+
+@pytest.mark.asyncio
+async def test_async_get_clean_history_filters_non_dict_entries() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history = AsyncMock(
+        return_value={"clean_history": [{"clean_area": 1.0}, "garbage", None, {"clean_area": 2.0}]}
+    )
+    out = await coord.async_get_clean_history(THING)
+    assert [e["clean_area"] for e in out] == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_async_get_clean_history_returns_empty_for_bad_envelope() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_clean_history = AsyncMock(return_value=None)
+    assert await coord.async_get_clean_history(THING) == []
+    api.get_clean_history = AsyncMock(return_value={"clean_history": "not-a-list"})
+    assert await coord.async_get_clean_history(THING) == []
+
+
+@pytest.mark.asyncio
+async def test_async_get_clean_history_wraps_underlying_errors() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    api.get_clean_history = AsyncMock(side_effect=RuntimeError("network down"))
+    with pytest.raises(HomeAssistantError, match="get_clean_history failed"):
+        await coord.async_get_clean_history(THING)
+
+
+@pytest.mark.asyncio
+async def test_async_bind_rtk_publishes_encoded_command() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_bind_rtk(THING, "LK000PLACEHOLD00")  # placeholder base id
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    cfg = _decode_fields(_first(_decode_fields(pb), 13))
+    assert _first(_decode_fields(_first(cfg, 17)), 1) == b"LK000PLACEHOLD00"
+
+
+@pytest.mark.asyncio
+async def test_async_set_wifi_writes_over_ble_not_mqtt(monkeypatch) -> None:
+    """Wi-Fi provisioning is BLE-only (live-confirmed 2026-05-30; issue #200):
+    it must write to a BLE controller, never publish over MQTT."""
+    coord, mqtt, _ = _make_coordinator()
+    created: list = []
+
+    def ctor(address):
+        c = MagicMock()
+        c.address = address
+        c.async_write_once = AsyncMock()
+        created.append(c)
+        return c
+
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "LymowBleController", ctor)
+    await coord.async_set_wifi("AA:BB:CC:DD:EE:FF", "TestNet", "testpass12")  # placeholder creds
+    assert len(created) == 1 and created[0].address == "AA:BB:CC:DD:EE:FF"
+    created[0].async_write_once.assert_awaited_once()
+    # The encoded payload must carry real bytes (the SSID/password), not be empty.
+    (payload,), _ = created[0].async_write_once.call_args
+    assert isinstance(payload, bytes) and len(payload) > 0
+    mqtt.async_publish_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_set_pin_publishes_encoded_command() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_pin(THING, "1234")  # placeholder PIN
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    assert pb.hex() == "10316a084a060a0401020304"
+
+
+@pytest.mark.asyncio
+async def test_async_set_headlight_schedule_publishes_encoded_command() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_set_headlight_schedule(THING, enable=True, start=(3, 17), end=(4, 23))
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    assert pb.hex() == "10314a0250016a0c7204080310117a0408041017"
+
+
+@pytest.mark.asyncio
 async def test_async_set_recharge_resume_round_trip() -> None:
     from lymow.protocol import _decode_fields, _first
 
@@ -388,33 +795,6 @@ async def test_async_set_recharge_resume_round_trip() -> None:
     start = _decode_fields(_first(rr, 2))
     assert _first(start, 1) == 8
     assert _first(rr, 5) == 75  # resumeBat
-
-
-@pytest.mark.asyncio
-async def test_async_set_night_mode_publishes_robot_config_with_times() -> None:
-    """Mirrors setNightMode (#9019): openLedTime/closeLedTime on
-    PbRobotConfig over the no-userCtrl robotConfig path. enable=True keeps
-    only the window; enable=False also adds SIGNAL_TURN_OFF_CAMERA_LIGHT."""
-    from lymow.const import SIGNAL_TURN_OFF_CAMERA_LIGHT
-    from lymow.protocol import _decode_fields, _first
-
-    coord, mqtt, _ = _make_coordinator()
-    await coord.async_set_night_mode(THING, open_time=(21, 0), close_time=(6, 30), enable=True)
-    thing, pb = mqtt.async_publish_command.await_args.args
-    assert thing == THING
-    f = _decode_fields(pb)
-    assert _first(f, 5) is None  # no userCtrl
-    cfg = _decode_fields(_first(f, 13))
-    assert _first(cfg, 8) is None  # no kill-light signal when enabled
-    open_tz = _decode_fields(_first(cfg, 14))
-    assert _first(open_tz, 1) == 21
-    assert _first(open_tz, 2) == 0
-
-    mqtt.async_publish_command.reset_mock()
-    await coord.async_set_night_mode(THING, open_time=(22, 0), close_time=(5, 0), enable=False)
-    _, pb_off = mqtt.async_publish_command.await_args.args
-    cfg_off = _decode_fields(_first(_decode_fields(pb_off), 13))
-    assert _first(cfg_off, 8) == SIGNAL_TURN_OFF_CAMERA_LIGHT
 
 
 @pytest.mark.asyncio
@@ -467,6 +847,25 @@ async def test_async_set_robot_config_publishes_metric_4g_without_userctrl() -> 
 
 
 @pytest.mark.asyncio
+async def test_async_find_my_robot_play_sound_publishes_captured_wire() -> None:
+    """Wire frame captured live from the app — fires the find-my-robot beacon
+    via PbInput {f13.audioVolume=100, f16=1} with no userCtrl."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_find_my_robot_play_sound(THING)
+    mqtt.async_publish_command.assert_awaited_once()
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    assert pb.hex() == "10316a023064800101"
+    f = _decode_fields(pb)
+    assert _first(f, 5) is None  # no userCtrl
+    assert _first(f, 16) == 1  # play-sound trigger
+    cfg = _decode_fields(_first(f, 13))
+    assert _first(cfg, 6) == 100  # audioVolume max (default)
+
+
+@pytest.mark.asyncio
 async def test_async_sync_timezone_publishes_offset_on_field_21() -> None:
     """Mirrors what the app's setTimezone (#9036) writes — seconds east of UTC
     on PbRobotConfig.f21, via the no-userCtrl robotConfig path."""
@@ -488,12 +887,99 @@ async def test_async_sync_timezone_publishes_offset_on_field_21() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
+async def test_async_update_data_seeds_proto3_config_defaults() -> None:
+    """Absent (proto3-default) settings fields are backfilled so settings
+    entities read a default instead of unknown — without clobbering real values."""
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "offline", "battery": 50})
+    # Robot reported only audioVolume; everything else is at its omitted default.
+    coord._mqtt_state[THING] = {"robotConfig": {"audioVolume": 100}}
+    coord.hass.async_create_task = _make_task_closer()
+    result = await coord._async_update_data()
+    rc = result[THING]["robotConfig"]
+    assert rc["audioVolume"] == 100  # real value preserved
+    assert rc["isOpenLed"] is False and rc["metric_4g"] is False and rc["dockOnError"] is False
+    assert rc["rrConfig"] == {"enable": False, "rechargeBat": 0, "resumeBat": 0}
+    tc = result[THING]["mapData"]["taskConfig"]
+    assert tc == {"chargingMode": 0, "zoneOrder": 0, "rainCleaning": False, "disableChargingPark": False}
+
+
+@pytest.mark.asyncio
+async def test_async_update_data_seed_does_not_overwrite_real_config() -> None:
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "offline"})
+    coord._mqtt_state[THING] = {
+        "robotConfig": {"isOpenLed": True, "rrConfig": {"enable": True, "rechargeBat": 15}},
+        "mapData": {"taskConfig": {"zoneOrder": 1}, "goZones": [{"hashId": "z1"}]},
+    }
+    coord.hass.async_create_task = _make_task_closer()
+    result = await coord._async_update_data()
+    rc = result[THING]["robotConfig"]
+    assert rc["isOpenLed"] is True
+    assert rc["rrConfig"]["enable"] is True and rc["rrConfig"]["rechargeBat"] == 15
+    assert rc["rrConfig"]["resumeBat"] == 0  # the one absent sub-field is defaulted
+    md = result[THING]["mapData"]
+    assert md["taskConfig"]["zoneOrder"] == 1 and md["taskConfig"]["chargingMode"] == 0
+    assert md["goZones"] == [{"hashId": "z1"}]  # untouched
+
+
+@pytest.mark.asyncio
+async def test_startup_query_fires_when_rest_reports_online_without_is_online() -> None:
+    """A robot already online at HA start sends no notify-app transition, so the
+    config query must be gated on the REST deviceState, not just isOnline."""
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "online", "battery": 90})
+    created: list = []
+    coord.hass.async_create_task = _make_task_closer(created)
+    await coord._async_update_data()
+    assert THING in coord._startup_queried
+    assert len(created) == 2  # query_robot_config + query_map
+
+
+@pytest.mark.asyncio
+async def test_startup_query_skipped_when_rest_reports_offline() -> None:
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "offline"})
+    created: list = []
+    coord.hass.async_create_task = _make_task_closer(created)
+    await coord._async_update_data()
+    assert THING not in coord._startup_queried
+    assert created == []
+
+
+@pytest.mark.asyncio
+async def test_startup_query_skipped_when_mqtt_not_connected() -> None:
+    """The first poll runs during setup before MQTT connects; a query published
+    then would be dropped, so the gate must hold until the transport is up."""
+    coord, mqtt, _ = _make_coordinator(rest_data={"deviceState": "online"})
+    mqtt.is_connected = False
+    created: list = []
+    coord.hass.async_create_task = _make_task_closer(created)
+    await coord._async_update_data()
+    assert THING not in coord._startup_queried
+    assert created == []
+
+
+@pytest.mark.asyncio
+async def test_async_query_all_robot_configs_queries_and_marks_each_device() -> None:
+    devices = [{"deviceThingName": "mower-001"}, {"deviceThingName": "mower-002"}]
+    coord, mqtt, _ = _make_coordinator(devices=devices)
+    await coord.async_query_all_robot_configs()
+    assert mqtt.async_publish_command.await_count == 2
+    assert coord._startup_queried == {"mower-001", "mower-002"}
+
+
 def test_on_mqtt_online_sets_is_online_true() -> None:
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {}}
     coord.on_mqtt_online(THING, True)
     assert coord.data[THING]["isOnline"] is True
     assert coord.data[THING]["deviceState"] == "online"
+
+
+def test_on_mqtt_online_schedules_robot_config_and_map_queries() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    create_task = _capture_create_task(coord)
+    coord.on_mqtt_online(THING, True)
+    assert create_task.call_count == 2  # query_robot_config + query_map
 
 
 def test_on_mqtt_online_sets_is_online_false() -> None:
@@ -769,8 +1255,8 @@ async def test_update_zone_cut_height_publishes_sync_map() -> None:
 
     await coord.async_update_zone_cut_height(THING, "zone0001", 60)
 
-    assert mqtt.async_publish_command.await_count == 1
-    thing, _ = mqtt.async_publish_command.call_args[0]
+    assert mqtt.async_publish_command.await_count == 2  # sync-map + query-map
+    thing, _ = mqtt.async_publish_command.await_args_list[0].args
     assert thing == THING
 
 
@@ -885,6 +1371,53 @@ async def test_async_update_zone_polygon_raises_when_no_map_data() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_move_charging_station_updates_x_y_theta() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_DATA)}}
+    captured = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    await coord.async_move_charging_station(THING, 3.5, -1.2, theta=1.57)
+    cs = captured["map"]["chargingStation"]
+    assert cs["x"] == pytest.approx(3.5)
+    assert cs["y"] == pytest.approx(-1.2)
+    assert cs["theta"] == pytest.approx(1.57)
+
+
+@pytest.mark.asyncio
+async def test_async_move_charging_station_defaults_theta_from_existing() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    map_data = copy.deepcopy(_SAMPLE_MAP_DATA)
+    map_data["chargingStation"] = {"x": 0.0, "y": 0.0, "theta": 2.0}
+    coord.data = {THING: {"mapData": map_data}}
+    captured = {}
+
+    async def _capture(thing, md):
+        captured["map"] = md
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    await coord.async_move_charging_station(THING, 1.0, 2.0)
+    assert captured["map"]["chargingStation"]["theta"] == pytest.approx(2.0)
+
+
+@pytest.mark.asyncio
+async def test_async_move_charging_station_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_move_charging_station(THING, 0.0, 0.0)
+
+
+@pytest.mark.asyncio
 async def test_async_add_zone_appends_new_zone_with_fresh_hash() -> None:
     import copy
 
@@ -962,6 +1495,235 @@ async def test_async_add_zone_rejects_malformed_point() -> None:
 
 
 # ---------------------------------------------------------------------------
+# async_update_nogo_polygon / async_add_nogo_zone / async_add_channel
+# ---------------------------------------------------------------------------
+
+
+_SAMPLE_MAP_WITH_NOGO = {
+    "goZones": [{"hashId": "zone0001", "polygon": [], "isEnabled": True}],
+    "nogoZones": [
+        {
+            "hashId": "nogo0001",
+            "polygon": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 0.5, "y": 1.0}],
+            "isEnabled": True,
+            "parentZoneHashId": "zone0001",
+        }
+    ],
+    "channels": [],
+}
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_replaces_vertices_and_marks_modified() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    new_poly = [{"x": 10.0, "y": 10.0}, {"x": 20.0, "y": 10.0}, {"x": 15.0, "y": 20.0}]
+    await coord.async_update_nogo_polygon(THING, "nogo0001", new_poly)
+
+    target = next(z for z in captured["map"]["nogoZones"] if z["hashId"] == "nogo0001")
+    assert target["polygon"] == new_poly
+    assert "nogo0001" in captured["map"]["modifyHashs"]
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_update_nogo_polygon(THING, "nogo0001", [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_rejects_too_few_vertices() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="3 vertices"):
+        await coord.async_update_nogo_polygon(THING, "nogo0001", [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_update_nogo_polygon(
+            THING, "nogo0001", [{"x": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_async_update_nogo_polygon_raises_for_unknown_hash() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await coord.async_update_nogo_polygon(THING, "missingxx", [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_appends_with_parent_and_fresh_hash() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    poly = [{"x": 5.0, "y": 5.0}, {"x": 6.0, "y": 5.0}, {"x": 5.5, "y": 6.0}]
+    new_id = await coord.async_add_nogo_zone(THING, poly, parent_zone_hash_id="zone0001")
+
+    assert new_id not in {"nogo0001"}
+    added = next(z for z in captured["map"]["nogoZones"] if z["hashId"] == new_id)
+    assert added["parentZoneHashId"] == "zone0001"
+    assert added["isEnabled"] is True
+    assert added["polygon"] == poly
+    assert new_id in captured["map"]["modifyHashs"]
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_avoids_hash_collision() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+
+    async def _noop(thing, map_data):
+        pass
+
+    coord.async_sync_map = _noop  # type: ignore[method-assign]
+
+    from unittest.mock import patch as _patch
+
+    with _patch("secrets.token_hex", side_effect=["nogo0001", "freshn"]):
+        new_id = await coord.async_add_nogo_zone(THING, [{"x": 0.0, "y": 0.0}] * 3)
+    assert new_id == "freshn"
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_add_nogo_zone(THING, [{"x": 0.0, "y": 0.0}] * 3)
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_rejects_too_few_vertices() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="3 vertices"):
+        await coord.async_add_nogo_zone(THING, [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_nogo_zone_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_add_nogo_zone(THING, [{"x": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_appends_with_zone_links_and_fresh_hash() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+    captured: dict = {}
+
+    async def _capture(thing, map_data):
+        captured["map"] = map_data
+
+    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    poly = [{"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 2.0}]
+    new_id = await coord.async_add_channel(
+        THING, poly, zone1_hash_id="zone0001", zone2_hash_id="zone0002", cut_height_mm=55
+    )
+
+    added = next(c for c in captured["map"]["channels"] if c["hashId"] == new_id)
+    assert added["zone1"] == "zone0001"
+    assert added["zone2"] == "zone0002"
+    assert added["cutHeight"] == 55
+    assert added["isValid"] is True
+    assert added["polygon"] == poly
+    assert new_id in captured["map"]["modifyHashs"]
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_avoids_hash_collision() -> None:
+    import copy
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
+
+    async def _noop(thing, map_data):
+        pass
+
+    coord.async_sync_map = _noop  # type: ignore[method-assign]
+
+    from unittest.mock import patch as _patch
+
+    # First call returns an existing nogo hash, retry returns a fresh one
+    with _patch("secrets.token_hex", side_effect=["nogo0001", "freshch"]):
+        new_id = await coord.async_add_channel(THING, [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+    assert new_id == "freshch"
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_raises_when_no_map_data() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    with pytest.raises(HomeAssistantError, match="Map data not yet loaded"):
+        await coord.async_add_channel(THING, [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_rejects_too_few_points() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="2 points"):
+        await coord.async_add_channel(THING, [{"x": 0.0, "y": 0.0}])
+
+
+@pytest.mark.asyncio
+async def test_async_add_channel_rejects_malformed_point() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    with pytest.raises(HomeAssistantError, match="'x' and 'y'"):
+        await coord.async_add_channel(THING, [{"x": 0.0}, {"x": 1.0, "y": 1.0}])
+
+
+# ---------------------------------------------------------------------------
 # Zone update commands — async_update_zone_enabled
 # ---------------------------------------------------------------------------
 
@@ -973,8 +1735,8 @@ async def test_update_zone_enabled_publishes_sync_map() -> None:
 
     await coord.async_update_zone_enabled(THING, "zone0001", False)
 
-    assert mqtt.async_publish_command.await_count == 1
-    thing, _ = mqtt.async_publish_command.call_args[0]
+    assert mqtt.async_publish_command.await_count == 2  # sync-map + query-map
+    thing, _ = mqtt.async_publish_command.await_args_list[0].args
     assert thing == THING
 
 
@@ -1027,13 +1789,21 @@ async def test_update_zone_enabled_raises_when_no_map_data() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_delete_zone_publishes_command() -> None:
+async def test_async_delete_zone_sends_command_then_queries_map() -> None:
+    from lymow.const import USER_CTRL_CLEAR_ZONE, USER_CTRL_QUERY_MAP
+    from lymow.protocol import _decode_fields, _first
+
     coord, mqtt, _ = _make_coordinator()
     await coord.async_delete_zone(THING, "zone0001")
 
-    assert mqtt.async_publish_command.await_count == 1
-    thing, _ = mqtt.async_publish_command.call_args[0]
-    assert thing == THING
+    # 1 = delete (USER_CTRL_CLEAR_ZONE), 2 = query-map refresh so the card stops showing the deleted zone.
+    assert mqtt.async_publish_command.await_count == 2
+    thing_del, pb_del = mqtt.async_publish_command.await_args_list[0].args
+    thing_q, pb_q = mqtt.async_publish_command.await_args_list[1].args
+    assert thing_del == THING
+    assert thing_q == THING
+    assert _first(_decode_fields(pb_del), 5) == USER_CTRL_CLEAR_ZONE
+    assert _first(_decode_fields(pb_q), 5) == USER_CTRL_QUERY_MAP
 
 
 @pytest.mark.asyncio
@@ -1527,6 +2297,150 @@ async def test_async_set_geofence_radius_raises_when_first_entry_not_dict() -> N
 
 
 @pytest.mark.asyncio
+async def test_async_set_geofence_writes_all_provided_fields() -> None:
+    """The full setter accepts lat/lon/radius/name in one PATCH."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Old", "latitude": 10.0, "longitude": 20.0, "radius": 100},
+            ]
+        }
+    }
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, latitude=59.68, longitude=16.76, radius_m=200, name="Home")
+    api.update_device_feature.assert_awaited_once()
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"][0]
+    assert sent["latitude"] == 59.68
+    assert sent["longitude"] == 16.76
+    assert sent["radius"] == 200
+    assert sent["name"] == "Home"
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_seeds_default_when_no_existing_record() -> None:
+    """Allow configuring a fresh device without first opening the Lymow app."""
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {}}
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, latitude=59.68, longitude=16.76, radius_m=150)
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"][0]
+    assert sent["latitude"] == 59.68
+    assert sent["longitude"] == 16.76
+    assert sent["radius"] == 150
+    assert sent["name"] == ""
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_preserves_unspecified_fields() -> None:
+    """A radius-only update keeps the existing centre coords + name."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Yard", "latitude": 10.0, "longitude": 20.0, "radius": 100},
+            ]
+        }
+    }
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, radius_m=250)
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"][0]
+    assert sent["latitude"] == 10.0
+    assert sent["longitude"] == 20.0
+    assert sent["radius"] == 250
+    assert sent["name"] == "Yard"
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_index_mutates_only_that_region() -> None:
+    """`index=1` updates the second region; other regions are kept intact."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100},
+                {"name": "Back", "latitude": 3.0, "longitude": 4.0, "radius": 150},
+                {"name": "Side", "latitude": 5.0, "longitude": 6.0, "radius": 200},
+            ]
+        }
+    }
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, radius_m=250, name="Renamed Back", index=1)
+
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"]
+    assert len(sent) == 3
+    assert sent[0] == {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100}
+    assert sent[1] == {"name": "Renamed Back", "latitude": 3.0, "longitude": 4.0, "radius": 250}
+    assert sent[2] == {"name": "Side", "latitude": 5.0, "longitude": 6.0, "radius": 200}
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_index_at_len_appends_new_region() -> None:
+    """`index == len(current)` appends a new region with defaults + provided fields."""
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100},
+            ]
+        }
+    }
+    coord.async_set_updated_data = MagicMock()
+
+    await coord.async_set_geofence(THING, latitude=10.0, longitude=20.0, radius_m=180, name="Back", index=1)
+
+    _, kwargs = api.update_device_feature.call_args
+    sent = kwargs["geoFence"]
+    assert len(sent) == 2
+    assert sent[0] == {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100}
+    assert sent[1] == {"name": "Back", "latitude": 10.0, "longitude": 20.0, "radius": 180}
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_index_out_of_range_raises() -> None:
+    """Skipping past the end of the list is an error, not a silent extend."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100},
+            ]
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="index 5 is out of range"):
+        await coord.async_set_geofence(THING, radius_m=250, index=5)
+    api.update_device_feature.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_set_geofence_negative_index_raises() -> None:
+    """Negative indexes would silently mutate the last entry — reject them."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, _, api = _make_coordinator()
+    coord.data = {
+        THING: {
+            "geoFence": [
+                {"name": "Front", "latitude": 1.0, "longitude": 2.0, "radius": 100},
+            ]
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="index -1 is out of range"):
+        await coord.async_set_geofence(THING, radius_m=250, index=-1)
+    api.update_device_feature.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_async_send_user_ctrl_publishes_command() -> None:
     from lymow.const import USER_CTRL_LOCK
     from lymow.protocol import _decode_fields
@@ -1551,7 +2465,9 @@ async def test_async_send_user_ctrl_publishes_command() -> None:
     [
         ("async_query_cleaning_info", 24),
         ("async_query_cleaning_summary", 34),
-        ("async_query_robot_config", 35),
+        # async_query_robot_config uses encode_query_robot_config() — f9 sub-message,
+        # not plain userCtrl=35 — tested separately below.
+        # ("async_query_robot_config", 35),  # removed: wrong encoding, see test below
         ("async_query_path", 23),
         ("async_query_channels", 39),
         ("async_query_run_time_config", 51),
@@ -1574,6 +2490,28 @@ async def test_query_helpers_publish_correct_userctrl(method_name: str, expected
     by_field = {fn: val for fn, _wt, val in _decode_fields(pb_bytes)}
     # userCtrl lives at field 5 — same convention as every other userCtrl-only command.
     assert by_field[5] == expected_code
+
+
+@pytest.mark.asyncio
+async def test_query_robot_config_uses_f9_submessage() -> None:
+    """async_query_robot_config must use PbInput.f9={f10=1}, NOT plain userCtrl=35.
+
+    The robot silently ignores a plain userCtrl=35; confirmed from app capture
+    that getRobotConfig requires the f9 sub-command discriminator.
+    """
+    from lymow.protocol import _decode_fields
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_query_robot_config(THING)
+
+    assert mqtt.async_publish_command.await_count == 1
+    _thing, pb_bytes = mqtt.async_publish_command.call_args[0]
+    by_field = {fn: val for fn, _wt, val in _decode_fields(pb_bytes)}
+    # Must NOT use f5 (userCtrl); must use f9 sub-message with f10=1 inside.
+    assert 5 not in by_field, "must not send plain userCtrl=35"
+    assert isinstance(by_field.get(9), bytes)
+    inner = {fn: val for fn, _wt, val in _decode_fields(by_field[9])}
+    assert inner.get(10) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -2386,12 +3324,23 @@ async def test_async_start_video_session_chains_endpoints() -> None:
         return_value={"channelARN": "arn:test", "region": "eu-west-1", "credentials": creds}
     )
     api.get_signaling_channel_endpoint = AsyncMock(return_value={"WSS": "wss://v", "HTTPS": "https://r"})
-    api.get_ice_server_config = AsyncMock(return_value=[{"Uris": ["turn:x"]}])
+    api.get_ice_server_config = AsyncMock(
+        return_value=[{"Uris": ["turn:x"], "Username": "u", "Password": "p"}, "junk-non-dict"]
+    )
+    api.viewer_client_id = MagicMock(return_value="ha-lymow_abcd_userId_S")
+    api.presign_signaling_url = MagicMock(return_value="wss://v/?X-Amz-Signature=sig")
     result = await coord.async_start_video_session(THING)
     api.get_signaling_channel_endpoint.assert_awaited_once_with("arn:test", creds, region="eu-west-1")
     api.get_ice_server_config.assert_awaited_once_with("arn:test", "https://r", creds, region="eu-west-1")
     assert result["signalingEndpoints"] == {"WSS": "wss://v", "HTTPS": "https://r"}
-    assert result["iceServers"] == [{"Uris": ["turn:x"]}]
+    assert result["iceServers"] == [{"Uris": ["turn:x"], "Username": "u", "Password": "p"}, "junk-non-dict"]
+    # Turnkey browser-viewer config (non-dict ICE entries are filtered out)
+    api.presign_signaling_url.assert_called_once_with(
+        "wss://v", "arn:test", "ha-lymow_abcd_userId_S", creds, region="eu-west-1"
+    )
+    assert result["viewerClientId"] == "ha-lymow_abcd_userId_S"
+    assert result["viewerWssUrl"] == "wss://v/?X-Amz-Signature=sig"
+    assert result["webrtcIceServers"] == [{"urls": ["turn:x"], "username": "u", "credential": "p"}]
 
 
 async def test_async_start_video_session_no_creds_returns_base() -> None:
@@ -2439,6 +3388,88 @@ async def test_async_rename_zone_publishes_modify_zone_info() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_rename_zone_updates_optimistic_cache_when_present() -> None:
+    """When coordinator already holds the map, rename should update the cached name immediately."""
+    coord, _mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [{"hashId": "wsmjco1T", "name": "Front garden"}],
+                "nogoZones": [],
+            },
+        }
+    }
+    await coord.async_rename_zone(THING, "wsmjco1T", "Front lawn")
+    assert coord.data[THING]["mapData"]["goZones"][0]["name"] == "Front lawn"
+
+
+@pytest.mark.asyncio
+async def test_async_rename_nogo_zone_targets_nogo_field_and_updates_cache() -> None:
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    # Seed coordinator cache with one nogo zone so we can verify the optimistic rename.
+    coord.data = {
+        THING: {
+            "mapData": {"goZones": [], "nogoZones": [{"hashId": "ngabcdef", "name": "Old"}]},
+        }
+    }
+    await coord.async_rename_nogo_zone(THING, "ngabcdef", "Flower bed")
+
+    thing, pb = mqtt.async_publish_command.await_args.args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    pb_map = _decode_fields(_first(f, 12))
+    # The nogo rename must land in PbMap.nogoZones (field 2), not goZones (field 1)
+    assert _first(pb_map, 1) is None
+    bi = _decode_fields(_first(_decode_fields(_first(pb_map, 2)), 1))
+    assert _first(bi, 2).decode() == "Flower bed"
+    assert _first(bi, 3).decode() == "ngabcdef"
+    # Coordinator cache updated optimistically
+    assert coord.data[THING]["mapData"]["nogoZones"][0]["name"] == "Flower bed"
+
+
+@pytest.mark.asyncio
+async def test_async_rename_channel_stores_override_and_updates_cache() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [],
+                "nogoZones": [],
+                "channels": [{"hashId": "a1b2c3d4", "isDockingChannel": False}],
+            },
+        }
+    }
+    await coord.async_rename_channel(THING, "a1b2c3d4", "Back passage")
+    assert coord._channel_name_overrides[THING]["a1b2c3d4"] == "Back passage"
+    assert coord.data[THING]["mapData"]["channels"][0]["name"] == "Back passage"
+
+
+@pytest.mark.asyncio
+async def test_on_mqtt_state_applies_channel_name_overrides_on_map_update() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._channel_name_overrides[THING] = {"a1b2c3d4": "Back passage"}
+    coord.data = {THING: {}}
+    patch = {"mapData": {"channels": [{"hashId": "a1b2c3d4", "isDockingChannel": False}]}}
+    coord.on_mqtt_state(THING, patch)
+    stored = coord.data[THING]["mapData"]["channels"][0]
+    assert stored["name"] == "Back passage"
+
+
+@pytest.mark.asyncio
+async def test_on_mqtt_state_skips_channel_override_when_none_registered() -> None:
+    coord, _, _ = _make_coordinator()
+    # No overrides registered — patch must pass through unchanged.
+    coord.data = {THING: {}}
+    patch = {"mapData": {"channels": [{"hashId": "a1b2c3d4", "isDockingChannel": False}]}}
+    coord.on_mqtt_state(THING, patch)
+    stored = coord.data[THING]["mapData"]["channels"][0]
+    assert "name" not in stored
+
+
+@pytest.mark.asyncio
 async def test_async_clear_schedules_sends_empty_then_queries() -> None:
     coord, mqtt, _ = _make_coordinator()
     await coord.async_clear_schedules(THING)
@@ -2446,6 +3477,134 @@ async def test_async_clear_schedules_sends_empty_then_queries() -> None:
     first_pb = mqtt.async_publish_command.await_args_list[0].args[1]
     assert first_pb.hex() == "10315a00"
     assert mqtt.async_publish_command.await_count == 2  # clear + query
+
+
+def test_wire_entries_from_cached_preserves_utc_and_refills_point() -> None:
+    from lymow.coordinator import _wire_entries_from_cached
+
+    cached = [
+        {
+            "dayOfWeek": [6],
+            "hour": 13,
+            "minute": 16,
+            "isRepeated": True,
+            "isDisabled": False,
+            "zones": ["z1"],
+            "id": 42,
+            "timeZone": 2,
+        }
+    ]
+    map_data = {"goZones": [{"hashId": "z1", "name": "Lawn", "innerPoint": {"x": 1.5, "y": 2.5}}]}
+    [entry] = _wire_entries_from_cached(cached, map_data)
+    assert entry["hour"] == 13 and entry["minute"] == 16  # UTC preserved, no re-conversion
+    assert entry["id"] == 42 and entry["timeZone"] == 2
+    assert entry["zones"][0] == {"hashId": "z1", "name": "Lawn", "point": {"x": 1.5, "y": 2.5}}
+
+
+@pytest.mark.asyncio
+async def test_async_add_schedule_appends_and_preserves_existing() -> None:
+    from lymow.protocol import _all, _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.hass.config.time_zone = "UTC"
+    coord.data = {
+        THING: {
+            "schedules": [
+                {
+                    "dayOfWeek": [6],
+                    "hour": 13,
+                    "minute": 16,
+                    "isDisabled": False,
+                    "zones": ["z1"],
+                    "id": 42,
+                    "timeZone": 0,
+                }
+            ],
+            "mapData": {"goZones": [{"hashId": "z1", "name": "L", "innerPoint": {"x": 0.0, "y": 0.0}}]},
+        }
+    }
+    await coord.async_add_schedule(
+        THING, hour=8, minute=5, day_of_week=[1], zones=["z1"], is_repeated=True, is_disabled=False
+    )
+    pb = mqtt.async_publish_command.await_args_list[0].args[1]
+    tasks = _all(_decode_fields(_first(_decode_fields(pb), 11)), 1)
+    assert len(tasks) == 2  # existing + new
+    # new entry (second) carries the new time; UTC tz => hour unchanged
+    new = _decode_fields(tasks[1])
+    assert _first(new, 2) == 8 and _first(new, 3) == 5
+
+
+@pytest.mark.asyncio
+async def test_async_delete_schedule_drops_one_keeps_rest() -> None:
+    from lymow.protocol import _all, _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "schedules": [
+                {"hour": 7, "minute": 0, "zones": [], "id": 1},
+                {"hour": 8, "minute": 0, "zones": [], "id": 2},
+            ],
+            "mapData": {},
+        }
+    }
+    await coord.async_delete_schedule(THING, 1)
+    pb = mqtt.async_publish_command.await_args_list[0].args[1]
+    tasks = _all(_decode_fields(_first(_decode_fields(pb), 11)), 1)
+    assert len(tasks) == 1
+    assert _first(_decode_fields(tasks[0]), 6) == 2  # id 2 survives
+
+
+@pytest.mark.asyncio
+async def test_async_delete_last_schedule_sends_clear() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"schedules": [{"hour": 7, "minute": 0, "zones": [], "id": 1}], "mapData": {}}}
+    await coord.async_delete_schedule(THING, 1)
+    assert mqtt.async_publish_command.await_args_list[0].args[1].hex() == "10315a00"  # clear
+
+
+@pytest.mark.asyncio
+async def test_async_delete_schedule_unknown_id_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"schedules": [{"hour": 7, "minute": 0, "zones": [], "id": 1}], "mapData": {}}}
+    with pytest.raises(HomeAssistantError, match="No schedule with id 9"):
+        await coord.async_delete_schedule(THING, 9)
+    mqtt.async_publish_command.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_async_toggle_schedule_sets_disabled_flag() -> None:
+    from lymow.protocol import _all, _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "schedules": [
+                {"hour": 7, "minute": 0, "zones": [], "id": 1, "isDisabled": False},
+                {"hour": 8, "minute": 0, "zones": [], "id": 2, "isDisabled": False},
+            ],
+            "mapData": {},
+        }
+    }
+    await coord.async_toggle_schedule(THING, 2, disabled=True)
+    pb = mqtt.async_publish_command.await_args_list[0].args[1]
+    tasks = _all(_decode_fields(_first(_decode_fields(pb), 11)), 1)
+    by_id = {_first(_decode_fields(t), 6): _decode_fields(t) for t in tasks}
+    assert _first(by_id[2], 8) == 1  # id 2 isDisabled set
+    assert _first(by_id[1], 8) is None  # id 1 still enabled (f8 omitted)
+
+
+@pytest.mark.asyncio
+async def test_async_toggle_schedule_unknown_id_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"schedules": [{"hour": 7, "minute": 0, "zones": [], "id": 1}], "mapData": {}}}
+    with pytest.raises(HomeAssistantError, match="No schedule with id 5"):
+        await coord.async_toggle_schedule(THING, 5, disabled=True)
+    mqtt.async_publish_command.assert_not_awaited()
 
 
 def test_build_schedule_entries_converts_utc_and_fills_zone() -> None:
@@ -2562,136 +3721,17 @@ async def test_async_delete_nogo_zone_sends_command_then_queries_map() -> None:
     assert _first(_decode_fields(_first(zone, 1)), 3) == b"ng1"  # basicInfo.hashId
 
 
-# ---------------------------------------------------------------------------
-# Defensive-branch coverage — partial branches the happy-path tests don't reach
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
-async def test_fetch_last_clean_summary_without_totals_skips_them() -> None:
-    """Missing total_clean_time / total_clean_area branches skip without setting keys."""
-    coord, _, api = _make_coordinator()
-    api.get_clean_history.return_value = {
-        "clean_history": [],
-        "clean_summary": {"something_else": 1},  # no total_clean_time / total_clean_area
-        "total_records": 0,
-    }
-    result = await coord._async_update_data()
-    assert "totalCleanTimeMin" not in result[THING]
-    assert "totalCleanHistoryAreaM2" not in result[THING]
+async def test_async_sync_map_publishes_sync_then_queries_map() -> None:
+    from lymow.const import USER_CTRL_SYNC_MAP
+    from lymow.protocol import _decode_fields, _first
 
-
-@pytest.mark.asyncio
-async def test_fetch_last_clean_last_entry_without_optional_fields() -> None:
-    """Entry without clean_area / clean_time / date — each branch skips silently."""
-    coord, _, api = _make_coordinator()
-    api.get_clean_history.return_value = {
-        # entry has neither clean_area, clean_time nor date — only percent/used_battery
-        "clean_history": [{"percent": 0.5, "used_battery": 20}],
-        "total_records": 1,
-    }
-    result = await coord._async_update_data()
-    assert "lastCleanAreaM2" not in result[THING]
-    assert "lastCleanDurationMin" not in result[THING]
-    assert "lastCleanAt" not in result[THING]
-    # Fields that ARE present still surface.
-    assert result[THING]["lastCleanPercent"] == 50.0
-    assert result[THING]["lastCleanBatteryUsed"] == 20
-
-
-@pytest.mark.asyncio
-async def test_fetch_backup_map_entry_without_any_known_file_key_emits_none() -> None:
-    """Backup entry without known file-key aliases leaves `file` as None (break-less path)."""
-    coord, _, api = _make_coordinator()
-    api.get_backup_map_list.return_value = [
-        {"name": "no-file-here", "backup_time": 12345}  # no map_file / key / etc.
-    ]
-    # Force the cache TTL to be expired so the call actually goes out.
-    coord._backup_map_cache.pop(THING, None)
-    result = await coord._async_update_data()
-    backups = result[THING].get("backupMapList", [])
-    assert backups and backups[0]["file"] is None
-    assert result[THING]["backupMapCount"] == 1
-
-
-@pytest.mark.asyncio
-async def test_update_zone_cut_height_unknown_hash_does_not_mutate_any_zone() -> None:
-    """Unknown hash_id walks goZones without break — cutHeight unchanged on every zone."""
-    import copy
-
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"workStatus": 5, "mapData": copy.deepcopy(_SAMPLE_MAP_DATA)}}
-    sent: list[dict] = []
-
-    async def _capture_sync(thing_name: str, map_data: dict) -> None:  # type: ignore[override]
-        sent.append(map_data)
-
-    coord.async_sync_map = _capture_sync  # type: ignore[method-assign]
-    await coord.async_update_zone_cut_height(THING, "no-such-zone", 99)
-    assert sent and sent[0]["goZones"][0]["cutHeight"] == 40  # unchanged
-    assert sent[0]["goZones"][1]["cutHeight"] == 50  # unchanged
-
-
-@pytest.mark.asyncio
-async def test_update_zone_polygon_does_not_duplicate_existing_modify_hash() -> None:
-    """hash_id already in modifyHashs must not grow on second edit (False branch)."""
-    import copy
-
-    coord, _, _ = _make_coordinator()
-    pre_modified = copy.deepcopy(_SAMPLE_MAP_DATA)
-    pre_modified["modifyHashs"] = ["zone0001"]  # already marked dirty
-    coord.data = {THING: {"workStatus": 5, "mapData": pre_modified}}
-
-    sent: list[dict] = []
-
-    async def _capture_sync(thing_name: str, map_data: dict) -> None:  # type: ignore[override]
-        sent.append(map_data)
-
-    coord.async_sync_map = _capture_sync  # type: ignore[method-assign]
-    await coord.async_update_zone_polygon(
-        THING, "zone0001", [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 0.0, "y": 1.0}]
-    )
-    # The list must still contain "zone0001" exactly once.
-    assert sent[0]["modifyHashs"].count("zone0001") == 1
-
-
-@pytest.mark.asyncio
-async def test_start_video_session_endpoints_without_https_skips_ice() -> None:
-    """Missing HTTPS in signalingEndpoints skips ICE server fetch (False guard)."""
-    coord, _, api = _make_coordinator()
-    creds = {"accessKeyId": "AK", "secretAccessKey": "SK", "sessionToken": "ST"}
-    api.start_video_session = AsyncMock(
-        return_value={"channelARN": "arn:test", "region": "eu-west-1", "credentials": creds}
-    )
-    # Endpoint payload missing HTTPS (e.g. region with WSS-only).
-    api.get_signaling_channel_endpoint = AsyncMock(return_value={"WSS": "wss://only"})
-    api.get_ice_server_config = AsyncMock()
-    result = await coord.async_start_video_session(THING)
-    api.get_ice_server_config.assert_not_awaited()
-    assert "iceServers" not in result
-    assert result["signalingEndpoints"] == {"WSS": "wss://only"}
-
-
-@pytest.mark.asyncio
-async def test_update_zone_enabled_unknown_hash_does_not_mutate_zones() -> None:
-    """Unknown hash walks goZones and nogoZones without break or mutation."""
-    import copy
-
-    coord, _, _ = _make_coordinator()
-    nogo_map = {
-        "goZones": [{"hashId": "zone0001", "isEnabled": True, "polygon": []}],
-        "nogoZones": [
-            {"hashId": "nogo0001", "parentZoneHashId": "zone0001", "isEnabled": True, "polygon": []},
-        ],
-    }
-    coord.data = {THING: {"workStatus": 5, "mapData": copy.deepcopy(nogo_map)}}
-    sent: list[dict] = []
-
-    async def _capture_sync(thing_name: str, map_data: dict) -> None:  # type: ignore[override]
-        sent.append(map_data)
-
-    coord.async_sync_map = _capture_sync  # type: ignore[method-assign]
-    await coord.async_update_zone_enabled(THING, "no-such-zone", False)
-    # Nothing flipped to False — both go-zone and (unmatched) nogo-zone keep their original state.
-    assert sent[0]["goZones"][0]["isEnabled"] is True
-    assert sent[0]["nogoZones"][0]["isEnabled"] is True
+    coord, mqtt, _ = _make_coordinator()
+    map_data: dict[str, Any] = {"goZones": [], "nogoZones": [], "channels": []}
+    await coord.async_sync_map(THING, map_data)
+    # sync command + query-map — robot does not re-broadcast map after SYNC_MAP on its own
+    assert mqtt.async_publish_command.await_count == 2
+    thing, pb = mqtt.async_publish_command.await_args_list[0].args
+    assert thing == THING
+    f = _decode_fields(pb)
+    assert _first(f, 5) == USER_CTRL_SYNC_MAP

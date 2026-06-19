@@ -12,6 +12,11 @@ REGION_CHOICES = [REGION_AUTO, "eu-west-1", "us-east-2", "ap-southeast-2", "ap-e
 # How often to poll REST device state (MQTT keeps live state between polls)
 POLLING_INTERVAL = 30  # seconds
 
+# Refresh Cognito tokens / AWS credentials this many seconds before they expire.
+# Without refresh the access token lapses (~24 h) and every REST poll 401s, taking
+# all entities unavailable until HA restarts.
+AUTH_REFRESH_MARGIN_SECONDS = 600
+
 # The robot exposes its onboard camera as a local RTSP h264 stream (640x480)
 # on the LAN. Confirmed by capture + a live frame pull from the device:
 #   rtsp://<robot_ip>:10022/h264ESVideoTest
@@ -384,6 +389,65 @@ ERROR_DESCRIPTIONS: dict[int, str] = {
     88: "Path-planning: out of where",
     89: "Thick blade stuck",
     90: "Max error code (sentinel)",
+}
+
+# Error-code -> official remediation steps (app i18n `errors` namespace, *_detail keys).
+# Only the 54 user-surfaced codes have remediation text.
+ERROR_REMEDIATION: dict[int, str] = {
+    1: "1. Clear error and resume operation.\n2. If unresolved: Power cycle and retry.\n3. Still failing? Contact official support.",
+    2: "1. Clear error and resume operation\n2. If unresolved: Power off for 5 minutes and retry\n3. Still failing? Contact official support",
+    3: "1. Clear error and resume operation.\n2. If unresolved: Power cycle and retry.\n3. Still failing? Contact official support.",
+    7: "1. Remove debris around the motor and retry.\n2. Press and hold the “–” button to reset if needed.\n3. Restart the mower if the issue persists.",
+    10: "1. Clear error and resume operation\n2. If unresolved: Power cycle and retry\n3. Still failing? Contact official support",
+    13: "1. Please drive the mower into the zone, at least 3 meters (approximately 9.8 feet) away from the boundary or obstacle, then clear error and resume operation.\n2. If unresolved: Please restart the mower and resume operation.",
+    15: "Help your mower navigate better:\n1. Move robot to open area\n2. Reposition RTK reference station (clear sky view)",
+    16: "Location service not initialized. Please drive the mower to an open area, then drive it forward or backward about 2 meters (approximately 6.6 feet) to activate it.",
+    17: "Unsafe drop detected. Please move the robot to a different spot.",
+    18: "Please move the mower to flat ground, press STOP, then press HOME button to resume operation.",
+    19: "Slipping detected. Please move the robot to a different spot.",
+    20: "Mower out of the work area. Please return it to the mapped zone.",
+    21: "1. Inspect the tracks for any obstructions.\n2. Move the mower to open area and resume operation.",
+    25: "Please add a charging station in the app and ensure a channel to the work zone.",
+    27: "Please create a go-zone before mowing.",
+    28: "Please ensure all target mowing zones are connected by channels.",
+    29: "1. Please ensure the charging station area is well-lit, and both the camera lens and tag surface are clean and unobstructed.\n2. Please update the charging station location in the app if it has been moved.",
+    30: "Please clear the error and retry. If unsuccessful, manually assist the mower to dock.",
+    31: "Please charge the mower above 20% before mowing.",
+    32: "Please restart the mower. If the issue persists after a few times of restart, contact official support",
+    33: "Please restart the mower. If the issue persists after a few times of restart, contact official support",
+    34: "Please restart the mower. If the issue persists after a few times of restart, contact official support",
+    44: "Press the bumper to check movement. Clear any debris if it's stuck.",
+    45: "Please power off the mower and remove debris from the blade.",
+    46: "Location service unstable. Please power cycle the mower.",
+    50: "Please move the mower to a new position and retry. If the error persists, cancel the task.",
+    51: "1. Please check the charging station's power supply and clean the charging contacts.\n2. Please check if the immersion sensor under the charging station was triggered by water.\n3. Restart the mower and the charging station if needed.",
+    52: "The mower cannot return to the charging station. Please ensure all zones are connected by channels, with one zone linked directly to the charging station.",
+    53: "Please move the mower to a new position and retry. If the error persists, cancel the task.",
+    58: "Invalid charging station location. Please move it completely outside the zone.",
+    61: "1. Please check the RTK reference station’s power supply.\n2. GNSS acquisition takes up to 3 mins on startup. Please wait.\n3. Still failing? Contact official support.",
+    64: "Mower out of the work area. Please return it to the mapped zone.",
+    65: "Mower out of the work area. Please return it to the mapped zone.",
+    66: "1. Inspect the tracks for any obstructions.\n2. Move the mower to open area and resume operation.",
+    67: "Please move the mower to a new position and retry. If the error persists, cancel the task.",
+    68: "Please move the mower to a new position and retry. If the error persists, cancel the task.",
+    69: "Please move the mower to a new position and retry. If the error persists, cancel the task.",
+    70: "Please move the mower to a new position and retry. If the error persists, cancel the task.",
+    71: "Please move the mower to a new position and retry. If the error persists, cancel the task.",
+    72: "Please restart the mower. If the issue persists after a few times of restart, contact official support",
+    73: "1. Please restart the mower and resume operation.\n2. Still failing? Please cancel the task.",
+    74: "Please check if there are obstacles in the channel.",
+    75: "Please check if there are obstacles in the channel.",
+    76: "Please check for obstacles on the perimeter.",
+    77: "Please check for obstacles on the perimeter.",
+    79: "1. Please drive the mower into the zone, at least 3 meters (approximately 9.8 feet) away from the boundary or obstacle, then clear error and resume operation.\n2. If unresolved: Please restart the mower and resume operation.",
+    80: "1. Please ensure the charging station area is well-lit, and both the camera lens and tag surface are clean and unobstructed.\n2. Please update the charging station location in the app if it has been moved.",
+    81: "Help your mower navigate better:\n1. Move robot to open area.\n2. Reposition RTK reference station (clear sky view).",
+    82: "Help your mower navigate better:\n1. Move robot to open area.\n2. Reposition RTK reference station (clear sky view).",
+    83: "Please first confirm whether the channel slips frequently. If it does, it is recommended to change the channel's position.",
+    84: "Slipping detected. Please move the robot to a different spot.",
+    86: "Mower out of the work area. Please return it to the mapped zone.",
+    87: "Mower out of the work area. Please return it to the mapped zone.",
+    89: "Please power off the mower and remove debris from the blade.",
 }
 
 # Warnings reported alongside errors (pboutput field 4, packed int32).

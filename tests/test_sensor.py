@@ -137,14 +137,35 @@ def test_error_sensor_unknown_code_has_unknown_description() -> None:
     sensor = LymowErrorSensor(coord, DEVICE, desc)
     attrs = sensor.extra_state_attributes
     assert "Unknown" in attrs["description"]
+    assert "remediation" not in attrs
 
 
-def test_error_sensor_warning_codes_included_when_present() -> None:
-    coord = _make_coord({"errorCode": 0, "warningCodes": [1, 2]})
+def test_error_sensor_surfaced_code_includes_remediation() -> None:
+    from lymow.const import ERROR_REMEDIATION
+
+    coord = _make_coord({"errorCode": 71})
     desc = next(d for d in SENSORS if d.key == "error_code")
     sensor = LymowErrorSensor(coord, DEVICE, desc)
     attrs = sensor.extra_state_attributes
-    assert attrs["warning_codes"] == [1, 2]
+    assert attrs["description"] == "Action timeout"
+    assert attrs["remediation"] == ERROR_REMEDIATION[71]
+
+
+def test_error_sensor_internal_code_omits_remediation() -> None:
+    coord = _make_coord({"errorCode": 4})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert "remediation" not in attrs
+
+
+def test_error_sensor_warning_codes_included_when_present() -> None:
+    coord = _make_coord({"errorCode": 0, "warningCodes": [1, 999]})
+    desc = next(d for d in SENSORS if d.key == "error_code")
+    sensor = LymowErrorSensor(coord, DEVICE, desc)
+    attrs = sensor.extra_state_attributes
+    assert attrs["warning_codes"] == [1, 999]
+    assert attrs["warning_descriptions"] == ["Wheel over-current", "Unknown (999)"]
 
 
 def test_error_sensor_warning_codes_absent_when_missing() -> None:
@@ -319,6 +340,26 @@ def test_map_sensor_extra_attrs_has_channels() -> None:
     assert sensor.extra_state_attributes["channels"] == channels
 
 
+def test_map_sensor_extra_attrs_path_rtk_and_progress() -> None:
+    coord = _make_coord(
+        {
+            "mapData": {"goZones": []},
+            "pathData": {"goZones": [{"hashId": "z1", "trackPoints": [{"x": 1.23456, "y": 2.34567}]}]},
+            "rtkStatus": 2,
+            "mowProgress": 45,
+            "mowStripCount": 12,
+            "totalTaskAreaM2": 350,
+        }
+    )
+    attrs = LymowMapSensor(coord, DEVICE).extra_state_attributes
+    # mow path track points are trimmed to 4 dp like zone polygons
+    assert attrs["mow_path"] == {"goZones": [{"hashId": "z1", "trackPoints": [{"x": 1.2346, "y": 2.3457}]}]}
+    assert attrs["rtkLabel"] == "Fixed"
+    assert attrs["mowProgress"] == 45
+    assert attrs["mowStripCount"] == 12
+    assert attrs["totalTaskAreaM2"] == 350
+
+
 def test_map_sensor_extra_attrs_has_gps_origin() -> None:
     origin = {"lat": 12.0, "lon": 65.0}
     coord = _make_coord({"mapData": {"gpsOrigin": origin}})
@@ -406,6 +447,26 @@ def test_map_sensor_extra_attrs_empty_when_no_data() -> None:
     assert sensor.extra_state_attributes == {}
 
 
+def test_map_sensor_extra_attrs_has_mowing_settings() -> None:
+    ms = {"cutHeight": 60, "pathSpacing": 35, "moveSpeed": 0.6}
+    coord = _make_coord({"mapData": {"globalZoneConfig": ms}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["mowing_settings"] == ms
+
+
+def test_map_sensor_extra_attrs_has_channel_config() -> None:
+    cc = {"detectMode": 2, "cutHeight": 60}
+    coord = _make_coord({"mapData": {"globalChannelConfig": cc}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["channel_config"] == cc
+
+
+def test_map_sensor_extra_attrs_mowing_settings_absent_when_not_decoded() -> None:
+    coord = _make_coord({"mapData": {"goZones": []}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert "mowing_settings" not in sensor.extra_state_attributes
+
+
 # ---------------------------------------------------------------------------
 # async_setup_entry
 # ---------------------------------------------------------------------------
@@ -474,26 +535,18 @@ def test_mow_progress_sensor_returns_none_when_absent() -> None:
     assert sensor.native_value is None
 
 
-def test_mow_strip_count_sensor_returns_value() -> None:
-    """The state key is still ``mowStripCount`` (kept to preserve user
-    automations / entity_ids), but f1 is actually ``cleanTime`` in seconds."""
-    coord = _make_coord({"mowStripCount": 1800})
-    desc = next(s for s in SENSORS if s.key == "mow_strip_count")
+def test_mission_time_sensor_returns_value() -> None:
+    coord = _make_coord({"missionTimeMin": 46})
+    desc = next(s for s in SENSORS if s.key == "mission_time")
     sensor = LymowSensor(coord, DEVICE, desc)
-    assert sensor.native_value == 1800
+    assert sensor.native_value == 46
 
 
-def test_mow_strip_count_sensor_disabled_by_default() -> None:
-    desc = next(s for s in SENSORS if s.key == "mow_strip_count")
-    assert desc.entity_registry_enabled_default is False
+def test_mission_time_sensor_is_duration_minutes() -> None:
 
-
-def test_mow_strip_count_sensor_now_rendered_as_duration_in_seconds() -> None:
-    """f1 is cleanTime (seconds), not a strip counter — match the metadata."""
-    desc = next(s for s in SENSORS if s.key == "mow_strip_count")
-    assert desc.name == "Mow elapsed time"
+    desc = next(s for s in SENSORS if s.key == "mission_time")
     assert desc.device_class == SensorDeviceClass.DURATION
-    assert desc.native_unit_of_measurement == UnitOfTime.SECONDS
+    assert desc.native_unit_of_measurement == UnitOfTime.MINUTES
 
 
 def test_heated_lens_times_sensor_reads_counter_state() -> None:
@@ -641,6 +694,72 @@ def test_sim_id_sensor_reads_value() -> None:
     desc = next(s for s in SENSORS if s.key == "sim_id")
     sensor = LymowSensor(coord, DEVICE, desc)
     assert sensor.native_value == "89320420000094505458"
+
+
+def test_dotted_value_key_sensor_walks_nested_dict() -> None:
+    """``value_key="networkInfo.cellularIp"`` walks the nested networkInfo dict."""
+    coord = _make_coord({"networkInfo": {"cellularIp": "100.116.126.140"}})
+    desc = next(s for s in SENSORS if s.key == "cellular_ip")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "100.116.126.140"
+
+
+def test_lcd_pin_sensor_disabled_by_default_diagnostic_and_reads_value() -> None:
+    from homeassistant.const import EntityCategory
+
+    desc = next(s for s in SENSORS if s.key == "lcd_pin")
+    assert desc.value_key == "robotConfig.lcdPin"
+    assert desc.entity_registry_enabled_default is False  # opt-in: PIN is sensitive
+    assert desc.entity_category == EntityCategory.DIAGNOSTIC
+    coord = _make_coord({"robotConfig": {"lcdPin": "0000"}})
+    assert LymowSensor(coord, DEVICE, desc).native_value == "0000"
+
+
+def test_lcd_pin_sensor_none_when_absent() -> None:
+    desc = next(s for s in SENSORS if s.key == "lcd_pin")
+    coord = _make_coord({"robotConfig": {}})
+    assert LymowSensor(coord, DEVICE, desc).native_value is None
+
+
+def test_wifi_ssid_sensor_returns_none_when_network_info_missing() -> None:
+    """Defensive: a stale state with no networkInfo dict must not raise."""
+    coord = _make_coord({"battery": 80})
+    desc = next(s for s in SENSORS if s.key == "wifi_ssid")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value is None
+
+
+def test_cellular_ip_sensor_reads_dotted_path() -> None:
+    coord = _make_coord({"networkInfo": {"cellularIp": "100.116.126.140"}})
+    desc = next(s for s in SENSORS if s.key == "cellular_ip")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "100.116.126.140"
+
+
+def test_rtk_advanced_sensors_read_dotted_l2_fields() -> None:
+    """The Advanced Diagnostics sensors walk the nested rtkL2 dict."""
+    coord = _make_coord(
+        {
+            "rtkL2": {
+                "loraBandwidthL1Bps": 268,
+                "hwDcVoltageL5V": 1.79,
+                "cwInterferenceL2": 94,
+                "antennaGainL5": 53,
+            }
+        }
+    )
+    by_key = {s.key: s for s in SENSORS}
+    assert LymowSensor(coord, DEVICE, by_key["rtk_lora_bandwidth_l1"]).native_value == 268
+    assert LymowSensor(coord, DEVICE, by_key["rtk_dc_voltage_l5"]).native_value == 1.79
+    assert LymowSensor(coord, DEVICE, by_key["rtk_cw_interference_l2"]).native_value == 94
+    assert LymowSensor(coord, DEVICE, by_key["rtk_antenna_gain_l5"]).native_value == 53
+
+
+def test_mac_address_sensor_reads_value() -> None:
+    coord = _make_coord({"macAddress": "F8:3D:C6:82:56:C1"})
+    desc = next(s for s in SENSORS if s.key == "mac_address")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == "F8:3D:C6:82:56:C1"
 
 
 def test_firmware_minimum_sensor_reads_value() -> None:
