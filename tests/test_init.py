@@ -69,6 +69,7 @@ def _make_ha_stubs() -> None:
             SELECT = "select"
             SENSOR = "sensor"
             SWITCH = "switch"
+            TEXT = "text"
             UPDATE = "update"
 
         ha_const.Platform = _Platform
