@@ -13,12 +13,12 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import DEGREE, PERCENTAGE, UnitOfArea, UnitOfLength, UnitOfTime
+from homeassistant.const import DEGREE, PERCENTAGE, EntityCategory, UnitOfArea, UnitOfLength, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ERROR_DESCRIPTIONS, MOW_END_TYPES, WARNING_DESCRIPTIONS
+from .const import DOMAIN, ERROR_DESCRIPTIONS, ERROR_REMEDIATION, MOW_END_TYPES, WARNING_DESCRIPTIONS
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
@@ -137,6 +137,222 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:ip-network",
         entity_registry_enabled_default=False,
     ),
+    LymowSensorDescription(
+        key="mac_address",
+        name="MAC address",
+        value_key="macAddress",
+        icon="mdi:network",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="cellular_ip",
+        name="Cellular IP",
+        value_key="networkInfo.cellularIp",
+        icon="mdi:signal-cellular-3",
+        entity_registry_enabled_default=False,
+    ),
+    # RTK diagnostic sensors — populated by query_rtk_diagnostic_l1 (#57)
+    # and query_rtk_diagnostic_l2 (#58). Labels cross-referenced live against
+    # the app's Settings → RTK Diagnostic page (basic + Advanced Diagnostics).
+    # All disabled by default — RTK details are mostly relevant during setup
+    # / troubleshooting, not for normal day-to-day automations.
+    LymowSensorDescription(
+        key="rtk_location_precision",
+        name="Location precision",
+        value_key="rtkL1.locationPrecisionM",
+        native_unit_of_measurement="m",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=3,
+        icon="mdi:crosshairs-gps",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_gnss_satellites",
+        name="GNSS satellites",
+        value_key="rtkL1.gnssSatellites",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:satellite-variant",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_l1_sat_count",
+        name="L1 satellites",
+        value_key="rtkL1.l1SatCount",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:satellite-variant",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_l2_sat_count",
+        name="L2 satellites",
+        value_key="rtkL1.l2SatCount",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:satellite-variant",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_l5_sat_count",
+        name="L5 satellites",
+        value_key="rtkL1.l5SatCount",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:satellite-variant",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_l1_snr",
+        name="L1 SNR",
+        value_key="rtkL1.l1SnrMedian",
+        native_unit_of_measurement="dB",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:signal-variant",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_l2_snr",
+        name="L2 SNR",
+        value_key="rtkL1.l2SnrMedian",
+        native_unit_of_measurement="dB",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:signal-variant",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_l5_snr",
+        name="L5 SNR",
+        value_key="rtkL1.l5SnrMedian",
+        native_unit_of_measurement="dB",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:signal-variant",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_data_error_rate",
+        name="RTK data error rate",
+        value_key="rtkL1.dataErrorRatePct",
+        native_unit_of_measurement="%",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:percent",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_differential_age",
+        name="RTK differential age",
+        value_key="rtkL2.differentialAgeSec",
+        native_unit_of_measurement="s",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        icon="mdi:timer-sand",
+        entity_registry_enabled_default=False,
+    ),
+    # RTK Advanced Diagnostics (app's "Advanced Diagnostics" expander) —
+    # per-band Lora bandwidth, hardware DC voltage, CW interference, and
+    # antenna gain. Labels live-correlated against the app's RTK Diagnostic
+    # page. All disabled by default like the basic RTK sensors above.
+    LymowSensorDescription(
+        key="rtk_lora_bandwidth_l1",
+        name="Lora bandwidth L1",
+        value_key="rtkL2.loraBandwidthL1Bps",
+        native_unit_of_measurement="bps",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:radio-tower",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_lora_bandwidth_l2",
+        name="Lora bandwidth L2",
+        value_key="rtkL2.loraBandwidthL2Bps",
+        native_unit_of_measurement="bps",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:radio-tower",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_lora_bandwidth_l5",
+        name="Lora bandwidth L5",
+        value_key="rtkL2.loraBandwidthL5Bps",
+        native_unit_of_measurement="bps",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:radio-tower",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_dc_voltage_l1",
+        name="RTK DC voltage L1",
+        value_key="rtkL2.hwDcVoltageL1V",
+        native_unit_of_measurement="V",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        icon="mdi:flash",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_dc_voltage_l2",
+        name="RTK DC voltage L2",
+        value_key="rtkL2.hwDcVoltageL2V",
+        native_unit_of_measurement="V",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        icon="mdi:flash",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_dc_voltage_l5",
+        name="RTK DC voltage L5",
+        value_key="rtkL2.hwDcVoltageL5V",
+        native_unit_of_measurement="V",
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=2,
+        icon="mdi:flash",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_cw_interference_l1",
+        name="RTK CW interference L1",
+        value_key="rtkL2.cwInterferenceL1",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:waveform",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_cw_interference_l2",
+        name="RTK CW interference L2",
+        value_key="rtkL2.cwInterferenceL2",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:waveform",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_cw_interference_l5",
+        name="RTK CW interference L5",
+        value_key="rtkL2.cwInterferenceL5",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:waveform",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_antenna_gain_l1",
+        name="RTK antenna gain L1",
+        value_key="rtkL2.antennaGainL1",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:antenna",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_antenna_gain_l2",
+        name="RTK antenna gain L2",
+        value_key="rtkL2.antennaGainL2",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:antenna",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_antenna_gain_l5",
+        name="RTK antenna gain L5",
+        value_key="rtkL2.antennaGainL5",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:antenna",
+        entity_registry_enabled_default=False,
+    ),
     # Live MQTT sensors decoded from additional pboutput fields
     LymowSensorDescription(
         key="rtk_satellites",
@@ -165,21 +381,13 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:progress-clock",
     ),
     LymowSensorDescription(
-        # PbCleanInfo.cleanTime (f1, int seconds): time spent mowing the
-        # current session — initial APK RE mislabelled this as a "strip
-        # count" before the wire layout was confirmed against
-        # PbCleanInfo.encode (Hermes #9770). The entity ``key`` is kept
-        # to preserve existing user automations / entity_ids; only the
-        # display name, device class, and unit have moved to match
-        # what the field actually carries.
-        key="mow_strip_count",
-        name="Mow elapsed time",
-        value_key="mowStripCount",
-        native_unit_of_measurement=UnitOfTime.SECONDS,
+        key="mission_time",
+        name="Mission time",
+        value_key="missionTimeMin",
+        native_unit_of_measurement=UnitOfTime.MINUTES,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:timer-outline",
-        entity_registry_enabled_default=False,
     ),
     # PbCleanInfo (PbOutput field 12) additional fields surfaced from APK RE.
     LymowSensorDescription(
@@ -201,9 +409,8 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:texture-box",
         entity_registry_enabled_default=False,
     ),
-    # Camera-lens heater (PbOutput.f37): monotonically-increasing count of
-    # how many times the heater has fired since the install — coarse
-    # condensation / fog indicator and a maintenance metric.
+    # Camera-lens heater (PbOutput.f37): count of heater fires — coarse
+    # condensation/fog indicator and maintenance metric.
     LymowSensorDescription(
         key="heated_lens_times",
         name="Lens heater fires",
@@ -212,9 +419,7 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:radiator",
         entity_registry_enabled_default=False,
     ),
-    # Camera auto-exposure gear (PbOutput.f38) — label string (NONE / 1..6 /
-    # MAX) decoded in protocol.py from the AE_RANGE_LEVELS enum. Disabled by
-    # default — diagnostic.
+    # Camera auto-exposure gear (PbOutput.f38) — label decoded via AE_RANGE_LEVELS.
     LymowSensorDescription(
         key="ae_range_level",
         name="Camera AE gear",
@@ -222,10 +427,7 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:camera-iris",
         entity_registry_enabled_default=False,
     ),
-    # outputCtrl (PbOutput.f18) — what the robot is replying to, e.g. a
-    # QUERY_MAP / SYNC_MAP / SET_RUN_TIME_CONFIG. Label string decoded in
-    # protocol.py via the OUTPUT_CTRLS enum. Disabled by default —
-    # diagnostic, mostly useful for traffic-debugging.
+    # outputCtrl (PbOutput.f18) — what the robot is replying to (label via OUTPUT_CTRLS).
     LymowSensorDescription(
         key="output_ctrl",
         name="Last reply opcode",
@@ -387,6 +589,16 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         icon="mdi:robot",
         entity_registry_enabled_default=False,
     ),
+    # The 4-digit LCD-screen unlock PIN (PbRobotConfig.lcdPin). Sensitive, so
+    # off by default — the user opts in. Diagnostic category; value never logged.
+    LymowSensorDescription(
+        key="lcd_pin",
+        name="Screen PIN",
+        value_key="robotConfig.lcdPin",
+        icon="mdi:form-textbox-password",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        entity_registry_enabled_default=False,
+    ),
 )
 
 
@@ -425,7 +637,14 @@ class LymowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> Any:
-        return self.coordinator.data.get(self._thing_name, {}).get(self.entity_description.value_key)
+        data = self.coordinator.data.get(self._thing_name, {})
+        # Dotted ``value_key`` (e.g. ``networkInfo.wifiSsid``) walks nested dicts;
+        # plain keys still read directly so existing descriptions keep working.
+        for part in self.entity_description.value_key.split("."):
+            if not isinstance(data, dict):
+                return None
+            data = data.get(part)
+        return data
 
 
 class LymowErrorSensor(LymowSensor):
@@ -438,10 +657,13 @@ class LymowErrorSensor(LymowSensor):
         attrs: dict[str, Any] = {
             "description": _describe(ERROR_DESCRIPTIONS, code),
         }
+        remediation = ERROR_REMEDIATION.get(int(code))
+        if remediation is not None:
+            attrs["remediation"] = remediation
         warning_codes = data.get("warningCodes")
         if warning_codes is not None:
             attrs["warning_codes"] = warning_codes
-            attrs["warning_descriptions"] = [_describe(WARNING_DESCRIPTIONS, w) for w in warning_codes]
+            attrs["warning_descriptions"] = [_describe(WARNING_DESCRIPTIONS, c) for c in warning_codes]
         all_error_codes = data.get("errorCodes")
         if all_error_codes is not None:
             attrs["error_codes"] = all_error_codes
@@ -470,10 +692,10 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     _attr_has_entity_name = True
 
     _RTK_LABELS = {
-        0: "Not ready",
-        1: "Float fix (~40 cm)",
-        2: "Fixed (~2 cm)",
-        3: "RTK fixed (~2 cm)",
+        0: "No fix",
+        1: "Float fix",
+        2: "Fixed",
+        3: "RTK fixed",
     }
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
@@ -524,13 +746,24 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._attr_name = "Map"
         self._attr_icon = "mdi:map"
 
+    @staticmethod
+    def _trim_poly(points: list[dict]) -> list[dict]:
+        """Round polygon coordinates to 4 decimal places (~1 cm precision in ENU metres).
+
+        Full float64 precision uses ~18 chars per coordinate; 4 dp uses ~7 chars,
+        cutting polygon size by ~60% and keeping the map sensor under HA's 16 kB
+        attribute limit even for large multi-zone maps.
+        """
+        return [{"x": round(p["x"], 4), "y": round(p["y"], 4)} for p in points]
+
     @property
     def native_value(self) -> int | None:
         """Number of go-zones loaded, or None if map data is not yet available."""
-        map_data = self.coordinator.data.get(self._thing_name, {}).get("mapData")
+        map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
         if not map_data:
             return None
-        return len(map_data.get("goZones", []))
+        # Only count zones that have a hashId — empty {} entries are stale decode artifacts
+        return sum(1 for z in map_data.get("goZones", []) if z.get("hashId"))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -538,23 +771,29 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
         data = self.coordinator.data.get(self._thing_name) or {}
         attrs: dict[str, Any] = {}
+
         if "goZones" in map_data:
-            attrs["go_zones"] = map_data["goZones"]
+            # Filter out stale empty zone entries (no hashId) that accumulate when
+            # MQTT delivers repeated partial map responses without full zone data
+            valid_zones = [z for z in map_data["goZones"] if z.get("hashId")]
+            attrs["go_zones"] = [
+                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z for z in valid_zones
+            ]
         if "nogoZones" in map_data:
-            attrs["nogo_zones"] = map_data["nogoZones"]
+            attrs["nogo_zones"] = [
+                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z for z in map_data["nogoZones"]
+            ]
         if "channels" in map_data:
-            attrs["channels"] = map_data["channels"]
+            attrs["channels"] = [
+                {**ch, "polygon": self._trim_poly(ch["polygon"])} if "polygon" in ch else ch
+                for ch in map_data["channels"]
+            ]
         if "gpsOrigin" in map_data:
             attrs["gps_origin"] = map_data["gpsOrigin"]
-        # Charging station position: map-derived (from PbMap.f4 via the
-        # last QUERY_MAP) is the base. A live PbOutput.f24 update
-        # (decoded as ``chargingStationLoc``) overlays fresher fields on
-        # top — the live message may carry only ``x`` and ``y`` without
-        # ``theta`` (legal partial update; see protocol decoder), so we
-        # merge field-by-field rather than wholesale-replace. That way a
-        # ``y``-only live update doesn't drop the existing ``x``/``theta``
-        # from the map dock and break the card's geometry. The card reads
-        # the same ``charging_station`` attribute either way.
+        # Charging station: map-derived dock (last QUERY_MAP) is the base; a live
+        # PbOutput.f24 update (chargingStationLoc) overlays fresher fields on top.
+        # The live message may carry only x/y without theta, so merge field-by-field
+        # rather than wholesale-replace (a y-only update must not drop x/theta).
         map_dock = map_data.get("chargingStation") if isinstance(map_data.get("chargingStation"), dict) else None
         live_dock = data.get("chargingStationLoc") if isinstance(data.get("chargingStationLoc"), dict) else None
         if map_dock and live_dock:
@@ -563,8 +802,31 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["charging_station"] = live_dock
         elif map_dock:
             attrs["charging_station"] = map_dock
-        # Include live robot position so the card updates without a separate entity
-        for key in ("poseEastM", "poseNorthM", "poseThetaRad"):
+        if "globalZoneConfig" in map_data:
+            attrs["mowing_settings"] = map_data["globalZoneConfig"]
+        if "globalChannelConfig" in map_data:
+            attrs["channel_config"] = map_data["globalChannelConfig"]
+
+        path_data = (self.coordinator.data.get(self._thing_name) or {}).get("pathData")
+        if path_data:
+            # Also trim mow-path track points to 4 dp
+            trimmed_zones = [
+                {**gz, "trackPoints": self._trim_poly(gz.get("trackPoints", []))} for gz in path_data.get("goZones", [])
+            ]
+            attrs["mow_path"] = {"goZones": trimmed_zones}
+
+        # Live robot + RTK position and fix quality
+        for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM", "rtkStatus", "workStatus"):
+            val = data.get(key)
+            if val is not None:
+                attrs[key] = val
+
+        rtk_raw = data.get("rtkStatus")
+        if rtk_raw is not None:
+            _RTK_LABELS = {0: "No fix", 1: "Float fix", 2: "Fixed", 3: "RTK fixed"}
+            attrs["rtkLabel"] = _RTK_LABELS.get(int(rtk_raw), f"Unknown ({rtk_raw})")
+        # Live mow progress so the card status bar shows % without needing a separate entity
+        for key in ("mowProgress", "mowStripCount", "totalTaskAreaM2"):
             val = data.get(key)
             if val is not None:
                 attrs[key] = val

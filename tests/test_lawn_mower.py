@@ -42,17 +42,31 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_ble_drive = AsyncMock()
     coord.async_set_task_config = AsyncMock()
     coord.async_set_run_time_config = AsyncMock()
+    coord.async_set_zone_config = AsyncMock()
+    coord.async_set_geofence = AsyncMock()
+    coord.async_update_channel_settings = AsyncMock()
+    coord.async_get_clean_history = AsyncMock(return_value=[])
     coord.async_set_robot_config = AsyncMock()
     coord.async_set_recharge_resume = AsyncMock()
-    coord.async_set_night_mode = AsyncMock()
+    coord.async_set_headlight_schedule = AsyncMock()
+    coord.async_set_pin = AsyncMock()
+    coord.async_set_wifi = AsyncMock()
+    coord.async_bind_rtk = AsyncMock()
     coord.async_set_device_settings = AsyncMock()
     coord.async_rename_zone = AsyncMock()
+    coord.async_rename_nogo_zone = AsyncMock()
+    coord.async_rename_channel = AsyncMock()
     coord.async_clear_schedules = AsyncMock()
     coord.async_set_schedules = AsyncMock()
+    coord.async_add_schedule = AsyncMock()
+    coord.async_delete_schedule = AsyncMock()
+    coord.async_toggle_schedule = AsyncMock()
+    coord.async_backup_map = AsyncMock()
     coord.async_restore_backup_map = AsyncMock()
     coord.async_delete_backup_map = AsyncMock()
     coord.async_rename_backup_map = AsyncMock()
     coord.async_rename_device = AsyncMock()
+    coord.async_move_charging_station = AsyncMock()
     return coord
 
 
@@ -240,11 +254,18 @@ async def test_async_setup_entry_registers_services() -> None:
 
     await async_setup_entry(hass, entry, lambda entities: None)
 
-    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split + 1 set-device-name
-    # + 3 backup-map + 1 ble_drive + 1 set-task-config + 1 set-run-time-config + 1 set-network-priority
-    # + 1 set-recharge-resume + 1 set-night-mode + 1 set-device-settings + 1 rename-zone
-    # + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone + 1 resume + 1 pause.
-    assert hass.services.async_register.call_count == 38
+    # 5 originals + 10 query + 2 zone-edit + 1 merge + 1 pin-and-go + 1 split
+    # + 1 set-device-name + 4 backup-map (create/restore/delete/rename) + 1 ble_drive
+    # + 1 set-task-config + 1 rename-zone + 1 rename-nogo-zone + 1 rename-channel
+    # + 1 clear-schedules + 1 set-schedules + 1 delete-channel + 1 delete-nogo-zone
+    # + 1 update-nogo-polygon + 1 set-zone-enabled + 1 add-nogo-zone + 1 add-channel
+    # + 1 move-charging-station + 1 resume + 1 set-run-time-config + 1 set-network-priority
+    # + 1 set-recharge-resume + 1 set-device-settings + 1 set-headlight-schedule
+    # + 3 granular schedule (add/delete/toggle) + 1 set-pin + 1 set-wifi + 1 bind-rtk
+    # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence
+    # + 1 update-channel-settings + 1 get-clean-history + main's merged services
+    # (pause, query_cleaning_summary, …). Count is asserted against the live total.
+    assert hass.services.async_register.call_count == 57
 
 
 # ---------------------------------------------------------------------------
@@ -885,6 +906,251 @@ async def test_handle_update_zone_polygon_unknown_entity_skips() -> None:
     coord.async_update_zone_polygon.assert_not_awaited()
 
 
+async def test_handle_update_zone_cut_height_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_update_zone_cut_height = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"], {"zone_hash_id": "z1", "cut_height_mm": 55})
+    await handlers["update_zone_cut_height"](call)
+    coord.async_update_zone_cut_height.assert_awaited_once_with(THING, "z1", 55)
+
+
+async def test_handle_update_zone_cut_height_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_update_zone_cut_height = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"zone_hash_id": "z1", "cut_height_mm": 40})
+    await handlers["update_zone_cut_height"](call)
+    coord.async_update_zone_cut_height.assert_not_awaited()
+
+
+async def test_handle_set_zone_config_passes_named_fields_to_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {
+            "zone_hash_id": "wsmjco1T",
+            "is_enabled": False,
+            "cut_height": 40,
+            "move_speed": 0.8,
+            "path_spacing": 25,
+        },
+    )
+    await handlers["set_zone_config"](call)
+    coord.async_set_zone_config.assert_awaited_once_with(
+        THING,
+        [{"hashId": "wsmjco1T", "isEnabled": False, "cutHeight": 40, "moveSpeed": 0.8, "pathSpacing": 25}],
+    )
+
+
+async def test_handle_set_zone_config_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"zone_hash_id": "z1", "cut_height": 40})
+    await handlers["set_zone_config"](call)
+    coord.async_set_zone_config.assert_not_awaited()
+
+
+async def test_handle_set_geofence_passes_named_fields_to_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"latitude": 59.68, "longitude": 16.76, "radius_m": 200, "name": "Home"},
+    )
+    await handlers["set_geofence"](call)
+    coord.async_set_geofence.assert_awaited_once_with(THING, latitude=59.68, longitude=16.76, radius_m=200, name="Home")
+
+
+async def test_handle_set_geofence_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"radius_m": 100})
+    await handlers["set_geofence"](call)
+    coord.async_set_geofence.assert_not_awaited()
+
+
+async def test_handle_set_geofence_plumbs_index_to_coordinator() -> None:
+    """`index` selects which geofence region the coordinator mutates."""
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"], {"radius_m": 220, "index": 1})
+    await handlers["set_geofence"](call)
+    coord.async_set_geofence.assert_awaited_once_with(THING, radius_m=220, index=1)
+
+
+async def test_handle_update_channel_settings_passes_named_fields() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"channel_hash_id": "ch000001", "cut_height_mm": 60, "channel_lift": 1},
+    )
+    await handlers["update_channel_settings"](call)
+    coord.async_update_channel_settings.assert_awaited_once_with(THING, "ch000001", cut_height_mm=60, channel_lift=1)
+
+
+async def test_handle_update_channel_settings_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"channel_hash_id": "ch000001", "cut_height_mm": 50})
+    await handlers["update_channel_settings"](call)
+    coord.async_update_channel_settings.assert_not_awaited()
+
+
+async def test_handle_get_clean_history_returns_response_object() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_get_clean_history = AsyncMock(return_value=[{"clean_area": 100.0}])
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"], {"page": 0, "page_size": 5})
+    response = await handlers["get_clean_history"](call)
+    assert response == {"history": {"lawn_mower.mower_1": [{"clean_area": 100.0}]}}
+    coord.async_get_clean_history.assert_awaited_once_with(THING, page=0, page_size=5)
+
+
+async def test_handle_get_clean_history_unknown_entity_returns_empty_history() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"page": 0, "page_size": 5})
+    response = await handlers["get_clean_history"](call)
+    assert response == {"history": {}}
+    coord.async_get_clean_history.assert_not_awaited()
+
+
 async def test_handle_add_zone_returns_new_hash_ids() -> None:
     coord = _make_coord()
     coord.devices = [DEVICE]
@@ -929,6 +1195,187 @@ async def test_handle_add_zone_unknown_entity_returns_empty_mapping() -> None:
     result = await handlers["add_zone"](call)
     assert result == {"hash_ids": {}}
     coord.async_add_zone.assert_not_awaited()
+
+
+async def test_handle_update_nogo_polygon_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_update_nogo_polygon = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"], {"nogo_hash_id": "ng1", "polygon": _TRIANGLE})
+    await handlers["update_nogo_polygon"](call)
+    coord.async_update_nogo_polygon.assert_awaited_once_with(THING, "ng1", _TRIANGLE)
+
+
+async def test_handle_update_nogo_polygon_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_update_nogo_polygon = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"nogo_hash_id": "ng1", "polygon": _TRIANGLE})
+    await handlers["update_nogo_polygon"](call)
+    coord.async_update_nogo_polygon.assert_not_awaited()
+
+
+async def test_handle_add_nogo_zone_returns_new_hash_ids() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_add_nogo_zone = AsyncMock(return_value="nogonew1")
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"polygon": _TRIANGLE, "parent_zone_hash_id": "z1"},
+    )
+    result = await handlers["add_nogo_zone"](call)
+    assert result == {"hash_ids": {"lawn_mower.mower_1": "nogonew1"}}
+    coord.async_add_nogo_zone.assert_awaited_once_with(THING, _TRIANGLE, parent_zone_hash_id="z1")
+
+
+async def test_handle_add_nogo_zone_unknown_entity_returns_empty_mapping() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_add_nogo_zone = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"polygon": _TRIANGLE, "parent_zone_hash_id": ""})
+    result = await handlers["add_nogo_zone"](call)
+    assert result == {"hash_ids": {}}
+    coord.async_add_nogo_zone.assert_not_awaited()
+
+
+async def test_handle_add_channel_returns_new_hash_ids() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_add_channel = AsyncMock(return_value="chnew1")
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    poly = [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}]
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"polygon": poly, "zone1_hash_id": "z1", "zone2_hash_id": "z2", "cut_height_mm": 50},
+    )
+    result = await handlers["add_channel"](call)
+    assert result == {"hash_ids": {"lawn_mower.mower_1": "chnew1"}}
+    coord.async_add_channel.assert_awaited_once_with(
+        THING, poly, zone1_hash_id="z1", zone2_hash_id="z2", cut_height_mm=50
+    )
+
+
+async def test_handle_add_channel_unknown_entity_returns_empty_mapping() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_add_channel = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    poly = [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}]
+    call = _make_call(
+        ["lawn_mower.unknown"],
+        {"polygon": poly, "zone1_hash_id": "", "zone2_hash_id": "", "cut_height_mm": 40},
+    )
+    result = await handlers["add_channel"](call)
+    assert result == {"hash_ids": {}}
+    coord.async_add_channel.assert_not_awaited()
+
+
+async def test_handle_set_zone_enabled_calls_coordinator() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_update_zone_enabled = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    from lymow.const import DOMAIN
+
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+
+    def _register(domain, service, handler, schema=None, supports_response=False):
+        handlers[service] = handler
+
+    hass.services.async_register.side_effect = _register
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower_1"], {"zone_hash_id": "z1", "is_enabled": False})
+    await handlers["set_zone_enabled"](call)
+    coord.async_update_zone_enabled.assert_awaited_once_with(THING, "z1", False)
+
+
+async def test_handle_set_zone_enabled_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_update_zone_enabled = AsyncMock()
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_and_get_handlers(hass, entry, coord)
+
+    call = _make_call(["lawn_mower.unknown"], {"zone_hash_id": "z1", "is_enabled": True})
+    await handlers["set_zone_enabled"](call)
+    coord.async_update_zone_enabled.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -1262,6 +1709,23 @@ async def test_handle_set_task_config_maps_and_calls() -> None:
     coord.async_set_task_config.assert_awaited_once_with("mower-001", pathSpacing=200, perimeterMowLaps=2)
 
 
+async def test_handle_set_task_config_new_fields_forwarded_deprecated_ignored() -> None:
+    """The confirmed f17/f18 params are forwarded; the deprecated line_follow_mode
+    / brush_speed the old card still sends are accepted but dropped (no wire home)."""
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"safe_margin_mode": True, "turn_off_outer_motor": False, "line_follow_mode": True, "brush_speed": 90},
+    )
+    await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_awaited_once_with("mower-001", safeMarginMode=True, turnOffOuterMotor=False)
+
+
 async def test_handle_set_task_config_no_params_raises() -> None:
     coord = _make_coord()
     entry = MagicMock()
@@ -1288,9 +1752,10 @@ async def test_handle_set_task_config_unknown_entity_skips() -> None:
 
 
 async def test_handle_set_task_config_supports_float_and_bool_fields() -> None:
-    """move_speed is a float (m/s); raise/lower_cut_height + path_order +
-    line_follow_mode are bools — schema must coerce them correctly and pass
-    them through to the encoder with their PbTaskConfig camelCase names."""
+    """move_speed is a float (m/s); raise/lower_cut_height + path_order are bools —
+    the schema coerces them and passes them through with PbZoneConfig camelCase
+    names. line_follow_mode is accepted for backward-compat but dropped (it has no
+    confirmed wire home), so it is NOT forwarded to the encoder."""
     coord = _make_coord()
     entry = MagicMock()
     entry.entry_id = "entry-1"
@@ -1316,7 +1781,6 @@ async def test_handle_set_task_config_supports_float_and_bool_fields() -> None:
         raiseCutHeight=True,
         lowerCutHeight=False,
         pathOrder=True,
-        lineFollowMode=True,
         cleanMode=1,
         obsDecMode=2,
     )
@@ -1491,6 +1955,54 @@ async def test_handle_set_recharge_resume_unknown_entity_skips() -> None:
     coord.async_set_recharge_resume.assert_not_awaited()
 
 
+async def test_handle_set_headlight_schedule_forwards_kwargs() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"enable": True, "start": (3, 17), "end": (4, 23)})
+    await handlers["set_headlight_schedule"](call)
+    coord.async_set_headlight_schedule.assert_awaited_once_with("mower-001", enable=True, start=(3, 17), end=(4, 23))
+
+
+async def test_handle_set_headlight_schedule_enable_without_times_raises() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_headlight_schedule"](_make_call(["lawn_mower.mower_1"], {"enable": True}))
+    coord.async_set_headlight_schedule.assert_not_awaited()
+
+
+async def test_handle_set_headlight_schedule_disable_needs_no_times() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_headlight_schedule"](_make_call(["lawn_mower.mower_1"], {"enable": False}))
+    coord.async_set_headlight_schedule.assert_awaited_once_with("mower-001", enable=False, start=None, end=None)
+
+
+async def test_handle_set_headlight_schedule_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_headlight_schedule"](
+        _make_call(["lawn_mower.other"], {"enable": True, "start": (3, 17), "end": (4, 23)})
+    )
+    coord.async_set_headlight_schedule.assert_not_awaited()
+
+
 def test_set_recharge_resume_schema_parses_time_strings_and_bounds() -> None:
     import voluptuous as vol_
     from lymow.lawn_mower import _SET_RECHARGE_RESUME_SCHEMA
@@ -1514,54 +2026,6 @@ def test_set_recharge_resume_schema_parses_time_strings_and_bounds() -> None:
     # Out-of-range battery
     with pytest.raises(vol_.Invalid):
         _SET_RECHARGE_RESUME_SCHEMA({"entity_id": ["lawn_mower.x"], "resume_bat": 150})
-
-
-async def test_handle_set_night_mode_forwards_all_three_required_kwargs() -> None:
-    coord = _make_coord()
-    entry = MagicMock()
-    entry.entry_id = "entry-1"
-    entry.options = {}
-    handlers = await _setup_with_entity(coord, entry)
-
-    call = _make_call(
-        ["lawn_mower.mower_1"],
-        {"open_time": (21, 0), "close_time": (6, 30), "enable": True},
-    )
-    await handlers["set_night_mode"](call)
-    coord.async_set_night_mode.assert_awaited_once_with("mower-001", open_time=(21, 0), close_time=(6, 30), enable=True)
-
-
-async def test_handle_set_night_mode_unknown_entity_skips() -> None:
-    coord = _make_coord()
-    entry = MagicMock()
-    entry.entry_id = "entry-1"
-    entry.options = {}
-    handlers = await _setup_with_entity(coord, entry)
-
-    await handlers["set_night_mode"](
-        _make_call(["lawn_mower.other"], {"open_time": (21, 0), "close_time": (6, 0), "enable": True})
-    )
-    coord.async_set_night_mode.assert_not_awaited()
-
-
-def test_set_night_mode_schema_requires_all_three_fields_and_parses_times() -> None:
-    """All three fields are required — the app rewrites the whole window on each
-    press, so partial updates have no defined wire-level meaning."""
-    import voluptuous as vol_
-    from lymow.lawn_mower import _SET_NIGHT_MODE_SCHEMA
-
-    parsed = _SET_NIGHT_MODE_SCHEMA(
-        {"entity_id": ["lawn_mower.x"], "open_time": "21:00", "close_time": "06:30", "enable": False}
-    )
-    assert parsed["open_time"] == (21, 0)
-    assert parsed["close_time"] == (6, 30)
-    assert parsed["enable"] is False
-
-    for missing in ("open_time", "close_time", "enable"):
-        kwargs = {"entity_id": ["lawn_mower.x"], "open_time": "21:00", "close_time": "06:00", "enable": True}
-        kwargs.pop(missing)
-        with pytest.raises(vol_.Invalid):
-            _SET_NIGHT_MODE_SCHEMA(kwargs)
 
 
 async def test_handle_set_device_settings_maps_choices_and_inverts_handbrake() -> None:
@@ -1675,6 +2139,149 @@ async def test_handle_set_schedules_unknown_entity_skips() -> None:
     coord.async_set_schedules.assert_not_called()
 
 
+async def test_handle_bind_rtk_forwards_value() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["bind_rtk"](_make_call(["lawn_mower.mower_1"], {"base_id": "LK000PLACEHOLD00"}))
+    coord.async_bind_rtk.assert_awaited_once_with("mower-001", "LK000PLACEHOLD00")
+
+
+async def test_handle_bind_rtk_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["bind_rtk"](_make_call(["lawn_mower.other"], {"base_id": "LK000PLACEHOLD00"}))
+    coord.async_bind_rtk.assert_not_called()
+
+
+async def test_handle_set_wifi_forwards_values() -> None:
+    """Wi-Fi is provisioned over BLE: the handler resolves the robot's BLE
+    address (from options here) and forwards it, not the MQTT thing-name."""
+    from lymow.const import CONF_BLE_ADDRESS
+
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {CONF_BLE_ADDRESS: "AA:BB:CC:DD:EE:FF"}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_wifi"](_make_call(["lawn_mower.mower_1"], {"ssid": "TestNet", "password": "testpass12"}))
+    coord.async_set_wifi.assert_awaited_once_with("AA:BB:CC:DD:EE:FF", "TestNet", "testpass12")
+
+
+async def test_handle_set_wifi_without_address_raises() -> None:
+    """No configured/discoverable BLE address → loud ServiceValidationError,
+    never a silent no-op (creds must not be dropped quietly)."""
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_wifi"](_make_call(["lawn_mower.mower_1"], {"ssid": "TestNet", "password": "testpass12"}))
+    coord.async_set_wifi.assert_not_called()
+
+
+async def test_handle_set_wifi_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_wifi"](_make_call(["lawn_mower.other"], {"ssid": "TestNet", "password": "x"}))
+    coord.async_set_wifi.assert_not_called()
+
+
+async def test_handle_set_pin_forwards_value() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_pin"](_make_call(["lawn_mower.mower_1"], {"pin": "1234"}))  # placeholder
+    coord.async_set_pin.assert_awaited_once_with("mower-001", "1234")
+
+
+async def test_handle_set_pin_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_pin"](_make_call(["lawn_mower.other"], {"pin": "1234"}))
+    coord.async_set_pin.assert_not_called()
+
+
+async def test_handle_add_schedule_forwards_kwargs() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"hour": 8, "minute": 5, "day_of_week": [1], "zones": ["abc"], "repeated": True, "disabled": False},
+    )
+    await handlers["add_schedule"](call)
+    coord.async_add_schedule.assert_awaited_once_with(
+        "mower-001", hour=8, minute=5, day_of_week=[1], zones=["abc"], is_repeated=True, is_disabled=False
+    )
+
+
+async def test_handle_delete_schedule_forwards_id() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["delete_schedule"](_make_call(["lawn_mower.mower_1"], {"id": 42}))
+    coord.async_delete_schedule.assert_awaited_once_with("mower-001", 42)
+
+
+async def test_handle_toggle_schedule_forwards_disabled() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["toggle_schedule"](_make_call(["lawn_mower.mower_1"], {"id": 42, "disabled": True}))
+    coord.async_toggle_schedule.assert_awaited_once_with("mower-001", 42, disabled=True)
+
+
+async def test_handle_granular_schedule_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["delete_schedule"](_make_call(["lawn_mower.other"], {"id": 1}))
+    await handlers["toggle_schedule"](_make_call(["lawn_mower.other"], {"id": 1, "disabled": True}))
+    await handlers["add_schedule"](
+        _make_call(
+            ["lawn_mower.other"],
+            {"hour": 8, "minute": 0, "day_of_week": [], "zones": [], "repeated": True, "disabled": False},
+        )
+    )
+    coord.async_delete_schedule.assert_not_called()
+    coord.async_toggle_schedule.assert_not_called()
+    coord.async_add_schedule.assert_not_called()
+
+
 def test_to_day_int_accepts_names_and_ints() -> None:
     from lymow.lawn_mower import _to_day_int
 
@@ -1734,6 +2341,25 @@ def test_discover_ble_address_matches_and_handles_empty(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 # Backup-map management services
 # ---------------------------------------------------------------------------
+
+
+async def test_handle_backup_map_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {})
+    await handlers["backup_map"](call)
+    coord.async_backup_map.assert_awaited_once_with(THING)
+
+
+async def test_handle_create_backup_map_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    await handlers["backup_map"](_make_call(["lawn_mower.nope"], {}))
+    coord.async_backup_map.assert_not_called()
 
 
 async def test_handle_restore_backup_map_calls_coordinator() -> None:
@@ -1832,6 +2458,46 @@ async def test_handle_rename_zone_unknown_entity_skips() -> None:
     coord.async_rename_zone.assert_not_called()
 
 
+async def test_handle_rename_nogo_zone_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"nogo_hash_id": "ngabcdef", "name": "Flower bed"})
+    await handlers["rename_nogo_zone"](call)
+    coord.async_rename_nogo_zone.assert_awaited_once_with("mower-001", "ngabcdef", "Flower bed")
+
+
+async def test_handle_rename_nogo_zone_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.other"], {"nogo_hash_id": "ng", "name": "X"})
+    await handlers["rename_nogo_zone"](call)
+    coord.async_rename_nogo_zone.assert_not_called()
+
+
+async def test_handle_rename_channel_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"channel_hash_id": "a1b2c3d4", "name": "Back passage"})
+    await handlers["rename_channel"](call)
+    coord.async_rename_channel.assert_awaited_once_with("mower-001", "a1b2c3d4", "Back passage")
+
+
+async def test_handle_rename_channel_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.other"], {"channel_hash_id": "a1b2c3d4", "name": "X"})
+    await handlers["rename_channel"](call)
+    coord.async_rename_channel.assert_not_called()
+
+
 async def test_handle_clear_schedules_calls_coordinator() -> None:
     coord = _make_coord()
     entry = MagicMock()
@@ -1848,3 +2514,33 @@ async def test_handle_clear_schedules_unknown_entity_skips() -> None:
     handlers = await _setup_with_entity(coord, entry)
     await handlers["clear_schedules"](_make_call(["lawn_mower.other"], {}))
     coord.async_clear_schedules.assert_not_called()
+
+
+async def test_handle_move_charging_station_calls_coordinator() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"x": 1.5, "y": -2.3, "theta": 0.7})
+    await handlers["move_charging_station"](call)
+    coord.async_move_charging_station.assert_awaited_once_with("mower-001", 1.5, -2.3, 0.7)
+
+
+async def test_handle_move_charging_station_no_theta() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.mower_1"], {"x": 3.0, "y": 1.0})
+    await handlers["move_charging_station"](call)
+    coord.async_move_charging_station.assert_awaited_once_with("mower-001", 3.0, 1.0, None)
+
+
+async def test_handle_move_charging_station_unknown_entity_skips() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    handlers = await _setup_with_entity(coord, entry)
+    call = _make_call(["lawn_mower.other"], {"x": 1.0, "y": 2.0})
+    await handlers["move_charging_station"](call)
+    coord.async_move_charging_station.assert_not_called()

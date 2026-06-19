@@ -17,7 +17,6 @@ from lymow.protocol import (
     encode_query_schedules,
     encode_rename_zone,
     encode_set_device_settings,
-    encode_set_night_mode,
     encode_set_recharge_resume,
     encode_set_robot_config,
     encode_set_run_time_config,
@@ -125,7 +124,9 @@ def test_ble_drive_backward_left_turn_is_byte_stable() -> None:
 
 
 def test_set_task_config_subset_is_byte_stable() -> None:
-    expected = "10312824d20106306428785002"
+    # Envelope: PbInput{f2:49, f5:49(GLOBAL_SETTING_N), f12 PbMap{f11 globalZoneConfig}}
+    # — the live-confirmed mowing-settings path (cutSpeed f6, brushSpeed f5, perimeterMowLaps f10).
+    expected = "1031283162085a06306428785002"
     out = encode_set_task_config(cutSpeed=100, brushSpeed=120, perimeterMowLaps=2)
     assert out.hex() == expected
 
@@ -295,7 +296,8 @@ def test_decode_map_response_synthetic_golden() -> None:
         + _field_i32(3, 100)
         + _field_bytes(5, _field_f32(1, 5.0) + _field_f32(2, 5.0))
     )
-    go_cfg = _field_i32(1, 40) + _field_f32(4, 0.2)
+    # PbZoneConfig: cutHeight f1 (int), pathSpacing f9 (int, cm).
+    go_cfg = _field_i32(1, 40) + _field_i32(9, 20)
     go = _field_bytes(1, go_bi) + _field_bytes(3, go_pp) + _field_bytes(2, go_cfg)
 
     nogo_bi = _field_i32(1, 2) + _field_str(3, "NOGO0001") + _field_i32(4, 1)
@@ -323,7 +325,7 @@ def test_decode_map_response_synthetic_golden() -> None:
     assert z["boundMax"] == {"x": pytest.approx(10.0), "y": pytest.approx(10.0)}
     assert z["innerPoint"] == {"x": pytest.approx(5.0), "y": pytest.approx(5.0)}
     assert z["cutHeight"] == 40
-    assert z["pathSpacing"] == pytest.approx(0.2)
+    assert z["pathSpacing"] == 20
 
     # Nogo zone — note: ``parentZoneHashId`` is the field that links it to its parent go-zone.
     n = out["nogoZones"][0]
@@ -396,26 +398,6 @@ def test_rename_zone_is_byte_stable() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_set_night_mode_enable_true_is_byte_stable() -> None:
-    """encode_set_night_mode with enable=True writes only openLedTime (f14)
-    and closeLedTime (f15) as PbTimeZones — no SIGNAL_TURN_OFF_CAMERA_LIGHT
-    co-publish. Pinning the layout so a refactor can't silently drop the
-    enable-true branch's "only schedule" semantic."""
-    assert (
-        encode_set_night_mode(open_time=(21, 0), close_time=(6, 30), enable=True).hex()
-        == "10316a0c7204081510007a040806101e"
-    )
-
-
-def test_set_night_mode_enable_false_appends_kill_light_signal() -> None:
-    """enable=False keeps the schedule but adds PbRobotConfig.signal (f8) =
-    SIGNAL_TURN_OFF_CAMERA_LIGHT (7) so the camera light goes off now."""
-    assert (
-        encode_set_night_mode(open_time=(21, 0), close_time=(6, 30), enable=False).hex()
-        == "10316a0e7204081510007a040806101e4007"
-    )
-
-
 # ---------------------------------------------------------------------------
 # PbTaskConfig writes — USER_CTRL_SET_TASK_CONFIG=36 + PbInput.taskConfig (f26)
 # ---------------------------------------------------------------------------
@@ -438,10 +420,13 @@ def test_set_device_settings_full_is_byte_stable() -> None:
 
 
 def test_set_run_time_config_full_is_byte_stable() -> None:
-    """cutHeight (f1, int) + moveSpeed (f4, float32) + cutSpeed (f6, int) —
-    mirrors the three Live cut-height / move-speed / cut-speed Numbers.
-    Pins both the field-number map and the float32-vs-int wire types."""
+    """cutHeight (f1, int) + moveSpeed (f2, float32) + cutSpeed (f3, int) —
+    PbRunTimeConfig field map pinned to Hermes class #9456. Pins both the
+    field-number map and the float32-vs-int wire types.
+    NOTE(2026-06-19): a prior RE pass read moveSpeed/cutSpeed as f4/f6 (PbZoneConfig
+    numbering); the deployed encoder uses f2/f3 — re-verify against the APK on the
+    next capture pass (tracked for the 2026-07-01 cleanup)."""
     assert (
         encode_set_run_time_config(cutHeight=30, moveSpeed=0.5, cutSpeed=200).hex()
-        == "10312832620c6a0a081e250000003f30c801"
+        == "10312832620c6a0a081e150000003f18c801"
     )

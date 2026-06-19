@@ -53,7 +53,13 @@ class LymowFirmwareUpdate(CoordinatorEntity[LymowCoordinator], UpdateEntity):
     def latest_version(self) -> str | None:
         # Fall back to installed_version so HA doesn't show "update available"
         # before the first check_update has populated latestVersion.
-        return self._device_data.get("latestVersion") or self.installed_version
+        raw = self._device_data.get("latestVersion") or self.installed_version
+        # The OTA API returns versions like "v2.1.48.1_20260528" (base version + date
+        # suffix). Strip the suffix so HA compares against the installed "v2.1.48.1"
+        # without showing a false update-available notification.
+        if raw and "_" in raw:
+            raw = raw.split("_")[0]
+        return raw
 
     @property
     def in_progress(self) -> bool:

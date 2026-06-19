@@ -188,13 +188,24 @@ def _decode_map_polygon(data: bytes) -> list[dict[str, float]]:
 # PbMapResponse decoder — extracts zones, no-go zones, base station, GPS
 # ---------------------------------------------------------------------------
 
-# Map content field numbers (inside the double-wrapped f23→f2→f3 structure)
+# Map content field numbers (PbMap, inside the double-wrapped f23→f2→f3 structure;
+# canonical names taken from the Hermes PbMap class declaration #9660).
 _MAP_CONTENT_GO_ZONES = 1
 _MAP_CONTENT_NOGO_ZONES = 2
 _MAP_CONTENT_CHANNELS = 3
-_MAP_CONTENT_CHARGING_STATION = 4
-_MAP_CONTENT_GPS_ORIGIN = 7
-_MAP_CONTENT_TASK_CONFIG = 8
+_MAP_CONTENT_CHARGING_STATION = 4  # PbPose: x, y, theta, z
+_MAP_CONTENT_IS_INCOMPLETE = 5
+_MAP_CONTENT_DIAGONAL_COORDS = 6  # repeated PbPoint (2 corners of map bbox)
+_MAP_CONTENT_ENU_BASE_POINT = 7  # PbRobotLLACoords: latitude, longitude, altitude
+_MAP_CONTENT_TASK_CONFIG = 8  # PbTaskConfig (4-field: chargingMode, zoneOrder, rainCleaning, disableChargingPark)
+_MAP_CONTENT_MODIFY_HASHS = 9
+_MAP_CONTENT_FLOOR_INFO = 10
+_MAP_CONTENT_GLOBAL_ZONE_CONFIG = 11  # PbZoneConfig (19 fields — the real mowing settings)
+_MAP_CONTENT_GLOBAL_CHANNEL_CONFIG = 12  # PbChannelConfig (3 fields)
+_MAP_CONTENT_RUN_TIME_CONFIG = 13
+
+# Back-compat alias — older code/tests refer to f7 as the GPS origin.
+_MAP_CONTENT_GPS_ORIGIN = _MAP_CONTENT_ENU_BASE_POINT
 
 
 def extract_raw_map_content(pb_bytes: bytes) -> bytes | None:
@@ -303,8 +314,11 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
         if isinstance(bi_raw, bytes):
             bi = _decode_fields(bi_raw)
             hash_raw = _first(bi, 3)
+            name_raw = _first(bi, 2)
             poly_raw = _first(bi, 5)
             zone["hashId"] = hash_raw.decode("utf-8", errors="replace") if isinstance(hash_raw, bytes) else ""
+            if isinstance(name_raw, bytes) and name_raw:
+                zone["name"] = name_raw.decode("utf-8", errors="replace")
             zone["type"] = _first(bi, 1, 0)
             zone["isEnabled"] = bool(_first(bi, 4, 1))
             zone["polygon"] = _decode_map_polygon(poly_raw) if isinstance(poly_raw, bytes) else []
@@ -327,13 +341,14 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
 
         cfg_raw = _first(zf, 2)
         if isinstance(cfg_raw, bytes) and len(cfg_raw) > 0:
-            cf = _decode_fields(cfg_raw)
-            cut_h = _first(cf, 1)
-            path_sp = _first(cf, 4)
-            if cut_h is not None:
-                zone["cutHeight"] = cut_h
-            if path_sp is not None:
-                zone["pathSpacing"] = _decode_f32(path_sp)
+            cfg = decode_zone_config(cfg_raw)
+            zone["zoneConfig"] = cfg
+            # Surface the two most-asked-for fields directly on the zone so
+            # existing callers keep working.
+            if "cutHeight" in cfg:
+                zone["cutHeight"] = cfg["cutHeight"]
+            if "pathSpacing" in cfg:
+                zone["pathSpacing"] = cfg["pathSpacing"]
 
         go_zones.append(zone)
     result["goZones"] = go_zones
@@ -350,8 +365,11 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
         if isinstance(bi_raw, bytes):
             bi = _decode_fields(bi_raw)
             hash_raw = _first(bi, 3)
+            name_raw = _first(bi, 2)
             poly_raw = _first(bi, 5)
             nogo["hashId"] = hash_raw.decode("utf-8", errors="replace") if isinstance(hash_raw, bytes) else ""
+            if isinstance(name_raw, bytes) and name_raw:
+                nogo["name"] = name_raw.decode("utf-8", errors="replace")
             nogo["type"] = _first(bi, 1, 0)
             nogo["isEnabled"] = bool(_first(bi, 4, 1))
             nogo["polygon"] = _decode_map_polygon(poly_raw) if isinstance(poly_raw, bytes) else []
@@ -380,34 +398,62 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
             channels.append(decode_channel(chan_raw))
     result["channels"] = channels
 
-    # ---- Charging station pose (f4) — x/y/theta as i32 floats -----------
+    # ---- Charging station pose (f4) — PbPose: x/y/theta + optional z ----
     cs_raw = _first(content, _MAP_CONTENT_CHARGING_STATION)
     if isinstance(cs_raw, bytes):
         cs = _decode_fields(cs_raw)
         x_raw = _first(cs, 1)
         y_raw = _first(cs, 2)
         t_raw = _first(cs, 3)
-        result["chargingStation"] = {
+        z_raw = _first(cs, 4)
+        cs_out: dict[str, float] = {
             "x": _decode_f32(x_raw) if x_raw is not None else 0.0,
             "y": _decode_f32(y_raw) if y_raw is not None else 0.0,
             "theta": _decode_f32(t_raw) if t_raw is not None else 0.0,
         }
+        if z_raw is not None:
+            cs_out["z"] = _decode_f32(z_raw)
+        result["chargingStation"] = cs_out
 
-    # ---- GPS origin (f7) — lat/lon as i32 floats -------------------------
-    gps_raw = _first(content, _MAP_CONTENT_GPS_ORIGIN)
-    if isinstance(gps_raw, bytes):
-        gf = _decode_fields(gps_raw)
+    # ---- Diagonal map corners (f6, repeated PbPoint) — 2 entries = map bbox.
+    diag_pts: list[dict[str, float]] = []
+    for d_raw in _all(content, _MAP_CONTENT_DIAGONAL_COORDS):
+        if isinstance(d_raw, bytes):
+            diag_pts.append(_decode_map_point(d_raw))
+    if diag_pts:
+        result["diagonalCoords"] = diag_pts
+
+    # ---- enuBasePoint (f7) — PbRobotLLACoords: lat / lon / altitude -------
+    enu_raw = _first(content, _MAP_CONTENT_ENU_BASE_POINT)
+    if isinstance(enu_raw, bytes):
+        gf = _decode_fields(enu_raw)
         lat_raw = _first(gf, 1)
         lon_raw = _first(gf, 2)
-        result["gpsOrigin"] = {
+        alt_raw = _first(gf, 3)
+        gps = {
             "lat": _decode_f32(lat_raw) if lat_raw is not None else 0.0,
             "lon": _decode_f32(lon_raw) if lon_raw is not None else 0.0,
         }
+        if alt_raw is not None:
+            gps["altitude"] = _decode_f32(alt_raw)
+        result["gpsOrigin"] = gps
+        result["enuBasePoint"] = gps
 
     # ---- Device-settings PbTaskConfig (f8) — chargingMode/zoneOrder/etc.
     tc_raw = _first(content, _MAP_CONTENT_TASK_CONFIG)
     if isinstance(tc_raw, bytes):
         result["taskConfig"] = decode_task_config(tc_raw)
+
+    # ---- Global mowing settings (f11) — PbZoneConfig, the real source of
+    # truth for cut height / move speed / path spacing / etc.
+    gzc_raw = _first(content, _MAP_CONTENT_GLOBAL_ZONE_CONFIG)
+    if isinstance(gzc_raw, bytes) and len(gzc_raw) > 0:
+        result["globalZoneConfig"] = decode_zone_config(gzc_raw)
+
+    # ---- Global channel settings (f12) — PbChannelConfig (3 fields).
+    gcc_raw = _first(content, _MAP_CONTENT_GLOBAL_CHANNEL_CONFIG)
+    if isinstance(gcc_raw, bytes) and len(gcc_raw) > 0:
+        result["globalChannelConfig"] = decode_channel_config(gcc_raw)
 
     return result
 
@@ -426,9 +472,8 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
     rather than silently flipping the switch on.
 
     This is the *same* PbTaskConfig written by ``encode_set_device_settings``;
-    not the broader 18-field map exposed via ``_ZONE_CONFIG_FIELDS`` (which is
-    actually a PbZoneConfig — historically published over the PbTaskConfig
-    wire path; #157 tracks the rewire).
+    the 19-field PbZoneConfig record (mowing settings: cutHeight, moveSpeed,
+    pathSpacing, …) is decoded by ``decode_zone_config``.
     """
     f = _decode_fields(data)
     out: dict[str, Any] = {}
@@ -444,6 +489,109 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
     dcp = _first(f, 4)
     if dcp in (0, 1):
         out["disableChargingPark"] = bool(dcp)
+    return out
+
+
+# PbZoneConfig wire layout — field numbers LIVE-CONFIRMED 2026-05-30 by
+# correlating the app's labeled Mowing Settings to globalZoneConfig (PbMap.f11)
+# wire values + toggle + re-query (see BRANCH_STATUS sections C/I/K/M). This is
+# the *mowing-settings* record: globally on PbMap.f11 globalZoneConfig and
+# per-zone as PbZone.f2 (zone-level override). Wire fields:
+#   f1  cutHeight (int, mm)                  — confirmed (app 60mm)
+#   f4  moveSpeed (float32, m/s)             — confirmed (app 0.6)
+#   f6  cutSpeed (int)                       — anchored
+#   f7  cleanMode (int)                      — anchored
+#   f8  stripeAngle (signed int32)           — CONFIRMED live 2026-06-19: set
+#       Stripe Angle "User-Defined 90°" → f8=90; "Optimized" → f8=-1 (the
+#       10-byte sign-extended varint the app sends). NOT enabledZoneMask.
+#   f9  pathSpacing (int, cm)                — CONFIRMED (app 35cm = f9)
+#   f10 perimeterMowLaps (int)               — CONFIRMED (app Zone-Perimeter)
+#   f11 perimeterMowDir (int)                — anchored
+#   f12 noGoMowLaps (int)                    — CONFIRMED (app No-Go)
+#   f13 obsDecMode (int, zone obstacle)      — anchored
+#   f14 pathOrder/mowingOrder (bool)         — anchored
+#   f15 startProgress (proto name; we leave it raw, =0)
+#   f16 relativeCleanDir (int, stripe angle) — anchored (=90)
+#   f17 safeMarginMode (bool, Offset=1/Precise=0) — CONFIRMED (toggle).
+#       Proto name is `lineFollowMode` (APK, Hermes v96); we keep the UI-derived
+#       name on purpose (per maintainer choice) — field NUMBER 17 is correct.
+#   f18 turnOffOuterMotor (bool, ON=1)       — CONFIRMED (toggle).
+#       Proto name is `disableOuterDischarge` (APK); UI-derived name kept; #18 correct.
+#   f19 followDetectMode (int)               — anchored
+# NOTE: the prior layout mislabeled f9 as relativeCleanDir / f10 as pathSpacing
+# (a +1 shift). The full PbZoneConfig map is now APK-verified (Hermes v96):
+# startProgress=f15, brushSpeed=f5 exist but we don't surface them (no HA use).
+# raiseCutHeight/lowerCutHeight are momentary +/- commands, kept as-is. All
+# field NUMBERS we DO use are confirmed correct (f8 stripeAngle live-confirmed).
+_ZONE_CONFIG_BOOL_FIELDS = {14, 17, 18}
+_ZONE_CONFIG_INT_NAMES: dict[int, str] = {
+    1: "cutHeight",
+    6: "cutSpeed",
+    7: "cleanMode",
+    9: "pathSpacing",
+    10: "perimeterMowLaps",
+    11: "perimeterMowDir",
+    12: "noGoMowLaps",
+    13: "obsDecMode",
+    16: "relativeCleanDir",
+    19: "followDetectMode",
+}
+_ZONE_CONFIG_BOOL_NAMES: dict[int, str] = {
+    14: "pathOrder",
+    17: "safeMarginMode",
+    18: "turnOffOuterMotor",
+}
+# Signed int32 fields: stripeAngle is -1 for "Optimized" (auto), else 0-179°.
+# Live-confirmed 2026-06-19 from a globalZoneConfig capture (f8 = -1 ⟺ app
+# "Stripe Angle: Optimized").
+_ZONE_CONFIG_SIGNED_NAMES: dict[int, str] = {
+    8: "stripeAngle",
+}
+
+
+def decode_zone_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbZoneConfig sub-message (the 19-field mowing-settings record).
+
+    Same shape is used for ``PbMap.f11 globalZoneConfig`` and the per-zone
+    override at ``PbZone.f2``. Missing fields are simply absent from the
+    returned dict — a value of None never appears.
+    """
+    out: dict[str, Any] = {}
+    for fn, _wt, val in _decode_fields(data):
+        if fn in _ZONE_CONFIG_BOOL_NAMES:
+            if val in (0, 1):
+                out[_ZONE_CONFIG_BOOL_NAMES[fn]] = bool(val)
+            continue
+        if fn == 4:  # moveSpeed (float32)
+            out["moveSpeed"] = _decode_f32(val)
+            continue
+        if fn in _ZONE_CONFIG_SIGNED_NAMES and isinstance(val, int):
+            out[_ZONE_CONFIG_SIGNED_NAMES[fn]] = _signed32(val)
+            continue
+        if fn in _ZONE_CONFIG_INT_NAMES and isinstance(val, int):
+            out[_ZONE_CONFIG_INT_NAMES[fn]] = val
+    return out
+
+
+def decode_channel_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbChannelConfig sub-message (Hermes class #9444).
+
+    Wire layout:
+      f1 detectMode (int, oneOf)
+      f2 cutHeight (int, mm)
+      f3 channelLift (int)
+    """
+    f = _decode_fields(data)
+    out: dict[str, Any] = {}
+    dm = _first(f, 1)
+    if isinstance(dm, int):
+        out["detectMode"] = dm
+    ch = _first(f, 2)
+    if isinstance(ch, int):
+        out["cutHeight"] = ch
+    lift = _first(f, 3)
+    if isinstance(lift, int):
+        out["channelLift"] = lift
     return out
 
 
@@ -470,6 +618,14 @@ def decode_channel(data: bytes) -> dict[str, Any]:
     lift = _first(f, 10)
     if lift is not None:
         chan["channelLift"] = lift
+    # NOTE: f8 appears only on channels that carry per-channel overrides (next
+    # to cutHeight/channelLift) and its value mirrors globalChannelConfig
+    # detectMode in our captured frame — strong candidate for per-channel
+    # Channel Obstacle Detection (gap 4). Surfaced raw (unlabeled) per the
+    # NO-ASSUMPTIONS rule until a toggle capture confirms the semantics.
+    f8 = _first(f, 8)
+    if f8 is not None:
+        chan["f8"] = f8
     return chan
 
 
@@ -530,6 +686,8 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         lte_sig = _first(ri, 4)
         if lte_sig is not None:
             state["lteSignalQuality"] = _signed32(lte_sig)
+        # f5 btSignalQuality, f9 wifiWorking, f10 lteWorking — names APK-verified
+        # (Hermes v96). The "working" flags say which link is currently active.
         bt_sig = _first(ri, 5)
         if bt_sig is not None:
             state["btSignalQuality"] = _signed32(bt_sig)
@@ -540,30 +698,58 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if lte_working is not None:
             state["lteWorking"] = bool(lte_working)
 
-    # PbDeviceProfile (field 10) — field map from PbDeviceProfile.encode
-    # (Hermes fn #9170 at offset 0x0049832f). f3 softwareVersion is a
-    # second software-version string distinct from f1 fwVersion (the app
-    # surfaces both); f4 wifiSsid + f8 rtkSn + f9 simId + f10 wheelVer +
-    # f11 knifeVer are diagnostic strings useful for sensors.
+    # PbDeviceProfile (field 10). f3 softwareVersion ("v2.1.48.1") live-confirmed
+    # 2026-05-30 (matches REST get-device-info.softwareVersion). f10 wheelVer /
+    # f11 knifeVer are hardware-component version strings (diagnostic). f4 wifiSsid,
+    # f8 rtkBaseId, f9 simIccid are also present here but deliberately NOT
+    # surfaced — they are sensitive identifiers (see security rules).
     profile_raw = _first(fields, 10)
     if isinstance(profile_raw, bytes):
         dp = _decode_fields(profile_raw)
         for field_no, key in (
             (1, "fwVersion"),
             (2, "mcuVersion"),
-            (3, "swVersionMqtt"),
-            (4, "wifiSsid"),
+            (3, "softwareVersion"),
             (5, "ipAddress"),
             (6, "macAddress"),
             (7, "sn"),
-            (8, "rtkSn"),
-            (9, "simIdMqtt"),
             (10, "wheelVer"),
             (11, "knifeVer"),
         ):
             val = _first(dp, field_no)
             if isinstance(val, bytes):
                 state[key] = val.decode("utf-8", errors="replace")
+
+    # Advanced RTK / localization diagnostic — carried in iotCmd (field 8, per
+    # the APK PbOutput map): {f1: type, f2: JSON}.
+    # LIVE-CONFIRMED 2026-05-30 — the "Advanced Diagnostics (Technical Support)"
+    # blob. The RTK base sends corrections over LoRa, so the most actionable
+    # fields are the fix quality, differential-correction age, position precision
+    # and the error reason (e.g. ERTK_LORA_DATA_ERROR_RATE — a noisy LoRa link is
+    # what degrades accuracy). The per-error positions (x/y/z) are not surfaced.
+    diag_raw = _first(fields, 8)
+    if isinstance(diag_raw, bytes) and diag_raw:
+        js = _first(_decode_fields(diag_raw), 2)
+        if isinstance(js, bytes):
+            try:
+                d = json.loads(js.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                d = None
+            if isinstance(d, dict):
+                adv: dict[str, Any] = {}
+                if isinstance(d.get("precision"), (int, float)):
+                    adv["precisionM"] = round(float(d["precision"]), 4)
+                if isinstance(d.get("quality"), int):
+                    adv["quality"] = d["quality"]
+                if isinstance(d.get("diff_age"), (int, float)):
+                    adv["diffAgeS"] = float(d["diff_age"])
+                if d.get("primary_error_desc"):
+                    adv["primaryError"] = str(d["primary_error_desc"])
+                errs = d.get("error_desc_list")
+                if isinstance(errs, list) and errs:
+                    adv["errors"] = [str(e) for e in errs]
+                if adv:
+                    state["rtkDiagnostic"] = adv
 
     # GPS / RTK (field 6 of outer PbOutput):
     #   f1=satellites(int), f2=eastM(float32), f3=northM(float32), f4=rtkStatus(int)
@@ -583,37 +769,40 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if rtk_status is not None:
             state["rtkStatus"] = _signed32(rtk_status)
 
-    # Area / progress info (field 12 = PbCleanInfo per PbCleanInfo.encode in
-    # the APK):
-    #   f1=cleanTime (int seconds spent mowing this session — initially
-    #     mislabelled as "mow strip count" in early RE; the state key is kept
-    #     as ``mowStripCount`` so existing automations / unique_ids survive,
-    #     but the sensor that surfaces it now renders as a duration),
-    #   f2=cleanArea (float, m² — task total / denominator for mowProgress),
-    #   f4=remainCleanTime(int seconds — ETA for the current task),
-    #   f5=cleanPercent(float 0-1, surfaced as mowProgress *100),
-    #   f6=mapArea(float, m² — total area of the current map, much larger
-    #   than the per-task cleanArea).
+    # Area / progress info (field 12):
+    #   f1=missionTimeMin(int — elapsed mission/cleaning time in MINUTES; this is
+    #   the app's "Mission time". LIVE-CONFIRMED 2026-05-30: matched the app's
+    #   Mission-time across a 46-min run, 1:1. Was previously mislabeled
+    #   "mowStripCount".), f2=totalTaskArea(float32, the current task's
+    #   total area — denominator for mowProgress), f3=currentTaskZone
+    #   (PbZoneBasicInfo, hashId=f2 — which go-zone is being mowed now; present in
+    #   the QUERY_PATH reply during an active task), f5=mowProgress(float32 0–1).
+    #   NOTE: the QUERY_PATH reply we captured carried only this task/progress
+    #   summary. The coverage-path geometry DOES exist as PbOutput.path
+    #   (PbPath = {poses[], cleanFinishedZones[]}, per APK) but wasn't populated
+    #   in our reply — decoding it is an open gap. The live trail can also be
+    #   built from the robot pose (field 14) accumulated over time.
     area_raw = _first(fields, 12)
     if isinstance(area_raw, bytes):
         area_fields = _decode_fields(area_raw)
         total_area = _first(area_fields, 2)
         if total_area is not None:
             state["totalTaskAreaM2"] = _decode_f32(total_area)
-        strip_count = _first(area_fields, 1)
-        if strip_count is not None:
-            state["mowStripCount"] = _signed32(strip_count)
+        mission_min = _first(area_fields, 1)
+        if mission_min is not None:
+            state["missionTimeMin"] = _signed32(mission_min)
+        # Bound the decoded fraction so a NaN/inf from a misaligned/corrupt
+        # payload can't surface as a garbage sensor state.
         progress_raw = _first(area_fields, 5)
-        # isinstance(progress_raw, int) guards against a wire-type drift (e.g. f5
-        # arriving as length-delimited bytes), which would crash _decode_f32 at
-        # struct.pack time. Mirrors the defensive pattern in _decode_error_list_entry.
         if isinstance(progress_raw, int):
-            # Wire fraction 0..1 → percent. Bound the decoded float before
-            # scaling so a NaN/inf from a misaligned or corrupt payload can't
-            # surface as a garbage HA sensor state.
             pct = _decode_f32(progress_raw)
             if 0.0 <= pct <= 1.0:
                 state["mowProgress"] = round(pct * 100, 1)
+        task_zone_raw = _first(area_fields, 3)
+        if isinstance(task_zone_raw, bytes):
+            hash_raw = _first(_decode_fields(task_zone_raw), 2)
+            if isinstance(hash_raw, bytes):
+                state["currentTaskZoneHashId"] = hash_raw.decode("utf-8", errors="replace")
         remain_raw = _first(area_fields, 4)
         if remain_raw is not None:
             state["remainCleanTimeSec"] = _signed32(remain_raw)
@@ -646,6 +835,21 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         if theta_rad is not None:
             state["poseThetaRad"] = _decode_f32(theta_rad)
 
+    # Coverage path (field 13 = PbPath {poses: repeated PbPose, cleanFinishedZones}).
+    # Field names APK-verified (Hermes v96); each PbPose is {f1 east, f2 north,
+    # f3 theta} float32 (same shape as the live pose). Surfaced as a list the map
+    # card can draw. Empty/absent in normal heartbeats — populated on demand.
+    path_raw = _first(fields, 13)
+    if isinstance(path_raw, bytes) and path_raw:
+        poses: list[dict[str, float]] = []
+        for praw in _all(_decode_fields(path_raw), 1):
+            if isinstance(praw, bytes):
+                pf = _decode_fields(praw)
+                e, n = _first(pf, 1), _first(pf, 2)
+                if isinstance(e, int) and isinstance(n, int):
+                    poses.append({"east": _decode_f32(e), "north": _decode_f32(n)})
+        if poses:
+            state["coveragePoses"] = poses
     # Live charging-station pose (PbOutput field 24 = PbPose — same sub-message
     # type as f14, per PbOutput.encode in the APK). The map-query path already
     # decodes the dock under ``mapData.chargingStation`` as ``{x, y, theta}``;
@@ -683,6 +887,61 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
         tasks = _all(_decode_fields(schedules_raw), 1)
         state["schedules"] = [decode_schedule_entry(t) for t in tasks if isinstance(t, bytes)]
 
+    # Clean report (PbOutput field 28 = PbCleanReport) — the robot pushes this at
+    # the end of a mow. Field semantics confirmed 2026-05-31 by cross-checking 5
+    # captured reports against the REST get-clean-history record (same numbers):
+    #   f1 date(epoch s)  f2 PbCleanSummary {1 cleanTimeMin, 2 cleanAreaM2(f32),
+    #   3 {2: mapHashId}, 5 percent(f32 0–1), 6 mapTotalAreaM2(f32)}
+    #   f3 startType  f4 [error_list {1 code, 2 percent(f32)}]  f6 usedBatteryPct
+    clean_raw = _first(fields, 28)
+    if isinstance(clean_raw, bytes):
+        cr = _decode_fields(clean_raw)
+        report: dict[str, Any] = {}
+        date_raw = _first(cr, 1)
+        if date_raw is not None:
+            report["date"] = _signed32(date_raw)
+        summary_raw = _first(cr, 2)
+        if isinstance(summary_raw, bytes):
+            sm = _decode_fields(summary_raw)
+            time_min = _first(sm, 1)
+            if time_min is not None:
+                report["cleanTimeMin"] = _signed32(time_min)
+            area = _first(sm, 2)
+            if area is not None:
+                report["cleanAreaM2"] = round(_decode_f32(area), 2)
+            percent = _first(sm, 5)
+            if percent is not None:
+                report["percent"] = round(_decode_f32(percent) * 100, 1)
+            total_area = _first(sm, 6)
+            if total_area is not None:
+                report["mapTotalAreaM2"] = round(_decode_f32(total_area), 2)
+            map_id_raw = _first(sm, 3)
+            if isinstance(map_id_raw, bytes):
+                hid = _first(_decode_fields(map_id_raw), 2)
+                if isinstance(hid, bytes):
+                    report["mapHashId"] = hid.decode("utf-8", errors="replace")
+        start_type = _first(cr, 3)
+        if start_type is not None:
+            report["startType"] = _signed32(start_type)
+        used_battery = _first(cr, 6)
+        if used_battery is not None:
+            report["usedBatteryPct"] = _signed32(used_battery)
+        errors: list[dict[str, Any]] = []
+        for eraw in _all(cr, 4):
+            if isinstance(eraw, bytes):
+                ef = _decode_fields(eraw)
+                code = _first(ef, 1)
+                if code is not None:
+                    entry: dict[str, Any] = {"code": _signed32(code)}
+                    epct = _first(ef, 2)
+                    if epct is not None:
+                        entry["percent"] = round(_decode_f32(epct) * 100, 1)
+                    errors.append(entry)
+        if errors:
+            report["errorList"] = errors
+        if report:
+            state["cleanReport"] = report
+
     # Robot config (PbOutput field 17 = PbRobotConfig — from PbOutput.encode tag
     # 138 = (17<<3)|2). Carries the device-settings the app shows on its
     # Settings/Network screens. Each field is optional in the reply; we surface
@@ -691,13 +950,73 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     if isinstance(robot_config_raw, bytes):
         state["robotConfig"] = decode_robot_config(robot_config_raw)
 
-    # Last cleaning summary (PbOutput field 28 = PbCleanReport — from PbOutput.encode
-    # tag 226 = (28<<3)|2). Populated by QUERY_CLEANING_SUMMARY (userCtrl 34).
-    clean_report_raw = _first(fields, 28)
-    if isinstance(clean_report_raw, bytes):
-        report = decode_clean_report(clean_report_raw)
-        if report:
-            state["cleanReport"] = report
+    # ---- Network info (PbOutput field 34) — populated by USER_CTRL_QUERY_RTK_
+    # DIAGNOSTIC_L1 (#57). Live capture 2026-05-27 against docked robot:
+    #   f1 connState   varint
+    #   f2 wifiSsid    bytes (UTF-8)
+    #   f3 ipAddress   bytes ("192.168.1.85")
+    #   f4 wifiRssiDbm varint (negative)
+    #   f5 wifiState   varint
+    #   f6 cellularIp  bytes ("100.116.126.140")  — Tailscale / 4G-NAT'd IPv4
+    #   f7 lteRssiDbm  varint (negative)
+    #   f8 cellularState varint
+    #   f9 ?           varint (1)
+    #   f10 simId      bytes (e.g. " 89320420000094505458")
+    net_raw = _first(fields, 34)
+    if isinstance(net_raw, bytes):
+        nf = _decode_fields(net_raw)
+        net: dict[str, Any] = {}
+        for fno, key in ((2, "wifiSsid"), (3, "ipAddress"), (6, "cellularIp"), (10, "simId")):
+            v = _first(nf, fno)
+            if isinstance(v, bytes):
+                net[key] = v.decode("utf-8", errors="replace").strip()
+        for fno, key in (
+            (4, "wifiRssiDbm"),
+            (7, "lteRssiDbm"),
+            (1, "connState"),
+            (5, "wifiState"),
+            (8, "cellularState"),
+        ):
+            v = _first(nf, fno)
+            if v is not None:
+                net[key] = _signed32(v)
+        if net:
+            state["networkInfo"] = net
+
+    # ---- RTK diagnostic L1 (PbOutput field 35) — populated by USER_CTRL_
+    # QUERY_RTK_DIAGNOSTIC_L1 (#57). Field labels cross-referenced live
+    # 2026-05-27 against the app's Settings → RTK Diagnostic UI.
+    l1_raw = _first(fields, 35)
+    if isinstance(l1_raw, bytes):
+        lf = _decode_fields(l1_raw)
+        l1: dict[str, Any] = {}
+        for fno, _wt, v in lf:
+            label = _RTK_L1_LABELS.get(fno)
+            if label is None:
+                continue
+            if _wt == 5 and isinstance(v, int):
+                l1[label] = round(_decode_f32(v), 4)
+            elif isinstance(v, int):
+                l1[label] = _signed32(v)
+        if l1:
+            state["rtkL1"] = l1
+
+    # ---- RTK diagnostic L2 (PbOutput field 36) — populated by USER_CTRL_
+    # QUERY_RTK_DIAGNOSTIC_L2 (#58). Labels per the same live correlation.
+    l2_raw = _first(fields, 36)
+    if isinstance(l2_raw, bytes):
+        lf = _decode_fields(l2_raw)
+        l2: dict[str, Any] = {}
+        for fno, _wt, v in lf:
+            label = _RTK_L2_LABELS.get(fno)
+            if label is None:
+                continue
+            if _wt == 5 and isinstance(v, int):
+                l2[label] = round(_decode_f32(v), 4)
+            elif isinstance(v, int):
+                l2[label] = _signed32(v)
+        if l2:
+            state["rtkL2"] = l2
 
     # Anti-theft lock live state (PbOutput field 27 = bool — from PbOutput.encode
     # tag 216 = (27<<3)|0 writing writer.bool). Surfaced under a distinct key
@@ -760,17 +1079,51 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
     return state
 
 
+# RTK diagnostic field labels — correlated live 2026-05-27 against the app's
+# Settings → RTK Diagnostic page (basic + Advanced Diagnostics). Field
+# numbers come from the wire capture; semantic names come from the UI labels
+# that displayed the same values seconds before/after the capture.
+_RTK_L1_LABELS: dict[int, str] = {
+    2: "locationPrecisionM",
+    3: "gnssSatellites",
+    4: "l1SatCount",
+    5: "l2SatCount",
+    6: "l5SatCount",
+    7: "l1SnrMedian",
+    8: "l2SnrMedian",
+    9: "l5SnrMedian",
+    10: "dataErrorRatePct",
+}
+_RTK_L2_LABELS: dict[int, str] = {
+    1: "differentialAgeSec",
+    2: "loraBandwidthL1Bps",
+    3: "loraBandwidthL2Bps",
+    4: "loraBandwidthL5Bps",
+    5: "hwDcVoltageL1V",
+    6: "hwDcVoltageL2V",
+    7: "hwDcVoltageL5V",
+    8: "cwInterferenceL1",
+    9: "cwInterferenceL2",
+    10: "cwInterferenceL5",
+    11: "antennaGainL1",
+    12: "antennaGainL2",
+    13: "antennaGainL5",
+}
+
+
 def decode_robot_config(data: bytes) -> dict[str, Any]:
     """Decode a PbRobotConfig sub-message into a flat dict.
 
     Field map from PbRobotConfig.encode (Hermes fn #9506 at offset 0x004a7ce8):
     f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
     f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
-    f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
-    f10 cmdCellularSwitch bool, f11 metric_4g bool, f14 openLedTime PbTimeZone,
-    f15 closeLedTime PbTimeZone, f18 rrConfig PbRRConfig, f21 timezoneOffset
-    int (seconds east of UTC, what setTimezone #9036 writes), f22 dockOnError
-    bool.
+    f8 signal int, f9 lcdPinCode submessage {f1: 4 digit-bytes} → lcdPin
+    (decoded for an opt-in diagnostic sensor; never logged — PIN is sensitive),
+    f10 cmdCellularSwitch bool, f11 metric_4g bool,
+    f14 headlightStart / f15 headlightEnd PbTimeZone {hour, minute} UTC,
+    f18 rrConfig PbRRConfig,
+    f21 timezoneOffset int (seconds east of UTC, what setTimezone #9036 writes),
+    f22 dockOnError bool.
 
     Untrusted wire data: only fields we read are decoded; unknown values are
     left absent rather than coerced.
@@ -796,11 +1149,7 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         v = _first(f, field_no)
         if v is not None:
             out[name] = bool(v)
-    # f14/f15 — Headlight schedule start/end (PbTimeZone). The app's "Night
-    # Mode" / Settings → Headlight page writes these via setNightMode (#9019)
-    # and the robot echoes them back here so users can see the current window
-    # without polling a separate config message.
-    for field_no, name in ((14, "openLedTime"), (15, "closeLedTime")):
+    for field_no, name in ((14, "headlightStart"), (15, "headlightEnd")):
         raw = _first(f, field_no)
         if isinstance(raw, bytes):
             sub = _decode_fields(raw)
@@ -813,6 +1162,15 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         rr = decode_rr_config(rr_raw)
         if rr:
             out["rrConfig"] = rr
+    # f9 lcdPinCode: submessage {f1: 4 bytes, one digit (0-9) per byte}. The
+    # 4-digit screen-unlock PIN. Surfaced only via a disabled-by-default
+    # diagnostic sensor; never logged (security rule: PIN is sensitive).
+    pin_raw = _first(f, 9)
+    if isinstance(pin_raw, bytes):
+        pin_sub = _decode_fields(pin_raw)
+        digits = _first(pin_sub, 1)
+        if isinstance(digits, bytes) and len(digits) == 4 and all(0 <= b <= 9 for b in digits):
+            out["lcdPin"] = "".join(str(b) for b in digits)
     return out
 
 
@@ -971,6 +1329,62 @@ def decode_schedule_entry(data: bytes) -> dict[str, Any]:
     return entry
 
 
+def decode_path_response(pb_bytes: bytes) -> dict[str, Any]:
+    """Decode a userCtrl=23 (QUERY_PATH) response into per-zone track polylines.
+
+    Returns {"goZones": [{"hashId": str, "trackPoints": [{"x": float, "y": float}], "stripsDone": int}]}
+    The track points are ENU metres from the RTK base station, same coordinate
+    space as the zone polygons returned by decode_map_response.
+
+    Wire layout (confirmed from live capture while robot is mowing):
+      pboutput.f23 → f2 → f3 → repeated f1 (go-zone path entries)
+      Each f1 entry:
+        .f1 sub-message: .f3=hashId(str), .f5 repeated PbPoint sub-messages
+          Each PbPoint: f1=x(float32), f2=y(float32)
+        .f2 sub-message: .f1=stripsDone(int)
+    """
+    outer = _first(_decode_fields(pb_bytes), 23)
+    if not isinstance(outer, bytes):
+        return {"goZones": []}
+    content = _first(_decode_fields(outer), 2)
+    if not isinstance(content, bytes):
+        return {"goZones": []}
+    path_data = _first(_decode_fields(content), 3)
+    if not isinstance(path_data, bytes):
+        return {"goZones": []}
+
+    go_zones: list[dict[str, Any]] = []
+    for gz_raw in _all(_decode_fields(path_data), 1):
+        if not isinstance(gz_raw, bytes):
+            continue
+        zone_info = _first(_decode_fields(gz_raw), 1)
+        hash_id: str | None = None
+        track_points: list[dict[str, float]] = []
+        if isinstance(zone_info, bytes):
+            for fn, _wt, val in _decode_fields(zone_info):
+                if fn == 3 and isinstance(val, bytes):
+                    hash_id = val.decode("utf-8", errors="replace")
+                elif fn == 5 and isinstance(val, bytes):
+                    for pfn, _pwt, pval in _decode_fields(val):
+                        if pfn == 1 and isinstance(pval, bytes):
+                            pt = _decode_map_point(pval)
+                            if pt["x"] is not None and pt["y"] is not None:
+                                track_points.append(pt)
+        if hash_id is None:
+            continue
+        strips_done: int | None = None
+        stats = _first(_decode_fields(gz_raw), 2)
+        if isinstance(stats, bytes):
+            sv = _first(_decode_fields(stats), 1)
+            if sv is not None:
+                strips_done = int(sv)
+        entry: dict[str, Any] = {"hashId": hash_id, "trackPoints": track_points}
+        if strips_done is not None:
+            entry["stripsDone"] = strips_done
+        go_zones.append(entry)
+    return {"goZones": go_zones}
+
+
 # ---------------------------------------------------------------------------
 # PbInput encoders — commands sent to the robot
 # ---------------------------------------------------------------------------
@@ -983,80 +1397,99 @@ def encode_userctrl(command: int) -> bytes:
     return pb
 
 
-# PbZoneConfig field map — (proto field number, wire kind) — confirmed from
-# PbZoneConfig.encode (Hermes #9434 @ 0x004a42b5). These are PER-ZONE cutting
-# parameters that the app writes via PbMap.goZones[i].zoneConfig over the
-# SYNC_MAP wire path (see fn customizeConfig #9009 in the APK).
-#
-# This map was historically named ``_TASK_CONFIG_FIELDS`` after the misnamed
-# ``encode_set_task_config`` / ``lymow.set_task_config`` service that publishes
-# it over the PbInput.taskConfig wire path with USER_CTRL_SET_TASK_CONFIG=36.
-# That path actually expects the FOUR-field PbTaskConfig (chargingMode /
-# zoneOrder / rainCleaning / disableChargingPark) — see #157 for the proper
-# fix. The robot appears to silently ignore unknown PbTaskConfig fields, so
-# the service has shipped without obvious breakage, but everything it writes
-# via this map is effectively a no-op until the wire path is corrected.
-#
-# Field 1 (cutHeight, int32) is intentionally omitted — it's set per-zone via
-# the SYNC_MAP path through ``ZoneCutHeightNumber``, the correct wire path.
-_ZONE_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+# PbZoneConfig field map — (proto field number, wire kind). Field numbers
+# LIVE-CONFIRMED 2026-05-30 (BRANCH_STATUS C/I/K/M): pathSpacing=f9,
+# perimeterMowLaps=f10, noGoMowLaps=f12, safeMarginMode=f17,
+# turnOffOuterMotor=f18 verified by app-label correlation + toggle/re-query;
+# the rest are anchored by the confirmed positions. Must stay in sync with the
+# decoder maps (`_ZONE_CONFIG_INT_NAMES`/`_BOOL_NAMES`). Used by the per-zone
+# userCtrl=9 write (`encode_set_zone_config`) and the sync_map round-trip
+# (`_encode_go_zone`); both build a PbZoneConfig sub-message from these numbers.
+# Not surfaced (no HA use), names per the APK-verified map (Hermes v96):
+# brushSpeed=f5, cleanDir=f8, startProgress=f15. Our f17/f18 use UI-derived
+# names (safeMarginMode/turnOffOuterMotor); proto names are lineFollowMode/
+# disableOuterDischarge — numbers correct, names kept by choice. raiseCutHeight/
+# lowerCutHeight (f2/f3) are momentary +/- commands, kept as-is.
+_TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "cutHeight": (1, "int"),
     "raiseCutHeight": (2, "bool"),
     "lowerCutHeight": (3, "bool"),
     "moveSpeed": (4, "float"),
     "brushSpeed": (5, "int"),
     "cutSpeed": (6, "int"),
     "cleanMode": (7, "int"),
-    "cleanDir": (8, "int"),
+    "stripeAngle": (8, "int"),  # signed: -1 = Optimized (auto), else 0-179°
     "pathSpacing": (9, "int"),
     "perimeterMowLaps": (10, "int"),
     "perimeterMowDir": (11, "int"),
     "noGoMowLaps": (12, "int"),
     "obsDecMode": (13, "int"),
     "pathOrder": (14, "bool"),
-    "startProgress": (15, "int"),
     "relativeCleanDir": (16, "int"),
-    "lineFollowMode": (17, "bool"),
-    "disableOuterDischarge": (18, "bool"),
+    "safeMarginMode": (17, "bool"),
+    "turnOffOuterMotor": (18, "bool"),
     "followDetectMode": (19, "int"),
+}
+
+# Global channel settings — PbChannelConfig carried at PbMap.f12 (alongside the
+# PbMap.f11 globalZoneConfig). The app's global Save sends BOTH; field map
+# live-confirmed 2026-06-19 from a captured global write (f1=2 detectMode Smart,
+# f2=60 deck height, f3=0 raise-omni). detectMode: Smart=2 / Touch-Only=1.
+_CHANNEL_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "channelDetectMode": (1, "int"),  # obstacle detection crossing a channel (Smart=2/Touch=1)
+    "channelDeckHeight": (2, "int"),  # deck module height when crossing a channel (mm)
+    "channelRaiseOmni": (3, "bool"),  # raise the omni wheels on channel
 }
 
 
 def encode_set_task_config(**fields: Any) -> bytes:
-    """Encode a USER_CTRL_SET_TASK_CONFIG command setting the given fields.
+    """Encode a global mowing-settings write setting only the given fields.
 
-    .. deprecated::
-        The wire path is wrong (see #157): this encodes PbZoneConfig-shaped
-        bytes and publishes them over PbInput.taskConfig, where the robot
-        expects the 4-field PbTaskConfig. The robot appears to silently
-        ignore unknown fields, so writes go through without errors but
-        likely have no effect. ``encode_set_device_settings`` is the correct
-        encoder for the real PbTaskConfig (Device Settings page); per-zone
-        cutting params should go through SYNC_MAP via the goZones[i].zoneConfig
-        sub-field.
-
-    Field names match PbZoneConfig (see :data:`_ZONE_CONFIG_FIELDS`); ``None``
+    Field names match PbZoneConfig (see ``_TASK_CONFIG_FIELDS``); ``None``
     values are skipped so only explicitly-set parameters are sent. Unknown
-    field names raise ValueError. The function name and the service it backs
-    are kept for backward compatibility until the rewire lands.
+    field names raise ValueError.
+
+    Envelope LIVE-CONFIRMED 2026-05-30 from the app's Mowing Settings → Global
+    tab "Save → Keep Custom": ``PbInput {f2:49, f5:49(GLOBAL_SETTING_N), f12
+    (PbMap):{f11: globalZoneConfig}}`` — userCtrl **49** ("Keep Custom": apply
+    the global mowing settings while preserving per-zone customs), NOT the old
+    userCtrl=36+PbTaskConfig(f26) which is the unrelated Device Settings page.
+    The robot merges the partial globalZoneConfig (same as the per-zone
+    userCtrl=9 path). Channel fields (``_CHANNEL_CONFIG_FIELDS``) ride alongside
+    in the sibling PbMap.f12 globalChannelConfig — exactly as the app's Save sends
+    both snapshots together.
     """
-    cfg = b""
+
+    def _encode(field_no: int, kind: str, value: Any) -> bytes:
+        if kind == "bool":
+            return _field_i32(field_no, 1 if value else 0)
+        if kind == "float":
+            return _field_f32(field_no, float(value))
+        return _field_i32(field_no, int(value))
+
+    zone_cfg = b""
+    chan_cfg = b""
     for name, value in fields.items():
         if value is None:
             continue
-        if name not in _ZONE_CONFIG_FIELDS:
-            raise ValueError(f"unknown zone-config field: {name}")
-        field_no, kind = _ZONE_CONFIG_FIELDS[name]
-        if kind == "bool":
-            cfg += _field_i32(field_no, 1 if value else 0)
-        elif kind == "float":
-            cfg += _field_f32(field_no, float(value))
+        if name in _TASK_CONFIG_FIELDS:
+            field_no, kind = _TASK_CONFIG_FIELDS[name]
+            zone_cfg += _encode(field_no, kind, value)
+        elif name in _CHANNEL_CONFIG_FIELDS:
+            field_no, kind = _CHANNEL_CONFIG_FIELDS[name]
+            chan_cfg += _encode(field_no, kind, value)
         else:
-            cfg += _field_i32(field_no, int(value))
-    from .const import USER_CTRL_SET_TASK_CONFIG
+            raise ValueError(f"unknown task-config field: {name}")
+    from .const import USER_CTRL_GLOBAL_SETTING_N
 
+    pb_map = b""
+    if zone_cfg:
+        pb_map += _field_bytes(11, zone_cfg)  # PbMap.globalZoneConfig
+    if chan_cfg:
+        pb_map += _field_bytes(12, chan_cfg)  # PbMap.globalChannelConfig
     pb = _field_i32(2, PB_VERSION)
-    pb += _field_i32(5, USER_CTRL_SET_TASK_CONFIG)
-    pb += _field_bytes(26, cfg)
+    pb += _field_i32(5, USER_CTRL_GLOBAL_SETTING_N)
+    pb += _field_bytes(12, pb_map)  # PbInput.map (f12)
     return pb
 
 
@@ -1084,6 +1517,10 @@ _ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
 # / by the matching VehicleLedSwitch in switch.py.
 SIGNAL_TURN_ON_VEHICLE_LIGHT = 10
 SIGNAL_TURN_OFF_VEHICLE_LIGHT = 11
+# Emitted by the app on the robotConfig.signal field when the headlight auto
+# schedule is turned OFF — captured live 2026-05-30 alongside zeroed start/end
+# times. (The ON path sends the times with no signal.)
+SIGNAL_DISABLE_HEADLIGHT_SCHEDULE = 7
 
 
 def _encode_pb_timezone(hour: int, minute: int) -> bytes:
@@ -1129,49 +1566,18 @@ def encode_set_recharge_resume(
     return pb
 
 
-def encode_set_night_mode(
-    *,
-    open_time: tuple[int, int],
-    close_time: tuple[int, int],
-    enable: bool,
-) -> bytes:
-    """Encode a Headlight Mode (a.k.a. Night Mode) schedule write.
+def encode_find_my_robot_play_sound(volume: int = 100) -> bytes:
+    """Encode the app's "Find My Robot → Play Sound" frame.
 
-    Wire format from Hermes setNightMode (#9019 @ 0x004875e8):
-
-      PbInput {
-        version,
-        robotConfig: PbRobotConfig {
-          openLedTime: PbTimeZone(open_time),
-          closeLedTime: PbTimeZone(close_time),
-          signal?: SIGNAL_TURN_OFF_CAMERA_LIGHT  // only when disable=true
-        }
-      }
-
-    The app writes the time window unconditionally and tacks on
-    ``signal=SIGNAL_TURN_OFF_CAMERA_LIGHT`` (7) when the user disables the
-    schedule — that one-shot signal forces the camera light off right now,
-    independent of the schedule window. So ``enable=True`` is "set the
-    schedule and let it run", ``enable=False`` is "set the schedule but turn
-    the light off now too". Both branches still record the schedule, which
-    matches what the app does in either branch.
-
-    open_time / close_time are (hour, minute) tuples; bound checks here keep
-    a malformed user input from publishing garbage to the robot.
+    Captured live 2026-05-27 from the app: ``PbInput {f2:49, f13(robotConfig):
+    {f6:volume audioVolume}, f16:1}``. f16 is a one-shot trigger (no encoder
+    mapping previously) — set to 1 to fire the beacon. Volume defaults to 100
+    (max) to match the app.
     """
-    from .const import SIGNAL_TURN_OFF_CAMERA_LIGHT
-
-    for label, hm in (("open_time", open_time), ("close_time", close_time)):
-        h, m = hm
-        if not (0 <= h <= 23 and 0 <= m <= 59):
-            raise ValueError(f"{label} out of range: {hm!r}")
-
-    cfg = _field_bytes(14, _encode_pb_timezone(*open_time))
-    cfg += _field_bytes(15, _encode_pb_timezone(*close_time))
-    if not enable:
-        cfg += _field_i32(8, SIGNAL_TURN_OFF_CAMERA_LIGHT)
+    cfg = _field_i32(6, int(volume))  # audioVolume
     pb = _field_i32(2, PB_VERSION)
     pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    pb += _field_i32(16, 1)  # PbInput.f16 = 1 → play find-my-robot sound
     return pb
 
 
@@ -1201,15 +1607,99 @@ def encode_set_robot_config(**fields: Any) -> bytes:
     return pb
 
 
-# PbRunTimeConfig field map — (proto field number, wire kind) — derived from APK
-# (Hermes) analysis of the app's ts-proto encoder (PbRunTimeConfig.encode). The
-# message is carried at PbInput.map.runTimeConfig (PbInput field 12 → PbMap
-# field 13) under USER_CTRL_SET_RUN_TIME_CONFIG. ``channelConfig`` (PbChannelConfig,
-# field 7) is intentionally omitted — per-channel overrides aren't exposed here.
+def encode_set_headlight_schedule(
+    *,
+    enable: bool,
+    start: tuple[int, int] | None = None,
+    end: tuple[int, int] | None = None,
+) -> bytes:
+    """Encode the app's Device Settings → Headlight Mode "Save" frame.
+
+    Captured live 2026-05-30 (three saves, ON twice + OFF). The headlight auto
+    on/off window lives on PbRobotConfig (PbInput.f13) as two PbTimeZone
+    sub-messages — f14 startTime, f15 endTime — with hour/minute stored in
+    **UTC** (the app converts the local picker value before sending). Every
+    headlight save also carries a constant PbInput.f9 = {f10:1} marker that
+    does not appear on other robotConfig writes (rrConfig / find-my-robot).
+
+    enable=True requires both ``start`` and ``end`` (the app always sends the
+    pair). enable=False reproduces the disable frame: signal=7 plus zeroed
+    times; ``start`` / ``end`` are ignored.
+    """
+    marker = _field_bytes(9, _field_i32(10, 1))  # PbInput.f9 = {f10:1}
+    if enable:
+        if start is None or end is None:
+            raise ValueError("enabling the headlight schedule requires start and end")
+        cfg = _field_bytes(14, _encode_pb_timezone(*start))
+        cfg += _field_bytes(15, _encode_pb_timezone(*end))
+    else:
+        cfg = _field_i32(8, SIGNAL_DISABLE_HEADLIGHT_SCHEDULE)  # PbRobotConfig.signal
+        cfg += _field_bytes(14, _encode_pb_timezone(0, 0))
+        cfg += _field_bytes(15, _encode_pb_timezone(0, 0))
+    pb = _field_i32(2, PB_VERSION)
+    pb += marker
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
+def encode_set_wifi(ssid: str, password: str) -> bytes:
+    """Encode a Wi-Fi provisioning command (PbInput.wifiConfig, field 17).
+
+    Wire format captured live 2026-05-30 over BLE (re-provisioning the mower's
+    Wi-Fi): ``PbInput {f17:{f1: ssid, f2: password, f5: 3}}`` — no version
+    prefix; f5=3 is a constant the app always sends (connect/auth mode). The
+    robot reconnects to the named network on receipt. SECURITY: ssid/password
+    are sensitive and are never logged here.
+    """
+    if not ssid:
+        raise ValueError("ssid must not be empty")
+    inner = _field_str(1, ssid) + _field_str(2, password) + _field_i32(5, 3)
+    return _field_bytes(17, inner)  # PbInput.wifiConfig
+
+
+def encode_bind_rtk(base_id: str) -> bytes:
+    """Encode an RTK-base bind command (PbRobotConfig.rtkBind, field 17).
+
+    Captured live 2026-05-30 (re-binding the current base): ``PbInput {f2:49,
+    f13(robotConfig):{f17:{f1: baseId}}}`` — no userCtrl (robotConfig dispatch).
+    Binds the mower to the RTK base station with the given ID. (Distinct from the
+    Wi-Fi command, which carries f17 at the PbInput top level, not in robotConfig.)
+    """
+    if not base_id:
+        raise ValueError("base_id must not be empty")
+    cfg = _field_bytes(17, _field_str(1, base_id))  # PbRobotConfig.rtkBind
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
+def encode_set_pin(pin: str) -> bytes:
+    """Encode an LCD-screen PIN write (PbRobotConfig.lcdPinCode).
+
+    ``pin`` is exactly 4 digits. Wire format captured live 2026-05-30:
+    ``PbInput {f2:49, f13(robotConfig):{f9(lcdPinCode):{f1: <one byte per
+    digit>}}}`` — no userCtrl (robotConfig dispatch). The PIN unlocks the
+    physical keypad on the mower. SECURITY: the value is sensitive — it is never
+    logged here and the ValueError carries no digits.
+    """
+    if not (isinstance(pin, str) and len(pin) == 4 and pin.isdigit()):
+        raise ValueError("PIN must be exactly 4 digits")
+    lcd = _field_bytes(1, bytes(int(c) for c in pin))  # lcdPinCode.f1 = digit bytes
+    cfg = _field_bytes(9, lcd)  # PbRobotConfig.lcdPinCode (f9)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(13, cfg)  # PbInput.robotConfig
+    return pb
+
+
+# PbRunTimeConfig field map — pinned to Hermes class #9456: f1 cutHeight, f2
+# moveSpeed, f3 cutSpeed, f4 channelConfig (PbChannelConfig — per-channel
+# override, not exposed here). Carried at PbMap.runTimeConfig (PbInput.f12 →
+# PbMap.f13) under USER_CTRL_SET_RUN_TIME_CONFIG. Distinct shape from
+# PbZoneConfig — don't reuse those field numbers.
 _RUN_TIME_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "cutHeight": (1, "int"),
-    "moveSpeed": (4, "float"),
-    "cutSpeed": (6, "int"),
+    "moveSpeed": (2, "float"),
+    "cutSpeed": (3, "int"),
 }
 
 
@@ -1296,6 +1786,19 @@ def encode_query_map(queryIndex: int = 0) -> bytes:
     pb = _field_i32(2, PB_VERSION)
     pb += _field_i32(5, 19)  # USER_CTRL_QUERY_MAP
     pb += _field_bytes(23, sub)
+    return pb
+
+
+def encode_query_robot_config() -> bytes:
+    """Encode a getRobotConfig command using the f9 sub-message format.
+
+    The robot does NOT respond to a plain userCtrl=35 (f5=35). The correct wire
+    format confirmed from app capture is PbInput{f2=version, f9={f10=1}}.
+    The f9 sub-message routes to the robot config handler; the marker f10=1
+    acts as a discriminator for the 'get all' query.
+    """
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_bytes(9, _field_i32(10, 1))  # PbInput.f9={f10=1} = getRobotConfig
     return pb
 
 
@@ -1391,6 +1894,24 @@ def encode_set_schedules(entries: list[dict[str, Any]]) -> bytes:
     return pb
 
 
+def _encode_channel(ch: dict) -> bytes:
+    """Encode a PbChannel sub-message for inclusion in a sync_map payload."""
+    out = _field_str(1, ch.get("hashId", ""))
+    if ch.get("zone1"):
+        out += _field_str(2, ch["zone1"])
+    if ch.get("zone2"):
+        out += _field_str(3, ch["zone2"])
+    out += _field_i32(4, int(ch.get("isValid", True)))
+    if ch.get("polygon"):
+        out += _field_bytes(5, _encode_map_polygon(ch["polygon"]))
+    out += _field_i32(6, int(ch.get("isDockingChannel", False)))
+    if "cutHeight" in ch:
+        out += _field_i32(9, int(ch["cutHeight"]))
+    if "channelLift" in ch:
+        out += _field_i32(10, int(ch["channelLift"]))
+    return out
+
+
 def encode_delete_channel(hash_id: str) -> bytes:
     """Encode a delete-channel command (USER_CTRL_DELETE_CHANNEL).
 
@@ -1450,12 +1971,28 @@ def _encode_go_zone(zone: dict) -> bytes:
     if zone.get("polygon"):
         bi += _field_bytes(5, _encode_map_polygon(zone["polygon"]))
 
-    # f2 = ZoneConfig (optional)
+    # f2 = ZoneConfig (PbZoneConfig — optional). Wire field numbers pinned to
+    # canonical Hermes class #9432: f1 cutHeight (int), f10 pathSpacing (int).
+    # If a full zoneConfig dict came back from the decoder we re-emit every
+    # field so a vertex-move sync_map round-trip preserves the other settings.
     cfg = b""
-    if "cutHeight" in zone:
-        cfg += _field_i32(1, zone["cutHeight"])
-    if "pathSpacing" in zone:
-        cfg += _field_f32(4, zone["pathSpacing"])
+    zc = zone.get("zoneConfig") or {}
+    if "cutHeight" in zone and "cutHeight" not in zc:
+        zc["cutHeight"] = zone["cutHeight"]
+    if "pathSpacing" in zone and "pathSpacing" not in zc:
+        zc["pathSpacing"] = zone["pathSpacing"]
+    for name, (field_no, kind) in _TASK_CONFIG_FIELDS.items():
+        if name not in zc:
+            continue
+        value = zc[name]
+        if value is None:
+            continue
+        if kind == "bool":
+            cfg += _field_i32(field_no, 1 if value else 0)
+        elif kind == "float":
+            cfg += _field_f32(field_no, float(value))
+        else:
+            cfg += _field_i32(field_no, int(value))
 
     # f3 = PpBasicInfo (optional)
     pp = b""
@@ -1514,6 +2051,8 @@ def _encode_map_content(map_data: dict) -> bytes:
         out += _field_bytes(1, _encode_go_zone(zone))
     for nogo in map_data.get("nogoZones", []):
         out += _field_bytes(2, _encode_nogo_zone(nogo))
+    for ch in map_data.get("channels", []):
+        out += _field_bytes(3, _encode_channel(ch))
     cs = map_data.get("chargingStation")
     if cs:
         cs_bytes = (
@@ -1524,6 +2063,19 @@ def _encode_map_content(map_data: dict) -> bytes:
     if gps:
         gps_bytes = _field_f32(1, gps.get("lat", 0.0)) + _field_f32(2, gps.get("lon", 0.0))
         out += _field_bytes(7, gps_bytes)
+    tc = map_data.get("taskConfig")
+    if isinstance(tc, dict) and tc:
+        tc_bytes = b""
+        if tc.get("chargingMode") is not None:
+            tc_bytes += _field_i32(1, int(tc["chargingMode"]))
+        if tc.get("zoneOrder") is not None:
+            tc_bytes += _field_i32(2, int(tc["zoneOrder"]))
+        if tc.get("rainCleaning") is not None:
+            tc_bytes += _field_i32(3, 1 if tc["rainCleaning"] else 0)
+        if tc.get("disableChargingPark") is not None:
+            tc_bytes += _field_i32(4, 1 if tc["disableChargingPark"] else 0)
+        if tc_bytes:
+            out += _field_bytes(8, tc_bytes)
     for hash_id in map_data.get("modifyHashs", []):
         out += _field_str(9, hash_id)
     return out
@@ -1600,6 +2152,100 @@ def encode_rename_zone(hash_id: str, name: str) -> bytes:
     basic_info = _field_str(2, name) + _field_str(3, hash_id)
     zone = _field_bytes(1, basic_info)
     pb_map = _field_bytes(1, zone)
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO)
+    pb += _field_bytes(12, pb_map)
+    return pb
+
+
+def encode_rename_nogo_zone(hash_id: str, name: str) -> bytes:
+    """Encode a USER_CTRL_MODIFY_ZONE_INFO command renaming a no-go zone.
+
+    Mirrors encode_rename_zone, but the zone goes in PbMap.nogoZones (field 2)
+    instead of goZones (field 1) — same shape used by encode_delete_nogo_zone.
+    """
+    from .const import USER_CTRL_MODIFY_ZONE_INFO
+
+    basic_info = _field_str(2, name) + _field_str(3, hash_id)
+    zone = _field_bytes(1, basic_info)
+    pb_map = _field_bytes(2, zone)  # PbMap.nogoZones, not goZones
+    pb = _field_i32(2, PB_VERSION)
+    pb += _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO)
+    pb += _field_bytes(12, pb_map)
+    return pb
+
+
+def _encode_zone_config_submessage(cfg: dict[str, Any]) -> bytes:
+    """Encode a PbZoneConfig sub-message from a dict of named fields.
+
+    Field name → wire layout from _TASK_CONFIG_FIELDS (Hermes #9432). ``cutHeight``
+    is at field 1 (not in _TASK_CONFIG_FIELDS because it's also the first field of
+    PbRunTimeConfig and PbChannel); everything else routes through the map.
+    """
+    out = b""
+    if cfg.get("cutHeight") is not None:
+        out += _field_i32(1, int(cfg["cutHeight"]))
+    for name, (field_no, kind) in _TASK_CONFIG_FIELDS.items():
+        if name not in cfg:
+            continue
+        value = cfg[name]
+        if value is None:
+            continue
+        if kind == "bool":
+            out += _field_i32(field_no, 1 if value else 0)
+        elif kind == "float":
+            out += _field_f32(field_no, float(value))
+        else:
+            out += _field_i32(field_no, int(value))
+    return out
+
+
+def encode_set_zone_config(updates: list[dict[str, Any]]) -> bytes:
+    """Encode a per-zone PbZoneConfig override via USER_CTRL_MODIFY_ZONE_INFO.
+
+    Wire layout captured live 2026-05-27 from the app's Mowing Settings →
+    Customize tab (BLE ATT WRITE_CMD handle 0x0014). Same envelope as
+    ``encode_rename_zone`` but carries ``configBox`` instead of a name:
+
+      PbInput {
+        f2  version = 49
+        f5  userCtrl = 9 (USER_CTRL_MODIFY_ZONE_INFO)
+        f12 PbMap {
+          goZones[*] = PbZone {
+            f1 basicInfo = PbZoneBasicInfo {hashId, isEnabled}
+            f2 configBox = PbZoneConfig {...PbZoneConfig fields...}
+          }
+        }
+      }
+
+    Each ``updates`` entry: ``{"hashId": str, "isEnabled": bool=True,
+    ...PbZoneConfig fields}`` where the config fields use ``_TASK_CONFIG_FIELDS``
+    naming (``cutHeight``, ``moveSpeed``, ``pathSpacing``, …). Multiple entries
+    are sent in one frame, matching the app's bulk-update behaviour.
+
+    Distinct from ``encode_rename_zone`` (which carries ``name`` in basicInfo)
+    and from ``async_update_zone_cut_height``'s sync_map path (which re-sends
+    the full map — slower but works on older robots). This is the targeted,
+    bandwidth-efficient per-zone path the app itself uses.
+    """
+    from .const import USER_CTRL_MODIFY_ZONE_INFO
+
+    if not updates:
+        raise ValueError("encode_set_zone_config: at least one update required")
+
+    pb_map = b""
+    for entry in updates:
+        hash_id = entry.get("hashId")
+        if not hash_id:
+            raise ValueError("encode_set_zone_config: every update needs a hashId")
+        is_enabled = 1 if entry.get("isEnabled", True) else 0
+        basic_info = _field_str(3, hash_id) + _field_i32(4, is_enabled)
+        cfg_bytes = _encode_zone_config_submessage(entry)
+        zone = _field_bytes(1, basic_info)
+        if cfg_bytes:
+            zone += _field_bytes(2, cfg_bytes)
+        pb_map += _field_bytes(1, zone)  # PbMap.goZones (repeated)
+
     pb = _field_i32(2, PB_VERSION)
     pb += _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO)
     pb += _field_bytes(12, pb_map)

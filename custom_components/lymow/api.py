@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
+import secrets
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote, urlparse, urlunparse
@@ -327,6 +329,22 @@ class LymowApiClient:
                 parsed_endpoint.fragment,
             )
         )
+
+    def viewer_client_id(self) -> str:
+        """Build a unique KVS viewer client id carrying the account's Cognito sub.
+
+        The robot's master answers a viewer whose id ends in ``_userId_<sub>``
+        (the app uses the same shape); the random prefix keeps concurrent HA
+        viewers distinct so they don't collide on the signaling channel.
+        """
+        sub = ""
+        try:
+            payload = self._access_token.split(".")[1]
+            payload += "=" * ((4 - len(payload) % 4) % 4)
+            sub = json.loads(base64.urlsafe_b64decode(payload)).get("sub", "")
+        except (ValueError, IndexError, KeyError):
+            sub = ""
+        return f"ha-lymow_{secrets.token_hex(4)}_userId_{sub}"
 
     async def check_update(self, thing_name: str) -> dict[str, Any]:
         """GET /prod/check-update — latest firmware metadata for one device.

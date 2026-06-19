@@ -43,6 +43,7 @@ try:
     import homeassistant.components.select  # noqa: F401
     import homeassistant.components.sensor  # noqa: F401
     import homeassistant.components.switch  # noqa: F401
+    import homeassistant.components.text  # noqa: F401
     import homeassistant.components.update  # noqa: F401
     import homeassistant.config_entries  # noqa: F401
     import homeassistant.core  # noqa: F401
@@ -60,6 +61,7 @@ try:
     _load_lymow_module("number")
     _load_lymow_module("select")
     _load_lymow_module("switch")
+    _load_lymow_module("text")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
     _load_lymow_module("camera")
@@ -93,10 +95,15 @@ except ImportError:
         MINUTES = "min"
         HOURS = "h"
 
+    class _EntityCategory(str, enum.Enum):
+        CONFIG = "config"
+        DIAGNOSTIC = "diagnostic"
+
     _ha_const.UnitOfArea = _UnitOfArea  # type: ignore[attr-defined]
     _ha_const.UnitOfLength = _UnitOfLength  # type: ignore[attr-defined]
     _ha_const.UnitOfTime = _UnitOfTime  # type: ignore[attr-defined]
     _ha_const.DEGREE = "°"  # type: ignore[attr-defined]
+    _ha_const.EntityCategory = _EntityCategory  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.const", _ha_const)
 
     # ── homeassistant.core ────────────────────────────────────────────────────
@@ -131,8 +138,16 @@ except ImportError:
     class _ServiceValidationError(_HomeAssistantError):
         pass
 
+    class _ConfigEntryAuthFailed(_HomeAssistantError):
+        pass
+
+    class _ConfigEntryNotReady(_HomeAssistantError):
+        pass
+
     _ha_exc.HomeAssistantError = _HomeAssistantError  # type: ignore[attr-defined]
     _ha_exc.ServiceValidationError = _ServiceValidationError  # type: ignore[attr-defined]
+    _ha_exc.ConfigEntryAuthFailed = _ConfigEntryAuthFailed  # type: ignore[attr-defined]
+    _ha_exc.ConfigEntryNotReady = _ConfigEntryNotReady  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.exceptions", _ha_exc)
 
     # ── homeassistant.config_entries ──────────────────────────────────────────
@@ -387,6 +402,20 @@ except ImportError:
     _ha_select.SelectEntity = _SelectEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.select", _ha_select)
 
+    # ── homeassistant.components.text ─────────────────────────────────────────
+    _ha_text = types.ModuleType("homeassistant.components.text")
+
+    class _TextEntity:
+        pass
+
+    class _TextMode(str, enum.Enum):
+        TEXT = "text"
+        PASSWORD = "pw"  # value irrelevant to tests; short to satisfy secret-scan
+
+    _ha_text.TextEntity = _TextEntity  # type: ignore[attr-defined]
+    _ha_text.TextMode = _TextMode  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.text", _ha_text)
+
     # ── homeassistant.components.device_tracker ───────────────────────────────
     _ha_dt = types.ModuleType("homeassistant.components.device_tracker")
 
@@ -439,8 +468,13 @@ except ImportError:
         ON_OFF = 1
         STREAM = 2
 
+    class _StreamType(str):
+        HLS = "hls"
+        WEB_RTC = "web_rtc"
+
     _ha_camera.Camera = _Camera  # type: ignore[attr-defined]
     _ha_camera.CameraEntityFeature = _CameraEntityFeature  # type: ignore[attr-defined]
+    _ha_camera.StreamType = _StreamType  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.camera", _ha_camera)
 
     # ── homeassistant.components.ffmpeg ───────────────────────────────────────
@@ -449,7 +483,11 @@ except ImportError:
     async def _async_get_image(hass, input_source, **kwargs):  # type: ignore[no-untyped-def]
         return b""
 
+    def _get_ffmpeg_manager(hass):  # type: ignore[no-untyped-def]
+        return types.SimpleNamespace(binary="ffmpeg")
+
     _ha_ffmpeg.async_get_image = _async_get_image  # type: ignore[attr-defined]
+    _ha_ffmpeg.get_ffmpeg_manager = _get_ffmpeg_manager  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.ffmpeg", _ha_ffmpeg)
 
     # ── homeassistant.components.bluetooth ────────────────────────────────────
@@ -482,6 +520,7 @@ except ImportError:
     _load_lymow_module("sensor")
     _load_lymow_module("number")
     _load_lymow_module("switch")
+    _load_lymow_module("text")
     _load_lymow_module("device_tracker")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")

@@ -6,7 +6,6 @@ import json
 import logging
 from pathlib import Path
 
-from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -26,14 +25,14 @@ _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
 _DASHBOARD_CREATED_KEY = f"{DOMAIN}_dashboard_created"
 
 
-def _card_url() -> str:
-    """Return card URL with integration version as cache buster."""
+def _card_url(name: str = "lymow-map-card.js") -> str:
+    """Return a card URL with the integration version as cache buster."""
     try:
         manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
         version = manifest.get("version", "0")
     except Exception:
         version = "0"
-    return f"/custom_components/{DOMAIN}/lymow-map-card.js?v={version}"
+    return f"/custom_components/{DOMAIN}/{name}?v={version}"
 
 
 _DASHBOARD_URL_PATH = "lymow-mower"
@@ -54,6 +53,7 @@ _DASHBOARD_ENTITY_KEYS: dict[str, tuple[str, str]] = {
     "last_mow_duration": ("sensor", "_last_clean_duration"),
     "total_mow_sessions": ("sensor", "_clean_history_count"),
     "total_mowed_area": ("sensor", "_total_area_m2"),
+    "camera": ("camera", "_camera"),
 }
 
 
@@ -67,8 +67,57 @@ PLATFORMS = [
     Platform.SELECT,
     Platform.SENSOR,
     Platform.SWITCH,
+    Platform.TEXT,
     Platform.UPDATE,
 ]
+
+
+async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
+    """Register card JS files as Lovelace resources, updating stale version URLs.
+
+    Checks each expected JS file by base name. If an entry already exists
+    with a different ?v= query string (old version), it is updated in-place
+    so only one copy is registered per card. This prevents double-loading
+    which causes 'custom element already defined' config errors.
+    """
+    try:
+        from homeassistant.components.lovelace.resources import ResourceStorageCollection
+
+        lovelace = hass.data.get("lovelace")
+        if lovelace is None:
+            return
+        resources: ResourceStorageCollection = lovelace.get("resources")
+        if resources is None:
+            return
+        await resources.async_load()
+        # Build a map of base JS filename → (resource_id, current_url)
+        base_to_item: dict[str, tuple[str, str]] = {}
+        for item in resources.async_items():
+            url: str = item.get("url", "")
+            # Strip query string to get base path
+            base = url.split("?")[0]
+            if f"/custom_components/{DOMAIN}/" in base:
+                base_to_item[base] = (item["id"], url)
+
+        for js in (
+            "lymow-map-card.js",
+            "lymow-camera-card.js",
+            "lymow-drive-card.js",
+            "lymow-schedule-card.js",
+            "lymow-backup-card.js",
+            "lymow-settings-card.js",
+        ):
+            wanted_url = _card_url(js)
+            base_path = wanted_url.split("?")[0]
+            if base_path in base_to_item:
+                res_id, current_url = base_to_item[base_path]
+                if current_url != wanted_url:
+                    # Version changed — update the existing entry
+                    await resources.async_update_item(res_id, {"res_type": "module", "url": wanted_url})
+            else:
+                await resources.async_create_item({"res_type": "module", "url": wanted_url})
+    except Exception:  # noqa: BLE001
+        pass  # Non-fatal; add_extra_js_url is the fallback
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -81,7 +130,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await hass.http.async_register_static_paths(
                 [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
             )
-            add_extra_js_url(hass, _card_url())
+            # Use Lovelace resources (not add_extra_js_url) as the sole loader.
+            # add_extra_js_url + Lovelace resources both fire on every page load,
+            # causing duplicate customElements.define() calls → config errors.
+            await _ensure_lovelace_resources(hass)
         hass.data[_WWW_REGISTERED_KEY] = True
 
     session = async_get_clientsession(hass)
@@ -105,6 +157,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         region=region,
         identity_id=creds["identity_id"],
     )
+    # Seed the temporary AWS credentials so S3-signed REST calls (backup maps,
+    # KVS) work from the first poll; the coordinator refreshes them before expiry.
+    client.update_aws_credentials(aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"))
 
     devices = await client.get_devices()
     things = [d["deviceThingName"] for d in devices]
@@ -122,6 +177,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     coordinator = LymowCoordinator(hass, client, mqtt_client, devices)
+    # Give the coordinator what it needs to refresh tokens + AWS creds before they
+    # expire — otherwise the access token lapses (~24 h) and every poll 401s.
+    coordinator.set_auth_context(auth, entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD], region, tokens, creds)
     await coordinator.async_config_entry_first_refresh()
 
     await mqtt_client.connect(
@@ -131,10 +189,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session_token=aws.get("SessionToken"),
     )
 
-    # Proactively request map + schedule data so zone and schedule entities
-    # populate without waiting for the user to trigger a query manually.
+    # Proactively request map + schedule + config data so zone, schedule and
+    # settings entities populate without waiting for the user to trigger a query.
+    # This runs after connect() so the publishes aren't dropped — the per-poll
+    # startup gate can't query reliably because the first poll precedes connect.
     await coordinator.async_query_all_maps()
     await coordinator.async_query_all_schedules()
+    await coordinator.async_query_all_robot_configs()
 
     _LOGGER.debug("Lymow setup complete: %d device(s) in region %s", len(devices), region)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -239,9 +300,40 @@ def _build_dashboard_config(entities: dict[str, str]) -> ConfigType:
     if conn := pick("connectivity", "firmware", "battery"):
         sensor_cards.append({"type": "entities", "title": "Connectivity", "entities": conn})
 
+    drive_cards: list[ConfigType] = []
+    if "mower" in entities:
+        drive_card: ConfigType = {
+            "type": "custom:lymow-drive-card",
+            "mower_entity": entities["mower"],
+            "title": "Drive",
+        }
+        if "camera" in entities:
+            drive_card["camera_entity"] = entities["camera"]
+        drive_cards.append(drive_card)
+
+    schedule_cards: list[ConfigType] = []
+    if "mower" in entities:
+        schedule_cards.append({"type": "custom:lymow-schedule-card", "mower_entity": entities["mower"]})
+
+    backup_cards: list[ConfigType] = []
+    if "mower" in entities:
+        backup_cards.append({"type": "custom:lymow-backup-card", "mower_entity": entities["mower"]})
+
+    advanced_cards: list[ConfigType] = []
+    if "mower" in entities:
+        advanced_cards.append({"type": "custom:lymow-settings-card", "mower_entity": entities["mower"]})
+
     views: list[ConfigType] = []
     if map_cards:
         views.append({"title": "Map", "path": "map", "icon": "mdi:map", "cards": map_cards})
+    if drive_cards:
+        views.append({"title": "Drive", "path": "drive", "icon": "mdi:gamepad-variant", "cards": drive_cards})
+    if schedule_cards:
+        views.append({"title": "Schedules", "path": "schedules", "icon": "mdi:clock-outline", "cards": schedule_cards})
+    if backup_cards:
+        views.append({"title": "Backups", "path": "backups", "icon": "mdi:database-arrow-up", "cards": backup_cards})
+    if advanced_cards:
+        views.append({"title": "Advanced", "path": "advanced", "icon": "mdi:cog-outline", "cards": advanced_cards})
     if sensor_cards:
         views.append({"title": "Sensors", "path": "sensors", "icon": "mdi:gauge", "cards": sensor_cards})
     return {"views": views}
