@@ -86,10 +86,12 @@ start_video_session:
   name: Start video session
   description: >
     Request a Kinesis Video Streams WebRTC session for the robot's camera.
-    Returns the channelARN, temporary AWS credentials, and region. Credentials
-    expire in ~15 minutes. The integration itself does not stream video bytes —
-    you need an external WebRTC viewer (go2rtc, aiortc, etc.) to consume the
-    response and complete the handshake.
+    Returns the channelARN, temporary AWS credentials, region, and a turnkey
+    browser-viewer config — viewerWssUrl (SigV4-presigned signaling WebSocket),
+    viewerClientId, and webrtcIceServers (shaped for RTCPeerConnection). The
+    Lymow Camera card's Cloud mode consumes this directly; credentials expire in
+    ~15 minutes. The integration itself does not pipe video bytes — a WebRTC
+    viewer (the card, a browser, go2rtc, etc.) completes the handshake.
 
 ble_drive:
   name: Manual drive (BLE)
@@ -138,6 +140,16 @@ ble_drive:
           max: 5.0
           step: 0.5
           unit_of_measurement: s
+
+backup_map:
+  name: Create backup map
+  description: >
+    Trigger the robot to create a map backup (userCtrl=44 FLOOR_BACKUP).
+    The backup will appear in the backup-maps sensor after the next refresh.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
 
 restore_backup_map:
   name: Restore backup map
@@ -216,97 +228,120 @@ set_device_name:
         text:
 
 set_task_config:
-  name: Set task config
+  name: Set mowing settings
   description: >
-    Set mowing task parameters on the robot (USER_CTRL_SET_TASK_CONFIG).
-    Only the parameters you provide are sent. Values are passed through to the
-    robot as-is — valid ranges aren't fully characterised, so change one at a
-    time and observe. Wire layout derived from the app.
+    Set global mowing settings (PbZoneConfig). Field numbers live-confirmed
+    2026-05-30 by correlating the app's labeled Mowing Settings to the wire.
+    Only the parameters you provide are sent. (Note: line_follow_mode and
+    brush_speed are accepted for backward-compatibility but ignored — neither
+    has a confirmed wire home.)
   target:
     entity:
       integration: lymow
       domain: lawn_mower
   fields:
+    move_speed:
+      name: Moving speed
+      description: Mowing speed in m/s.
+      example: 0.6
+      selector:
+        number: { min: 0.3, max: 1.0, step: 0.1, unit_of_measurement: "m/s" }
     path_spacing:
       name: Path spacing
-      description: Spacing between mowing passes (robot units).
-      example: 200
+      description: Distance between mowing passes, in cm (confirmed wire field f9).
+      example: 35
       selector:
-        number: { min: 0, max: 1000, step: 1, mode: box }
+        number: { min: 25, max: 35, step: 1, unit_of_measurement: "cm" }
     perimeter_mow_laps:
-      name: Perimeter laps
-      description: Number of perimeter (edge) mowing laps.
+      name: Zone perimeter laps
+      description: Number of perimeter (edge) mowing laps per zone.
       example: 1
       selector:
-        number: { min: 0, max: 5, step: 1, mode: box }
+        number: { min: 0, max: 3, step: 1, mode: box }
     perimeter_mow_dir:
       name: Perimeter direction
-      description: Perimeter mowing direction code.
-      example: 0
+      description: Perimeter mowing direction (0/1/2 — e.g. Random/CW/CCW).
+      example: 2
       selector:
-        number: { min: 0, max: 3, step: 1, mode: box }
+        number: { min: 0, max: 2, step: 1, mode: box }
     nogo_mow_laps:
       name: No-go laps
       description: Number of laps around no-go zones.
       example: 1
       selector:
-        number: { min: 0, max: 5, step: 1, mode: box }
+        number: { min: 0, max: 3, step: 1, mode: box }
     cut_speed:
-      name: Cut speed
-      description: Cutting speed (robot units).
-      example: 100
-      selector:
-        number: { min: 0, max: 1000, step: 1, mode: box }
-    brush_speed:
-      name: Brush speed
-      description: Brush/blade speed (robot units).
-      example: 100
-      selector:
-        number: { min: 0, max: 1000, step: 1, mode: box }
-    move_speed:
-      name: Move speed
-      description: Drive speed (m/s).
-      example: 0.6
-      selector:
-        number: { min: 0.1, max: 1.0, step: 0.05, mode: box }
-    obs_dec_mode:
-      name: Obstacle avoidance mode
-      description: 0 = off, 1 = slow down, 2 = detour. (Coerced to int by the service schema.)
-      example: "1"
-      selector:
-        select:
-          options:
-            - { value: "0", label: "Off" }
-            - { value: "1", label: "Slow down" }
-            - { value: "2", label: "Detour" }
-    clean_mode:
-      name: Clean mode
-      description: Mowing pattern (robot-specific enum).
-      example: 0
+      name: Blade speed
+      description: Blade/cut speed code.
+      example: 4
       selector:
         number: { min: 0, max: 10, step: 1, mode: box }
+    clean_mode:
+      name: Clean mode
+      description: Clean-mode code.
+      example: 1
+      selector:
+        number: { min: 0, max: 5, step: 1, mode: box }
+    obs_dec_mode:
+      name: Zone obstacle detection
+      description: Zone obstacle-detection mode (e.g. Smart/Touch-Only).
+      example: 2
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    relative_clean_dir:
+      name: Stripe angle
+      description: Mowing stripe angle in degrees (wire field f16).
+      example: 90
+      selector:
+        number: { min: 0, max: 180, step: 1, unit_of_measurement: "°" }
     path_order:
-      name: Path order
-      description: Toggle path-ordering strategy (bool).
+      name: Mowing order
+      description: Mowing order (false = Main Area First, true = Perimeter First).
       example: false
       selector:
         boolean:
-    line_follow_mode:
-      name: Line-follow mode
-      description: Enable straight-line following (bool).
+    safe_margin_mode:
+      name: Safe-margin mode
+      description: Edge mode — true = Offset Edge, false = Precise Edge (confirmed f17).
+      example: true
+      selector:
+        boolean:
+    turn_off_outer_motor:
+      name: Turn off outer motor
+      description: Turn off the outer mowing motor at boundaries (confirmed f18).
       example: false
       selector:
         boolean:
-    raise_cut_height:
-      name: Raise cut height
-      description: One-shot raise the cutting deck by one notch (bool).
-      example: true
+    stripe_angle:
+      name: Stripe angle
+      description: >
+        Mowing stripe direction (confirmed f8). -1 = Optimized (robot picks the
+        best direction); 0-180 = a fixed angle in degrees.
+      example: 90
       selector:
-        boolean:
-    lower_cut_height:
-      name: Lower cut height
-      description: One-shot lower the cutting deck by one notch (bool).
-      example: true
+        number: { min: -1, max: 180, step: 1, mode: box }
+    follow_detect_mode:
+      name: Perimeter obstacle detection
+      description: Obstacle-detection mode on perimeter laps (Smart=2 / Touch-Only=1; confirmed f19).
+      example: 2
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    channel_detect_mode:
+      name: Channel obstacle detection
+      description: Obstacle-detection mode crossing a channel (Smart=2 / Touch-Only=1; globalChannelConfig f1).
+      example: 2
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    channel_deck_height:
+      name: Channel deck height
+      description: Deck (cut) height when crossing a channel, in mm (globalChannelConfig f2).
+      example: 60
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: "mm" }
+    channel_raise_omni:
+      name: Raise omni wheels on channel
+      description: Raise the omni wheels when crossing a channel (globalChannelConfig f3).
+      example: false
       selector:
         boolean:
 
@@ -407,43 +442,106 @@ set_recharge_resume:
       selector:
         number: { min: 0, max: 100, step: 1, unit_of_measurement: "%", mode: box }
 
-set_night_mode:
-  name: Set headlight schedule (Night Mode)
+set_headlight_schedule:
+  name: Set Headlight schedule
   description: >
-    Configure the camera headlight schedule window. Mirrors the app's
-    Settings → Headlight page (called "Night Mode" in the wire format /
-    APK). When enable=false, the schedule is still recorded but a
-    one-shot SIGNAL_TURN_OFF_CAMERA_LIGHT is co-published so the light
-    turns off immediately too — matching what the app does on disable.
+    Configure the mower's Headlight Mode auto on/off window (PbRobotConfig
+    f14/f15). Mirrors the app's Device Settings → Headlight Mode page. Times
+    are in UTC, hour/minute (the app converts the local picker value before
+    sending). enable=true requires both start and end. enable=false turns the
+    schedule off; start/end are then ignored.
   target:
     entity:
       integration: lymow
       domain: lawn_mower
   fields:
-    open_time:
-      name: Light-on time (HH:MM)
-      description: Time of day the headlight schedule starts (24h).
-      example: "21:00"
-      required: true
-      selector:
-        text:
-    close_time:
-      name: Light-off time (HH:MM)
-      description: Time of day the headlight schedule ends.
-      example: "06:00"
-      required: true
-      selector:
-        text:
     enable:
-      name: Enable schedule
-      description: >
-        True keeps the schedule running. False records the same schedule
-        but also forces the light off right now via a co-published
-        SIGNAL_TURN_OFF_CAMERA_LIGHT.
+      name: Enable
+      description: Master on/off for the headlight auto schedule.
       example: true
-      required: true
       selector:
         boolean:
+    start:
+      name: On time (HH:MM, UTC)
+      description: Time of day the headlights turn on. Required when enable=true.
+      example: "21:00"
+      selector:
+        text:
+    end:
+      name: Off time (HH:MM, UTC)
+      description: Time of day the headlights turn off. Required when enable=true.
+      example: "05:00"
+      selector:
+        text:
+
+set_pin:
+  name: Set screen PIN
+  description: >
+    Set the 4-digit PIN that unlocks the physical keypad on the mower's body
+    (PbRobotConfig.lcdPinCode). Note: the PIN is sensitive — it is sent to the
+    robot but never logged by the integration. Default from the factory is 0000.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    pin:
+      name: PIN
+      description: Exactly 4 digits (0-9).
+      required: true
+      example: "1234"
+      selector:
+        text:
+          type: password
+
+set_wifi:
+  name: Set Wi-Fi network
+  description: >
+    Provision the mower's Wi-Fi (PbInput.wifiConfig). NOTE: Wi-Fi provisioning
+    is BLE-only — the robot ignores this command over the cloud/MQTT connection
+    this integration uses, so the service currently raises an error (see GitHub
+    issue #200). The wire format is confirmed and retained for a future BLE
+    transport. The password is sensitive and is never logged by the integration.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    ssid:
+      name: SSID
+      description: Wi-Fi network name.
+      required: true
+      example: "MyNetwork"
+      selector:
+        text:
+    password:
+      name: Password
+      description: Wi-Fi password (8-63 chars, or leave empty for an open network).
+      example: "wifi-password"
+      selector:
+        text:
+          type: password
+
+
+bind_rtk:
+  name: Bind RTK base
+  description: >
+    Bind the mower to an RTK base station by its id (PbRobotConfig.rtkBind).
+    The id is printed on the base and shown on the app's Bind RTK screen.
+    Re-binding the current base is harmless; binding a different base changes
+    the positioning reference.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    base_id:
+      name: RTK base id
+      description: The RTK base station identifier (e.g. starts with "LK").
+      required: true
+      example: "LK000000000000"
+      selector:
+        text:
 
 set_network_priority:
   name: Set network priority
@@ -523,6 +621,31 @@ rename_zone:
       selector:
         text:
 
+rename_nogo_zone:
+  name: Rename no-go zone
+  description: >
+    Rename a no-go zone on the robot's map (USER_CTRL_MODIFY_ZONE_INFO,
+    targets PbMap.nogoZones instead of goZones).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    nogo_hash_id:
+      name: No-go zone hash ID
+      description: The 8-character hash ID of the no-go zone to rename.
+      required: true
+      example: "ngabcdef"
+      selector:
+        text:
+    name:
+      name: New name
+      description: The new no-go zone name.
+      required: true
+      example: "Flower bed"
+      selector:
+        text:
+
 clear_schedules:
   name: Clear schedules
   description: >
@@ -558,6 +681,99 @@ set_schedules:
       selector:
         object:
 
+add_schedule:
+  name: Add schedule
+  description: >
+    Add one mowing schedule, keeping the existing ones. The robot stores the
+    full list, so this re-sends every schedule plus the new entry (the existing
+    ones are preserved from cached state).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    hour:
+      name: Hour
+      description: Local hour (0-23) the mow should start.
+      required: true
+      example: 9
+      selector:
+        number: { min: 0, max: 23, step: 1, mode: box }
+    minute:
+      name: Minute
+      description: Local minute (0-59).
+      required: true
+      example: 30
+      selector:
+        number: { min: 0, max: 59, step: 1, mode: box }
+    day_of_week:
+      name: Days
+      description: Days to run (0-6 Sun-Sat, or names). Empty = every day.
+      example: [mon, wed, fri]
+      selector:
+        object:
+    zones:
+      name: Zones
+      description: List of go-zone hash IDs to mow.
+      example: ["wsmjco1T"]
+      selector:
+        object:
+    repeated:
+      name: Repeat weekly
+      description: Whether the schedule repeats every week (default true).
+      example: true
+      selector:
+        boolean:
+    disabled:
+      name: Start disabled
+      description: Create the schedule in the disabled state (default false).
+      example: false
+      selector:
+        boolean:
+
+delete_schedule:
+  name: Delete schedule
+  description: >
+    Delete one mowing schedule by its id (re-sends the remaining list). The id
+    is the value exposed in the Mow schedules sensor's attributes.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    id:
+      name: Schedule id
+      description: The id of the schedule to delete (from the schedules sensor).
+      required: true
+      example: 481098222
+      selector:
+        number: { min: 0, mode: box }
+
+toggle_schedule:
+  name: Enable/disable schedule
+  description: >
+    Enable or disable one mowing schedule by its id without deleting it
+    (re-sends the full list with that entry's disabled flag changed).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    id:
+      name: Schedule id
+      description: The id of the schedule to toggle (from the schedules sensor).
+      required: true
+      example: 481098222
+      selector:
+        number: { min: 0, mode: box }
+    disabled:
+      name: Disabled
+      description: true = disable the schedule, false = enable it.
+      required: true
+      example: true
+      selector:
+        boolean:
+
 update_zone_polygon:
   name: Update zone polygon
   description: >
@@ -584,6 +800,283 @@ update_zone_polygon:
       example: [{ x: 0.0, y: 0.0 }, { x: 5.0, y: 0.0 }, { x: 5.0, y: 4.0 }]
       selector:
         object:
+
+get_clean_history:
+  name: Get cleaning history
+  description: >
+    Return the paged cleaning-history list (most-recent first) as a response
+    object. Each entry has clean_area, clean_time, date (epoch seconds),
+    error_list, map_total_area, percent, soc_version, start_type,
+    status_times, used_battery, history_file, hash_id. The HA sensors only
+    surface the latest entry — use this service when automations need the
+    full list (e.g. "alert me if the last 3 mows failed").
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    page:
+      name: Page (0-based)
+      description: Pagination index (0 = most-recent page).
+      required: false
+      default: 0
+      example: 0
+      selector:
+        number: { min: 0, max: 100, step: 1, mode: box }
+    page_size:
+      name: Page size
+      description: Number of entries to return per page.
+      required: false
+      default: 15
+      example: 15
+      selector:
+        number: { min: 1, max: 100, step: 1, mode: box }
+
+update_channel_settings:
+  name: Update channel settings
+  description: >
+    Override mowing settings for one channel (cut height, channel lift) and
+    resync the map. Channels carry their settings directly on the PbChannel
+    record — no configBox sub-message — so only ``cut_height_mm`` and
+    ``channel_lift`` are exposed here. Resync is via sync_map (userCtrl=25).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    channel_hash_id:
+      name: Channel hash ID
+      description: The 8-character hash ID of the channel to update.
+      required: true
+      example: "ch000001"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height (mm)
+      description: Blade height while the robot traverses this channel.
+      required: false
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 5, unit_of_measurement: "mm" }
+    channel_lift:
+      name: Channel lift mode
+      description: >
+        Raise the omni-wheels on this channel? Per the app's Channel Deck
+        Height setting. 0=auto, 1=off, 2=on (values inferred from the wire
+        capture; refine after live correlation).
+      required: false
+      example: 0
+      selector:
+        number: { min: 0, max: 2, step: 1, mode: box }
+
+set_geofence:
+  name: Set anti-theft geofence
+  description: >
+    Set one anti-theft geofence region's centre, radius, and optional name in
+    one PATCH /update-device-feature call. Mirrors the Lymow app's Settings →
+    Anti-theft page (centre + radius slider + Save). The app supports multiple
+    regions navigated by `< >` arrows — pass `index` to pick which one. Each
+    parameter is optional; omitted ones keep their existing value, so the same
+    service can move the centre, resize the circle, or rename it independently.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    latitude:
+      name: Centre latitude
+      description: WGS-84 latitude of the geofence centre.
+      required: false
+      example: 51.5
+      selector:
+        number: { min: -90, max: 90, step: 0.000001, mode: box }
+    longitude:
+      name: Centre longitude
+      description: WGS-84 longitude of the geofence centre.
+      required: false
+      example: -0.12
+      selector:
+        number: { min: -180, max: 180, step: 0.000001, mode: box }
+    radius_m:
+      name: Radius (m)
+      description: Geofence radius in metres (10–500).
+      required: false
+      example: 150
+      selector:
+        number: { min: 10, max: 500, step: 5, unit_of_measurement: "m" }
+    name:
+      name: Name
+      description: Optional display name for the geofence.
+      required: false
+      example: "Backyard"
+      selector:
+        text:
+    index:
+      name: Region index
+      description: >
+        Which geofence region to mutate (0 = first; defaults to 0). Pass an
+        index equal to the current region count to append a new region.
+      required: false
+      example: 0
+      selector:
+        number: { min: 0, max: 9, step: 1, mode: box }
+
+set_zone_config:
+  name: Set per-zone mowing config
+  description: >
+    Override mowing settings for a single zone (USER_CTRL_MODIFY_ZONE_INFO with
+    a per-zone PbZoneConfig — the app's Mowing Settings → Customize tab path).
+    Only the parameters you provide are sent. Bandwidth-efficient alternative
+    to lymow.update_zone_cut_height (which re-sends the whole map). Cut height
+    is millimetres; move speed is m/s; other values are robot units. Wire
+    format byte-equal to the app's BLE write (live capture 2026-05-27).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone to update.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    is_enabled:
+      name: Is enabled
+      description: Optional — set the zone's enabled flag in the same write.
+      required: false
+      example: true
+      selector:
+        boolean:
+    cut_height:
+      name: Cut height (mm)
+      description: Blade height for this zone (20–100 mm).
+      required: false
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 5, unit_of_measurement: "mm" }
+    move_speed:
+      name: Move speed (m/s)
+      description: Robot drive speed within this zone.
+      required: false
+      example: 0.6
+      selector:
+        number: { min: 0.1, max: 1.5, step: 0.05 }
+    path_spacing:
+      name: Path spacing
+      description: Spacing between mowing passes (robot units).
+      required: false
+      example: 25
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+    perimeter_mow_laps:
+      name: Perimeter laps
+      description: Number of perimeter (edge) mowing laps for this zone.
+      required: false
+      example: 1
+      selector:
+        number: { min: 0, max: 5, step: 1, mode: box }
+    perimeter_mow_dir:
+      name: Perimeter direction
+      description: Perimeter mowing direction code.
+      required: false
+      example: 0
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    nogo_mow_laps:
+      name: No-go laps
+      description: Number of laps around no-go zones inside this zone.
+      required: false
+      example: 1
+      selector:
+        number: { min: 0, max: 5, step: 1, mode: box }
+    cut_speed:
+      name: Cut speed
+      description: Cutting blade speed (robot units).
+      required: false
+      example: 100
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+    brush_speed:
+      name: Brush speed
+      description: Brush motor speed (robot units).
+      required: false
+      example: 100
+      selector:
+        number: { min: 0, max: 1000, step: 1, mode: box }
+    obs_dec_mode:
+      name: Obstacle detection mode
+      description: 0=off, 1=slow, 2=detour.
+      required: false
+      example: 2
+      selector:
+        number: { min: 0, max: 2, step: 1, mode: box }
+    clean_mode:
+      name: Clean mode
+      description: 0=parallel, 1=spiral, 2=random (robot interprets).
+      required: false
+      example: 0
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    path_order:
+      name: Path order (reverse)
+      description: false = normal, true = reverse path direction.
+      required: false
+      example: false
+      selector:
+        boolean:
+    line_follow_mode:
+      name: Line follow mode
+      description: When true, edges follow the boundary line precisely.
+      required: false
+      example: false
+      selector:
+        boolean:
+    raise_cut_height:
+      name: Raise cut height (trigger)
+      description: Pulse trigger to raise the cut height incrementally.
+      required: false
+      example: false
+      selector:
+        boolean:
+    lower_cut_height:
+      name: Lower cut height (trigger)
+      description: Pulse trigger to lower the cut height incrementally.
+      required: false
+      example: false
+      selector:
+        boolean:
+
+update_zone_cut_height:
+  name: Update zone cut height
+  description: >
+    Change one go-zone's cut height (mm) and push the updated map back to the
+    robot (USER_CTRL_SYNC_MAP). Other zones, polygons, and global settings are
+    left untouched.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone whose cut height to change.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height (mm)
+      description: Blade height in millimetres (20–100).
+      required: true
+      example: 40
+      selector:
+        number:
+          min: 20
+          max: 100
+          step: 5
+          unit_of_measurement: "mm"
 
 add_zone:
   name: Add zone
@@ -735,6 +1228,184 @@ pin_and_go:
       example: "Spot"
       selector:
         text:
+
+rename_channel:
+  name: Rename channel
+  description: >
+    Assign a display name to a channel. Channel names have no protobuf field on
+    the robot, so the name is stored HA-side and re-applied on each map update.
+    The map card also persists names in localStorage for browser-side continuity.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    channel_hash_id:
+      name: Channel hash ID
+      description: The 8-character hash ID of the channel to rename.
+      required: true
+      example: "a1b2c3d4"
+      selector:
+        text:
+    name:
+      name: New name
+      description: The display name for the channel.
+      required: true
+      example: "Back passage"
+      selector:
+        text:
+
+add_nogo_zone:
+  name: Add no-go zone
+  description: >
+    Create a new no-go zone from a polygon and push it to the robot's map
+    (USER_CTRL_SYNC_MAP). Points are in the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    polygon:
+      name: Polygon
+      description: Ordered list of at least 3 {x, y} vertices in metres (local ENU frame).
+      required: true
+      example: [{ x: 1.0, y: 1.0 }, { x: 3.0, y: 1.0 }, { x: 3.0, y: 3.0 }]
+      selector:
+        object:
+    parent_zone_hash_id:
+      name: Parent zone hash ID
+      description: Hash ID of the go-zone this no-go zone belongs to. Empty string for top-level.
+      required: false
+      default: ""
+      example: "wsmjco1T"
+      selector:
+        text:
+
+add_channel:
+  name: Add channel
+  description: >
+    Create a new mowing channel connecting two zones and push it to the robot's
+    map (USER_CTRL_SYNC_MAP). The channel is defined by at least 2 path points in
+    the robot's local ENU frame (metres).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    polygon:
+      name: Path points
+      description: Ordered list of at least 2 {x, y} points in metres (local ENU frame).
+      required: true
+      example: [{ x: 0.0, y: 5.0 }, { x: 10.0, y: 5.0 }]
+      selector:
+        object:
+    zone1_hash_id:
+      name: Zone 1 hash ID
+      description: Hash ID of the first zone the channel connects. Empty string if not connected.
+      required: false
+      default: ""
+      example: "wsmjco1T"
+      selector:
+        text:
+    zone2_hash_id:
+      name: Zone 2 hash ID
+      description: Hash ID of the second zone the channel connects. Empty string if not connected.
+      required: false
+      default: ""
+      example: "KX1kGyat"
+      selector:
+        text:
+    cut_height_mm:
+      name: Cut height
+      description: Cutting height for the channel, in millimetres.
+      required: false
+      default: 40
+      example: 40
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: mm, mode: box }
+
+update_nogo_polygon:
+  name: Update no-go zone polygon
+  description: >
+    Replace a no-go zone's outline with a new polygon (USER_CTRL_SYNC_MAP). Points
+    are in the robot's local ENU frame (metres). Used by the map card's editor.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    nogo_hash_id:
+      name: No-go zone hash ID
+      description: The 8-character hash ID of the no-go zone to reshape.
+      required: true
+      example: "ngabcdef"
+      selector:
+        text:
+    polygon:
+      name: Polygon
+      description: Ordered list of at least 3 {x, y} vertices in metres (local ENU frame).
+      required: true
+      example: [{ x: 1.0, y: 1.0 }, { x: 3.0, y: 1.0 }, { x: 3.0, y: 3.0 }]
+      selector:
+        object:
+
+set_zone_enabled:
+  name: Enable/disable zone
+  description: >
+    Enable or disable a go-zone. Disabled zones are skipped during autonomous
+    mowing but remain on the map (USER_CTRL_SYNC_MAP).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: The 8-character hash ID of the go-zone to enable or disable.
+      required: true
+      example: "wsmjco1T"
+      selector:
+        text:
+    is_enabled:
+      name: Enabled
+      description: Set to true to enable the zone, false to disable it.
+      required: true
+      example: true
+      selector:
+        boolean:
+
+move_charging_station:
+  name: Move charging station
+  description: >
+    Relocate the charging station marker on the robot's map. Coordinates are in
+    the robot's local ENU frame (metres). Called by the map card's drag-to-relocate
+    feature (USER_CTRL_MOVE_CHARGING_STATION).
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    x:
+      name: X
+      description: New X coordinate in metres (local ENU frame).
+      required: true
+      example: 0.5
+      selector:
+        number: { min: -1000, max: 1000, step: 0.01, mode: box }
+    y:
+      name: Y
+      description: New Y coordinate in metres (local ENU frame).
+      required: true
+      example: 1.2
+      selector:
+        number: { min: -1000, max: 1000, step: 0.01, mode: box }
+    theta:
+      name: Heading (radians)
+      description: Optional orientation of the station in radians (0 = East).
+      required: false
+      example: 0.0
+      selector:
+        number: { min: -3.14159, max: 3.14159, step: 0.01, mode: box }
 
 resume:
   name: Resume mowing

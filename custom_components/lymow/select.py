@@ -81,10 +81,13 @@ class _DeviceSettingsSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
     def current_option(self) -> str | None:
         tc = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData", {}).get("taskConfig") or {}
         value = tc.get(self._wire_key)
-        # Untrusted wire data: only known enum codes map to a label; anything
-        # else (None before first poll, a future firmware enum, or a non-int)
-        # shows as unknown rather than silently picking option 0.
-        if not isinstance(value, int):
+        # Proto3: an absent field equals its default (enum 0), so a robot that
+        # never changed this setting off-default resolves to option 0 rather
+        # than unknown. A present-but-unknown enum code (future firmware) or a
+        # non-int still shows as unknown — we won't invent a label for it.
+        if value is None:
+            value = 0
+        elif not isinstance(value, int):
             return None
         return self._value_to_label.get(value)
 

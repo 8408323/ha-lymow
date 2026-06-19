@@ -116,6 +116,21 @@ class LymowBleController:
             finally:
                 await self._write_frame(client, 0.0, 0.0)
 
+    async def async_write_once(self, payload: bytes) -> None:
+        """Write a single raw payload to the drive characteristic and disconnect.
+
+        Used for one-shot commands (e.g. Wi-Fi provisioning) that don't need
+        the persistent connection kept alive by async_drive_for.  The connection
+        is torn down after the write so it doesn't interfere with a subsequent
+        drive session.
+        """
+        async with self._lock:
+            client = await self._connected_client()
+            await client.write_gatt_char(BLE_DRIVE_CHARACTERISTIC_UUID, payload, response=False)
+            # Disconnect immediately — one-shot writes should not keep the link open.
+            self._client = None
+            await client.disconnect()
+
     async def async_disconnect(self) -> None:
         async with self._lock:
             client = self._client

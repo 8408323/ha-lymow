@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from datetime import UTC, datetime, timedelta
@@ -9,12 +10,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
 from .bluetooth import LymowBleController
 from .const import (
+    AUTH_REFRESH_MARGIN_SECONDS,
     DOMAIN,
     POLLING_INTERVAL,
     USER_CTRL_CLEAN,
@@ -26,7 +28,6 @@ from .const import (
     USER_CTRL_QUERY_CLEANING_SUMMARY,
     USER_CTRL_QUERY_NET_DETAIL,
     USER_CTRL_QUERY_PATH,
-    USER_CTRL_QUERY_ROBOT_CONFIG,
     USER_CTRL_QUERY_RTK_DIAGNOSTIC_L1,
     USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2,
     USER_CTRL_QUERY_RUN_TIME_CONFIG,
@@ -46,6 +47,7 @@ from .mqtt import LymowMqttClient
 from .protocol import (
     encode_delete_zone,
     encode_query_map,
+    encode_query_robot_config,
     encode_query_schedules,
     encode_start_zones,
     encode_sync_map,
@@ -53,6 +55,44 @@ from .protocol import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Proto3 omits scalar fields that equal their type default, so a config the
+# robot has never changed off-default simply never appears on the wire. Decoding
+# is therefore incomplete: an absent field *is* its default. We fill those
+# defaults into the merged state so settings entities show the real value (a
+# muted volume = 0, a select on its 0th option) instead of "unknown". Real wire
+# values always win — these only backfill keys the robot didn't send.
+_ROBOT_CONFIG_DEFAULTS: dict[str, Any] = {
+    "audioVolume": 0,
+    "metric_4g": False,
+    "isOpenLed": False,
+    "dockOnError": False,
+}
+_RR_CONFIG_DEFAULTS: dict[str, Any] = {"enable": False, "rechargeBat": 0, "resumeBat": 0}
+_TASK_CONFIG_DEFAULTS: dict[str, Any] = {
+    "chargingMode": 0,
+    "zoneOrder": 0,
+    "rainCleaning": False,
+    "disableChargingPark": False,
+}
+
+
+def _is_device_online(merged: dict[str, Any]) -> bool:
+    """True if the robot is online per either the MQTT notify-app flag or the
+    REST device-info ``deviceState`` (the latter is the only signal available
+    when the robot was already online before HA started — no transition fires)."""
+    return bool(merged.get("isOnline")) or str(merged.get("deviceState", "")).lower() == "online"
+
+
+def _apply_config_defaults(merged: dict[str, Any]) -> None:
+    """Backfill proto3 defaults for the robotConfig / taskConfig settings fields
+    in-place, so absent (default-valued) fields read as their default rather than
+    unknown. Real values already present are never overwritten."""
+    rc = {**_ROBOT_CONFIG_DEFAULTS, **(merged.get("robotConfig") or {})}
+    rc["rrConfig"] = {**_RR_CONFIG_DEFAULTS, **(rc.get("rrConfig") or {})}
+    merged["robotConfig"] = rc
+    map_data = merged.get("mapData") or {}
+    merged["mapData"] = {**map_data, "taskConfig": {**_TASK_CONFIG_DEFAULTS, **(map_data.get("taskConfig") or {})}}
 
 
 def build_schedule_entries(
@@ -111,6 +151,45 @@ def build_schedule_entries(
                 "moveSpeed": 0.6,
                 "pathSpacing": 90,
             }
+        entries.append(entry)
+    return entries
+
+
+def _wire_entries_from_cached(schedules: list[dict[str, Any]], map_data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Rebuild ``encode_set_schedules`` wire entries from cached decoded schedules.
+
+    The decoded ``schedules`` already hold UTC ``hour``/``minute``, ``id`` and
+    ``timeZone``; only the per-zone point/name (dropped on decode) is re-looked-up
+    from cached map data. Used by the granular add/delete/toggle ops, which must
+    re-send the full list (schedule writes are full-list replacements) without
+    re-running the local->UTC conversion on the entries that aren't changing.
+    """
+    zones_by_id = {z.get("hashId"): z for z in map_data.get("goZones", [])}
+    entries: list[dict[str, Any]] = []
+    for s in schedules:
+        zinfos: list[dict[str, Any]] = []
+        for hid in s.get("zones", []):
+            zone = zones_by_id.get(hid, {})
+            point = zone.get("innerPoint") or zone.get("boundMin") or {"x": 0.0, "y": 0.0}
+            zinfos.append(
+                {
+                    "hashId": hid,
+                    "name": zone.get("name", ""),
+                    "point": {"x": point.get("x", 0.0), "y": point.get("y", 0.0)},
+                }
+            )
+        entry: dict[str, Any] = {
+            "dayOfWeek": list(s.get("dayOfWeek", [])),
+            "hour": int(s.get("hour", 0)),
+            "minute": int(s.get("minute", 0)),
+            "isRepeated": bool(s.get("isRepeated")),
+            "isDisabled": bool(s.get("isDisabled")),
+            "zones": zinfos,
+        }
+        if s.get("id") is not None:
+            entry["id"] = int(s["id"])
+        if s.get("timeZone") is not None:
+            entry["timeZone"] = int(s["timeZone"])
         entries.append(entry)
     return entries
 
@@ -192,6 +271,33 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._last_ota_check: dict[str, datetime] = {}
         # Lazily-created BLE manual-drive transport, reused across drive calls.
         self._ble_controller: LymowBleController | None = None
+        # Tracks devices that already had startup queries (robotConfig + map)
+        # fired. Without this, restarting HA while the robot is already online
+        # never triggers on_mqtt_online, so robotConfig/taskConfig stay unknown.
+        self._startup_queried: set[str] = set()
+        # Channel names have no protobuf field — store HA-side so renames survive
+        # MQTT polls. Keyed by thing_name → {hashId → name}. Lost on HA restart;
+        # the card's localStorage covers the browser-side persistence gap.
+        self._channel_name_overrides: dict[str, dict[str, str]] = {}
+        # Track whether a path-query task is already scheduled so we don't flood
+        # the robot with QUERY_PATH commands while mowing.
+        self._path_poll_pending: dict[str, bool] = {}
+        # Last non-empty pathData per device — persisted in memory so the map
+        # card can still show mow coverage after the robot docks (the robot stops
+        # sending path data once docked, but the last session's track is useful).
+        self._last_path_data: dict[str, dict] = {}
+        # Auth-refresh state, populated by set_auth_context() at setup. When the
+        # auth object is None (unit tests), refresh is a no-op. Cognito access
+        # tokens and the derived AWS credentials both expire; without refreshing
+        # them every REST poll eventually 401s and all entities go unavailable.
+        self._auth: Any | None = None
+        self._username: str | None = None
+        self._password: str | None = None
+        self._region: str | None = None
+        self._refresh_token: str | None = None
+        self._id_token: str | None = None
+        self._token_expiry: datetime | None = None
+        self._aws_creds_expiry: datetime | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -240,6 +346,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Receive a state update from MQTT and push to HA."""
         # A QUERY_SCHEDULES reply carries the full schedule list in one message
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
+        if "mapData" in patch:
+            patch = self._apply_channel_name_overrides(thing_name, patch)
+        # Cache non-empty pathData so the map card can show last-mow coverage
+        # even after the robot docks (robot stops sending path data when docked).
+        if "pathData" in patch and patch["pathData"].get("goZones"):
+            self._last_path_data[thing_name] = patch["pathData"]
+        # If this patch has no pathData but we have a cached one, inject it so
+        # the sensor attribute stays populated until next mow clears/replaces it.
+        if "pathData" not in patch and thing_name in self._last_path_data:
+            patch = {**patch, "pathData": self._last_path_data[thing_name]}
         merged_patch = self._merge_nested_patch(self._mqtt_state.setdefault(thing_name, {}), patch)
         self._mqtt_state[thing_name].update(merged_patch)
         if self.data and thing_name in self.data:
@@ -249,6 +365,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
+
+    def _apply_channel_name_overrides(self, thing_name: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Re-apply HA-side channel name overrides to a mapData patch before storing."""
+        overrides = self._channel_name_overrides.get(thing_name)
+        if not overrides:
+            return patch
+        map_data = patch["mapData"]
+        channels = map_data.get("channels", [])
+        new_channels = [
+            {**ch, "name": overrides[ch["hashId"]]} if ch.get("hashId") in overrides else ch for ch in channels
+        ]
+        return {**patch, "mapData": {**map_data, "channels": new_channels}}
 
     def _merge_nested_patch(self, existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
         """Return a copy of patch where each ``_DEEP_MERGE_KEYS`` dict is overlaid
@@ -308,6 +436,22 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 title=f"Lymow — {device_label} done",
                 notification_id=f"{DOMAIN}_{thing_name}_done",
             )
+            # PbMap.f8 taskConfig (rainy_mowing, charging_handbrake, zone_order,
+            # return_to_dock_route) is only present in docked-state map responses.
+            # Re-query now so those switches populate after every mow session.
+            self.hass.async_create_task(self.async_query_map(thing_name))
+
+        # Clear stale path cache when a new mow session starts (docked/waiting → mowing).
+        # Without this the previous session's completed track masks current progress.
+        if new_ws in WORK_STATUS_MOWING_GROUP and prev_ws not in WORK_STATUS_MOWING_GROUP:
+            self._last_path_data.pop(thing_name, None)
+
+        # Auto-query mow path while actively mowing (≤ once per 30 s).
+        # Fires on any workStatus update when the robot is in a mowing state,
+        # but only schedules a new task if one isn't already waiting.
+        if new_ws in WORK_STATUS_MOWING_GROUP and not self._path_poll_pending.get(thing_name):
+            self._path_poll_pending[thing_name] = True
+            self.hass.async_create_task(self._async_poll_path(thing_name))
 
     def _check_rtk_guard(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Auto-pause when RTK falls below user-configured threshold; auto-resume when it recovers.
@@ -382,9 +526,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self.on_mqtt_state(thing_name, patch)
         prev_online = self._prev_online.get(thing_name)
         self._prev_online[thing_name] = is_online
-        # Fire the offline notification only on a True/None → False transition.
-        # Consecutive offline messages (or repeated assertions of the same state)
-        # would otherwise re-create a dismissed notification on every broker push.
+        if is_online:
+            # Robot just came online — query both robotConfig and the map so all
+            # entity state populates without the user needing to call services.
+            # query_robot_config → PbOutput.f17 → vehicle_led, prefer_4g, auto_dock…
+            # query_map → PbMap.f8 taskConfig → rainy_mowing, charging_handbrake,
+            #             zone_order, return_to_dock_route
+            self.hass.async_create_task(self.async_query_robot_config(thing_name))
+            self.hass.async_create_task(self.async_query_map(thing_name))
+        # Fire the offline notification only on a True/None → False transition so
+        # consecutive offline pushes don't re-create a dismissed notification.
         if not is_online and prev_online is not False:
             device_label = next(
                 (
@@ -401,10 +552,94 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             )
 
     # ------------------------------------------------------------------
+    # Auth refresh
+    # ------------------------------------------------------------------
+
+    def set_auth_context(
+        self,
+        auth: Any,
+        username: str,
+        password: str,
+        region: str,
+        tokens: dict[str, Any],
+        creds: dict[str, Any],
+    ) -> None:
+        """Hand the coordinator everything it needs to keep credentials fresh.
+
+        ``tokens`` is the Cognito AuthenticationResult (AccessToken / IdToken /
+        RefreshToken / ExpiresIn); ``creds`` is the get_aws_credentials() result
+        (its ``credentials.Expiration`` dates the temporary AWS keys)."""
+        self._auth = auth
+        self._username = username
+        self._password = password
+        self._region = region
+        self._refresh_token = tokens.get("RefreshToken")
+        self._id_token = tokens.get("IdToken")
+        self._token_expiry = self._expiry_from_expires_in(tokens.get("ExpiresIn"))
+        self._aws_creds_expiry = self._expiry_from_timestamp(creds.get("credentials", {}).get("Expiration"))
+
+    @staticmethod
+    def _expiry_from_expires_in(expires_in: Any) -> datetime:
+        seconds = int(expires_in) if isinstance(expires_in, (int, float)) else 3600
+        return datetime.now(UTC) + timedelta(seconds=seconds)
+
+    @staticmethod
+    def _expiry_from_timestamp(expiration: Any) -> datetime:
+        """AWS returns Expiration as a Unix epoch (number) or an ISO/datetime."""
+        if isinstance(expiration, datetime):
+            return expiration if expiration.tzinfo else expiration.replace(tzinfo=UTC)
+        if isinstance(expiration, (int, float)):
+            return datetime.fromtimestamp(expiration, tz=UTC)
+        # Unknown/absent → treat as already due so we refresh on the next poll.
+        return datetime.now(UTC)
+
+    async def _async_ensure_auth(self) -> None:
+        """Refresh Cognito tokens and/or AWS credentials before they expire.
+
+        No-op when auth context wasn't provided (unit tests). Token refresh uses
+        the RefreshToken, falling back to a full SRP re-login with stored creds;
+        if both fail it raises ConfigEntryAuthFailed so HA surfaces a reauth."""
+        if self._auth is None:
+            return
+        now = datetime.now(UTC)
+        margin = timedelta(seconds=AUTH_REFRESH_MARGIN_SECONDS)
+        token_due = self._token_expiry is None or now >= self._token_expiry - margin
+        creds_due = self._aws_creds_expiry is None or now >= self._aws_creds_expiry - margin
+        if not token_due and not creds_due:
+            return
+
+        if token_due:
+            await self._async_refresh_tokens(now)
+            creds_due = True  # the new id token requires fresh AWS credentials
+        if creds_due:
+            await self._async_refresh_aws_credentials()
+
+    async def _async_refresh_tokens(self, now: datetime) -> None:
+        try:
+            result = await self._auth.refresh_tokens(self._refresh_token, self._region)
+        except Exception as refresh_err:  # noqa: BLE001
+            _LOGGER.debug("Lymow token refresh failed, falling back to re-login: %s", refresh_err)
+            try:
+                result = await self._auth.login_region(self._username, self._password, self._region)
+            except Exception as login_err:
+                raise ConfigEntryAuthFailed("Lymow re-authentication failed") from login_err
+            self._refresh_token = result.get("RefreshToken") or self._refresh_token
+        self._client.update_tokens(result["AccessToken"])
+        self._id_token = result.get("IdToken", self._id_token)
+        self._token_expiry = self._expiry_from_expires_in(result.get("ExpiresIn"))
+
+    async def _async_refresh_aws_credentials(self) -> None:
+        creds = await self._auth.get_aws_credentials(self._id_token, self._region)
+        aws = creds["credentials"]
+        self._client.update_aws_credentials(aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"))
+        self._aws_creds_expiry = self._expiry_from_timestamp(aws.get("Expiration"))
+
+    # ------------------------------------------------------------------
     # REST polling
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+        await self._async_ensure_auth()
         try:
             result: dict[str, dict[str, Any]] = {}
             for device in self.devices:
@@ -429,7 +664,20 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     **self._ota_state.get(thing, {}),
                     **self._mqtt_state.get(thing, {}),
                 }
+                _apply_config_defaults(merged)
                 result[thing] = merged
+                # Fire robotConfig + map queries once per HA session so
+                # switch entities (vehicle_led, rainy_mowing, etc.) populate
+                # even when the robot was already online before HA started.
+                # Gate on REST deviceState too: a robot already online at HA
+                # start sends no notify-app transition, so isOnline stays unset
+                # and the config query would otherwise never fire. Require MQTT
+                # connected — the first poll runs during setup before connect, and
+                # a command published then is silently dropped.
+                if thing not in self._startup_queried and _is_device_online(merged) and self._mqtt.is_connected:
+                    self._startup_queried.add(thing)
+                    self.hass.async_create_task(self.async_query_robot_config(thing))
+                    self.hass.async_create_task(self.async_query_map(thing))
             return result
         except Exception as err:
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
@@ -632,18 +880,58 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
 
     async def async_sync_map(self, thing_name: str, map_data: dict) -> None:
-        """Push an edited map to the robot via SYNC_MAP command."""
+        """Push an edited map to the robot via SYNC_MAP command and update coordinator data."""
         await self._mqtt.async_publish_command(thing_name, encode_sync_map(map_data))
+        if self.data and thing_name in self.data:
+            new_device = {**self.data[thing_name], "mapData": map_data}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
+        # Robot does not re-broadcast map on pboutput after SYNC_MAP; query forces it to,
+        # so the Lymow app (which listens on pboutput) picks up the updated map.
+        await self.async_query_map(thing_name)
 
     async def async_delete_zone(self, thing_name: str, hash_id: str) -> None:
         """Delete a go-zone by hashId using USER_CTRL_CLEAR_ZONE=8."""
         await self._mqtt.async_publish_command(thing_name, encode_delete_zone(hash_id))
+        # Mirror nogo/channel delete: re-query so the lovelace card stops showing the deleted zone.
+        await self.async_query_map(thing_name)
 
     async def async_rename_zone(self, thing_name: str, hash_id: str, name: str) -> None:
         """Rename a go-zone by hashId using USER_CTRL_MODIFY_ZONE_INFO=9."""
         from .protocol import encode_rename_zone
 
         await self._mqtt.async_publish_command(thing_name, encode_rename_zone(hash_id, name))
+        if self.data and thing_name in self.data:
+            map_data = self.data[thing_name].get("mapData", {})
+            new_zones = [{**z, "name": name} if z.get("hashId") == hash_id else z for z in map_data.get("goZones", [])]
+            new_map = {**map_data, "goZones": new_zones}
+            new_device = {**self.data[thing_name], "mapData": new_map}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
+
+    async def async_rename_nogo_zone(self, thing_name: str, hash_id: str, name: str) -> None:
+        """Rename a no-go zone by hashId — mirrors async_rename_zone but targets PbMap.nogoZones."""
+        from .protocol import encode_rename_nogo_zone
+
+        await self._mqtt.async_publish_command(thing_name, encode_rename_nogo_zone(hash_id, name))
+        if self.data and thing_name in self.data:
+            map_data = self.data[thing_name].get("mapData", {})
+            new_zones = [
+                {**z, "name": name} if z.get("hashId") == hash_id else z for z in map_data.get("nogoZones", [])
+            ]
+            new_map = {**map_data, "nogoZones": new_zones}
+            new_device = {**self.data[thing_name], "mapData": new_map}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
+
+    async def async_rename_channel(self, thing_name: str, hash_id: str, name: str) -> None:
+        """Assign a display name to a channel (HA-side only; no protobuf name field)."""
+        self._channel_name_overrides.setdefault(thing_name, {})[hash_id] = name
+        if self.data and thing_name in self.data:
+            map_data = self.data[thing_name].get("mapData", {})
+            new_channels = [
+                {**ch, "name": name} if ch.get("hashId") == hash_id else ch for ch in map_data.get("channels", [])
+            ]
+            new_map = {**map_data, "channels": new_channels}
+            new_device = {**self.data[thing_name], "mapData": new_map}
+            self.async_set_updated_data({**self.data, thing_name: new_device})
 
     async def async_delete_channel(self, thing_name: str, hash_id: str) -> None:
         """Delete a channel by hashId (USER_CTRL_DELETE_CHANNEL), then refresh the map."""
@@ -671,6 +959,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Request map data for every registered device."""
         for device in self.devices:
             await self.async_query_map(device["deviceThingName"])
+
+    async def async_query_all_robot_configs(self) -> None:
+        """Request robotConfig for every device (call once MQTT is connected).
+
+        Marks each device queried so the per-poll startup gate doesn't fire a
+        duplicate. The offline-then-online case is still covered independently by
+        ``on_mqtt_online``, which re-queries on the notify-app transition."""
+        for device in self.devices:
+            thing = device["deviceThingName"]
+            self._startup_queried.add(thing)
+            await self.async_query_robot_config(thing)
 
     async def async_query_schedules(self, thing_name: str) -> None:
         """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot.
@@ -717,16 +1016,78 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_set_schedules(entries))
         await self.async_query_schedules(thing_name)
 
-    async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:
-        """Set mowing task-config parameters (USER_CTRL_SET_TASK_CONFIG).
+    def _cached_schedules(self, thing_name: str) -> list[dict[str, Any]]:
+        return (self.data or {}).get(thing_name, {}).get("schedules") or []
 
-        Only the provided fields are sent; see :data:`protocol._ZONE_CONFIG_FIELDS`
-        for the supported names. **Wire-path mismatch (#157):** the names are
-        PbZoneConfig fields, but the encoder publishes them over the
-        PbTaskConfig wire path — the robot appears to silently ignore the
-        unknown fields. ``async_set_device_settings`` covers the actual
-        PbTaskConfig (Device Settings page) and per-zone cutting params are
-        already exposed through the SYNC_MAP-based Number entities.
+    async def async_add_schedule(
+        self,
+        thing_name: str,
+        *,
+        hour: int,
+        minute: int,
+        day_of_week: list[int],
+        zones: list[str],
+        is_repeated: bool = True,
+        is_disabled: bool = False,
+    ) -> None:
+        """Append one schedule, preserving the existing ones (full-list re-send).
+
+        ``hour``/``minute`` are local; the new entry is converted to UTC via
+        :func:`build_schedule_entries` while existing entries keep their cached
+        UTC values.
+        """
+        from .protocol import encode_set_schedules
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData") or {}
+        existing = _wire_entries_from_cached(self._cached_schedules(thing_name), map_data)
+        tz_name = getattr(self.hass.config, "time_zone", None) or "UTC"
+        now_local = datetime.now(ZoneInfo(tz_name))
+        new_spec = {
+            "hour": hour,
+            "minute": minute,
+            "dayOfWeek": day_of_week,
+            "zones": zones,
+            "isRepeated": is_repeated,
+            "isDisabled": is_disabled,
+        }
+        new_entries = build_schedule_entries([new_spec], map_data, now_local)
+        await self._mqtt.async_publish_command(thing_name, encode_set_schedules(existing + new_entries))
+        await self.async_query_schedules(thing_name)
+
+    async def async_delete_schedule(self, thing_name: str, schedule_id: int) -> None:
+        """Delete one schedule by id (re-sends the remaining list)."""
+        from .protocol import encode_clear_schedules, encode_set_schedules
+
+        cached = self._cached_schedules(thing_name)
+        remaining = [s for s in cached if s.get("id") != schedule_id]
+        if len(remaining) == len(cached):
+            raise HomeAssistantError(f"No schedule with id {schedule_id} to delete")
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData") or {}
+        entries = _wire_entries_from_cached(remaining, map_data)
+        pb = encode_set_schedules(entries) if entries else encode_clear_schedules()
+        await self._mqtt.async_publish_command(thing_name, pb)
+        await self.async_query_schedules(thing_name)
+
+    async def async_toggle_schedule(self, thing_name: str, schedule_id: int, *, disabled: bool) -> None:
+        """Enable/disable one schedule by id (re-sends the full list)."""
+        from .protocol import encode_set_schedules
+
+        cached = self._cached_schedules(thing_name)
+        if not any(s.get("id") == schedule_id for s in cached):
+            raise HomeAssistantError(f"No schedule with id {schedule_id} to toggle")
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData") or {}
+        entries = _wire_entries_from_cached(cached, map_data)
+        for entry, sched in zip(entries, cached):
+            if sched.get("id") == schedule_id:
+                entry["isDisabled"] = disabled
+        await self._mqtt.async_publish_command(thing_name, encode_set_schedules(entries))
+        await self.async_query_schedules(thing_name)
+
+    async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:
+        """Set global mowing settings (userCtrl=49 GLOBAL_SETTING, "Keep Custom").
+
+        Only the provided globalZoneConfig fields are sent; see
+        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
         """
         from .protocol import encode_set_task_config
 
@@ -761,29 +1122,52 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             ),
         )
 
-    async def async_set_night_mode(
+    async def async_set_headlight_schedule(
         self,
         thing_name: str,
         *,
-        open_time: tuple[int, int],
-        close_time: tuple[int, int],
         enable: bool,
+        start: tuple[int, int] | None = None,
+        end: tuple[int, int] | None = None,
     ) -> None:
-        """Publish a Headlight Mode (a.k.a. Night Mode) schedule write.
+        """Publish a Headlight Mode schedule write (PbRobotConfig f14/f15).
 
-        See :func:`protocol.encode_set_night_mode`. Mirrors what the app's
-        setNightMode (Hermes #9019) writes: openLedTime / closeLedTime on
-        PbRobotConfig, plus SIGNAL_TURN_OFF_CAMERA_LIGHT in the same message
-        when disabling. ``open_time`` and ``close_time`` are (hour, minute)
-        tuples and are required even when disabling — the app rewrites the
-        full schedule each press.
+        See :func:`protocol.encode_set_headlight_schedule`. ``start`` / ``end``
+        are (hour, minute) in UTC; both are required when ``enable`` is true.
         """
-        from .protocol import encode_set_night_mode
+        from .protocol import encode_set_headlight_schedule
 
         await self._mqtt.async_publish_command(
             thing_name,
-            encode_set_night_mode(open_time=open_time, close_time=close_time, enable=enable),
+            encode_set_headlight_schedule(enable=enable, start=start, end=end),
         )
+
+    async def async_set_pin(self, thing_name: str, pin: str) -> None:
+        """Set the mower's 4-digit LCD-screen PIN. The value is never logged."""
+        from .protocol import encode_set_pin
+
+        await self._mqtt.async_publish_command(thing_name, encode_set_pin(pin))
+
+    async def async_bind_rtk(self, thing_name: str, base_id: str) -> None:
+        """Bind the mower to an RTK base station by id (PbRobotConfig.rtkBind)."""
+        from .protocol import encode_bind_rtk
+
+        await self._mqtt.async_publish_command(thing_name, encode_bind_rtk(base_id))
+
+    async def async_set_wifi(self, address: str, ssid: str, password: str) -> None:
+        """Provision the mower's Wi-Fi over BLE.
+
+        Sends PbInput{f17:{f1:ssid, f2:password, f5:3}} base64-encoded to the
+        drive characteristic.  Uses a fresh BLE controller (not the shared drive
+        one) so a running drive session is not interrupted.  Creds never logged.
+        """
+        import base64
+
+        from .protocol import encode_set_wifi
+
+        payload = base64.b64encode(encode_set_wifi(ssid, password))
+        controller = LymowBleController(address)
+        await controller.async_write_once(payload)
 
     async def async_set_robot_config(self, thing_name: str, **fields: Any) -> None:
         """Set PbRobotConfig fields on the robot — currently just network priority.
@@ -796,6 +1180,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         from .protocol import encode_set_robot_config
 
         await self._mqtt.async_publish_command(thing_name, encode_set_robot_config(**fields))
+
+    async def async_find_my_robot_play_sound(self, thing_name: str, volume: int = 100) -> None:
+        """Trigger the app's "Find My Robot → Play Sound" beacon.
+
+        Sends ``PbInput {f13.audioVolume=volume, f16=1}`` — the f16 trigger fires
+        a one-shot locate beep on the robot. Volume defaults to 100 (max) to
+        match the app. Wire format captured live 2026-05-27.
+        """
+        from .protocol import encode_find_my_robot_play_sound
+
+        await self._mqtt.async_publish_command(thing_name, encode_find_my_robot_play_sound(volume))
 
     async def async_sync_timezone(self, thing_name: str, offset_seconds: int) -> None:
         """Push a timezone offset (seconds east of UTC) to the robot.
@@ -833,6 +1228,24 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 charging_handbrake=charging_handbrake,
             ),
         )
+        # Optimistic update: the robot never echoes PbTaskConfig via MQTT, so
+        # we write the new wire values into coordinator data immediately so
+        # HA switches reflect the change without staying "unknown" forever.
+        if self.data and thing_name in self.data:
+            updates: dict[str, Any] = {}
+            if rainy_mowing is not None:
+                updates["rainCleaning"] = rainy_mowing
+            if charging_handbrake is not None:
+                updates["disableChargingPark"] = not charging_handbrake  # inverted: UI→wire
+            if zone_order is not None:
+                updates["zoneOrder"] = zone_order
+            if charging_mode is not None:
+                updates["chargingMode"] = charging_mode
+            if updates:
+                existing = self.data[thing_name]
+                map_data = {**existing.get("mapData", {})}
+                map_data["taskConfig"] = {**map_data.get("taskConfig", {}), **updates}
+                self.async_set_updated_data({**self.data, thing_name: {**existing, "mapData": map_data}})
 
     async def async_set_run_time_config(self, thing_name: str, **fields: Any) -> None:
         """Set run-time config parameters (USER_CTRL_SET_RUN_TIME_CONFIG).
@@ -873,10 +1286,30 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_CLEANING_SUMMARY)
 
     async def async_query_robot_config(self, thing_name: str) -> None:
-        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_ROBOT_CONFIG)
+        # Robot requires PbInput.f9={f10=1} format, not plain userCtrl=35.
+        await self._mqtt.async_publish_command(thing_name, encode_query_robot_config())
 
     async def async_query_path(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+
+    async def _async_poll_path(self, thing_name: str) -> None:
+        """Poll QUERY_PATH every 30 s while the robot is mowing.
+
+        The pending flag gates entry so workStatus ticks don't pile up requests.
+        After each query-and-sleep cycle we re-schedule only if the robot is still
+        in a mowing state, giving a clean 30 s cadence with no drift.
+        """
+        try:
+            await asyncio.sleep(2)  # brief delay so robot finishes the current strip
+            await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+            await asyncio.sleep(28)  # rest of the 30 s window
+            # If still mowing, kick off the next cycle immediately
+            ws = (self.data or {}).get(thing_name, {}).get("workStatus")
+            if ws in WORK_STATUS_MOWING_GROUP:
+                self.hass.async_create_task(self._async_poll_path(thing_name))
+                return  # keep pending=True for the new task
+        finally:
+            self._path_poll_pending[thing_name] = False
 
     async def async_query_channels(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_CHANNELS)
@@ -908,6 +1341,85 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             if z.get("hashId") == hash_id:
                 z["cutHeight"] = mm
                 break
+        await self.async_sync_map(thing_name, updated)
+
+    async def async_set_zone_config(self, thing_name: str, updates: list[dict[str, Any]]) -> None:
+        """Set per-zone PbZoneConfig overrides via userCtrl=9 (app's path).
+
+        Bandwidth-efficient alternative to ``async_update_zone_cut_height`` /
+        ``async_sync_map``: only the named zones + only the named config fields
+        are sent. Wire format byte-equal to the app's Mowing Settings →
+        Customize tab (BLE capture 2026-05-27, see BRANCH_STATUS reply 4).
+
+        Each ``updates`` entry: ``{"hashId": str, "isEnabled": bool=True,
+        ...PbZoneConfig fields}``. Re-queries the map after publish so the
+        local cache reflects the new values within one round-trip.
+        """
+        from .protocol import encode_set_zone_config
+
+        if not updates:
+            raise HomeAssistantError("set_zone_config: at least one zone update is required")
+        await self._mqtt.async_publish_command(thing_name, encode_set_zone_config(updates))
+        await self.async_query_map(thing_name)
+
+    async def async_get_clean_history(
+        self,
+        thing_name: str,
+        *,
+        page: int = 0,
+        page_size: int = 15,
+    ) -> list[dict[str, Any]]:
+        """Return the cleaning-history list (most-recent first) for templating.
+
+        The HA sensors only surface the *last* session's fields — automations
+        that want to walk the full history (e.g. "alert me if my last 3 mows
+        failed") need the raw list. Hits the same /get-clean-history-collect
+        REST endpoint as the periodic refresh.
+        """
+        try:
+            history = await self._client.get_clean_history(thing_name, page=page, page_size=page_size)
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(f"get_clean_history failed: {err}") from err
+        if not isinstance(history, dict):
+            return []
+        entries = history.get("clean_history")
+        if not isinstance(entries, list):
+            return []
+        return [e for e in entries if isinstance(e, dict)]
+
+    async def async_update_channel_settings(
+        self,
+        thing_name: str,
+        hash_id: str,
+        *,
+        cut_height_mm: int | None = None,
+        channel_lift: int | None = None,
+    ) -> None:
+        """Override mowing settings for a single channel and resync the map.
+
+        Channels carry their settings directly on the PbChannel record
+        (``cutHeight`` at f9, ``channelLift`` at f10) — there's no separate
+        configBox sub-message as there is for zones. We mutate the local
+        cache and resync via sync_map (userCtrl=25) — same proven path
+        ``async_update_zone_cut_height`` uses for zones.
+        """
+        import copy
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        updated = copy.deepcopy(map_data)
+        target = None
+        for ch in updated.get("channels", []):
+            if ch.get("hashId") == hash_id:
+                target = ch
+                break
+        if target is None:
+            raise HomeAssistantError(f"Channel {hash_id!r} not found in current map data")
+        if cut_height_mm is not None:
+            target["cutHeight"] = int(cut_height_mm)
+        if channel_lift is not None:
+            target["channelLift"] = int(channel_lift)
         await self.async_sync_map(thing_name, updated)
 
     async def async_update_zone_polygon(self, thing_name: str, hash_id: str, polygon: list[dict]) -> None:
@@ -946,6 +1458,53 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         existing_modified = updated.get("modifyHashs") or []
         if hash_id not in existing_modified:
             updated["modifyHashs"] = [*existing_modified, hash_id]
+        await self.async_sync_map(thing_name, updated)
+
+    async def async_update_nogo_polygon(self, thing_name: str, hash_id: str, polygon: list[dict]) -> None:
+        """Replace a no-go zone's polygon with the caller-supplied vertices and SYNC_MAP."""
+        import copy
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            raise HomeAssistantError(
+                f"Polygon needs at least 3 vertices, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
+            )
+        for pt in polygon:
+            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
+                raise HomeAssistantError("Polygon vertices must be dicts with 'x' and 'y' keys")
+        updated = copy.deepcopy(map_data)
+        target = None
+        for z in updated.get("nogoZones", []):
+            if z.get("hashId") == hash_id:
+                target = z
+                break
+        if target is None:
+            raise HomeAssistantError(f"No-go zone {hash_id!r} not found in map")
+        target["polygon"] = [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon]
+        existing_modified = updated.get("modifyHashs") or []
+        if hash_id not in existing_modified:
+            updated["modifyHashs"] = [*existing_modified, hash_id]
+        await self.async_sync_map(thing_name, updated)
+
+    async def async_move_charging_station(
+        self, thing_name: str, x: float, y: float, theta: float | None = None
+    ) -> None:
+        """Move the charging station to new ENU coordinates and SYNC_MAP."""
+        import copy
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        updated = copy.deepcopy(map_data)
+        existing = updated.get("chargingStation") or {}
+        updated["chargingStation"] = {
+            **existing,
+            "x": float(x),
+            "y": float(y),
+            "theta": float(theta) if theta is not None else existing.get("theta", 0.0),
+        }
         await self.async_sync_map(thing_name, updated)
 
     async def async_add_zone(
@@ -996,6 +1555,95 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self.async_sync_map(thing_name, updated)
         return new_hash_id
 
+    async def async_add_nogo_zone(
+        self,
+        thing_name: str,
+        polygon: list[dict],
+        parent_zone_hash_id: str = "",
+    ) -> str:
+        """Create a new no-go zone and push the map. Returns the new hashId."""
+        import copy
+        import secrets
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            raise HomeAssistantError(
+                f"Polygon needs at least 3 vertices, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
+            )
+        for pt in polygon:
+            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
+                raise HomeAssistantError("Polygon vertices must be dicts with 'x' and 'y' keys")
+        new_hash_id = secrets.token_hex(4)
+        existing_ids = {z.get("hashId") for z in map_data.get("goZones", [])} | {
+            z.get("hashId") for z in map_data.get("nogoZones", [])
+        }
+        while new_hash_id in existing_ids:
+            new_hash_id = secrets.token_hex(4)
+        updated = copy.deepcopy(map_data)
+        new_zone: dict[str, Any] = {
+            "hashId": new_hash_id,
+            "type": 0,
+            "isEnabled": True,
+            "polygon": [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon],
+        }
+        if parent_zone_hash_id:
+            new_zone["parentZoneHashId"] = parent_zone_hash_id
+        updated.setdefault("nogoZones", []).append(new_zone)
+        existing_modified = updated.get("modifyHashs") or []
+        updated["modifyHashs"] = [*existing_modified, new_hash_id]
+        await self.async_sync_map(thing_name, updated)
+        return new_hash_id
+
+    async def async_add_channel(
+        self,
+        thing_name: str,
+        polygon: list[dict],
+        zone1_hash_id: str = "",
+        zone2_hash_id: str = "",
+        cut_height_mm: int = 40,
+    ) -> str:
+        """Create a new channel (path connector) and push the map. Returns the new hashId."""
+        import copy
+        import secrets
+
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        if not map_data:
+            raise HomeAssistantError("Map data not yet loaded — query map first")
+        if not isinstance(polygon, list) or len(polygon) < 2:
+            raise HomeAssistantError(
+                f"Channel needs at least 2 points, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
+            )
+        for pt in polygon:
+            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
+                raise HomeAssistantError("Channel points must be dicts with 'x' and 'y' keys")
+        new_hash_id = secrets.token_hex(4)
+        existing_ids = (
+            {z.get("hashId") for z in map_data.get("goZones", [])}
+            | {z.get("hashId") for z in map_data.get("nogoZones", [])}
+            | {c.get("hashId") for c in map_data.get("channels", [])}
+        )
+        while new_hash_id in existing_ids:
+            new_hash_id = secrets.token_hex(4)
+        updated = copy.deepcopy(map_data)
+        new_channel: dict[str, Any] = {
+            "hashId": new_hash_id,
+            "isValid": True,
+            "isDockingChannel": False,
+            "cutHeight": int(cut_height_mm),
+            "polygon": [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon],
+        }
+        if zone1_hash_id:
+            new_channel["zone1"] = zone1_hash_id
+        if zone2_hash_id:
+            new_channel["zone2"] = zone2_hash_id
+        updated.setdefault("channels", []).append(new_channel)
+        existing_modified = updated.get("modifyHashs") or []
+        updated["modifyHashs"] = [*existing_modified, new_hash_id]
+        await self.async_sync_map(thing_name, updated)
+        return new_hash_id
+
     async def async_set_geofence_radius(self, thing_name: str, radius_m: int) -> None:
         """Update the radius of the first (and only observed) geofence circle.
 
@@ -1016,6 +1664,51 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 "re-save the geofence in the Lymow app to repair it."
             )
         updated = [{**first, "radius": int(radius_m)}, *current[1:]]
+        await self.async_set_device_feature(thing_name, geoFence=updated)
+
+    async def async_set_geofence(
+        self,
+        thing_name: str,
+        *,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        radius_m: int | None = None,
+        name: str | None = None,
+        index: int = 0,
+    ) -> None:
+        """Set one anti-theft geofence region's centre, radius, and optional name in one PATCH.
+
+        Mirrors the app's Settings → Anti-theft page (centre + radius slider +
+        Save). The app navigates between regions with `< >` arrows; `index`
+        selects which region to mutate (0 = first). Pass `index == len(current)`
+        to append a new region. Empty/unset existing records are seeded with
+        sensible defaults so callers can configure a fresh device without first
+        opening the Lymow app.
+        """
+        raw = (self.data or {}).get(thing_name, {}).get("geoFence") or []
+        current: list[Any] = list(raw) if isinstance(raw, list) else []
+        if index < 0 or index > len(current):
+            raise HomeAssistantError(
+                f"Geofence index {index} is out of range (have {len(current)} region(s); "
+                "pass index == len to append a new region)."
+            )
+        if index < len(current) and isinstance(current[index], dict):
+            existing = current[index]
+        else:
+            existing = {"name": "", "latitude": 0.0, "longitude": 0.0, "radius": 150}
+        merged = {**existing}
+        if latitude is not None:
+            merged["latitude"] = float(latitude)
+        if longitude is not None:
+            merged["longitude"] = float(longitude)
+        if radius_m is not None:
+            merged["radius"] = int(radius_m)
+        if name is not None:
+            merged["name"] = str(name)
+        if index == len(current):
+            updated = [*current, merged]
+        else:
+            updated = [*current[:index], merged, *current[index + 1 :]]
         await self.async_set_device_feature(thing_name, geoFence=updated)
 
     async def async_set_device_feature(self, thing_name: str, **fields: Any) -> None:
@@ -1199,6 +1892,24 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 session["iceServers"] = await self._client.get_ice_server_config(
                     channel_arn, endpoints["HTTPS"], creds, region=region
                 )
+            # Turnkey viewer config: a browser/WebRTC client can connect with
+            # just these — the SigV4-presigned signaling WSS, a unique viewer
+            # client id, and the ICE/TURN list shaped for RTCPeerConnection.
+            if endpoints.get("WSS"):
+                client_id = self._client.viewer_client_id()
+                session["viewerClientId"] = client_id
+                session["viewerWssUrl"] = self._client.presign_signaling_url(
+                    endpoints["WSS"], channel_arn, client_id, creds, region=region
+                )
+                session["webrtcIceServers"] = [
+                    {
+                        "urls": s.get("Uris") or s.get("uris"),
+                        "username": s.get("Username"),
+                        "credential": s.get("Password"),
+                    }
+                    for s in session.get("iceServers", [])
+                    if isinstance(s, dict)
+                ]
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("KVS endpoint/ICE resolution failed for %s: %s", thing_name, err)
         return session

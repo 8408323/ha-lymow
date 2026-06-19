@@ -152,10 +152,13 @@ async def test_build_presigned_ws_path_includes_security_token():
 async def test_connect_success_sets_client_and_task(monkeypatch):
     monkeypatch.setattr(aiomqtt, "Client", _make_success_client())
     client = _make_mqtt()
+    assert client.is_connected is False  # nothing published before connect
     await client.connect(["mower-001"], "key", "secret", None)
     assert client._client is not None
+    assert client.is_connected is True
     assert client._listen_task is not None
     await client.disconnect()
+    assert client.is_connected is False
 
 
 # ---------------------------------------------------------------------------
@@ -442,6 +445,21 @@ def test_handle_pboutput_with_map_data(monkeypatch):
     client = LymowMqttClient("h", "eu-west-1", lambda t, s: states.update(s), lambda *a: None)
     client._handle_pboutput("m1", b"raw")
     assert states["mapData"] == {"zones": []}
+
+
+def test_handle_pboutput_with_path_data(monkeypatch):
+    import sys
+
+    proto = sys.modules["lymow.protocol"]
+    monkeypatch.setattr(proto, "unwrap_envelope", lambda b: b"")
+    monkeypatch.setattr(proto, "decode_pboutput", lambda b: {"state": 1})
+    monkeypatch.setattr(proto, "decode_map_response", lambda b: {})
+    monkeypatch.setattr(proto, "decode_path_response", lambda b: {"goZones": [{"hashId": "z1"}]})
+
+    states = {}
+    client = LymowMqttClient("h", "eu-west-1", lambda t, s: states.update(s), lambda *a: None)
+    client._handle_pboutput("m1", b"raw")
+    assert states["pathData"] == {"goZones": [{"hashId": "z1"}]}
 
 
 # ---------------------------------------------------------------------------
