@@ -52,26 +52,25 @@ Ship the current changes through commit, push, and PR creation. Confirm with the
 
 ## Step 5: Review & merge discipline
 
-Follow the **PR Review Discipline** rule, and run this watch-and-iterate loop until the PR is clean. Do not merge an unreviewed PR.
+Follow the **PR Review Discipline** rule. The critical point: a green, "clean"/mergeable PR is **not** ready to merge if a reviewer is still running — Copilot/Codex can be mid-review with no comments posted yet. Wait for the round to *finish*, not just for checks to pass.
 
-Once the PR is open (the automatic review and any GitHub review apps post the first round):
+**Batching:** if you know you'll make several pushes, make them all first, *then* run this loop once on the final commit. Don't re-request review on intermediate pushes — it churns reviewers on states you're about to change.
 
-1. **Poll for review activity.** `gh` has no watch mode for PR comments/reviews (only `gh pr checks --watch` for CI and `gh run watch` for Actions runs), so this is a sleep-and-poll loop: check, and if nothing new, sleep ~2 min and check again. Act the moment new comments land; don't sit out the interval if they're already there.
+Once the PR is open (or after the final push you want reviewed):
+
+1. **Wait for the review round to finish.** `gh` has no watch for reviews, so poll: sleep ~2 min between checks, up to ~10 min.
    ```
-   gh pr view <n> --json reviews,comments,reviewDecision
-   gh api repos/{owner}/{repo}/pulls/<n>/comments   # inline review threads
+   gh pr view <n> --json reviewRequests,latestReviews,reviewDecision
+   gh api repos/{owner}/{repo}/issues/<n>/timeline   # shows "review_requested" / Copilot "is reviewing"
    ```
-   Detect "new" by comparing the comment/review count or the latest `createdAt` against the previous poll (or use the REST `since` parameter). Keep polling up to ~10 minutes for a round to arrive (AI reviews can take several minutes). If a reviewer still hasn't posted after that, re-ping it or tell the user — don't block indefinitely, and don't treat the silence as approval.
-2. **When comments arrive, address each one:**
-   - Implement the change, **or** deliberately decline it with a short reply explaining why.
-   - **Resolve the thread** for each comment you've handled (`gh api graphql` → `resolveReviewThread`).
-   - **Do not resolve** a thread that asks a question or requests more information — reply with the info and leave it open.
-3. **Push the fixes**, then re-request review in one comment mentioning every reviewer in use:
+   A reviewer still in `reviewRequests` (or shown reviewing in the timeline) is **not done** — keep waiting. The round is finished when every expected reviewer (Copilot, Codex, …) has posted its review/comments on the **current head commit** and none remain pending. Don't evaluate comments or merge until then.
+   - **Timeout path (deterministic):** if ~10 min elapses and an expected reviewer still hasn't posted for the current commit, re-request that reviewer once. If it still doesn't engage after another short wait, stop polling and tell the user which reviewer is missing — ask whether to wait longer or proceed without it. Never wait indefinitely, and never merge counting a missing reviewer as approval.
+2. **Address each comment:** implement it, or decline with a short reply. **Resolve the thread** for each handled comment (`gh api graphql` → `resolveReviewThread`). **Don't resolve** a thread that asks a question / for more info — reply and leave it open.
+3. **Pushing fixes is a new push to review.** Resolve the fixed threads, then re-request in one comment, and go back to step 1:
    ```
    gh pr comment <n> --body "Addressed the feedback — @claude review, @codex review, @codex[agent] review, @copilot review"
    ```
-4. **Poll again the same way** (~2 min apart, up to ~10 min for the round). Iterate steps 1–4 until **every** reviewer explicitly states it has no more comments. For the CI half of the gate you *can* block on a real watch: `gh pr checks <n> --watch --fail-fast`. Silence is not sign-off — keep iterating, don't merge.
-5. Merge only after the loop is clean **and** the user explicitly confirms.
+4. **Merge only when** every reviewer has *finished* the latest round with no remaining comments, all threads are resolved, and CI is green (`gh pr checks <n> --watch --fail-fast`) — **and** the user explicitly confirms. Never merge while a review is in progress or on silence.
 
 ## Rules
 

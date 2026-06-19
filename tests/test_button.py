@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from lymow.button import (
     AbortOtaButton,
     BackupMapButton,
+    CancelTaskButton,
     ChargingStationResetButton,
     ClearAllZonesAndChannelsButton,
     CompleteZonePartitionButton,
@@ -94,6 +95,25 @@ async def test_self_check_press_sends_user_ctrl_self_checking() -> None:
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_SELF_CHECKING)
 
 
+def test_cancel_task_button_disabled_by_default() -> None:
+    """Cancel Task ends the current mow — disabled by default to avoid
+    accidental presses, mirroring the app's confirmation prompt."""
+    coord = _make_coord()
+    e = CancelTaskButton(coord, DEVICE)
+    assert e._attr_entity_registry_enabled_default is False
+    assert e._attr_unique_id == f"{THING}_cancel_task"
+    assert "Cancel task" in e._attr_name
+
+
+async def test_cancel_task_press_sends_user_ctrl_dock_2() -> None:
+    """USER_CTRL_DOCK=2 is the destructive 'end task and dock' variant,
+    distinct from the lawn-mower entity's progress-preserving RECHARGE_DOCK=33."""
+    coord = _make_coord()
+    e = CancelTaskButton(coord, DEVICE)
+    await e.async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_DOCK)
+
+
 async def test_force_reinit_press_sends_user_ctrl_force_reinit() -> None:
     coord = _make_coord()
     e = ForceReinitButton(coord, DEVICE)
@@ -168,6 +188,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
     types = {type(e).__name__ for e in added}
     assert types == {
         "LockRobotButton",
+        "CancelTaskButton",
         "SelfCheckButton",
         "ForceReinitButton",
         "ChargingStationResetButton",
@@ -182,6 +203,8 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "DockAndForgetProgressButton",
         "FindMyRobotPlaySoundButton",
         "SyncTimezoneButton",
+        "BtBroadcastButton",
+        "CameraLightOffNowButton",
     }
 
 
@@ -342,3 +365,56 @@ async def test_sync_timezone_button_press_publishes_offset() -> None:
     coord.async_sync_timezone = AsyncMock()
     await SyncTimezoneButton(coord, DEVICE, _make_tz_hass("Asia/Tokyo")).async_press()
     coord.async_sync_timezone.assert_awaited_once_with(THING, 9 * 3600)
+
+
+# ---------------------------------------------------------------------------
+# BtBroadcastButton — PbRobotConfig.signal one-shot (SIGNAL_TURN_ON_BT_BROADCAST=12)
+# ---------------------------------------------------------------------------
+
+
+def test_bt_broadcast_button_metadata_and_disabled_default() -> None:
+    from lymow.button import BtBroadcastButton
+
+    coord = _make_coord()
+    e = BtBroadcastButton(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_bt_broadcast"
+    assert e._attr_name == "Re-advertise Bluetooth"
+    # Disabled by default so a stray press doesn't interfere with app pairing.
+    assert e._attr_entity_registry_enabled_default is False
+
+
+async def test_bt_broadcast_button_press_publishes_signal_code() -> None:
+    from lymow.button import BtBroadcastButton
+    from lymow.const import SIGNAL_TURN_ON_BT_BROADCAST
+
+    coord = _make_coord()
+    coord.async_set_robot_config = AsyncMock()
+    await BtBroadcastButton(coord, DEVICE).async_press()
+    coord.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_ON_BT_BROADCAST)
+
+
+# ---------------------------------------------------------------------------
+# CameraLightOffNowButton — PbRobotConfig.signal one-shot (SIGNAL_TURN_OFF_CAMERA_LIGHT=7)
+# ---------------------------------------------------------------------------
+
+
+def test_camera_light_off_now_button_metadata_and_disabled_default() -> None:
+    from lymow.button import CameraLightOffNowButton
+
+    coord = _make_coord()
+    e = CameraLightOffNowButton(coord, DEVICE)
+    assert e._attr_unique_id == f"{THING}_camera_light_off_now"
+    assert "Camera light off" in e._attr_name
+    # Disabled by default — overlaps with CameraLightSelect's "Off" option;
+    # users enable whichever idiom fits their automations.
+    assert e._attr_entity_registry_enabled_default is False
+
+
+async def test_camera_light_off_now_button_press_publishes_signal_code() -> None:
+    from lymow.button import CameraLightOffNowButton
+    from lymow.const import SIGNAL_TURN_OFF_CAMERA_LIGHT
+
+    coord = _make_coord()
+    coord.async_set_robot_config = AsyncMock()
+    await CameraLightOffNowButton(coord, DEVICE).async_press()
+    coord.async_set_robot_config.assert_awaited_once_with(THING, signal=SIGNAL_TURN_OFF_CAMERA_LIGHT)

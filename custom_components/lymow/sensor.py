@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -17,7 +18,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ERROR_DESCRIPTIONS, ERROR_REMEDIATION, WARNING_DESCRIPTIONS
+from .const import DOMAIN, ERROR_DESCRIPTIONS, ERROR_REMEDIATION, MOW_END_TYPES, WARNING_DESCRIPTIONS
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
@@ -70,6 +71,45 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         value_key="wifiRssiDbm",
         entity_registry_enabled_default=False,
     ),
+    # PbRobotInfo extras (decoded from PbOutput field 5 — APK fn #9734).
+    LymowSensorDescription(
+        key="bt_signal",
+        name="Bluetooth signal",
+        device_class=SensorDeviceClass.SIGNAL_STRENGTH,
+        native_unit_of_measurement="dBm",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_key="btSignalQuality",
+        entity_registry_enabled_default=False,
+    ),
+    # PbDeviceProfile extras (decoded from PbOutput field 10 — APK fn #9170).
+    LymowSensorDescription(
+        key="wifi_ssid",
+        name="Wi-Fi SSID",
+        value_key="wifiSsid",
+        icon="mdi:wifi-marker",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="rtk_serial",
+        name="RTK base serial",
+        value_key="rtkSn",
+        icon="mdi:satellite-uplink",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="wheel_firmware",
+        name="Wheel firmware",
+        value_key="wheelVer",
+        icon="mdi:car-cog",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
+        key="blade_firmware",
+        name="Blade firmware",
+        value_key="knifeVer",
+        icon="mdi:saw-blade",
+        entity_registry_enabled_default=False,
+    ),
     # REST sensors
     LymowSensorDescription(
         key="connectivity",
@@ -102,13 +142,6 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         name="MAC address",
         value_key="macAddress",
         icon="mdi:network",
-        entity_registry_enabled_default=False,
-    ),
-    LymowSensorDescription(
-        key="wifi_ssid",
-        name="Wi-Fi SSID",
-        value_key="networkInfo.wifiSsid",
-        icon="mdi:wifi",
         entity_registry_enabled_default=False,
     ),
     LymowSensorDescription(
@@ -356,6 +389,52 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:timer-outline",
     ),
+    # PbCleanInfo (PbOutput field 12) additional fields surfaced from APK RE.
+    LymowSensorDescription(
+        key="remain_clean_time",
+        name="Mow time remaining",
+        value_key="remainCleanTimeSec",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:clock-end",
+    ),
+    LymowSensorDescription(
+        key="map_area",
+        name="Total map area",
+        value_key="mapAreaM2",
+        native_unit_of_measurement=UnitOfArea.SQUARE_METERS,
+        state_class=SensorStateClass.MEASUREMENT,
+        suggested_display_precision=0,
+        icon="mdi:texture-box",
+        entity_registry_enabled_default=False,
+    ),
+    # Camera-lens heater (PbOutput.f37): count of heater fires — coarse
+    # condensation/fog indicator and maintenance metric.
+    LymowSensorDescription(
+        key="heated_lens_times",
+        name="Lens heater fires",
+        value_key="heatedLensTimes",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        icon="mdi:radiator",
+        entity_registry_enabled_default=False,
+    ),
+    # Camera auto-exposure gear (PbOutput.f38) — label decoded via AE_RANGE_LEVELS.
+    LymowSensorDescription(
+        key="ae_range_level",
+        name="Camera AE gear",
+        value_key="aeRangeLevel",
+        icon="mdi:camera-iris",
+        entity_registry_enabled_default=False,
+    ),
+    # outputCtrl (PbOutput.f18) — what the robot is replying to (label via OUTPUT_CTRLS).
+    LymowSensorDescription(
+        key="output_ctrl",
+        name="Last reply opcode",
+        value_key="outputCtrl",
+        icon="mdi:reply",
+        entity_registry_enabled_default=False,
+    ),
     # Robot pose in local ENU frame (pboutput field 14), disabled by default —
     # mostly useful for debugging and advanced visualisations.
     LymowSensorDescription(
@@ -539,6 +618,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowCleanHistoryDetailsSensor(coordinator, device))
         entities.append(LymowBackupMapsSensor(coordinator, device))
         entities.append(LymowSchedulesSensor(coordinator, device))
+        entities.append(LymowLastCleanSensor(coordinator, device))
+        entities.append(LymowRobotTimezoneSensor(coordinator, device))
+        entities.append(LymowHeadlightWindowSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -573,7 +655,7 @@ class LymowErrorSensor(LymowSensor):
         data = self.coordinator.data.get(self._thing_name, {})
         code = self.native_value or 0
         attrs: dict[str, Any] = {
-            "description": ERROR_DESCRIPTIONS.get(int(code), f"Unknown ({code})"),
+            "description": _describe(ERROR_DESCRIPTIONS, code),
         }
         remediation = ERROR_REMEDIATION.get(int(code))
         if remediation is not None:
@@ -581,11 +663,27 @@ class LymowErrorSensor(LymowSensor):
         warning_codes = data.get("warningCodes")
         if warning_codes is not None:
             attrs["warning_codes"] = warning_codes
-            attrs["warning_descriptions"] = [WARNING_DESCRIPTIONS.get(int(c), f"Unknown ({c})") for c in warning_codes]
+            attrs["warning_descriptions"] = [_describe(WARNING_DESCRIPTIONS, c) for c in warning_codes]
         all_error_codes = data.get("errorCodes")
         if all_error_codes is not None:
             attrs["error_codes"] = all_error_codes
+            attrs["error_descriptions"] = [_describe(ERROR_DESCRIPTIONS, e) for e in all_error_codes]
         return attrs
+
+
+def _describe(table: dict[int, str], code: Any) -> str:
+    """Look up ``code`` in ``table`` and return its label, or ``"Unknown (...)"``.
+
+    Wire data is untrusted: a future firmware (or a malformed payload) may put
+    a non-numeric value in the warning/error code list. Treat any conversion
+    failure as an unknown code rather than letting the sensor's state-update
+    blow up — the user's automations would silently stop firing otherwise.
+    """
+    try:
+        key = int(code)
+    except (TypeError, ValueError):
+        return f"Unknown ({code!r})"
+    return table.get(key, f"Unknown ({key})")
 
 
 class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
@@ -692,8 +790,18 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             ]
         if "gpsOrigin" in map_data:
             attrs["gps_origin"] = map_data["gpsOrigin"]
-        if "chargingStation" in map_data:
-            attrs["charging_station"] = map_data["chargingStation"]
+        # Charging station: map-derived dock (last QUERY_MAP) is the base; a live
+        # PbOutput.f24 update (chargingStationLoc) overlays fresher fields on top.
+        # The live message may carry only x/y without theta, so merge field-by-field
+        # rather than wholesale-replace (a y-only update must not drop x/theta).
+        map_dock = map_data.get("chargingStation") if isinstance(map_data.get("chargingStation"), dict) else None
+        live_dock = data.get("chargingStationLoc") if isinstance(data.get("chargingStationLoc"), dict) else None
+        if map_dock and live_dock:
+            attrs["charging_station"] = {**map_dock, **live_dock}
+        elif live_dock:
+            attrs["charging_station"] = live_dock
+        elif map_dock:
+            attrs["charging_station"] = map_dock
         if "globalZoneConfig" in map_data:
             attrs["mowing_settings"] = map_data["globalZoneConfig"]
         if "globalChannelConfig" in map_data:
@@ -894,3 +1002,205 @@ class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         data = self.coordinator.data.get(self._thing_name) or {}
         entries = data.get("backupMapList") or []
         return {"backups": entries}
+
+
+class LymowLastCleanSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Last mowing session — PbCleanReport from QUERY_CLEANING_SUMMARY.
+
+    Native value is the session start timestamp; end-type (completed,
+    user-cancelled, or none) and battery-used are surfaced as attributes
+    so a Lovelace card can render a single 'Last mow' tile with both
+    'when' and 'how it ended'.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:clock-end"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_last_mow_session"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Last mow session"
+
+    @property
+    def _report(self) -> dict[str, Any]:
+        return (self.coordinator.data or {}).get(self._thing_name, {}).get("cleanReport") or {}
+
+    @property
+    def native_value(self) -> datetime | None:
+        # decode_clean_report already bounds cleanStartTime to a sane POSIX
+        # epoch range, so fromtimestamp can't raise here. We still re-check
+        # the type/positivity in case a future code path skips the decoder.
+        start = self._report.get("cleanStartTime")
+        if not isinstance(start, int) or start <= 0:
+            return None
+        return datetime.fromtimestamp(start, tz=UTC)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        report = self._report
+        attrs: dict[str, Any] = {}
+        end_type = report.get("mowEndType")
+        if isinstance(end_type, int) and end_type in MOW_END_TYPES:
+            attrs["end_type"] = MOW_END_TYPES[end_type]
+        used = report.get("usedBattery")
+        if isinstance(used, int):
+            attrs["used_battery_pct"] = used
+        status_times = report.get("statusTimes")
+        if isinstance(status_times, list) and status_times:
+            # Packed repeated int32 from PbCleanReport.f5: array[i] = seconds
+            # spent at workStatus i during the session. Card can render the
+            # raw breakdown directly; an additional total saves the user from
+            # summing it themselves.
+            attrs["status_times_sec"] = status_times
+            attrs["total_active_sec"] = sum(status_times)
+        error_list = report.get("errorList")
+        if isinstance(error_list, list) and error_list:
+            # Each entry from PbCleanReport.f4 has {code: int, percent: int (0-100)?}.
+            # Surface the raw list plus a human-readable label per code so the
+            # card can render "ERR 64 (Robot inside no-go zone) at 73.0%"
+            # without re-implementing the lookup. Skip entries that lost their
+            # code (malformed wire / future-shape entry) — if the filter empties
+            # the list entirely, drop the attribute rather than render an
+            # empty-array placeholder.
+            decorated = [
+                {
+                    **e,
+                    "description": ERROR_DESCRIPTIONS.get(e["code"], f"Unknown ({e['code']})"),
+                }
+                for e in error_list
+                if isinstance(e, dict) and isinstance(e.get("code"), int)
+            ]
+            if decorated:
+                attrs["error_list"] = decorated
+        return attrs
+
+
+class LymowRobotTimezoneSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """The robot's configured timezone offset from UTC.
+
+    Reads ``PbRobotConfig.timezoneOffset`` (f21, signed int32 seconds east of
+    UTC — what the app's setTimezone (Hermes #9036) writes). Surfaces it as an
+    ``±HH:MM`` string and exposes ``offset_seconds`` / ``offset_hours`` for
+    automations that prefer numerics. Disabled by default because most users
+    only need the Sync Timezone button — this is for spotting drift between
+    the robot and HA.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:earth"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_robot_timezone"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Robot timezone"
+
+    @property
+    def _offset_seconds(self) -> int | None:
+        offset = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("timezoneOffset")
+        # The robot can plausibly land anywhere from UTC-12 to UTC+14 — bound
+        # the wire data so a corrupted pboutput can't surface a 200-hour
+        # offset. Also reject sub-minute resolution: real-world timezones are
+        # always whole minutes (no zone has a sub-minute offset), and the
+        # ±HH:MM format below would silently truncate stray seconds, so a
+        # corrupted payload like 5*3600+33 must report unknown instead.
+        if not isinstance(offset, int) or not -12 * 3600 <= offset <= 14 * 3600 or offset % 60 != 0:
+            return None
+        return offset
+
+    @property
+    def native_value(self) -> str | None:
+        seconds = self._offset_seconds
+        if seconds is None:
+            return None
+        sign = "-" if seconds < 0 else "+"
+        magnitude = abs(seconds)
+        hours, remainder = divmod(magnitude, 3600)
+        minutes = remainder // 60
+        return f"{sign}{hours:02d}:{minutes:02d}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        seconds = self._offset_seconds
+        if seconds is None:
+            return None
+        return {"offset_seconds": seconds, "offset_hours": round(seconds / 3600, 2)}
+
+
+# Camera-headlight schedule window — read-side companion to
+# ``lymow.set_night_mode``. Reads PbRobotConfig.openLedTime / closeLedTime
+# (f14/f15). The wire has no "schedule enabled" bit: setNightMode rewrites
+# the full window each press and co-publishes SIGNAL_TURN_OFF_CAMERA_LIGHT
+# to disable the light *now* (see encode_set_night_mode). So this sensor is
+# purely descriptive — it shows *what window is configured*; the existing
+# Camera light Select shows whether the light is currently on.
+class LymowHeadlightWindowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Headlight schedule window, formatted as ``HH:MM–HH:MM``."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:car-light-high"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_headlight_window"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Headlight schedule"
+
+    @property
+    def _times(self) -> tuple[str | None, str | None]:
+        # Walk each level defensively: a truthy non-dict at any layer (from a
+        # malformed cache hydrate / future restore source) would crash the
+        # next .get with AttributeError mid-render and break the entity. The
+        # canonical shape is data[thing] -> {"robotConfig": {...}}, but any
+        # deviation must drop to unknown rather than raise.
+        data = self.coordinator.data
+        if not isinstance(data, dict):
+            return None, None
+        thing_state = data.get(self._thing_name)
+        if not isinstance(thing_state, dict):
+            return None, None
+        cfg = thing_state.get("robotConfig")
+        if not isinstance(cfg, dict):
+            return None, None
+        return self._format(cfg.get("openLedTime")), self._format(cfg.get("closeLedTime"))
+
+    @staticmethod
+    def _format(tz: Any) -> str | None:
+        # decode_robot_config already validates 0-23 / 0-59 before surfacing
+        # the dict, but coordinator state could come from a less-strict source
+        # someday (a future restore-from-cache, an integration-internal seed,
+        # or a partial pboutput that slipped through). Re-validate the keys
+        # here so a missing or wrong-typed entry returns None instead of
+        # raising mid-render and breaking the entity update.
+        if not isinstance(tz, dict):
+            return None
+        hour = tz.get("hour")
+        minute = tz.get("minute")
+        if not isinstance(hour, int) or not isinstance(minute, int):
+            return None
+        if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+        return f"{hour:02d}:{minute:02d}"
+
+    @property
+    def native_value(self) -> str | None:
+        open_s, close_s = self._times
+        if open_s is None or close_s is None:
+            return None
+        # En-dash (not hyphen) to match the app's UI rendering.
+        return f"{open_s}–{close_s}"
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        open_s, close_s = self._times
+        if open_s is None and close_s is None:
+            return None
+        return {"open_time": open_s, "close_time": close_s}

@@ -1,0 +1,80 @@
+name: Bug report
+description: Something in the integration isn't working as expected.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a report.
+
+        ⚠️ **Do not paste sensitive data.** Logs and diagnostics from this integration
+        can contain auth tokens (JWTs), your robot PIN, GPS coordinates, the device
+        `thingName`, and your account email. **Redact these before posting.** For a
+        suspected *security* problem, use the [private advisory flow](../../security/advisories/new)
+        instead of a public issue.
+  - type: checkboxes
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I'm on the latest commit of `main` (or the latest release).
+          required: true
+        - label: I've redacted tokens, PIN, GPS, `thingName`, and email from anything I paste.
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: ha-version
+    attributes:
+      label: Home Assistant version
+      placeholder: "2026.5.1"
+    validations:
+      required: true
+  - type: input
+    id: integration-version
+    attributes:
+      label: Integration version
+      description: HACS version tag, or commit SHA if installed from source.
+      placeholder: "v0.x.y or abc1234"
+    validations:
+      required: true
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: Install method
+      options:
+        - HACS
+        - Manual (copied custom_components/lymow)
+    validations:
+      required: true
+  - type: input
+    id: mower
+    attributes:
+      label: Mower model & firmware
+      placeholder: "model / firmware version (from the app or the update entity)"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Set `custom_components.lymow` to debug, reproduce, and paste the **redacted** log. This is rendered as code, no backticks needed.
+      render: text
+    validations:
+      required: false
