@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from lymow.entity import lymow_device_info
+from lymow.entity import async_prune_stale_zone_entities, lymow_device_info
 
 THING = "mower-001"
 
@@ -50,3 +51,49 @@ def test_device_info_falls_back_to_raw_device_and_fwversion() -> None:
 def test_device_info_name_falls_back_to_thing_name() -> None:
     info = lymow_device_info(_coord(), {"deviceThingName": THING})
     assert info["name"] == THING
+
+
+# ---------------------------------------------------------------------------
+# async_prune_stale_zone_entities
+# ---------------------------------------------------------------------------
+
+
+class _FakeRegistry:
+    def __init__(self, entries):
+        self.entities = {e.entity_id: e for e in entries}
+        self.removed: list[str] = []
+
+    def async_remove(self, entity_id):
+        self.removed.append(entity_id)
+
+
+def _hass_with_registry(entries):
+    hass = MagicMock()
+    hass._entity_registry = _FakeRegistry(entries)
+    return hass
+
+
+def _entry(unique_id, entity_id, platform="lymow"):
+    return SimpleNamespace(unique_id=unique_id, entity_id=entity_id, platform=platform)
+
+
+def test_prune_removes_only_stale_zone_entities() -> None:
+    entries = [
+        _entry(f"{THING}_kx1k_cut_height", "number.kx1k_ch"),  # valid
+        _entry(f"{THING}_kx1k_enabled", "switch.kx1k"),  # valid
+        _entry(f"{THING}_dead1_cut_height", "number.dead1_ch"),  # stale → remove
+        _entry(f"{THING}_dead1_enabled", "switch.dead1"),  # stale → remove
+        _entry(f"{THING}_audio_volume", "number.volume"),  # device-level, not a zone
+        _entry("other-thing_dead1_enabled", "switch.other", platform="lymow"),  # different thing
+        _entry(f"{THING}_dead1_enabled", "switch.foreign", platform="hue"),  # foreign platform
+    ]
+    hass = _hass_with_registry(entries)
+    async_prune_stale_zone_entities(hass, THING, {"kx1k"})
+    assert sorted(hass._entity_registry.removed) == ["number.dead1_ch", "switch.dead1"]
+
+
+def test_prune_noop_when_no_valid_zones() -> None:
+    # Empty valid set means the map isn't loaded yet — never prune (would wipe all).
+    hass = _hass_with_registry([_entry(f"{THING}_dead1_enabled", "switch.dead1")])
+    async_prune_stale_zone_entities(hass, THING, set())
+    assert hass._entity_registry.removed == []

@@ -69,6 +69,7 @@ def _make_ha_stubs() -> None:
             SELECT = "select"
             SENSOR = "sensor"
             SWITCH = "switch"
+            TEXT = "text"
             UPDATE = "update"
 
         ha_const.Platform = _Platform
@@ -180,6 +181,7 @@ def _make_coordinator() -> MagicMock:
     coord.async_config_entry_first_refresh = AsyncMock()
     coord.async_query_all_maps = AsyncMock()
     coord.async_query_all_schedules = AsyncMock()
+    coord.async_query_all_robot_configs = AsyncMock()
     coord.async_shutdown = AsyncMock()
     return coord
 
@@ -232,6 +234,7 @@ async def test_async_setup_entry_returns_true_with_stored_region() -> None:
     coord.async_config_entry_first_refresh.assert_awaited_once()
     coord.async_query_all_maps.assert_awaited_once()
     coord.async_query_all_schedules.assert_awaited_once()
+    coord.async_query_all_robot_configs.assert_awaited_once()
     mqtt.connect.assert_awaited_once()
 
 
@@ -432,7 +435,7 @@ def test_build_dashboard_config_full() -> None:
     ents = {k: f"x.{k}" for k in _lymow._DASHBOARD_ENTITY_KEYS}
     cfg = _build_dashboard_config(ents)
     titles = [v["title"] for v in cfg["views"]]
-    assert titles == ["Map", "Sensors"]
+    assert titles == ["Map", "Drive", "Schedules", "Backups", "Advanced", "Sensors"]
     map_card = cfg["views"][0]["cards"][0]
     assert map_card["type"] == "custom:lymow-map-card"
     assert map_card["entity"] == "x.map"

@@ -55,6 +55,8 @@ async def async_setup_entry(
                 ClearAllZonesAndChannelsButton(coordinator, device),
                 ToggleLteAirplaneButton(coordinator, device),
                 BackupMapButton(coordinator, device),
+                DockAndForgetProgressButton(coordinator, device),
+                FindMyRobotPlaySoundButton(coordinator, device),
                 SyncTimezoneButton(coordinator, device, hass),
                 BtBroadcastButton(coordinator, device),
                 CameraLightOffNowButton(coordinator, device),
@@ -346,3 +348,43 @@ class BackupMapButton(_UserCtrlButton):
         # Route through the coordinator so the backup-map cache is invalidated
         # and the backup sensors reflect the new snapshot on the next poll.
         await self.coordinator.async_backup_map(self._thing_name)
+
+
+class FindMyRobotPlaySoundButton(CoordinatorEntity[LymowCoordinator], ButtonEntity):
+    """Trigger the app's "Find My Robot → Play Sound" beacon.
+
+    Sends a one-shot wire frame (`PbInput {f13.audioVolume=100, f16=1}`) that
+    makes the robot beep so the owner can locate it. Captured live 2026-05-27
+    from the app's Settings → Find My Robot → Play Sound flow.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:bullhorn"
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Find my robot (play sound)"
+        self._attr_unique_id = f"{self._thing_name}_find_my_robot_play_sound"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    async def async_press(self) -> None:
+        await self.coordinator.async_find_my_robot_play_sound(self._thing_name)
+
+
+class DockAndForgetProgressButton(_UserCtrlButton):
+    """Dock the robot and cancel any in-progress task (USER_CTRL_DOCK = 2).
+
+    The Lymow app shows a confirmation dialog when Dock is tapped during an
+    active mow: Yes (forget progress) → userCtrl=2, No (keep progress) →
+    userCtrl=33. The standard HA dock service uses userCtrl=33 (preserve);
+    this button exposes the destructive variant explicitly. Disabled by
+    default because progress is lost on press.
+    """
+
+    _user_ctrl = USER_CTRL_DOCK
+    _key = "dock_and_forget_progress"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Dock and forget progress", "mdi:home-import-outline")

@@ -13,7 +13,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import LymowCoordinator
-from .entity import lymow_device_info
+from .entity import async_prune_stale_zone_entities, lymow_device_info
 
 
 async def async_setup_entry(
@@ -45,11 +45,14 @@ async def async_setup_entry(
         for device in coordinator.devices:
             thing = device["deviceThingName"]
             map_data = (coordinator.data or {}).get(thing, {}).get("mapData") or {}
-            for zone in map_data.get("goZones", []):
+            zones = map_data.get("goZones", [])
+            for zone in zones:
                 key = (thing, zone["hashId"])
                 if key not in added:
                     added.add(key)
                     new_entities.append(ZoneCutHeightNumber(coordinator, device, zone["hashId"]))
+            # Drop switch + number entities for zones deleted from the map.
+            async_prune_stale_zone_entities(hass, thing, {z["hashId"] for z in zones})
         if new_entities:
             async_add_entities(new_entities)
 

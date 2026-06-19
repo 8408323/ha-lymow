@@ -78,6 +78,13 @@ def test_every_sensor_value_key_has_a_producer_or_is_rest_api(key: str) -> None:
     """Every sensor value_key must appear as literal in a producer or be in REST allow-list."""
     if key in _REST_API_KEYS:
         return  # documented exception
+    # Nested value_keys (e.g. "networkInfo.cellularIp", "rtkL1.gnssSatellites",
+    # "robotConfig.lcdPin") are resolved by walking into a dict the producer
+    # writes under the ROOT key (state["networkInfo"] = {...}); the leaf is filled
+    # inside that sub-dict, so verify the root segment is produced.
+    key = key.split(".", 1)[0]
+    if key in _REST_API_KEYS:
+        return
     haystack = _producer_haystack()
     # Match the key as a quoted string literal — both single- and double-quoted.
     needle = f'"{key}"'

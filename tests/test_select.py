@@ -51,19 +51,20 @@ def test_charging_mode_reads_current_value() -> None:
     assert e2.current_option == "Follow perimeter"
 
 
-def test_charging_mode_unknown_when_missing_or_invalid() -> None:
-    assert ChargingModeSelect(_make_coord(), DEVICE).current_option is None
-    assert ChargingModeSelect(_make_coord({}), DEVICE).current_option is None
-    # Unknown future enum value → unknown rather than silently picking 0.
+def test_charging_mode_defaults_to_option0_when_missing_unknown_when_invalid() -> None:
+    # Proto3: absent field == enum default 0 → option 0, not unknown.
+    assert ChargingModeSelect(_make_coord(), DEVICE).current_option == "Follow perimeter"
+    assert ChargingModeSelect(_make_coord({}), DEVICE).current_option == "Follow perimeter"
+    # Unknown future enum value (present but unmapped) → unknown.
     assert ChargingModeSelect(_make_coord({"chargingMode": 99}), DEVICE).current_option is None
     # Non-int (hostile decode) → unknown.
     assert ChargingModeSelect(_make_coord({"chargingMode": "1"}), DEVICE).current_option is None
 
 
-def test_charging_mode_unknown_when_coordinator_data_none() -> None:
+def test_charging_mode_defaults_to_option0_when_coordinator_data_none() -> None:
     coord = _make_coord({"chargingMode": 1})
     coord.data = None
-    assert ChargingModeSelect(coord, DEVICE).current_option is None
+    assert ChargingModeSelect(coord, DEVICE).current_option == "Follow perimeter"
 
 
 async def test_charging_mode_select_option_calls_coordinator() -> None:

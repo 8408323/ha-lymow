@@ -20,10 +20,13 @@ from lymow.protocol import (
     _field_str,
     _first,
     _signed32,
+    decode_channel,
+    decode_channel_config,
     decode_map_response,
     decode_pboutput,
     decode_schedule_entry,
     decode_task_config,
+    decode_zone_config,
     delete_zone,
     encode_ble_drive,
     encode_delete_zone,
@@ -298,12 +301,7 @@ def _build_pboutput(
     warning_codes: list[int] | None = None,
     fw_version: str | None = None,
     mcu_version: str | None = None,
-    wifi_ssid: str | None = None,
-    rtk_sn: str | None = None,
-    wheel_ver: str | None = None,
-    knife_ver: str | None = None,
-    sw_version_mqtt: str | None = None,
-    sim_id_mqtt: str | None = None,
+    software_version: str | None = None,
 ) -> bytes:
     """Hand-build a minimal PbOutput blob for testing."""
     from lymow.protocol import PB_VERSION
@@ -332,18 +330,8 @@ def _build_pboutput(
         profile += _field_str(1, fw_version)
     if mcu_version is not None:
         profile += _field_str(2, mcu_version)
-    if sw_version_mqtt is not None:
-        profile += _field_str(3, sw_version_mqtt)
-    if wifi_ssid is not None:
-        profile += _field_str(4, wifi_ssid)
-    if rtk_sn is not None:
-        profile += _field_str(8, rtk_sn)
-    if sim_id_mqtt is not None:
-        profile += _field_str(9, sim_id_mqtt)
-    if wheel_ver is not None:
-        profile += _field_str(10, wheel_ver)
-    if knife_ver is not None:
-        profile += _field_str(11, knife_ver)
+    if software_version is not None:
+        profile += _field_str(3, software_version)
 
     # Top-level PbOutput
     out = _field_i32(2, PB_VERSION)
@@ -414,6 +402,96 @@ def test_decode_pboutput_warning_codes() -> None:
     assert state["warningCodes"] == [4, 5]
 
 
+def _build_clean_report(
+    *,
+    date: int,
+    clean_time_min: int,
+    map_hash_id: str,
+    used_battery: int,
+    start_type: int = 1,
+    clean_area: float | None = None,
+    percent_frac: float | None = None,
+    total_area_frac: float | None = None,
+    errors: list[tuple[int, float | None]] | None = None,
+) -> bytes:
+    """Build a PbOutput carrying a PbCleanReport (field 28) for decode tests."""
+    summary = _field_i32(1, clean_time_min)
+    if clean_area is not None:
+        summary += _field_f32(2, clean_area)
+    summary += _field_bytes(3, _field_str(2, map_hash_id))
+    if percent_frac is not None:
+        summary += _field_f32(5, percent_frac)
+    if total_area_frac is not None:
+        summary += _field_f32(6, total_area_frac)
+    report = _field_i32(1, date) + _field_bytes(2, summary) + _field_i32(3, start_type)
+    for code, epct in errors or []:
+        entry = _field_i32(1, code)
+        if epct is not None:
+            entry += _field_f32(2, epct)
+        report += _field_bytes(4, entry)
+    report += _field_i32(6, used_battery)
+    return _build_pboutput() + _field_bytes(28, report)
+
+
+def test_decode_pboutput_clean_report_complete() -> None:
+    pb = _build_clean_report(
+        date=1780137536,
+        clean_time_min=73,
+        clean_area=345.0,
+        percent_frac=1.0,
+        total_area_frac=1489.02,
+        map_hash_id="wsmjco1T",
+        used_battery=51,
+        errors=[(18, 1.0)],
+    )
+    report = decode_pboutput(pb)["cleanReport"]
+    assert report["date"] == 1780137536
+    assert report["cleanTimeMin"] == 73
+    assert report["cleanAreaM2"] == 345.0
+    assert report["percent"] == 100.0
+    assert report["mapTotalAreaM2"] == 1489.02
+    assert report["mapHashId"] == "wsmjco1T"
+    assert report["usedBatteryPct"] == 51
+    assert report["startType"] == 1
+    assert report["errorList"] == [{"code": 18, "percent": 100.0}]
+
+
+def test_decode_pboutput_clean_report_interrupted_omits_absent_fields() -> None:
+    # An interrupted run with 0 area / no errors: proto3 omits those fields.
+    pb = _build_clean_report(
+        date=1780147021,
+        clean_time_min=6,
+        percent_frac=0.0,
+        total_area_frac=1489.02,
+        map_hash_id="KX1kGyat",
+        used_battery=1,
+        start_type=2,
+    )
+    report = decode_pboutput(pb)["cleanReport"]
+    assert report["cleanTimeMin"] == 6
+    assert report["startType"] == 2
+    assert "cleanAreaM2" not in report
+    assert "errorList" not in report
+
+
+def test_decode_pboutput_clean_report_error_without_percent() -> None:
+    pb = _build_clean_report(
+        date=1780155584,
+        clean_time_min=3,
+        percent_frac=0.0,
+        total_area_frac=1489.02,
+        map_hash_id="KX1kGyat",
+        used_battery=2,
+        errors=[(20, None)],
+    )
+    report = decode_pboutput(pb)["cleanReport"]
+    assert report["errorList"] == [{"code": 20}]
+
+
+def test_decode_pboutput_no_clean_report_when_absent() -> None:
+    assert "cleanReport" not in decode_pboutput(_build_pboutput())
+
+
 def test_decode_pboutput_wifi_signal() -> None:
     pb = _build_pboutput(wifi_signal=80)
     state = decode_pboutput(pb)
@@ -438,52 +516,11 @@ def test_decode_pboutput_mcu_version() -> None:
     assert state["mcuVersion"] == "2.3.0"
 
 
-def test_decode_pboutput_bt_signal() -> None:
-    """PbRobotInfo.btSignalQuality (f5) — new sensor for the Bluetooth link."""
-    pb = _build_pboutput(bt_signal=-68)
+def test_decode_pboutput_software_version() -> None:
+    """f10.f3 → softwareVersion (live-confirmed 2026-05-30; was previously unmapped)."""
+    pb = _build_pboutput(software_version="v2.1.48.1")
     state = decode_pboutput(pb)
-    assert state["btSignalQuality"] == -68
-
-
-def test_decode_pboutput_wifi_lte_working_bools() -> None:
-    """PbRobotInfo.wifiWorking (f9) + lteWorking (f10) — connectivity flags."""
-    pb_on = _build_pboutput(wifi_working=True, lte_working=False)
-    state = decode_pboutput(pb_on)
-    assert state["wifiWorking"] is True
-    assert state["lteWorking"] is False
-
-    # Field absent → key absent (no implicit False).
-    pb_neither = _build_pboutput()
-    state = decode_pboutput(pb_neither)
-    assert "wifiWorking" not in state
-    assert "lteWorking" not in state
-
-
-def test_decode_pboutput_extended_device_profile_strings() -> None:
-    """PbDeviceProfile extras (f4 wifiSsid, f8 rtkSn, f10 wheelVer, f11 knifeVer)."""
-    pb = _build_pboutput(
-        wifi_ssid="Haraldsson",
-        rtk_sn="RTK-XYZ-001",
-        wheel_ver="wheel-1.2.3",
-        knife_ver="blade-0.4.1",
-    )
-    state = decode_pboutput(pb)
-    assert state["wifiSsid"] == "Haraldsson"
-    assert state["rtkSn"] == "RTK-XYZ-001"
-    assert state["wheelVer"] == "wheel-1.2.3"
-    assert state["knifeVer"] == "blade-0.4.1"
-
-
-def test_decode_pboutput_extended_device_profile_sw_version_and_sim_id() -> None:
-    """PbDeviceProfile f3 (softwareVersion) + f9 (simId) come over MQTT alongside
-    same-named REST fields. They're stored under distinct keys
-    (``swVersionMqtt`` / ``simIdMqtt``) so the REST sensors keep their existing
-    source — but the MQTT-side values still round-trip through the decoder so
-    a future refactor doesn't silently drop them."""
-    pb = _build_pboutput(sw_version_mqtt="2.1.48", sim_id_mqtt="8946070000000000000")
-    state = decode_pboutput(pb)
-    assert state["swVersionMqtt"] == "2.1.48"
-    assert state["simIdMqtt"] == "8946070000000000000"
+    assert state["softwareVersion"] == "v2.1.48.1"
 
 
 def test_decode_pboutput_empty_bytes() -> None:
@@ -552,6 +589,8 @@ def _build_map_response(
 
     for zone in go_zones or []:
         bi = _field_i32(1, zone.get("type", 1))
+        if zone.get("name"):
+            bi += _field_str(2, zone["name"])
         bi += _field_str(3, zone["hashId"])
         bi += _field_i32(4, 1 if zone.get("isEnabled", True) else 0)
         if zone.get("polygon"):
@@ -571,17 +610,21 @@ def _build_map_response(
         if pp:
             zone_pb += _field_bytes(3, pp)
         if zone.get("cutHeight") is not None or zone.get("pathSpacing") is not None:
+            # PbZoneConfig wire layout (live-confirmed 2026-05-30): f1 cutHeight,
+            # f9 pathSpacing.
             cfg = b""
             if zone.get("cutHeight") is not None:
                 cfg += _field_i32(1, zone["cutHeight"])
             if zone.get("pathSpacing") is not None:
-                cfg += _field_f32(4, zone["pathSpacing"])
+                cfg += _field_i32(9, int(zone["pathSpacing"]))
             zone_pb += _field_bytes(2, cfg)
 
         content += _field_bytes(1, zone_pb)
 
     for nogo in nogo_zones or []:
         bi = _field_i32(1, nogo.get("type", 2))
+        if nogo.get("name"):
+            bi += _field_str(2, nogo["name"])
         bi += _field_str(3, nogo["hashId"])
         bi += _field_i32(4, 1 if nogo.get("isEnabled", True) else 0)
         if nogo.get("polygon"):
@@ -638,6 +681,17 @@ def _build_map_response(
     return _field_bytes(23, outer)
 
 
+def _build_map_response_with_raw_extra(extra_pb_bytes: bytes) -> bytes:
+    """Wrap raw PbMap field bytes in the f23→f2→f3 outer envelope.
+
+    Lets tests pin specific PbMap subfields (globalZoneConfig, diagonalCoords,
+    chargingStationLoc with z, enuBasePoint with altitude) without going
+    through the higher-level builder.
+    """
+    wrapper = _field_i32(1, 1) + _field_bytes(3, extra_pb_bytes)
+    return _field_bytes(23, _field_bytes(2, wrapper))
+
+
 def test_decode_map_response_empty_bytes() -> None:
     result = decode_map_response(b"")
     assert result == {}
@@ -689,14 +743,16 @@ def test_decode_map_response_go_zone_config() -> None:
                 "hashId": "cfgzone1",
                 "type": 1,
                 "cutHeight": 55,
-                "pathSpacing": 0.35,
+                "pathSpacing": 25,
             }
         ]
     )
     result = decode_map_response(pb)
     zone = result["goZones"][0]
     assert zone["cutHeight"] == 55
-    assert pytest.approx(zone["pathSpacing"], abs=1e-4) == 0.35
+    assert zone["pathSpacing"] == 25
+    # The full PbZoneConfig submessage is surfaced too.
+    assert zone["zoneConfig"] == {"cutHeight": 55, "pathSpacing": 25}
 
 
 def test_decode_map_response_multiple_go_zones() -> None:
@@ -739,6 +795,34 @@ def test_decode_map_response_nogo_no_parent() -> None:
     result = decode_map_response(pb)
     nogo = result["nogoZones"][0]
     assert "parentZoneHashId" not in nogo
+
+
+def test_decode_map_response_go_zone_name() -> None:
+    pb = _build_map_response(
+        go_zones=[{"hashId": "wsmjco1T", "type": 1, "name": "Front garden"}],
+    )
+    result = decode_map_response(pb)
+    assert result["goZones"][0]["name"] == "Front garden"
+
+
+def test_decode_map_response_go_zone_without_name_omits_key() -> None:
+    pb = _build_map_response(go_zones=[{"hashId": "wsmjco1T", "type": 1}])
+    result = decode_map_response(pb)
+    assert "name" not in result["goZones"][0]
+
+
+def test_decode_map_response_nogo_zone_name() -> None:
+    pb = _build_map_response(
+        nogo_zones=[{"hashId": "ngabcdef", "type": 2, "name": "Flower bed"}],
+    )
+    result = decode_map_response(pb)
+    assert result["nogoZones"][0]["name"] == "Flower bed"
+
+
+def test_decode_map_response_nogo_zone_without_name_omits_key() -> None:
+    pb = _build_map_response(nogo_zones=[{"hashId": "ngabcdef", "type": 2}])
+    result = decode_map_response(pb)
+    assert "name" not in result["nogoZones"][0]
 
 
 def test_decode_map_response_charging_station() -> None:
@@ -809,6 +893,198 @@ def test_decode_task_config_drops_non_boolean_bool_fields() -> None:
     assert decode_task_config(pb) == {"chargingMode": 1, "disableChargingPark": True}
 
 
+def test_decode_zone_config_canonical_fields() -> None:
+    """PbZoneConfig wire layout — field numbers LIVE-CONFIRMED 2026-05-30.
+
+    Confirmed by correlating the app's labeled Mowing Settings to the wire +
+    toggle/re-query (BRANCH_STATUS C/I/K/M): pathSpacing=f9, perimeterMowLaps
+    =f10, noGoMowLaps=f12, safeMarginMode=f17, turnOffOuterMotor=f18. The prior
+    map had a +1 shift (f9 mislabelled relativeCleanDir / f10 pathSpacing);
+    cleanDir@8 / startProgress@16 / lineFollowMode@17 had no real home.
+    """
+
+    # Exercise every supported field at its confirmed wire position.
+    pb = (
+        _field_i32(1, 60)  # cutHeight
+        + _field_f32(4, 0.6)  # moveSpeed (float)
+        + _field_i32(6, 4)  # cutSpeed
+        + _field_i32(7, 1)  # cleanMode
+        + _field_i32(9, 35)  # pathSpacing (cm) — CONFIRMED app 35cm
+        + _field_i32(10, 2)  # perimeterMowLaps
+        + _field_i32(11, 1)  # perimeterMowDir
+        + _field_i32(12, 3)  # noGoMowLaps
+        + _field_i32(13, 2)  # obsDecMode (zone obstacle)
+        + _field_i32(14, 1)  # pathOrder/mowingOrder (bool=1)
+        + _field_i32(16, 90)  # relativeCleanDir (stripe angle)
+        + _field_i32(17, 0)  # safeMarginMode (bool, Precise=0)
+        + _field_i32(18, 1)  # turnOffOuterMotor (bool=1)
+        + _field_i32(19, 2)  # followDetectMode
+    )
+    out = decode_zone_config(pb)
+    assert out["cutHeight"] == 60
+    assert pytest.approx(out["moveSpeed"], abs=1e-4) == 0.6
+    assert out["cutSpeed"] == 4
+    assert out["cleanMode"] == 1
+    assert out["pathSpacing"] == 35
+    assert out["perimeterMowLaps"] == 2
+    assert out["perimeterMowDir"] == 1
+    assert out["noGoMowLaps"] == 3
+    assert out["obsDecMode"] == 2
+    assert out["pathOrder"] is True
+    assert out["relativeCleanDir"] == 90
+    assert out["safeMarginMode"] is False
+    assert out["turnOffOuterMotor"] is True
+    assert out["followDetectMode"] == 2
+    # Dropped/never-homed labels must not appear.
+    assert "lineFollowMode" not in out
+    assert "startProgress" not in out
+    assert "cleanDir" not in out
+
+
+def test_decode_zone_config_stripe_angle_signed() -> None:
+    """stripeAngle (f8) is signed: -1 = Optimized (auto). LIVE-CONFIRMED
+    2026-06-19 from a globalZoneConfig BLE capture (f8 = -1 ⟺ app
+    'Stripe Angle: Optimized')."""
+    # -1 on the wire is the 10-byte 0xffff…ff varint; must decode as -1, not huge.
+    assert decode_zone_config(_field_i32(8, -1))["stripeAngle"] == -1
+    assert decode_zone_config(_field_i32(8, 45))["stripeAngle"] == 45
+
+
+def test_encode_set_task_config_stripe_angle_roundtrips() -> None:
+    """encode_set_task_config(stripeAngle=-1) writes f8 = -1; decode recovers it."""
+    from lymow.protocol import _decode_fields, _first, decode_zone_config, encode_set_task_config
+
+    pb = encode_set_task_config(stripeAngle=-1)
+    pbmap = _decode_fields(_first(_decode_fields(pb), 12))
+    gz = _first(pbmap, 11)
+    assert decode_zone_config(gz)["stripeAngle"] == -1
+    # Optimized=-1 encodes as the same 10-byte varint the app sends.
+    assert _field_i32(8, -1).hex() in pb.hex()
+
+
+def test_decode_zone_config_empty_and_partial() -> None:
+
+    assert decode_zone_config(b"") == {}
+    # Only cutHeight present — other keys must not appear with default values.
+    assert decode_zone_config(_field_i32(1, 40)) == {"cutHeight": 40}
+
+
+def test_decode_zone_config_drops_non_boolean_bool_fields() -> None:
+    """Corrupted payload: a varint ≥ 2 on a bool field must NOT coerce to True.
+
+    Same hostile-input handling we apply in decode_task_config — silently
+    flipping a switch on from a malformed frame is worse than reporting
+    unknown.
+    """
+
+    assert decode_zone_config(_field_i32(17, 7)) == {}  # safeMarginMode=7 → dropped
+    assert decode_zone_config(_field_i32(14, 9)) == {}  # pathOrder=9 → dropped
+
+
+def test_decode_channel_config_three_fields() -> None:
+    """PbChannelConfig wire layout — pinned to Hermes class #9444.
+
+    f1 detectMode, f2 cutHeight, f3 channelLift — used at PbMap.f12
+    globalChannelConfig and at PbRunTimeConfig.channelConfig.
+    """
+
+    out = decode_channel_config(_field_i32(1, 2) + _field_i32(2, 60) + _field_i32(3, 0))
+    assert out == {"detectMode": 2, "cutHeight": 60, "channelLift": 0}
+    # Missing fields are absent (not zero-filled).
+    assert decode_channel_config(b"") == {}
+    assert decode_channel_config(_field_i32(2, 35)) == {"cutHeight": 35}
+
+
+def test_decode_channel_surfaces_raw_f8_when_present() -> None:
+    """PbChannel.f8 (per-channel obstacle-detect candidate, gap 4) is surfaced
+    raw/unlabeled when present, and absent otherwise — observed on channels
+    carrying per-channel cutHeight/channelLift overrides in the live frame."""
+    with_f8 = _field_str(1, "ch01") + _field_i32(6, 1) + _field_i32(8, 2) + _field_i32(9, 96) + _field_i32(10, 1)
+    decoded = decode_channel(with_f8)
+    assert decoded["f8"] == 2
+    assert decoded["cutHeight"] == 96
+    assert decoded["channelLift"] == 1
+    # A channel without per-channel overrides omits f8 entirely.
+    assert "f8" not in decode_channel(_field_str(1, "ch02") + _field_i32(6, 0))
+
+
+def test_decode_map_response_global_zone_and_channel_config() -> None:
+    """decode_map_response surfaces PbMap.f11 globalZoneConfig + f12 globalChannelConfig."""
+    extra = _field_bytes(
+        11,
+        _field_i32(1, 60)  # cutHeight
+        + _field_f32(4, 0.6)  # moveSpeed
+        + _field_i32(9, 25),  # pathSpacing (confirmed f9)
+    )
+    extra += _field_bytes(12, _field_i32(1, 2) + _field_i32(2, 60))
+    pb = _build_map_response_with_raw_extra(extra)
+    result = decode_map_response(pb)
+    gzc = result["globalZoneConfig"]
+    assert gzc["cutHeight"] == 60
+    assert pytest.approx(gzc["moveSpeed"], abs=1e-4) == 0.6
+    assert gzc["pathSpacing"] == 25
+    assert result["globalChannelConfig"] == {"detectMode": 2, "cutHeight": 60}
+
+
+def test_decode_map_response_charging_station_with_z_and_enu_altitude() -> None:
+    """PbPose.f4 = z (altitude) and PbRobotLLACoords.f3 = altitude both surface."""
+    extra = _field_bytes(
+        4,  # PbMap.f4 chargingStationLoc — PbPose with z
+        _field_f32(1, -0.05) + _field_f32(2, -0.12) + _field_f32(3, -1.53) + _field_f32(4, 0.42),
+    )
+    extra += _field_bytes(
+        7,  # PbMap.f7 enuBasePoint — PbRobotLLACoords with altitude
+        _field_f32(1, 59.68) + _field_f32(2, 16.76) + _field_f32(3, 34.09),
+    )
+    pb = _build_map_response_with_raw_extra(extra)
+    result = decode_map_response(pb)
+    cs = result["chargingStation"]
+    assert pytest.approx(cs["x"], abs=1e-3) == -0.05
+    assert pytest.approx(cs["z"], abs=1e-3) == 0.42
+    enu = result["enuBasePoint"]
+    assert pytest.approx(enu["lat"], abs=1e-3) == 59.68
+    assert pytest.approx(enu["lon"], abs=1e-3) == 16.76
+    assert pytest.approx(enu["altitude"], abs=1e-3) == 34.09
+    # gpsOrigin is kept as an alias of enuBasePoint for back-compat.
+    assert result["gpsOrigin"] is enu
+
+
+def test_decode_map_response_diagonal_coords() -> None:
+    """PbMap.f6 diagonalCoords (repeated PbPoint) lands as result['diagonalCoords']."""
+    p1 = _field_f32(1, -35.15) + _field_f32(2, -45.07)
+    p2 = _field_f32(1, 17.88) + _field_f32(2, 18.37)
+    extra = _field_bytes(6, p1) + _field_bytes(6, p2)
+    pb = _build_map_response_with_raw_extra(extra)
+    result = decode_map_response(pb)
+    pts = result["diagonalCoords"]
+    assert len(pts) == 2
+    assert pytest.approx(pts[0]["x"], abs=1e-2) == -35.15
+    assert pytest.approx(pts[1]["y"], abs=1e-2) == 18.37
+
+
+def test_decode_map_response_per_zone_config_surfaces_full_dict() -> None:
+    """A go-zone's f2 zoneConfig comes back as the full PbZoneConfig dict,
+    not just the two legacy keys."""
+    pb = _build_map_response(
+        go_zones=[
+            {
+                "hashId": "fullcfg1",
+                "type": 1,
+                # _build_map_response only writes cutHeight + pathSpacing into the
+                # zoneConfig wrapper, so the rest are zero — that's enough to
+                # prove the new "zoneConfig" key is plumbed end-to-end.
+                "cutHeight": 40,
+                "pathSpacing": 25,
+            }
+        ]
+    )
+    zone = decode_map_response(pb)["goZones"][0]
+    assert zone["zoneConfig"] == {"cutHeight": 40, "pathSpacing": 25}
+    # Legacy top-level keys still present for back-compat.
+    assert zone["cutHeight"] == 40
+    assert zone["pathSpacing"] == 25
+
+
 def test_decode_map_response_channels() -> None:
     pb = _build_map_response(
         channels=[
@@ -862,7 +1138,7 @@ def test_decode_map_response_full() -> None:
     pb = _build_map_response(
         go_zones=[
             {"hashId": "gozone01", "type": 1, "polygon": [{"x": 1.0, "y": 2.0}], "area": 100},
-            {"hashId": "gozone02", "type": 1, "cutHeight": 40, "pathSpacing": 1.0},
+            {"hashId": "gozone02", "type": 1, "cutHeight": 40, "pathSpacing": 25},
         ],
         nogo_zones=[
             {"hashId": "nogo0001", "type": 2, "parentZoneHashId": "gozone01"},
@@ -1064,9 +1340,91 @@ def test_sync_map_after_delete_roundtrip() -> None:
     assert "gozone01" in modify_ids
 
 
+def test_encode_sync_map_serializes_channels_in_field_3() -> None:
+    """A channel in map_data must round-trip through encode_sync_map into PbMap.f3."""
+    map_data = {
+        "goZones": [],
+        "nogoZones": [],
+        "channels": [
+            {
+                "hashId": "ch000001",
+                "zone1": "gozone01",
+                "zone2": "gozone02",
+                "isValid": True,
+                "isDockingChannel": False,
+                "polygon": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}],
+                "cutHeight": 45,
+                "channelLift": 1,
+            }
+        ],
+    }
+    raw = encode_sync_map(map_data)
+    content = _decode_fields(_first(_decode_fields(raw), 23))
+    ch_raws = _all(content, 3)
+    assert len(ch_raws) == 1
+    cf = _decode_fields(ch_raws[0])
+    assert _first(cf, 1).decode() == "ch000001"
+    assert _first(cf, 2).decode() == "gozone01"
+    assert _first(cf, 3).decode() == "gozone02"
+    assert _first(cf, 4) == 1
+    assert _first(cf, 6) == 0
+    assert _first(cf, 9) == 45
+    assert _first(cf, 10) == 1
+
+
+def test_encode_sync_map_preserves_task_config() -> None:
+    """taskConfig decoded from the robot must survive encode_sync_map round-trip.
+
+    Without this, every SYNC_MAP wipes PbMap field 8 (taskConfig) from the
+    robot's stored map, losing Device Settings (chargingMode/zoneOrder/etc.).
+    """
+    pb = _build_map_response(
+        go_zones=[{"hashId": "z1", "type": 1, "polygon": [{"x": 0.0, "y": 0.0}]}],
+        nogo_zones=[],
+        charging_station={"x": 0.0, "y": 0.0, "theta": 0.0},
+        gps_origin={"lat": 0.0, "lon": 0.0},
+        task_config={"chargingMode": 1, "zoneOrder": 0, "rainCleaning": True, "disableChargingPark": False},
+    )
+    map_data = decode_map_response(pb)
+    assert map_data.get("taskConfig") == {
+        "chargingMode": 1,
+        "zoneOrder": 0,
+        "rainCleaning": True,
+        "disableChargingPark": False,
+    }
+
+    raw = encode_sync_map(map_data)
+    top = _decode_fields(raw)
+    content_raw = _first(top, 23)
+    assert isinstance(content_raw, bytes)
+    content = _decode_fields(content_raw)
+    tc_raw = _first(content, 8)
+    assert isinstance(tc_raw, bytes), "field 8 (taskConfig) must be present in encoded sync_map"
+    tc = decode_task_config(tc_raw)
+    assert tc["chargingMode"] == 1
+    assert tc["zoneOrder"] == 0
+    assert tc["rainCleaning"] is True
+    assert tc["disableChargingPark"] is False
+
+
 # ---------------------------------------------------------------------------
 # encode_delete_zone tests
 # ---------------------------------------------------------------------------
+
+
+def test_encode_delete_zone_matches_pinned_bytes() -> None:
+    """Lock the wire format so accidental encoder churn fails CI.
+
+    These bytes were derived from Hermes bytecode analysis of deleteZonePartition
+    (fn 8972) and round-trip-validated indirectly by the live rename round-trip
+    (same envelope shape, same field numbers — see Task B live confirmation in
+    BRANCH_STATUS.md). A destructive live delete would need to recreate the
+    zone afterwards, so we lock the static bytes instead.
+    """
+    assert encode_delete_zone("wsmjco1T").hex() == "10312808620e0a0c0a0a1a0877736d6a636f3154"
+    from lymow.protocol import encode_delete_nogo_zone
+
+    assert encode_delete_nogo_zone("ngabcdef").hex() == "10312808620e120c0a0a1a08" + b"ngabcdef".hex()
 
 
 def test_encode_delete_zone_has_pb_version() -> None:
@@ -1152,6 +1510,7 @@ def _build_pboutput_with_extras(
     total_area_m2: float | None = None,
     mow_strip_count: int | None = None,
     mow_progress: float | None = None,
+    current_task_zone: str | None = None,
     remain_clean_time_sec: int | None = None,
     map_area_m2: float | None = None,
     pose_east_m: float | None = None,
@@ -1176,14 +1535,19 @@ def _build_pboutput_with_extras(
             rtk += _field_i32(4, rtk_status)
         out += _field_bytes(6, rtk)
 
-    # PbCleanInfo (field 12): f1=cleanTime/mowStripCount, f2=cleanArea/totalArea,
-    # f4=remainCleanTime, f5=cleanPercent/mowProgress, f6=mapArea.
-    if any(v is not None for v in (total_area_m2, mow_strip_count, mow_progress, remain_clean_time_sec, map_area_m2)):
+    # Area info (field 12): f1=missionTimeMin, f2=totalAreaM2, f4=remainCleanTime,
+    # f5=mowProgress, f6=mapArea
+    if any(
+        v is not None
+        for v in (total_area_m2, mow_strip_count, mow_progress, current_task_zone, remain_clean_time_sec, map_area_m2)
+    ):
         area = b""
         if mow_strip_count is not None:
             area += _field_i32(1, mow_strip_count)
         if total_area_m2 is not None:
             area += _field_f32(2, total_area_m2)
+        if current_task_zone is not None:
+            area += _field_bytes(3, _field_i32(1, 1) + _field_str(2, current_task_zone))
         if remain_clean_time_sec is not None:
             area += _field_i32(4, remain_clean_time_sec)
         if mow_progress is not None:
@@ -1241,52 +1605,30 @@ def test_decode_pboutput_pose_enu() -> None:
     assert abs(state["poseThetaRad"] - math.pi / 2) < 0.001
 
 
-def test_decode_pboutput_charging_station_loc_live_pose() -> None:
-    """PbOutput.f24 = PbPose (same sub-message type as f14 robot pose).
-    The live dock-position channel — surfaces as ``chargingStationLoc`` with
-    the ``{x, y, theta}`` shape that matches the map-query path's
-    ``mapData.chargingStation`` entry, so a card can pick whichever is fresher."""
-    import math
+def test_decode_pboutput_robot_info_extra_signals() -> None:
+    """btSignalQuality(f5), wifiWorking(f9), lteWorking(f10) — APK-verified names (Hermes v96)."""
+    from lymow.protocol import PB_VERSION
 
-    dock = _field_f32(1, 1.5) + _field_f32(2, 2.5) + _field_f32(3, math.pi)
-    pb = _build_pboutput() + _field_bytes(24, dock)
+    ri = _field_i32(6, 2) + _field_i32(5, 70) + _field_i32(9, 1) + _field_i32(10, 0)
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(5, ri)
     state = decode_pboutput(pb)
-    assert abs(state["chargingStationLoc"]["x"] - 1.5) < 0.001
-    assert abs(state["chargingStationLoc"]["y"] - 2.5) < 0.001
-    assert abs(state["chargingStationLoc"]["theta"] - math.pi) < 0.001
+    assert state["btSignalQuality"] == 70
+    assert state["wifiWorking"] is True
+    assert state["lteWorking"] is False
 
 
-def test_decode_pboutput_charging_station_loc_partial_present_fields() -> None:
-    """A pboutput carrying only the dock's east/north (no theta) still
-    surfaces, with theta absent — partial updates must not require all
-    three fields."""
-    dock = _field_f32(1, 5.0) + _field_f32(2, 7.0)
-    pb = _build_pboutput() + _field_bytes(24, dock)
-    state = decode_pboutput(pb)
-    assert state["chargingStationLoc"] == {"x": 5.0, "y": 7.0}
+def test_decode_pboutput_coverage_path() -> None:
+    """PbOutput f13 PbPath{poses: repeated PbPose} → coveragePoses (APK-verified)."""
+    from lymow.protocol import PB_VERSION
 
-
-def test_decode_pboutput_no_charging_station_loc_when_field24_absent() -> None:
-    assert "chargingStationLoc" not in decode_pboutput(_build_pboutput())
-
-
-def test_decode_pboutput_no_charging_station_loc_when_field24_empty() -> None:
-    """An empty f24 sub-message has no decodable scalars — drop the key
-    so a stale-but-known dock entry from the map path isn't shadowed by
-    an empty dict."""
-    pb = _build_pboutput() + _field_bytes(24, b"")
-    assert "chargingStationLoc" not in decode_pboutput(pb)
-
-
-def test_decode_pboutput_charging_station_loc_skips_wire_type_drift() -> None:
-    """PbPose f1/f2/f3 are wire-type 5 (fixed32) per the encoder, but the
-    wire is untrusted — if a malformed payload sends f1 as length-delimited
-    bytes, ``_decode_f32`` would otherwise raise. Drop the offending field
-    and surface the rest."""
-    # f1 sent as wire-type-2 bytes; f2 sent correctly as float32
-    dock = _field_bytes(1, b"\x00\x00") + _field_f32(2, 3.5)
-    pb = _build_pboutput() + _field_bytes(24, dock)
-    assert decode_pboutput(pb)["chargingStationLoc"] == {"y": 3.5}
+    path = _field_bytes(1, _field_f32(1, 1.5) + _field_f32(2, 2.5)) + _field_bytes(
+        1, _field_f32(1, 3.0) + _field_f32(2, 4.0)
+    )
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(13, path)
+    poses = decode_pboutput(pb)["coveragePoses"]
+    assert len(poses) == 2
+    assert poses[0]["east"] == pytest.approx(1.5) and poses[0]["north"] == pytest.approx(2.5)
+    assert poses[1]["east"] == pytest.approx(3.0) and poses[1]["north"] == pytest.approx(4.0)
 
 
 def test_decode_pboutput_no_rtk_when_absent() -> None:
@@ -1298,11 +1640,243 @@ def test_decode_pboutput_no_rtk_when_absent() -> None:
     assert "poseEastM" not in state
 
 
-def test_decode_pboutput_mow_strip_count() -> None:
-    """f12.f1 → mowStripCount decoded as integer."""
+def test_decode_pboutput_mission_time() -> None:
+    """f12.f1 → missionTimeMin (mission/cleaning time in minutes; live-confirmed
+    2026-05-30 matching the app's Mission-time over a 46-min run). Previously
+    mislabeled mowStripCount."""
     pb = _build_pboutput_with_extras(mow_strip_count=17)
     state = decode_pboutput(pb)
-    assert state["mowStripCount"] == 17
+    assert state["missionTimeMin"] == 17
+
+
+def test_decode_pboutput_rtk_advanced_diagnostic() -> None:
+    """f8 JSON 'Advanced Diagnostics' → rtkDiagnostic (precision/quality/diffAge/
+    error). Live-confirmed 2026-05-30: RTK base over LoRa; ERTK_LORA_DATA_ERROR_RATE."""
+    import json as _json
+
+    from lymow.protocol import PB_VERSION
+
+    blob = _json.dumps(
+        {
+            "precision": 0.0136,
+            "quality": 4,
+            "diff_age": 2.0,
+            "primary_error_desc": "ERTK_LORA_DATA_ERROR_RATE",
+            "error_desc_list": ["ERTK_LORA_DATA_ERROR_RATE"],
+            "error_position_list": [{"x": -3.1, "y": -18.0, "z": -0.6}],
+        }
+    )
+    f8 = _field_i32(1, 3) + _field_str(2, blob)
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(8, f8)
+    d = decode_pboutput(pb)["rtkDiagnostic"]
+    assert d["precisionM"] == 0.0136
+    assert d["quality"] == 4
+    assert d["diffAgeS"] == 2.0
+    assert d["primaryError"] == "ERTK_LORA_DATA_ERROR_RATE"
+    assert d["errors"] == ["ERTK_LORA_DATA_ERROR_RATE"]
+    assert "error_position_list" not in str(d)  # per-error coords not surfaced
+
+
+def test_decode_pboutput_rtk_diagnostic_ignores_non_json_f8() -> None:
+    from lymow.protocol import PB_VERSION
+
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(8, _field_i32(1, 3) + _field_str(2, "not json"))
+    assert "rtkDiagnostic" not in decode_pboutput(pb)
+
+
+def test_decode_pboutput_camera_diagnostics() -> None:
+    """f37 heatedLensTimes / f38 aeRangeLevel — names from the APK PbOutput.encode
+    disassembly (Hermes v96, 2026-05-30). f37 is the formerly-mystery 'f37=15'."""
+    from lymow.protocol import PB_VERSION
+
+    pb = _field_i32(2, PB_VERSION) + _field_i32(37, 15) + _field_i32(38, 3)
+    state = decode_pboutput(pb)
+    assert state["heatedLensTimes"] == 15
+    # f38 is surfaced as its AE_RANGE_LEVELS label (gear 3 → "3"), not the raw int.
+    assert state["aeRangeLevel"] == "3"
+
+
+def test_decode_pboutput_current_task_zone() -> None:
+    """f12.f3 (PbZoneBasicInfo) → currentTaskZoneHashId (which zone is mowing now).
+    Live-confirmed 2026-05-30 in the QUERY_PATH reply during an active task."""
+    pb = _build_pboutput_with_extras(current_task_zone="KX1kGyat")
+    state = decode_pboutput(pb)
+    assert state["currentTaskZoneHashId"] == "KX1kGyat"
+
+
+def test_decode_pboutput_no_current_task_zone_when_absent() -> None:
+    pb = _build_pboutput_with_extras(mow_strip_count=3)
+    assert "currentTaskZoneHashId" not in decode_pboutput(pb)
+
+
+def test_decode_path_response_full() -> None:
+    """QUERY_PATH reply → per-zone track polyline + stripsDone.
+
+    Wire: pb.f23 → f2 → f3 → repeated f1; each f1 has .f1{f3=hashId, f5=points}
+    and .f2{f1=stripsDone}; each point is a PbPoint {f1=x, f2=y} float32.
+    """
+    from lymow.protocol import decode_path_response
+
+    pt1 = _field_f32(1, 1.5) + _field_f32(2, 2.5)
+    pt2 = _field_f32(1, 3.0) + _field_f32(2, 4.0)
+    polyline = _field_bytes(1, pt1) + _field_bytes(1, pt2)  # f5 holds repeated f1 points
+    zone_info = _field_str(3, "wsmjco1T") + _field_bytes(5, polyline)
+    gz_raw = _field_bytes(1, zone_info) + _field_bytes(2, _field_i32(1, 7))
+    pb = _field_bytes(23, _field_bytes(2, _field_bytes(3, _field_bytes(1, gz_raw))))
+    assert decode_path_response(pb) == {
+        "goZones": [
+            {
+                "hashId": "wsmjco1T",
+                "trackPoints": [{"x": 1.5, "y": 2.5}, {"x": 3.0, "y": 4.0}],
+                "stripsDone": 7,
+            }
+        ]
+    }
+
+
+def test_decode_path_response_empty_without_content() -> None:
+    from lymow.protocol import decode_path_response
+
+    # f23 present but no f2 sub-message.
+    assert decode_path_response(_field_bytes(23, b"")) == {"goZones": []}
+
+
+def test_decode_path_response_empty_without_path_data() -> None:
+    from lymow.protocol import decode_path_response
+
+    # f23.f2 present but no f3 sub-message.
+    assert decode_path_response(_field_bytes(23, _field_bytes(2, b""))) == {"goZones": []}
+
+
+def test_decode_path_response_skips_malformed_entries() -> None:
+    from lymow.protocol import decode_path_response
+
+    # A varint where a go-zone sub-message is expected, and a zone entry with no
+    # hashId (only stats), are both skipped.
+    bad_varint = _field_i32(1, 5)
+    no_hash = _field_bytes(1, _field_bytes(2, _field_i32(1, 3)))
+    pb = _field_bytes(23, _field_bytes(2, _field_bytes(3, bad_varint + no_hash)))
+    assert decode_path_response(pb) == {"goZones": []}
+
+
+def test_decode_pboutput_network_info_field_34() -> None:
+    """PbOutput.f34 networkInfo (populated by query_rtk_diagnostic_l1).
+
+    Live capture 2026-05-27: f2 wifiSsid, f3 ipAddress, f4 wifiRssiDbm, f6
+    cellularIp, f7 lteRssiDbm, f10 simId. We surface the user-facing fields;
+    the connection-state varints are stored as signed ints.
+    """
+    net = (
+        _field_i32(1, 1)
+        + _field_str(2, "Haraldsson")
+        + _field_str(3, "192.168.1.85")
+        + _field_i32(4, (1 << 32) - 59)  # -59 dBm as two's-complement varint
+        + _field_i32(5, 1)
+        + _field_str(6, "100.116.126.140")
+        + _field_i32(7, (1 << 32) - 73)
+        + _field_i32(8, 1)
+        + _field_str(10, " 89320420000094505458")
+    )
+    pb = _field_bytes(34, net)
+    state = decode_pboutput(pb)
+    assert state["networkInfo"]["wifiSsid"] == "Haraldsson"
+    assert state["networkInfo"]["ipAddress"] == "192.168.1.85"
+    assert state["networkInfo"]["cellularIp"] == "100.116.126.140"
+    assert state["networkInfo"]["wifiRssiDbm"] == -59
+    assert state["networkInfo"]["lteRssiDbm"] == -73
+    # simId is stripped of leading/trailing whitespace
+    assert state["networkInfo"]["simId"] == "89320420000094505458"
+
+
+def test_decode_pboutput_no_network_info_when_field_34_absent() -> None:
+    pb = _build_pboutput()
+    state = decode_pboutput(pb)
+    assert "networkInfo" not in state
+
+
+def test_decode_pboutput_rtk_diagnostic_l1_field_35() -> None:
+    """PbOutput.f35 rtkL1 — populated by query_rtk_diagnostic_l1.
+
+    Field labels cross-referenced 2026-05-27 against the app's Settings → RTK
+    Diagnostic page. f2 is the Location Precision float, f3-f9 are per-band
+    counts/SNRs, f10 is the data-error-rate percent. f1 (subMsgVersion=2)
+    is intentionally not surfaced — it's a wire marker, not a user signal.
+    """
+    l1 = (
+        _field_i32(1, 2)
+        + _field_f32(2, 0.01135)
+        + _field_i32(3, 23)
+        + _field_i32(4, 16)
+        + _field_i32(5, 16)
+        + _field_i32(6, 13)
+        + _field_i32(7, 38)
+        + _field_i32(8, 34)
+        + _field_i32(9, 36)
+        + _field_i32(10, 0)
+    )
+    pb = _field_bytes(35, l1)
+    state = decode_pboutput(pb)
+    rtk = state["rtkL1"]
+    # Rounded to 4 decimals at decode time.
+    assert rtk["locationPrecisionM"] == pytest.approx(0.0114, abs=1e-4)
+    assert rtk["gnssSatellites"] == 23
+    assert rtk["l1SatCount"] == 16
+    assert rtk["l2SatCount"] == 16
+    assert rtk["l5SatCount"] == 13
+    assert rtk["l1SnrMedian"] == 38
+    assert rtk["l2SnrMedian"] == 34
+    assert rtk["l5SnrMedian"] == 36
+    assert rtk["dataErrorRatePct"] == 0
+    # f1 (subMsgVersion) is intentionally dropped — not a user-facing signal.
+    assert "subMsgVersion" not in rtk and "f1" not in rtk
+
+
+def test_decode_pboutput_rtk_diagnostic_l2_field_36() -> None:
+    """PbOutput.f36 rtkL2 — Advanced Diagnostics. Float fields are
+    differentialAge + per-band HW DC Voltage; ints are per-band Lora
+    Bandwidth, CW Interference, and Primary Antenna Gain.
+    """
+    l2 = (
+        _field_f32(1, 2.0)
+        + _field_i32(2, 268)
+        + _field_i32(3, 389)
+        + _field_i32(4, 680)
+        + _field_f32(5, 0.891)
+        + _field_f32(6, 1.002)
+        + _field_f32(7, 1.793)
+        + _field_i32(8, 60)
+        + _field_i32(9, 94)
+        + _field_i32(10, 36)
+        + _field_i32(11, 38)
+        + _field_i32(12, 71)
+        + _field_i32(13, 53)
+    )
+    pb = _field_bytes(36, l2)
+    state = decode_pboutput(pb)
+    rtk = state["rtkL2"]
+    assert rtk["differentialAgeSec"] == pytest.approx(2.0, rel=1e-4)
+    assert rtk["loraBandwidthL1Bps"] == 268
+    assert rtk["loraBandwidthL2Bps"] == 389
+    assert rtk["loraBandwidthL5Bps"] == 680
+    assert rtk["hwDcVoltageL1V"] == pytest.approx(0.891, rel=1e-3)
+    assert rtk["hwDcVoltageL2V"] == pytest.approx(1.002, rel=1e-3)
+    assert rtk["hwDcVoltageL5V"] == pytest.approx(1.793, rel=1e-3)
+    assert rtk["cwInterferenceL1"] == 60
+    assert rtk["cwInterferenceL2"] == 94
+    assert rtk["cwInterferenceL5"] == 36
+    assert rtk["antennaGainL1"] == 38
+    assert rtk["antennaGainL2"] == 71
+    assert rtk["antennaGainL5"] == 53
+
+
+def test_decode_pboutput_rtk_l2_unknown_field_ignored() -> None:
+    """If the robot adds an unmapped field number to rtkL2, the decoder must
+    silently skip it — we'd rather drop one field than crash the coordinator."""
+    l2 = _field_f32(1, 2.0) + _field_i32(99, 12345)  # f99 not in label map
+    pb = _field_bytes(36, l2)
+    state = decode_pboutput(pb)
+    assert state["rtkL2"] == {"differentialAgeSec": pytest.approx(2.0, rel=1e-4)}
+    assert "f99" not in state["rtkL2"]
 
 
 def test_decode_pboutput_mow_progress() -> None:
@@ -1313,11 +1887,11 @@ def test_decode_pboutput_mow_progress() -> None:
     assert abs(state["mowProgress"] - 52.6) < 1.0
 
 
-def test_decode_pboutput_mow_strip_count_and_progress_together() -> None:
-    """f12.f1, f12.f2, f12.f5 all decoded simultaneously."""
+def test_decode_pboutput_mission_time_area_progress_together() -> None:
+    """f12.f1 (missionTimeMin), f12.f2 (area), f12.f5 (progress) all decoded together."""
     pb = _build_pboutput_with_extras(total_area_m2=800.0, mow_strip_count=5, mow_progress=0.25)
     state = decode_pboutput(pb)
-    assert state["mowStripCount"] == 5
+    assert state["missionTimeMin"] == 5
     assert abs(state["totalTaskAreaM2"] - 800.0) < 1.0
     assert abs(state["mowProgress"] - 25.0) < 1.0
 
@@ -1428,7 +2002,8 @@ def test_decode_pboutput_clean_info_all_fields_together() -> None:
         map_area_m2=1500.0,
     )
     state = decode_pboutput(pb)
-    assert state["mowStripCount"] == 120
+    # f1 is surfaced as missionTimeMin (minutes; live-confirmed) — not mowStripCount.
+    assert state["missionTimeMin"] == 120
     assert abs(state["totalTaskAreaM2"] - 350.0) < 1.0
     assert state["remainCleanTimeSec"] == 900
     assert abs(state["mowProgress"] - 45.0) < 1.0
@@ -1442,6 +2017,27 @@ def test_decode_pboutput_remain_and_map_area_absent_when_not_set() -> None:
     state = decode_pboutput(pb)
     assert "remainCleanTimeSec" not in state
     assert "mapAreaM2" not in state
+
+
+def test_decode_pboutput_charging_station_loc_from_f24() -> None:
+    """PbOutput.f24 (PbPose) → live chargingStationLoc {x, y, theta}; a partial
+    pose (no theta) surfaces only the fields present, and wire-type drift on a
+    field is skipped rather than crashing."""
+    from lymow.protocol import PB_VERSION
+
+    pose = _field_f32(1, 1.5) + _field_f32(2, 2.5) + _field_f32(3, 0.25)
+    pb = _field_i32(2, PB_VERSION) + _field_bytes(24, pose)
+    dock = decode_pboutput(pb)["chargingStationLoc"]
+    assert dock["x"] == pytest.approx(1.5)
+    assert dock["y"] == pytest.approx(2.5)
+    assert dock["theta"] == pytest.approx(0.25)
+
+    # Partial (x/y only) + a drifted theta (length-delimited instead of fixed32) →
+    # theta dropped, x/y kept, no crash.
+    partial = _field_f32(1, 3.0) + _field_f32(2, 4.0) + _field_bytes(3, b"junk")
+    pb2 = _field_i32(2, PB_VERSION) + _field_bytes(24, partial)
+    dock2 = decode_pboutput(pb2)["chargingStationLoc"]
+    assert dock2 == {"x": pytest.approx(3.0), "y": pytest.approx(4.0)}
 
 
 # ---------------------------------------------------------------------------
@@ -1734,6 +2330,45 @@ def test_decode_map_response_nogo_with_area_and_inner_point() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_encode_go_zone_zoneconfig_emits_full_pbzoneconfig() -> None:
+    """A zone's full ``zoneConfig`` dict round-trips through ``encode_sync_map``.
+
+    The map decoder surfaces the per-zone PbZoneConfig as ``zoneConfig`` —
+    when the card pushes that map back via sync_map, every field must be
+    re-emitted using canonical wire field numbers and types so settings are
+    not silently dropped on the round-trip.
+    """
+    map_data = {
+        "goZones": [
+            {
+                "hashId": "fullzone",
+                "type": 1,
+                "isEnabled": True,
+                "polygon": [],
+                "zoneConfig": {
+                    "cutHeight": 40,
+                    "moveSpeed": 0.8,
+                    "pathSpacing": 25,
+                    "safeMarginMode": True,
+                    "followDetectMode": None,  # None is skipped
+                },
+            }
+        ],
+        "nogoZones": [],
+    }
+    from lymow.protocol import _encode_go_zone
+
+    pb = _encode_go_zone(map_data["goZones"][0])
+    zf = _decode_fields(pb)
+    cfg_raw = _first(zf, 2)
+    cfg = decode_zone_config(cfg_raw)
+    assert cfg["cutHeight"] == 40
+    assert pytest.approx(cfg["moveSpeed"], abs=1e-3) == 0.8
+    assert cfg["pathSpacing"] == 25
+    assert cfg["safeMarginMode"] is True
+    assert "followDetectMode" not in cfg  # None skipped
+
+
 def test_encode_go_zone_with_optional_fields_roundtrips() -> None:
     """encode_sync_map round-trips go-zone optional fields."""
     map_data = {
@@ -1742,7 +2377,7 @@ def test_encode_go_zone_with_optional_fields_roundtrips() -> None:
                 "hashId": "gz1",
                 "type": 1,
                 "cutHeight": 30,
-                "pathSpacing": 0.5,
+                "pathSpacing": 25,
                 "isEnabled": True,
                 "polygon": [],
                 "boundMin": {"x": 0.1, "y": 0.2},
@@ -2123,8 +2758,9 @@ def test_decode_robot_config_extracts_known_fields() -> None:
 def test_decode_robot_config_absent_fields_not_in_dict() -> None:
     from lymow.protocol import decode_robot_config
 
-    # Only metric_4g present — the other keys must NOT appear (so the merge
-    # doesn't blow away existing state with False/0 defaults).
+    # Absent bools must NOT appear in the decoded dict — proto3 zero-default
+    # fill-in is handled by the coordinator after accumulating multiple patches,
+    # not by the decoder. This preserves deep-merge safety.
     assert decode_robot_config(_field_i32(11, 0)) == {"metric_4g": False}
     assert decode_robot_config(b"") == {}
 
@@ -2289,7 +2925,8 @@ def test_decode_clean_report_error_list_skips_wire_type_drift_for_percent() -> N
 
 def test_decode_pboutput_surfaces_clean_report_under_cleanReport_key() -> None:
     pb = _build_pboutput(work_status=2) + _field_bytes(28, _field_i32(1, 1_700_000_000) + _field_i32(3, 2))
-    assert decode_pboutput(pb)["cleanReport"] == {"cleanStartTime": 1_700_000_000, "mowEndType": 2}
+    # cleanReport is decoded inline: f1 → date (epoch), f3 → startType.
+    assert decode_pboutput(pb)["cleanReport"] == {"date": 1_700_000_000, "startType": 2}
 
 
 def test_decode_pboutput_no_cleanReport_key_when_field28_absent() -> None:
@@ -2404,14 +3041,27 @@ def test_decode_robot_config_drops_empty_rrConfig() -> None:
 def test_encode_set_task_config_wraps_in_pbinput() -> None:
     from lymow.protocol import encode_set_task_config
 
-    pb = encode_set_task_config(pathSpacing=200, perimeterMowLaps=2, pathOrder=True, moveSpeed=0.5)
+    pb = encode_set_task_config(
+        pathSpacing=200,
+        perimeterMowLaps=2,
+        pathOrder=True,
+        moveSpeed=0.5,
+        relativeCleanDir=35,
+        cutHeight=60,
+    )
     f = _decode_fields(pb)
     assert _first(f, 2) == 49  # version
-    assert _first(f, 5) == 36  # USER_CTRL_SET_TASK_CONFIG
-    cfg = _decode_fields(_first(f, 26))  # PbTaskConfig sub-message
-    assert _first(cfg, 9) == 200  # pathSpacing
-    assert _first(cfg, 10) == 2  # perimeterMowLaps
+    assert _first(f, 5) == 49  # USER_CTRL_GLOBAL_SETTING_N (Keep Custom) — LIVE-CONFIRMED 2026-05-30
+    # Envelope: PbInput.f12 (PbMap) → f11 globalZoneConfig (NOT the old f26 PbTaskConfig).
+    pb_map = _decode_fields(_first(f, 12))
+    cfg = _decode_fields(_first(pb_map, 11))  # PbMap.globalZoneConfig
+    assert _first(f, 26) is None  # old PbTaskConfig envelope no longer used
+    # Wire field numbers LIVE-CONFIRMED 2026-05-30 (BRANCH_STATUS C/I/K/M).
+    assert _first(cfg, 1) == 60  # cutHeight
+    assert _first(cfg, 9) == 200  # pathSpacing (confirmed f9)
+    assert _first(cfg, 10) == 2  # perimeterMowLaps (confirmed f10)
     assert _first(cfg, 14) == 1  # pathOrder (bool -> 1)
+    assert _first(cfg, 16) == 35  # relativeCleanDir (stripe angle)
     # moveSpeed is a float32 (wire type 5)
     assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.5, rel=1e-5)
 
@@ -2419,12 +3069,67 @@ def test_encode_set_task_config_wraps_in_pbinput() -> None:
 def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     from lymow.protocol import encode_set_task_config
 
-    pb = encode_set_task_config(cutSpeed=None, brushSpeed=100)
-    cfg = _decode_fields(_first(_decode_fields(pb), 26))
-    assert _first(cfg, 5) == 100  # brushSpeed (field 5) present
-    assert _first(cfg, 6) is None  # cutSpeed (field 6) skipped (None)
-    with pytest.raises(ValueError, match="unknown zone-config field"):
+    pb = encode_set_task_config(cutSpeed=None, perimeterMowLaps=2)
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    cfg = _decode_fields(_first(pb_map, 11))  # PbMap.globalZoneConfig
+    assert _first(cfg, 10) == 2  # perimeterMowLaps (field 10) present
+
+
+def test_encode_set_task_config_global_channel_config() -> None:
+    """Channel fields ride in PbMap.f12 globalChannelConfig {f1 detectMode, f2
+    deckHeight, f3 raiseOmni} — LIVE-CONFIRMED 2026-06-19 (app global Save sends
+    both f11 zone + f12 channel snapshots)."""
+    from lymow.protocol import _decode_fields, _first, decode_channel_config, encode_set_task_config
+
+    # Channel-only write: f12 present, f11 absent.
+    pb = encode_set_task_config(channelDetectMode=2, channelDeckHeight=60, channelRaiseOmni=False)
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    assert _first(pb_map, 11) is None  # no zone config
+    cc = decode_channel_config(_first(pb_map, 12))
+    assert cc == {"detectMode": 2, "cutHeight": 60, "channelLift": 0}
+    # Matches the captured globalChannelConfig bytes (f1=2, f2=60, f3=0).
+    assert _first(pb_map, 12).hex() == "0802103c1800"
+
+
+def test_encode_set_task_config_zone_and_channel_together() -> None:
+    """Mixed zone+channel write puts zone fields in f11, channel fields in f12."""
+    from lymow.protocol import _decode_fields, _first, encode_set_task_config
+
+    pb = encode_set_task_config(obsDecMode=2, followDetectMode=1, channelDetectMode=1)
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    zone = _decode_fields(_first(pb_map, 11))
+    chan = _decode_fields(_first(pb_map, 12))
+    assert _first(zone, 13) == 2  # obsDecMode
+    assert _first(zone, 19) == 1  # followDetectMode (now service-exposed)
+    assert _first(chan, 1) == 1  # channel detectMode
+    with pytest.raises(ValueError, match="unknown task-config field"):
         encode_set_task_config(nonsense=1)
+
+
+def test_encode_find_my_robot_play_sound_matches_captured_frame() -> None:
+    """Wire frame captured live 2026-05-27 from the app's Settings → Find My
+    Robot → Play Sound tap. The frame is `PbInput { f2:49 (version),
+    f13(robotConfig):{f6:100 audioVolume}, f16:1 (play-sound trigger) }`.
+    """
+    from lymow.protocol import encode_find_my_robot_play_sound
+
+    pb = encode_find_my_robot_play_sound()
+    # Byte-exact match against the captured ATT payload (base64 EDEoeq= →
+    # actually base64 of these bytes is "EDFqAjBkgAEB").
+    assert pb.hex() == "10316a023064800101"
+
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # PB_VERSION
+    assert _first(f, 5) is None  # no userCtrl — robot dispatches by f16 trigger
+    cfg = _decode_fields(_first(f, 13))
+    assert _first(cfg, 6) == 100  # audioVolume default
+    assert _first(f, 16) == 1  # play-sound trigger
+
+    # Custom volume parameter still emits f16=1
+    pb_quiet = encode_find_my_robot_play_sound(volume=30)
+    cfg_quiet = _decode_fields(_first(_decode_fields(pb_quiet), 13))
+    assert _first(cfg_quiet, 6) == 30
+    assert _first(_decode_fields(pb_quiet), 16) == 1
 
 
 def test_encode_set_robot_config_no_userctrl_just_submessage() -> None:
@@ -2593,70 +3298,110 @@ def test_encode_set_recharge_resume_partial_skips_unset() -> None:
         assert _first(rr, fno) is None
 
 
-def test_encode_set_night_mode_enable_true_writes_only_times() -> None:
-    """enable=True publishes the window without the kill-the-light signal."""
-    from lymow.protocol import encode_set_night_mode
+def test_encode_bind_rtk_structure_with_placeholder() -> None:
+    """Layout (PbInput.f13.f17.f1 = baseId) confirmed live 2026-05-30; asserted
+    with a placeholder base id, never the real one."""
+    from lymow.protocol import encode_bind_rtk
 
-    pb = encode_set_night_mode(open_time=(21, 0), close_time=(6, 30), enable=True)
+    pb = encode_bind_rtk("LK000PLACEHOLD00")
     f = _decode_fields(pb)
+    assert _first(f, 2) == 49
+    cfg = _decode_fields(_first(f, 13))  # robotConfig
+    inner = _decode_fields(_first(cfg, 17))  # rtkBind
+    assert _first(inner, 1) == b"LK000PLACEHOLD00"
     assert _first(f, 5) is None  # no userCtrl
-    cfg = _decode_fields(_first(f, 13))  # PbInput.robotConfig
-
-    open_tz = _decode_fields(_first(cfg, 14))
-    assert _first(open_tz, 1) == 21
-    assert _first(open_tz, 2) == 0
-    close_tz = _decode_fields(_first(cfg, 15))
-    assert _first(close_tz, 1) == 6
-    assert _first(close_tz, 2) == 30
-    # No signal field — the schedule keeps running, light stays on its own time.
-    assert _first(cfg, 8) is None
 
 
-def test_encode_set_night_mode_enable_false_co_publishes_off_signal() -> None:
-    """enable=False still records the schedule but forces the light off now."""
-    from lymow.const import SIGNAL_TURN_OFF_CAMERA_LIGHT
-    from lymow.protocol import encode_set_night_mode
+def test_encode_bind_rtk_rejects_empty() -> None:
+    from lymow.protocol import encode_bind_rtk
 
-    pb = encode_set_night_mode(open_time=(22, 0), close_time=(5, 0), enable=False)
-    cfg = _decode_fields(_first(_decode_fields(pb), 13))
-    assert isinstance(_first(cfg, 14), bytes)  # openLedTime still written
-    assert isinstance(_first(cfg, 15), bytes)  # closeLedTime still written
-    assert _first(cfg, 8) == SIGNAL_TURN_OFF_CAMERA_LIGHT
+    with pytest.raises(ValueError, match="base_id must not be empty"):
+        encode_bind_rtk("")
 
 
-def test_encode_set_night_mode_rejects_out_of_range_times() -> None:
-    """Bound-check at the encoder so a malformed service call can't publish garbage."""
-    from lymow.protocol import encode_set_night_mode
+def test_encode_set_wifi_structure_with_placeholder() -> None:
+    """Layout (PbInput.f17{f1 ssid, f2 password, f5:3}) confirmed live 2026-05-30;
+    asserted with placeholder ssid/password, never real credentials."""
+    from lymow.protocol import encode_set_wifi
 
-    for bad in ((24, 0), (-1, 0), (0, 60), (0, -1)):
-        with pytest.raises(ValueError, match="out of range"):
-            encode_set_night_mode(open_time=bad, close_time=(6, 0), enable=True)
-        with pytest.raises(ValueError, match="out of range"):
-            encode_set_night_mode(open_time=(0, 0), close_time=bad, enable=True)
+    pb = encode_set_wifi("TestNet", "testpass12")
+    assert pb.hex().startswith("8a01")  # field 17, no version prefix (as captured)
+    inner = _decode_fields(_first(_decode_fields(pb), 17))
+    assert _first(inner, 1) == b"TestNet"
+    assert _first(inner, 2) == b"testpass12"
+    assert _first(inner, 5) == 3
 
 
-def test_decode_robot_config_extracts_open_close_led_time() -> None:
-    """The robot echoes the schedule window back in pboutput so users see the
-    current window on the entity card without a separate poll."""
+def test_encode_set_wifi_rejects_empty_ssid() -> None:
+    from lymow.protocol import encode_set_wifi
+
+    with pytest.raises(ValueError, match="ssid must not be empty"):
+        encode_set_wifi("", "testpass12")
+
+
+def test_encode_set_pin_structure_with_placeholder() -> None:
+    """Structure (PbInput.f13.f9.f1 = digit bytes) confirmed live 2026-05-30;
+    asserted with a placeholder PIN, never the real value."""
+    from lymow.protocol import encode_set_pin
+
+    pb = encode_set_pin("1234")
+    assert pb.hex() == "10316a084a060a0401020304"  # placeholder 1->04 bytes
+    f = _decode_fields(pb)
+    cfg = _decode_fields(_first(f, 13))  # robotConfig
+    lcd = _decode_fields(_first(cfg, 9))  # lcdPinCode
+    assert _first(lcd, 1) == bytes([1, 2, 3, 4])
+
+
+def test_encode_set_pin_rejects_bad_input() -> None:
+    from lymow.protocol import encode_set_pin
+
+    for bad in ("123", "12345", "12a4", "", "abcd"):
+        with pytest.raises(ValueError, match="exactly 4 digits"):
+            encode_set_pin(bad)
+
+
+def test_encode_set_headlight_schedule_enable_matches_capture() -> None:
+    """Byte-exact against the live BLE frame captured 2026-05-30 (start 03:17,
+    end 04:23 UTC). PbInput {f2:49, f9:{f10:1}, f13:{f14 start, f15 end}}."""
+    from lymow.protocol import encode_set_headlight_schedule
+
+    pb = encode_set_headlight_schedule(enable=True, start=(3, 17), end=(4, 23))
+    assert pb.hex() == "10314a0250016a0c7204080310117a0408041017"
+
+
+def test_encode_set_headlight_schedule_disable_matches_capture() -> None:
+    """Byte-exact against the live disable frame: signal=7 plus zeroed times."""
+    from lymow.protocol import encode_set_headlight_schedule
+
+    pb = encode_set_headlight_schedule(enable=False)
+    assert pb.hex() == "10314a0250016a0e40077204080010007a0408001000"
+
+
+def test_encode_set_headlight_schedule_enable_requires_both_times() -> None:
+    from lymow.protocol import encode_set_headlight_schedule
+
+    with pytest.raises(ValueError, match="requires start and end"):
+        encode_set_headlight_schedule(enable=True, start=(3, 17))
+
+
+def test_decode_robot_config_surfaces_headlight_window() -> None:
     from lymow.protocol import decode_robot_config
 
-    cfg = _field_bytes(14, _field_i32(1, 21) + _field_i32(2, 0)) + _field_bytes(
-        15, _field_i32(1, 6) + _field_i32(2, 30)
-    )
-    out = decode_robot_config(cfg)
+    start = _field_i32(1, 3) + _field_i32(2, 17)
+    end = _field_i32(1, 4) + _field_i32(2, 23)
+    out = decode_robot_config(_field_bytes(14, start) + _field_bytes(15, end))
     assert out == {
-        "openLedTime": {"hour": 21, "minute": 0},
-        "closeLedTime": {"hour": 6, "minute": 30},
+        "headlightStart": {"hour": 3, "minute": 17},
+        "headlightEnd": {"hour": 4, "minute": 23},
     }
 
 
-def test_decode_robot_config_drops_out_of_range_led_times() -> None:
-    """A hostile pboutput must not surface 25:99 or -1:-1 to HA state."""
+def test_decode_robot_config_drops_out_of_range_headlight_window() -> None:
+    """A hostile/garbage time sub-message is dropped, not surfaced as state."""
     from lymow.protocol import decode_robot_config
 
-    bad = _field_bytes(14, _field_i32(1, 24) + _field_i32(2, 0))  # 24h is invalid
-    bad += _field_bytes(15, _field_i32(1, 0) + _field_i32(2, 60))  # minute 60 invalid
-    assert decode_robot_config(bad) == {}
+    bad = _field_i32(1, 99) + _field_i32(2, 17)  # hour out of range
+    assert "headlightStart" not in decode_robot_config(_field_bytes(14, bad))
 
 
 def test_encode_set_robot_config_signal_field_for_vehicle_led() -> None:
@@ -2687,6 +3432,25 @@ def test_decode_robot_config_surfaces_dock_on_error() -> None:
     assert decode_robot_config(_field_i32(22, 0)) == {"dockOnError": False}
 
 
+def test_decode_robot_config_surfaces_lcd_pin() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # f9 lcdPinCode = {f1: 4 digit-bytes}
+    pin = _field_bytes(9, _field_bytes(1, bytes([0, 0, 0, 0])))
+    assert decode_robot_config(pin)["lcdPin"] == "0000"
+    pin = _field_bytes(9, _field_bytes(1, bytes([1, 2, 3, 4])))
+    assert decode_robot_config(pin)["lcdPin"] == "1234"
+
+
+def test_decode_robot_config_rejects_malformed_lcd_pin() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # Wrong length, out-of-range digit, or a non-submessage all surface no PIN.
+    assert "lcdPin" not in decode_robot_config(_field_bytes(9, _field_bytes(1, bytes([1, 2, 3]))))
+    assert "lcdPin" not in decode_robot_config(_field_bytes(9, _field_bytes(1, bytes([1, 2, 3, 99]))))
+    assert "lcdPin" not in decode_robot_config(_field_i32(9, 5))
+
+
 def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     from lymow.protocol import encode_set_run_time_config
 
@@ -2697,10 +3461,12 @@ def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     # PbInput.map (field 12) → PbMap.runTimeConfig (field 13) → PbRunTimeConfig
     pb_map = _decode_fields(_first(f, 12))
     cfg = _decode_fields(_first(pb_map, 13))
+    # Wire field numbers pinned to canonical PbRunTimeConfig (Hermes #9456):
+    # f1 cutHeight / f2 moveSpeed / f3 cutSpeed / f4 channelConfig.
     assert _first(cfg, 1) == 45  # cutHeight
-    assert _first(cfg, 6) == 120  # cutSpeed
+    assert _first(cfg, 3) == 120  # cutSpeed
     # moveSpeed is float32 (wire type 5)
-    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.6, rel=1e-5)
+    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 2)))[0] == pytest.approx(0.6, rel=1e-5)
 
 
 def test_encode_set_run_time_config_skips_none_and_rejects_unknown() -> None:
@@ -2708,7 +3474,7 @@ def test_encode_set_run_time_config_skips_none_and_rejects_unknown() -> None:
 
     pb = encode_set_run_time_config(cutHeight=None, cutSpeed=80)
     cfg = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 12)), 13))
-    assert _first(cfg, 6) == 80  # cutSpeed present
+    assert _first(cfg, 3) == 80  # cutSpeed present
     assert _first(cfg, 1) is None  # cutHeight (None) skipped
     with pytest.raises(ValueError, match="unknown run-time-config field"):
         encode_set_run_time_config(nonsense=1)
@@ -2725,6 +3491,186 @@ def test_encode_rename_zone_structure() -> None:
     bi = _decode_fields(_first(zone, 1))  # PbZoneBasicInfo
     assert _first(bi, 2).decode() == "Front lawn"  # name = field 2
     assert _first(bi, 3).decode() == "wsmjco1T"  # hashId = field 3
+
+
+def test_encode_rename_nogo_zone_uses_nogo_field() -> None:
+    from lymow.protocol import encode_rename_nogo_zone
+
+    pb = encode_rename_nogo_zone("ngabcdef", "Flower bed")
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    pb_map = _decode_fields(_first(f, 12))
+    # nogo lives in PbMap field 2, NOT field 1 — distinguishes from go-zone rename
+    assert _first(pb_map, 1) is None
+    zone = _decode_fields(_first(pb_map, 2))
+    bi = _decode_fields(_first(zone, 1))
+    assert _first(bi, 2).decode() == "Flower bed"
+    assert _first(bi, 3).decode() == "ngabcdef"
+
+
+def test_encode_set_zone_config_single_zone_carries_configbox() -> None:
+    """Per-zone PbZoneConfig override via userCtrl=9 (app's Customize-tab path).
+
+    Wire layout captured live 2026-05-27 (BRANCH_STATUS reply 4): PbInput with
+    userCtrl=9, PbMap.goZones[*] each carrying basicInfo (hashId + isEnabled)
+    and configBox (PbZoneConfig). Distinguishes itself from a rename frame by
+    omitting BasicInfo.name (f2) and including the configBox at PbZone.f2.
+    """
+    from lymow.protocol import encode_set_zone_config
+
+    pb = encode_set_zone_config(
+        [
+            {
+                "hashId": "wsmjco1T",
+                "isEnabled": True,
+                "cutHeight": 40,
+                "moveSpeed": 0.8,
+                "pathSpacing": 25,
+            }
+        ]
+    )
+    f = _decode_fields(pb)
+    assert _first(f, 2) == 49  # PB_VERSION
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    pb_map = _decode_fields(_first(f, 12))
+    zone = _decode_fields(_first(pb_map, 1))  # goZones[0]
+    bi = _decode_fields(_first(zone, 1))
+    # No name field — config-only write
+    assert _first(bi, 2) is None
+    assert _first(bi, 3).decode() == "wsmjco1T"
+    assert _first(bi, 4) == 1  # isEnabled
+    cfg = _decode_fields(_first(zone, 2))  # configBox
+    assert _first(cfg, 1) == 40  # cutHeight
+    # moveSpeed is float32 stored in a varint slot
+    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.8, rel=1e-5)
+    # PbZoneConfig pathSpacing is at f9 (live-confirmed 2026-05-30)
+    assert _first(cfg, 9) == 25
+
+
+def test_encode_set_zone_config_multiple_zones_in_one_frame() -> None:
+    """The app re-sends every zone in a single bulk write — mirror that shape."""
+    from lymow.protocol import encode_set_zone_config
+
+    pb = encode_set_zone_config(
+        [
+            {"hashId": "wsmjco1T", "cutHeight": 40, "isEnabled": True},
+            {"hashId": "KX1kGyat", "cutHeight": 50, "isEnabled": False},
+        ]
+    )
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    zones = _all(pb_map, 1)
+    assert len(zones) == 2
+    bi0 = _decode_fields(_first(_decode_fields(zones[0]), 1))
+    bi1 = _decode_fields(_first(_decode_fields(zones[1]), 1))
+    assert _first(bi0, 3).decode() == "wsmjco1T"
+    assert _first(bi0, 4) == 1
+    assert _first(bi1, 3).decode() == "KX1kGyat"
+    assert _first(bi1, 4) == 0
+
+
+def test_encode_set_zone_config_empty_config_only_basic_info() -> None:
+    """A bare ``{hashId, isEnabled}`` update emits no configBox — useful for
+    flipping a zone's enabled state via the userCtrl=9 path without changing
+    other settings."""
+    from lymow.protocol import encode_set_zone_config
+
+    pb = encode_set_zone_config([{"hashId": "wsmjco1T", "isEnabled": False}])
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    zone = _decode_fields(_first(pb_map, 1))
+    # basicInfo present, configBox absent
+    assert _first(zone, 1) is not None
+    assert _first(zone, 2) is None
+
+
+def test_encode_set_zone_config_rejects_empty_list_and_missing_hash() -> None:
+    from lymow.protocol import encode_set_zone_config
+
+    with pytest.raises(ValueError, match="at least one update required"):
+        encode_set_zone_config([])
+    with pytest.raises(ValueError, match="needs a hashId"):
+        encode_set_zone_config([{"cutHeight": 40}])
+
+
+def test_encode_set_zone_config_emits_bool_and_skips_none() -> None:
+    """Bool fields encode as varint 0/1; explicit None values are skipped so
+    callers can pass through a sparse update without touching unset fields."""
+    from lymow.protocol import encode_set_zone_config
+
+    pb = encode_set_zone_config(
+        [
+            {
+                "hashId": "wsmjco1T",
+                "safeMarginMode": True,
+                "pathOrder": False,
+                "cutSpeed": None,  # explicit None — skipped
+            }
+        ]
+    )
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    cfg = _decode_fields(_first(_decode_fields(_first(pb_map, 1)), 2))
+    assert _first(cfg, 17) == 1  # safeMarginMode true (confirmed f17)
+    assert _first(cfg, 14) == 0  # pathOrder false (confirmed f14)
+    assert _first(cfg, 6) is None  # cutSpeed None → omitted
+
+
+def test_encode_rename_zone_matches_live_confirmed_bytes() -> None:
+    """Pin the wire format against a live round-trip executed on 2026-05-26.
+
+    Bytes below were published to /device/<thing>/pbinput, the robot accepted the
+    rename, and the next QUERY_MAP echoed BasicInfo.f2 == "Front garden RENAMETEST"
+    (and then "Front garden" on the restore). See BRANCH_STATUS.md "Task B — live
+    confirmation" for the round-trip trace.
+    """
+    from lymow.protocol import encode_rename_zone
+
+    assert (
+        encode_rename_zone("wsmjco1T", "Front garden RENAMETEST").hex()
+        == "1031280962270a250a23121746726f6e742067617264656e2052454e414d45544553541a0877736d6a636f3154"
+    )
+    assert (
+        encode_rename_zone("wsmjco1T", "Front garden").hex()
+        == "10312809621c0a1a0a18120c46726f6e742067617264656e1a0877736d6a636f3154"
+    )
+
+
+def test_encode_rename_zone_envelope_matches_app_ble_capture() -> None:
+    """Cross-check encoder envelope against bytes captured from the Lymow app over BLE.
+
+    On 2026-05-26 we drove the Android app via ADB through Edit → Rename → pick
+    wsmjco1T → "ABCDEFG_TEST" → OK, and captured the resulting ATT WRITE_CMD on
+    GATT handle 0x0014 from the phone's BTSnoop HCI log. The 48-byte ASCII payload
+    is base64 of the protobuf below:
+
+        ATT b64:   EDEoCWIeChwKGhIMQUJDREVGR19URVNUGgh3c21qY28xVCAB
+        pb (36B):  10312809621e0a1c0a1a120c414243444546475f544553541a0877736d6a636f31542001
+
+    Compared to our encoder for the same hash+name, the app's frame also includes
+    BasicInfo.f4 = isEnabled = 1 at the tail. Our encoder omits it intentionally:
+    sending a blanket 1 would re-enable a user-disabled zone on a simple rename.
+    The robot accepts both forms — the direct-MQTT round-trip in rename_test.py
+    proves the no-f4 form is honored end-to-end.
+    """
+    from lymow.protocol import encode_rename_zone
+
+    # Strip the app's trailing isEnabled field and adjust the three nested length
+    # tags down by 2 bytes — the result must equal our encoder's output exactly.
+    ours = encode_rename_zone("wsmjco1T", "ABCDEFG_TEST")
+    assert ours.hex() == "10312809621c0a1a0a18120c414243444546475f544553541a0877736d6a636f3154"
+
+    # Same envelope, same nesting, same userCtrl, same name field, same hashId field
+    # as the captured app frame. Decode both and compare structurally.
+    app_pb = bytes.fromhex("10312809621e0a1c0a1a120c414243444546475f544553541a0877736d6a636f31542001")
+    app_f = _decode_fields(app_pb)
+    our_f = _decode_fields(ours)
+    assert _first(app_f, 2) == _first(our_f, 2) == 49  # PB_VERSION
+    assert _first(app_f, 5) == _first(our_f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
+    app_bi = _decode_fields(_first(_decode_fields(_first(_decode_fields(_first(app_f, 12)), 1)), 1))
+    our_bi = _decode_fields(_first(_decode_fields(_first(_decode_fields(_first(our_f, 12)), 1)), 1))
+    assert _first(app_bi, 2) == _first(our_bi, 2) == b"ABCDEFG_TEST"
+    assert _first(app_bi, 3) == _first(our_bi, 3) == b"wsmjco1T"
+    # The one structural difference: the app appends f4 isEnabled=1, we omit it.
+    assert _first(app_bi, 4) == 1
+    assert _first(our_bi, 4) is None
 
 
 def test_encode_clear_schedules_is_empty_schedule_field() -> None:
