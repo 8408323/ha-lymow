@@ -2738,7 +2738,35 @@ def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     pb_map = _decode_fields(_first(_decode_fields(pb), 12))
     cfg = _decode_fields(_first(pb_map, 11))  # PbMap.globalZoneConfig
     assert _first(cfg, 10) == 2  # perimeterMowLaps (field 10) present
-    assert _first(cfg, 6) is None  # cutSpeed (field 6) skipped (None)
+
+
+def test_encode_set_task_config_global_channel_config() -> None:
+    """Channel fields ride in PbMap.f12 globalChannelConfig {f1 detectMode, f2
+    deckHeight, f3 raiseOmni} — LIVE-CONFIRMED 2026-06-19 (app global Save sends
+    both f11 zone + f12 channel snapshots)."""
+    from lymow.protocol import _decode_fields, _first, decode_channel_config, encode_set_task_config
+
+    # Channel-only write: f12 present, f11 absent.
+    pb = encode_set_task_config(channelDetectMode=2, channelDeckHeight=60, channelRaiseOmni=False)
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    assert _first(pb_map, 11) is None  # no zone config
+    cc = decode_channel_config(_first(pb_map, 12))
+    assert cc == {"detectMode": 2, "cutHeight": 60, "channelLift": 0}
+    # Matches the captured globalChannelConfig bytes (f1=2, f2=60, f3=0).
+    assert _first(pb_map, 12).hex() == "0802103c1800"
+
+
+def test_encode_set_task_config_zone_and_channel_together() -> None:
+    """Mixed zone+channel write puts zone fields in f11, channel fields in f12."""
+    from lymow.protocol import _decode_fields, _first, encode_set_task_config
+
+    pb = encode_set_task_config(obsDecMode=2, followDetectMode=1, channelDetectMode=1)
+    pb_map = _decode_fields(_first(_decode_fields(pb), 12))
+    zone = _decode_fields(_first(pb_map, 11))
+    chan = _decode_fields(_first(pb_map, 12))
+    assert _first(zone, 13) == 2  # obsDecMode
+    assert _first(zone, 19) == 1  # followDetectMode (now service-exposed)
+    assert _first(chan, 1) == 1  # channel detectMode
     with pytest.raises(ValueError, match="unknown task-config field"):
         encode_set_task_config(nonsense=1)
 

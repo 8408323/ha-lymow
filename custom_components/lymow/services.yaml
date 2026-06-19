@@ -301,6 +301,38 @@ set_task_config:
       example: false
       selector:
         boolean:
+    stripe_angle:
+      name: Stripe angle
+      description: >
+        Mowing stripe direction (confirmed f8). -1 = Optimized (robot picks the
+        best direction); 0-180 = a fixed angle in degrees.
+      example: 90
+      selector:
+        number: { min: -1, max: 180, step: 1, mode: box }
+    follow_detect_mode:
+      name: Perimeter obstacle detection
+      description: Obstacle-detection mode on perimeter laps (Smart=2 / Touch-Only=1; confirmed f19).
+      example: 2
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    channel_detect_mode:
+      name: Channel obstacle detection
+      description: Obstacle-detection mode crossing a channel (Smart=2 / Touch-Only=1; globalChannelConfig f1).
+      example: 2
+      selector:
+        number: { min: 0, max: 3, step: 1, mode: box }
+    channel_deck_height:
+      name: Channel deck height
+      description: Deck (cut) height when crossing a channel, in mm (globalChannelConfig f2).
+      example: 60
+      selector:
+        number: { min: 20, max: 100, step: 1, unit_of_measurement: "mm" }
+    channel_raise_omni:
+      name: Raise omni wheels on channel
+      description: Raise the omni wheels when crossing a channel (globalChannelConfig f3).
+      example: false
+      selector:
+        boolean:
 
 set_device_settings:
   name: Set Device Settings

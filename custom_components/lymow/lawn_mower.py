@@ -149,13 +149,19 @@ _TASK_CONFIG_SERVICE_FIELDS = {
     "nogo_mow_laps": "noGoMowLaps",
     "cut_speed": "cutSpeed",
     "obs_dec_mode": "obsDecMode",
+    "follow_detect_mode": "followDetectMode",
     "clean_mode": "cleanMode",
+    "stripe_angle": "stripeAngle",
     "path_order": "pathOrder",
     "relative_clean_dir": "relativeCleanDir",
     "safe_margin_mode": "safeMarginMode",
     "turn_off_outer_motor": "turnOffOuterMotor",
     "raise_cut_height": "raiseCutHeight",
     "lower_cut_height": "lowerCutHeight",
+    # Global channel settings — ride in PbMap.f12 globalChannelConfig.
+    "channel_detect_mode": "channelDetectMode",
+    "channel_deck_height": "channelDeckHeight",
+    "channel_raise_omni": "channelRaiseOmni",
 }
 # Fields that accept floats rather than ints.
 _TASK_CONFIG_FLOAT_FIELDS = {"move_speed"}
@@ -166,6 +172,7 @@ _TASK_CONFIG_BOOL_FIELDS = {
     "turn_off_outer_motor",
     "raise_cut_height",
     "lower_cut_height",
+    "channel_raise_omni",
 }
 
 # Service-field (snake_case) → PbRunTimeConfig field (camelCase) + safe numeric
