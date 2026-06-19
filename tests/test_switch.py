@@ -397,8 +397,9 @@ def test_vehicle_led_switch_metadata_and_unknown_when_missing() -> None:
     e = VehicleLedSwitch(coord, DEVICE)
     assert e._attr_unique_id == f"{THING}_isOpenLed"
     assert "Vehicle LED" in e._attr_name
-    # No robotConfig yet → unknown, not silently False
-    assert e.is_on is None
+    # No robotConfig yet → proto3 default (off): an absent bool is false, so an
+    # interactive off-toggle is correct, not the ⚡ that None renders as.
+    assert e.is_on is False
 
 
 def test_vehicle_led_switch_reads_state_from_robot_config() -> None:
@@ -414,9 +415,9 @@ def test_vehicle_led_switch_off_when_dock_on_error_known_and_led_absent() -> Non
     assert e.is_on is False
 
 
-def test_vehicle_led_switch_unknown_when_no_robot_config() -> None:
+def test_vehicle_led_switch_defaults_off_when_no_robot_config() -> None:
     e = VehicleLedSwitch(_make_robot_config_coord({}), DEVICE)
-    assert e.is_on is None
+    assert e.is_on is False
 
 
 async def test_vehicle_led_switch_writes_via_signal_not_isOpenLed() -> None:
@@ -464,7 +465,9 @@ def test_prefer_4g_switch_metadata_and_reads_state() -> None:
     assert "4G" in e._attr_name
     assert e.is_on is True
     assert Prefer4gSwitch(_make_robot_config_coord({"metric_4g": False}), DEVICE).is_on is False
-    assert Prefer4gSwitch(_make_robot_config_coord(None), DEVICE).is_on is None
+    assert Prefer4gSwitch(_make_robot_config_coord(None), DEVICE).is_on is False
+    # Present-but-malformed (hostile decode) → unknown, not coerced.
+    assert Prefer4gSwitch(_make_robot_config_coord({"metric_4g": 1}), DEVICE).is_on is None
 
 
 async def test_prefer_4g_switch_turn_on_off_publishes_robot_config() -> None:
@@ -491,7 +494,7 @@ def test_dock_on_error_switch_reads_state_and_unique_id() -> None:
     assert on._attr_unique_id == f"{THING}_dockOnError"
     assert on.is_on is True
     assert DockOnErrorSwitch(_make_robot_config_coord({"dockOnError": False}), DEVICE).is_on is False
-    assert DockOnErrorSwitch(_make_robot_config_coord(None), DEVICE).is_on is None
+    assert DockOnErrorSwitch(_make_robot_config_coord(None), DEVICE).is_on is False
 
 
 async def test_dock_on_error_switch_writes_robot_config() -> None:
@@ -729,11 +732,12 @@ def test_rain_cleaning_switch_metadata_and_reads_state() -> None:
     assert e_off.is_on is False
 
 
-def test_rain_cleaning_unknown_when_missing_or_non_bool() -> None:
+def test_rain_cleaning_default_when_missing_unknown_when_non_bool() -> None:
     from lymow.switch import RainCleaningSwitch
 
-    assert RainCleaningSwitch(_make_task_config_coord(), DEVICE).is_on is None
-    assert RainCleaningSwitch(_make_task_config_coord({}), DEVICE).is_on is None
+    # Absent taskConfig / absent field → proto3 default (off, not None).
+    assert RainCleaningSwitch(_make_task_config_coord(), DEVICE).is_on is False
+    assert RainCleaningSwitch(_make_task_config_coord({}), DEVICE).is_on is False
     # int 1 from a hostile decode must not be treated as bool — surfaces unknown.
     assert RainCleaningSwitch(_make_task_config_coord({"rainCleaning": 1}), DEVICE).is_on is None
 
@@ -760,13 +764,15 @@ def test_charging_handbrake_switch_inverts_wire_for_ui_sense() -> None:
     assert off.is_on is False
 
 
-def test_charging_handbrake_metadata_and_unknown_when_missing() -> None:
+def test_charging_handbrake_metadata_and_default_when_missing() -> None:
     from lymow.switch import ChargingHandbrakeSwitch
 
     e = ChargingHandbrakeSwitch(_make_task_config_coord(), DEVICE)
     assert e._attr_unique_id == f"{THING}_charging_handbrake"
     assert e._attr_name == "Charging handbrake"
-    assert e.is_on is None
+    # Inverted: absent disableChargingPark → proto3 default wire False →
+    # UI "handbrake on" (True), not None.
+    assert e.is_on is True
 
 
 async def test_charging_handbrake_turn_on_off_passes_ui_bool_through() -> None:
@@ -799,13 +805,14 @@ def _make_rr_coord(rr_config: dict | None = None) -> MagicMock:
     return coord
 
 
-def test_recharge_resume_switch_metadata_and_unknown_when_missing() -> None:
+def test_recharge_resume_switch_metadata_and_default_when_missing() -> None:
     from lymow.switch import RechargeResumeSwitch
 
     e = RechargeResumeSwitch(_make_rr_coord(), DEVICE)
     assert e._attr_unique_id == f"{THING}_recharge_resume"
     assert e._attr_name == "Recharge & resume"
-    assert e.is_on is None
+    # Absent rrConfig → proto3 default (off), not None.
+    assert e.is_on is False
 
 
 def test_recharge_resume_switch_reads_state_and_period_attrs() -> None:

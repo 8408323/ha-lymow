@@ -93,10 +93,15 @@ except ImportError:
         MINUTES = "min"
         HOURS = "h"
 
+    class _EntityCategory(str, enum.Enum):
+        CONFIG = "config"
+        DIAGNOSTIC = "diagnostic"
+
     _ha_const.UnitOfArea = _UnitOfArea  # type: ignore[attr-defined]
     _ha_const.UnitOfLength = _UnitOfLength  # type: ignore[attr-defined]
     _ha_const.UnitOfTime = _UnitOfTime  # type: ignore[attr-defined]
     _ha_const.DEGREE = "°"  # type: ignore[attr-defined]
+    _ha_const.EntityCategory = _EntityCategory  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.const", _ha_const)
 
     # ── homeassistant.core ────────────────────────────────────────────────────
@@ -131,8 +136,16 @@ except ImportError:
     class _ServiceValidationError(_HomeAssistantError):
         pass
 
+    class _ConfigEntryAuthFailed(_HomeAssistantError):
+        pass
+
+    class _ConfigEntryNotReady(_HomeAssistantError):
+        pass
+
     _ha_exc.HomeAssistantError = _HomeAssistantError  # type: ignore[attr-defined]
     _ha_exc.ServiceValidationError = _ServiceValidationError  # type: ignore[attr-defined]
+    _ha_exc.ConfigEntryAuthFailed = _ConfigEntryAuthFailed  # type: ignore[attr-defined]
+    _ha_exc.ConfigEntryNotReady = _ConfigEntryNotReady  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.exceptions", _ha_exc)
 
     # ── homeassistant.config_entries ──────────────────────────────────────────
@@ -454,7 +467,11 @@ except ImportError:
     async def _async_get_image(hass, input_source, **kwargs):  # type: ignore[no-untyped-def]
         return b""
 
+    def _get_ffmpeg_manager(hass):  # type: ignore[no-untyped-def]
+        return types.SimpleNamespace(binary="ffmpeg")
+
     _ha_ffmpeg.async_get_image = _async_get_image  # type: ignore[attr-defined]
+    _ha_ffmpeg.get_ffmpeg_manager = _get_ffmpeg_manager  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.ffmpeg", _ha_ffmpeg)
 
     # ── homeassistant.components.bluetooth ────────────────────────────────────

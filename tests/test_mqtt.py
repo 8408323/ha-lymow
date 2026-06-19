@@ -152,10 +152,13 @@ async def test_build_presigned_ws_path_includes_security_token():
 async def test_connect_success_sets_client_and_task(monkeypatch):
     monkeypatch.setattr(aiomqtt, "Client", _make_success_client())
     client = _make_mqtt()
+    assert client.is_connected is False  # nothing published before connect
     await client.connect(["mower-001"], "key", "secret", None)
     assert client._client is not None
+    assert client.is_connected is True
     assert client._listen_task is not None
     await client.disconnect()
+    assert client.is_connected is False
 
 
 # ---------------------------------------------------------------------------

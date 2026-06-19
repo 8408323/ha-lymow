@@ -3549,3 +3549,62 @@ Files deployed: `coordinator.py`, `manifest.json` (v0.2.12). The card JS (`lymow
 | Gap 4: Channel OD toggle values | Confirm `detectMode` Smart=2/Touch=1 from a fresh capture |
 | Backup create/restore test | Panel shows 3 backups; create/restore/rename/delete UI not yet tested |
 | Schedule panel | No schedules configured; test when user creates one |
+
+---
+
+## 🛠 Supervisor session — 2026-06-19 (live-deploy reliability + frontend pass)
+
+Worked against the **deployed** code (`origin/feat/map-lovelace-card`); the local
+checkout was 50 commits behind and was synced to origin first. Deploy = `ssh
+homeassistant "cat > /tmp/x && sudo cp /tmp/x /config/custom_components/lymow/<f>"`
+(SSH add-on has no sftp) then `homeassistant.restart`. All items below are
+**deployed live + verified**; 1168 tests pass, ruff clean. (Tests NOT yet pushed.)
+
+**Live outage found & fixed (root cause):** `__init__.py` logged in once and never
+refreshed → Cognito access token lapsed (~24 h) → every REST poll 401'd →
+all entities `unavailable` until restart. Wired token + AWS-cred refresh into the
+coordinator (`set_auth_context` / `_async_ensure_auth`, preemptive at
+`AUTH_REFRESH_MARGIN_SECONDS`=600; refresh_tokens → re-login fallback →
+ConfigEntryAuthFailed). Also: `__init__` never seeded the client's initial AWS
+creds (latent S3/backup bug) — now does.
+
+**Proto3 defaults (user request "default values for everything"):** coordinator
+seeds robotConfig + taskConfig proto3 defaults (`_apply_config_defaults`), so
+settings entities show the default instead of `unknown`. Switch policy unified:
+absent → default (False / inverted), present-but-malformed → unknown. Selects:
+absent → option 0. Result: 0 non-button entities unknown/unavailable.
+
+**Startup query race:** the config query now fires after MQTT connect
+(`async_query_all_robot_configs` in `__init__`, gate also requires
+`mqtt.is_connected`) — was dropping the publish during first_refresh.
+
+**PIN read path (closes the #46 read gap):** `decode_robot_config` now decodes
+`PbRobotConfig.f9 lcdPinCode` ({f1: 4 digit-bytes}) → `lcdPin`, surfaced as
+`sensor.<id>_screen_pin` (disabled-by-default, DIAGNOSTIC, never logged). This was
+a hand-edit on the live box not in git — now committed properly.
+
+**Orphan entity cleanup:** `async_prune_stale_zone_entities` (entity.py, called from
+number.py) removes switch/number entities for zones deleted from the map. Cleared
+3f49/6171/d1d8.
+
+**CI was RED, now green:** conftest stub missing `get_ffmpeg_manager` (suite
+wouldn't load) + `ConfigEntryAuthFailed`/`EntityCategory` stubs added; ~11 stale
+tests reconciled (switch defaults, dashboard 6-views, BLE-wifi signature); ruff
+format/imports fixed across __init__/camera/lawn_mower.
+
+**Frontend (lymow-mower dashboard) modernized + deduplicated:** rebuilt via
+`lovelace/config/save` (backup at `.lymow_dashboard_backup.json`). Each value
+entity now has exactly one home (was: network/connectivity/zone_order/prefer_4g/
+rtk duplicated across views). Stripped the repeated "7B6521" prefix from every
+row. Settings + Diagnostics use modern `sections` views with icon headings.
+Overview "Mowing controls" card scoped to `run_time/zone_config/start_zone/resume`
+so headlight/advanced live only on Settings (no duplicate controls). Verified all
+views via Playwright (screenshots).
+
+**Still open (unchanged, capture-blocked / out of scope):** WiFi credential write
+(BLE, risky), Bind RTK (risky), notification-history list, map edits (deferred),
+camera KVS #97 (excluded). **Low-confidence to verify:** chargingMode label
+semantics (wire 0/1 correct; "Follow perimeter"=0 / "Direct route"=1 human labels
+unconfirmed against the app — needs a Return-to-Dock screen capture). `last_mow
+_duration` / `total_mow_time` sensors display raw seconds (consider duration
+device_class for h:m formatting).

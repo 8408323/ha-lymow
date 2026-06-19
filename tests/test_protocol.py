@@ -3048,6 +3048,25 @@ def test_decode_robot_config_surfaces_dock_on_error() -> None:
     assert decode_robot_config(_field_i32(22, 0)) == {"dockOnError": False}
 
 
+def test_decode_robot_config_surfaces_lcd_pin() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # f9 lcdPinCode = {f1: 4 digit-bytes}
+    pin = _field_bytes(9, _field_bytes(1, bytes([0, 0, 0, 0])))
+    assert decode_robot_config(pin)["lcdPin"] == "0000"
+    pin = _field_bytes(9, _field_bytes(1, bytes([1, 2, 3, 4])))
+    assert decode_robot_config(pin)["lcdPin"] == "1234"
+
+
+def test_decode_robot_config_rejects_malformed_lcd_pin() -> None:
+    from lymow.protocol import decode_robot_config
+
+    # Wrong length, out-of-range digit, or a non-submessage all surface no PIN.
+    assert "lcdPin" not in decode_robot_config(_field_bytes(9, _field_bytes(1, bytes([1, 2, 3]))))
+    assert "lcdPin" not in decode_robot_config(_field_bytes(9, _field_bytes(1, bytes([1, 2, 3, 99]))))
+    assert "lcdPin" not in decode_robot_config(_field_i32(9, 5))
+
+
 def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     from lymow.protocol import encode_set_run_time_config
 

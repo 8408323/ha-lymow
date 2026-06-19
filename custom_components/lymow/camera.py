@@ -100,9 +100,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         await super().async_added_to_hass()
         if self._stream_url():
             await self._start_proxy()
-        self.async_on_remove(
-            self.coordinator.async_add_listener(self._on_coordinator_update)
-        )
+        self.async_on_remove(self.coordinator.async_add_listener(self._on_coordinator_update))
 
     async def async_will_remove_from_hass(self) -> None:
         await self._stop_proxy()
@@ -143,20 +141,25 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         try:
             self._proxy_proc = await asyncio.create_subprocess_exec(
                 ffmpeg_bin,
-                "-loglevel", "warning",
-                "-rtsp_transport", "tcp",
-                "-analyzeduration", "5000000",
-                "-probesize", "5000000",
-                "-i", rtsp_url,
-                "-c:v", "copy",
-                "-f", "mpegts",
+                "-loglevel",
+                "warning",
+                "-rtsp_transport",
+                "tcp",
+                "-analyzeduration",
+                "5000000",
+                "-probesize",
+                "5000000",
+                "-i",
+                rtsp_url,
+                "-c:v",
+                "copy",
+                "-f",
+                "mpegts",
                 "pipe:1",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            self._ts_reader_task = self.hass.async_create_task(
-                self._read_ffmpeg_stdout()
-            )
+            self._ts_reader_task = self.hass.async_create_task(self._read_ffmpeg_stdout())
             _LOGGER.debug("Lymow MPEG-TS proxy started (pid=%s) for %s", self._proxy_proc.pid, rtsp_url)
         except Exception as exc:
             _LOGGER.warning("Lymow proxy could not start (%s); falling back to direct RTSP", exc)
@@ -191,9 +194,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         self._ts_port = None
         self._proxy_ip = None
 
-    async def _handle_ts_client(
-        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-    ) -> None:
+    async def _handle_ts_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         """Serve one HTTP client with the live MPEG-TS stream."""
         try:
             # Consume all HTTP request headers before responding.
@@ -279,9 +280,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
             attrs["mpegts_proxy_url"] = f"http://127.0.0.1:{self._ts_port}/stream.ts"
         return attrs
 
-    async def async_camera_image(
-        self, width: int | None = None, height: int | None = None
-    ) -> bytes | None:
+    async def async_camera_image(self, width: int | None = None, height: int | None = None) -> bytes | None:
         url = self._stream_url()
         if not url:
             return None

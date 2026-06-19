@@ -1012,7 +1012,8 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
     Field map from PbRobotConfig.encode (Hermes fn #9506 at offset 0x004a7ce8):
     f2 rcCutSpeed int, f3 rcCutHeight int, f4 rcRaiseCutHeight bool,
     f5 rcLowerCutHeight bool, f6 audioVolume int, f7 isOpenLed bool,
-    f8 signal int, f9 lcdPinCode submessage (omitted — PIN is sensitive),
+    f8 signal int, f9 lcdPinCode submessage {f1: 4 digit-bytes} → lcdPin
+    (decoded for an opt-in diagnostic sensor; never logged — PIN is sensitive),
     f10 cmdCellularSwitch bool, f11 metric_4g bool,
     f14 headlightStart / f15 headlightEnd PbTimeZone {hour, minute} UTC,
     f18 rrConfig PbRRConfig,
@@ -1056,6 +1057,15 @@ def decode_robot_config(data: bytes) -> dict[str, Any]:
         rr = decode_rr_config(rr_raw)
         if rr:
             out["rrConfig"] = rr
+    # f9 lcdPinCode: submessage {f1: 4 bytes, one digit (0-9) per byte}. The
+    # 4-digit screen-unlock PIN. Surfaced only via a disabled-by-default
+    # diagnostic sensor; never logged (security rule: PIN is sensitive).
+    pin_raw = _first(f, 9)
+    if isinstance(pin_raw, bytes):
+        pin_sub = _decode_fields(pin_raw)
+        digits = _first(pin_sub, 1)
+        if isinstance(digits, bytes) and len(digits) == 4 and all(0 <= b <= 9 for b in digits):
+            out["lcdPin"] = "".join(str(b) for b in digits)
     return out
 
 

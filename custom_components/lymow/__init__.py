@@ -6,7 +6,6 @@ import json
 import logging
 from pathlib import Path
 
-
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -100,22 +99,20 @@ async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
                 base_to_item[base] = (item["id"], url)
 
         for js in (
-                "lymow-map-card.js",
-                "lymow-camera-card.js",
-                "lymow-drive-card.js",
-                "lymow-schedule-card.js",
-                "lymow-backup-card.js",
-                "lymow-settings-card.js",
-            ):
+            "lymow-map-card.js",
+            "lymow-camera-card.js",
+            "lymow-drive-card.js",
+            "lymow-schedule-card.js",
+            "lymow-backup-card.js",
+            "lymow-settings-card.js",
+        ):
             wanted_url = _card_url(js)
             base_path = wanted_url.split("?")[0]
             if base_path in base_to_item:
                 res_id, current_url = base_to_item[base_path]
                 if current_url != wanted_url:
                     # Version changed — update the existing entry
-                    await resources.async_update_item(
-                        res_id, {"res_type": "module", "url": wanted_url}
-                    )
+                    await resources.async_update_item(res_id, {"res_type": "module", "url": wanted_url})
             else:
                 await resources.async_create_item({"res_type": "module", "url": wanted_url})
     except Exception:  # noqa: BLE001
@@ -159,6 +156,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         region=region,
         identity_id=creds["identity_id"],
     )
+    # Seed the temporary AWS credentials so S3-signed REST calls (backup maps,
+    # KVS) work from the first poll; the coordinator refreshes them before expiry.
+    client.update_aws_credentials(aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"))
 
     devices = await client.get_devices()
     things = [d["deviceThingName"] for d in devices]
@@ -176,6 +176,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     coordinator = LymowCoordinator(hass, client, mqtt_client, devices)
+    # Give the coordinator what it needs to refresh tokens + AWS creds before they
+    # expire — otherwise the access token lapses (~24 h) and every poll 401s.
+    coordinator.set_auth_context(auth, entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD], region, tokens, creds)
     await coordinator.async_config_entry_first_refresh()
 
     await mqtt_client.connect(
@@ -185,10 +188,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session_token=aws.get("SessionToken"),
     )
 
-    # Proactively request map + schedule data so zone and schedule entities
-    # populate without waiting for the user to trigger a query manually.
+    # Proactively request map + schedule + config data so zone, schedule and
+    # settings entities populate without waiting for the user to trigger a query.
+    # This runs after connect() so the publishes aren't dropped — the per-poll
+    # startup gate can't query reliably because the first poll precedes connect.
     await coordinator.async_query_all_maps()
     await coordinator.async_query_all_schedules()
+    await coordinator.async_query_all_robot_configs()
 
     _LOGGER.debug("Lymow setup complete: %d device(s) in region %s", len(devices), region)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

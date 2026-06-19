@@ -5,12 +5,15 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Minimal stubs so coordinator.py can import without the HA stack
 # ---------------------------------------------------------------------------
+import asyncio
 import sys
 import types
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from homeassistant.exceptions import ConfigEntryAuthFailed
 
 
 def _make_ha_stubs() -> None:
@@ -134,6 +137,19 @@ def _make_coordinator(
     return coord, mqtt, api
 
 
+def _make_task_closer(captured: list | None = None) -> MagicMock:
+    """A hass.async_create_task replacement that records and closes scheduled
+    coroutines so they don't emit 'never awaited' warnings in tests."""
+
+    def _create(coro):
+        if captured is not None:
+            captured.append(coro)
+        if asyncio.iscoroutine(coro):
+            coro.close()
+
+    return MagicMock(side_effect=_create)
+
+
 # ---------------------------------------------------------------------------
 # REST polling
 # ---------------------------------------------------------------------------
@@ -169,6 +185,131 @@ async def test_async_update_data_raises_update_failed_on_exception() -> None:
     api.get_device_info.side_effect = RuntimeError("network error")
     with pytest.raises(UpdateFailed, match="network error"):
         await coord._async_update_data()
+
+
+# ---------------------------------------------------------------------------
+# Auth refresh — keep Cognito tokens + AWS creds fresh so polls don't 401
+# ---------------------------------------------------------------------------
+
+
+def _setup_auth(coord, *, refresh_ok=True, login_ok=True):
+    auth = MagicMock()
+    auth.refresh_tokens = (
+        AsyncMock(return_value={"AccessToken": "at2", "IdToken": "it2", "ExpiresIn": 3600})
+        if refresh_ok
+        else AsyncMock(side_effect=ValueError("refresh token expired"))
+    )
+    auth.login_region = (
+        AsyncMock(return_value={"AccessToken": "at3", "IdToken": "it3", "RefreshToken": "rt3", "ExpiresIn": 3600})
+        if login_ok
+        else AsyncMock(side_effect=ValueError("bad creds"))
+    )
+    auth.get_aws_credentials = AsyncMock(
+        return_value={
+            "credentials": {"AccessKeyId": "ak", "SecretKey": "sk", "SessionToken": "st", "Expiration": 9999999999}
+        }
+    )
+    coord.set_auth_context(
+        auth,
+        "user",
+        "pass",
+        "eu-west-1",
+        {"AccessToken": "at1", "IdToken": "it1", "RefreshToken": "rt1", "ExpiresIn": 3600},
+        {"credentials": {"AccessKeyId": "ak0", "SecretKey": "sk0", "SessionToken": "st0", "Expiration": 9999999999}},
+    )
+    return auth
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_noop_when_no_context() -> None:
+    coord, _, _ = _make_coordinator()
+    await coord._async_ensure_auth()  # _auth is None → silent no-op
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_noop_when_not_due() -> None:
+    coord, _, _ = _make_coordinator()
+    auth = _setup_auth(coord)  # expiries ~1h out, margin 10m → not due
+    await coord._async_ensure_auth()
+    auth.refresh_tokens.assert_not_awaited()
+    auth.get_aws_credentials.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_refreshes_token_and_creds_when_token_due() -> None:
+    coord, _, api = _make_coordinator()
+    auth = _setup_auth(coord)
+    coord._token_expiry = datetime.now(UTC)  # due now
+    await coord._async_ensure_auth()
+    auth.refresh_tokens.assert_awaited_once_with("rt1", "eu-west-1")
+    api.update_tokens.assert_called_once_with("at2")
+    # New id token forces fresh AWS creds.
+    auth.get_aws_credentials.assert_awaited_once_with("it2", "eu-west-1")
+    api.update_aws_credentials.assert_called_once_with("ak", "sk", "st")
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_refreshes_only_creds_when_token_valid() -> None:
+    coord, _, api = _make_coordinator()
+    auth = _setup_auth(coord)
+    coord._aws_creds_expiry = datetime.now(UTC)  # creds due, token still valid
+    await coord._async_ensure_auth()
+    auth.refresh_tokens.assert_not_awaited()
+    auth.get_aws_credentials.assert_awaited_once_with("it1", "eu-west-1")
+    api.update_aws_credentials.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_falls_back_to_relogin_when_refresh_fails() -> None:
+    coord, _, api = _make_coordinator()
+    auth = _setup_auth(coord, refresh_ok=False)
+    coord._token_expiry = datetime.now(UTC)
+    await coord._async_ensure_auth()
+    auth.login_region.assert_awaited_once_with("user", "pass", "eu-west-1")
+    api.update_tokens.assert_called_once_with("at3")
+    assert coord._refresh_token == "rt3"  # re-login rotates the refresh token
+
+
+@pytest.mark.asyncio
+async def test_ensure_auth_raises_config_entry_auth_failed_when_relogin_fails() -> None:
+    coord, _, _ = _make_coordinator()
+    _setup_auth(coord, refresh_ok=False, login_ok=False)
+    coord._token_expiry = datetime.now(UTC)
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coord._async_ensure_auth()
+
+
+@pytest.mark.asyncio
+async def test_update_data_propagates_auth_failed_not_update_failed() -> None:
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "online"})
+    _setup_auth(coord, refresh_ok=False, login_ok=False)
+    coord._token_expiry = datetime.now(UTC)
+    coord.hass.async_create_task = _make_task_closer()
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coord._async_update_data()
+    # Must not be wrapped — UpdateFailed would suppress HA's reauth flow.
+    assert not isinstance(ConfigEntryAuthFailed(), UpdateFailed)
+
+
+def test_set_auth_context_and_expiry_helpers() -> None:
+    from datetime import timedelta
+
+    coord, _, _ = _make_coordinator()
+    _setup_auth(coord)
+    assert coord._refresh_token == "rt1" and coord._id_token == "it1"
+    assert coord._region == "eu-west-1"
+    # ExpiresIn 3600 → ~1h out
+    assert coord._token_expiry > datetime.now(UTC) + timedelta(minutes=50)
+    # Expiry parsing variants
+    assert coord._expiry_from_expires_in(None) > datetime.now(UTC)
+    naive = datetime(2030, 1, 1, 0, 0, 0)
+    assert coord._expiry_from_timestamp(naive).tzinfo is not None
+    aware = datetime(2030, 1, 1, tzinfo=UTC)
+    assert coord._expiry_from_timestamp(aware) == aware
+    assert coord._expiry_from_timestamp(1893456000).year == 2030
+    assert coord._expiry_from_timestamp(None) <= datetime.now(UTC)
 
 
 @pytest.mark.asyncio
@@ -596,14 +737,26 @@ async def test_async_bind_rtk_publishes_encoded_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_set_wifi_raises_ble_only() -> None:
-    """Wi-Fi provisioning is BLE-only; over MQTT it must fail loudly, not no-op
-    (live-confirmed 2026-05-30; see issue #200)."""
-    from homeassistant.exceptions import HomeAssistantError
-
+async def test_async_set_wifi_writes_over_ble_not_mqtt(monkeypatch) -> None:
+    """Wi-Fi provisioning is BLE-only (live-confirmed 2026-05-30; issue #200):
+    it must write to a BLE controller, never publish over MQTT."""
     coord, mqtt, _ = _make_coordinator()
-    with pytest.raises(HomeAssistantError, match="BLE-only"):
-        await coord.async_set_wifi(THING, "TestNet", "testpass12")  # placeholder creds
+    created: list = []
+
+    def ctor(address):
+        c = MagicMock()
+        c.address = address
+        c.async_write_once = AsyncMock()
+        created.append(c)
+        return c
+
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "LymowBleController", ctor)
+    await coord.async_set_wifi("AA:BB:CC:DD:EE:FF", "TestNet", "testpass12")  # placeholder creds
+    assert len(created) == 1 and created[0].address == "AA:BB:CC:DD:EE:FF"
+    created[0].async_write_once.assert_awaited_once()
+    # The encoded payload must carry real bytes (the SSID/password), not be empty.
+    (payload,), _ = created[0].async_write_once.call_args
+    assert isinstance(payload, bytes) and len(payload) > 0
     mqtt.async_publish_command.assert_not_awaited()
 
 
@@ -700,21 +853,83 @@ async def test_async_sync_timezone_publishes_offset_on_field_21() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_on_mqtt_state_fills_is_open_led_false_when_dock_on_error_known() -> None:
-    """Proto3 zero-default fill-in: once dockOnError is known, absent isOpenLed = False."""
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"robotConfig": {}}}
-    # First patch: only dockOnError arrives (LED is off but robot omits f7)
-    coord.on_mqtt_state(THING, {"robotConfig": {"dockOnError": True}})
-    assert coord.data[THING]["robotConfig"]["isOpenLed"] is False
-    # Fill-in must also persist in _mqtt_state so the 30s REST poll doesn't revert
-    assert coord._mqtt_state[THING]["robotConfig"]["isOpenLed"] is False
+@pytest.mark.asyncio
+async def test_async_update_data_seeds_proto3_config_defaults() -> None:
+    """Absent (proto3-default) settings fields are backfilled so settings
+    entities read a default instead of unknown — without clobbering real values."""
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "offline", "battery": 50})
+    # Robot reported only audioVolume; everything else is at its omitted default.
+    coord._mqtt_state[THING] = {"robotConfig": {"audioVolume": 100}}
+    coord.hass.async_create_task = _make_task_closer()
+    result = await coord._async_update_data()
+    rc = result[THING]["robotConfig"]
+    assert rc["audioVolume"] == 100  # real value preserved
+    assert rc["isOpenLed"] is False and rc["metric_4g"] is False and rc["dockOnError"] is False
+    assert rc["rrConfig"] == {"enable": False, "rechargeBat": 0, "resumeBat": 0}
+    tc = result[THING]["mapData"]["taskConfig"]
+    assert tc == {"chargingMode": 0, "zoneOrder": 0, "rainCleaning": False, "disableChargingPark": False}
 
-    # Once isOpenLed is set to True (user turns LED on), another dockOnError
-    # patch must NOT overwrite the known True state.
-    coord.data[THING]["robotConfig"]["isOpenLed"] = True
-    coord.on_mqtt_state(THING, {"robotConfig": {"dockOnError": True}})
-    assert coord.data[THING]["robotConfig"]["isOpenLed"] is True
+
+@pytest.mark.asyncio
+async def test_async_update_data_seed_does_not_overwrite_real_config() -> None:
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "offline"})
+    coord._mqtt_state[THING] = {
+        "robotConfig": {"isOpenLed": True, "rrConfig": {"enable": True, "rechargeBat": 15}},
+        "mapData": {"taskConfig": {"zoneOrder": 1}, "goZones": [{"hashId": "z1"}]},
+    }
+    coord.hass.async_create_task = _make_task_closer()
+    result = await coord._async_update_data()
+    rc = result[THING]["robotConfig"]
+    assert rc["isOpenLed"] is True
+    assert rc["rrConfig"]["enable"] is True and rc["rrConfig"]["rechargeBat"] == 15
+    assert rc["rrConfig"]["resumeBat"] == 0  # the one absent sub-field is defaulted
+    md = result[THING]["mapData"]
+    assert md["taskConfig"]["zoneOrder"] == 1 and md["taskConfig"]["chargingMode"] == 0
+    assert md["goZones"] == [{"hashId": "z1"}]  # untouched
+
+
+@pytest.mark.asyncio
+async def test_startup_query_fires_when_rest_reports_online_without_is_online() -> None:
+    """A robot already online at HA start sends no notify-app transition, so the
+    config query must be gated on the REST deviceState, not just isOnline."""
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "online", "battery": 90})
+    created: list = []
+    coord.hass.async_create_task = _make_task_closer(created)
+    await coord._async_update_data()
+    assert THING in coord._startup_queried
+    assert len(created) == 2  # query_robot_config + query_map
+
+
+@pytest.mark.asyncio
+async def test_startup_query_skipped_when_rest_reports_offline() -> None:
+    coord, _, _ = _make_coordinator(rest_data={"deviceState": "offline"})
+    created: list = []
+    coord.hass.async_create_task = _make_task_closer(created)
+    await coord._async_update_data()
+    assert THING not in coord._startup_queried
+    assert created == []
+
+
+@pytest.mark.asyncio
+async def test_startup_query_skipped_when_mqtt_not_connected() -> None:
+    """The first poll runs during setup before MQTT connects; a query published
+    then would be dropped, so the gate must hold until the transport is up."""
+    coord, mqtt, _ = _make_coordinator(rest_data={"deviceState": "online"})
+    mqtt.is_connected = False
+    created: list = []
+    coord.hass.async_create_task = _make_task_closer(created)
+    await coord._async_update_data()
+    assert THING not in coord._startup_queried
+    assert created == []
+
+
+@pytest.mark.asyncio
+async def test_async_query_all_robot_configs_queries_and_marks_each_device() -> None:
+    devices = [{"deviceThingName": "mower-001"}, {"deviceThingName": "mower-002"}]
+    coord, mqtt, _ = _make_coordinator(devices=devices)
+    await coord.async_query_all_robot_configs()
+    assert mqtt.async_publish_command.await_count == 2
+    assert coord._startup_queried == {"mower-001", "mower-002"}
 
 
 def test_on_mqtt_online_sets_is_online_true() -> None:

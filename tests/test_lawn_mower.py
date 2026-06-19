@@ -2048,14 +2048,32 @@ async def test_handle_bind_rtk_unknown_entity_skips() -> None:
 
 
 async def test_handle_set_wifi_forwards_values() -> None:
+    """Wi-Fi is provisioned over BLE: the handler resolves the robot's BLE
+    address (from options here) and forwards it, not the MQTT thing-name."""
+    from lymow.const import CONF_BLE_ADDRESS
+
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {CONF_BLE_ADDRESS: "AA:BB:CC:DD:EE:FF"}
+    handlers = await _setup_with_entity(coord, entry)
+
+    await handlers["set_wifi"](_make_call(["lawn_mower.mower_1"], {"ssid": "TestNet", "password": "testpass12"}))
+    coord.async_set_wifi.assert_awaited_once_with("AA:BB:CC:DD:EE:FF", "TestNet", "testpass12")
+
+
+async def test_handle_set_wifi_without_address_raises() -> None:
+    """No configured/discoverable BLE address → loud ServiceValidationError,
+    never a silent no-op (creds must not be dropped quietly)."""
     coord = _make_coord()
     entry = MagicMock()
     entry.entry_id = "entry-1"
     entry.options = {}
     handlers = await _setup_with_entity(coord, entry)
 
-    await handlers["set_wifi"](_make_call(["lawn_mower.mower_1"], {"ssid": "TestNet", "password": "testpass12"}))
-    coord.async_set_wifi.assert_awaited_once_with("mower-001", "TestNet", "testpass12")
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_wifi"](_make_call(["lawn_mower.mower_1"], {"ssid": "TestNet", "password": "testpass12"}))
+    coord.async_set_wifi.assert_not_called()
 
 
 async def test_handle_set_wifi_unknown_entity_skips() -> None:
