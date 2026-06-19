@@ -539,6 +539,12 @@ _ZONE_CONFIG_BOOL_NAMES: dict[int, str] = {
     17: "safeMarginMode",
     18: "turnOffOuterMotor",
 }
+# Signed int32 fields: stripeAngle is -1 for "Optimized" (auto), else 0-179°.
+# Live-confirmed 2026-06-19 from a globalZoneConfig capture (f8 = -1 ⟺ app
+# "Stripe Angle: Optimized").
+_ZONE_CONFIG_SIGNED_NAMES: dict[int, str] = {
+    8: "stripeAngle",
+}
 
 
 def decode_zone_config(data: bytes) -> dict[str, Any]:
@@ -556,6 +562,9 @@ def decode_zone_config(data: bytes) -> dict[str, Any]:
             continue
         if fn == 4:  # moveSpeed (float32)
             out["moveSpeed"] = _decode_f32(val)
+            continue
+        if fn in _ZONE_CONFIG_SIGNED_NAMES and isinstance(val, int):
+            out[_ZONE_CONFIG_SIGNED_NAMES[fn]] = _signed32(val)
             continue
         if fn in _ZONE_CONFIG_INT_NAMES and isinstance(val, int):
             out[_ZONE_CONFIG_INT_NAMES[fn]] = val
@@ -1231,6 +1240,7 @@ _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "moveSpeed": (4, "float"),
     "cutSpeed": (6, "int"),
     "cleanMode": (7, "int"),
+    "stripeAngle": (8, "int"),  # signed: -1 = Optimized (auto), else 0-179°
     "pathSpacing": (9, "int"),
     "perimeterMowLaps": (10, "int"),
     "perimeterMowDir": (11, "int"),

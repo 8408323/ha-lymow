@@ -932,6 +932,27 @@ def test_decode_zone_config_canonical_fields() -> None:
     assert "cleanDir" not in out
 
 
+def test_decode_zone_config_stripe_angle_signed() -> None:
+    """stripeAngle (f8) is signed: -1 = Optimized (auto). LIVE-CONFIRMED
+    2026-06-19 from a globalZoneConfig BLE capture (f8 = -1 ⟺ app
+    'Stripe Angle: Optimized')."""
+    # -1 on the wire is the 10-byte 0xffff…ff varint; must decode as -1, not huge.
+    assert decode_zone_config(_field_i32(8, -1))["stripeAngle"] == -1
+    assert decode_zone_config(_field_i32(8, 45))["stripeAngle"] == 45
+
+
+def test_encode_set_task_config_stripe_angle_roundtrips() -> None:
+    """encode_set_task_config(stripeAngle=-1) writes f8 = -1; decode recovers it."""
+    from lymow.protocol import _decode_fields, _first, decode_zone_config, encode_set_task_config
+
+    pb = encode_set_task_config(stripeAngle=-1)
+    pbmap = _decode_fields(_first(_decode_fields(pb), 12))
+    gz = _first(pbmap, 11)
+    assert decode_zone_config(gz)["stripeAngle"] == -1
+    # Optimized=-1 encodes as the same 10-byte varint the app sends.
+    assert _field_i32(8, -1).hex() in pb.hex()
+
+
 def test_decode_zone_config_empty_and_partial() -> None:
 
     assert decode_zone_config(b"") == {}

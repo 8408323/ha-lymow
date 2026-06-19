@@ -3608,3 +3608,58 @@ semantics (wire 0/1 correct; "Follow perimeter"=0 / "Direct route"=1 human label
 unconfirmed against the app — needs a Return-to-Dock screen capture). `last_mow
 _duration` / `total_mow_time` sensors display raw seconds (consider duration
 device_class for h:m formatting).
+
+---
+
+## 🔬 Live BLE capture validation — 2026-06-19 (supervisor laptop)
+
+Set up the full capture pipeline on THIS laptop (mitmproxy CA `c8750f0d` already
+trusted on the phone; phone proxy → 192.168.20.180:8888) and confirmed: **app
+COMMANDS go over BLE when BT-connected** (mitmproxy sees only MQTT `pboutput`
+heartbeats, never `pbinput`). Used the btsnoop HCI log
+(`/data/misc/bluetooth/logs/*.cfa`, parsed with `scripts/parse_btsnoop.py`) to
+capture the SENT ATT writes (handle 0x14) — the `.cfa` DID contain sent writes
+this time (15k+), so settings commands are recoverable.
+
+Captured the **Mowing Settings → Global → Save → Keep Custom** write and decoded
+it against our codec. Envelope CONFIRMED: `PbInput{f2:ver, f5:49
+(GLOBAL_SETTING_N), f12:PbMap{f11:globalZoneConfig, f12:globalChannelConfig}}`.
+
+**globalZoneConfig (PbMap.f11) — every field cross-checked to the app's labels:**
+cutHeight f1=60, moveSpeed f4=0.6, cutSpeed f6=4(Standard), **stripeAngle f8=-1
+(=Optimized)**, pathSpacing f9=35, perimeterMowLaps f10=1, perimeterMowDir f11,
+noGoMowLaps f12=1, **obsDecMode f13=2 (Zone OD = Smart)**, pathOrder f14, safe
+MarginMode f17=1 (Offset Edge), turnOffOuterMotor f18=0, **followDetectMode f19=2
+(Perimeter OD = Smart)**.
+
+**globalChannelConfig (PbMap.f12):** detectMode f1, channelDeckHeight f2=60,
+channelLift f3=0 (= the "Raise Omni Wheels on Channel" toggle). Drove a
+Smart→Touch→Smart change sequence and confirmed **detectMode Smart=2 / Touch-Only
+=1** (09:08 =2, 09:11 =1, 09:15 =2) — resolves the long-standing Gap 4. Robot
+config left RESTORED (final detectMode=2/Smart). `decode_channel_config` already
+maps all three fields.
+
+**Concrete fix shipped this session:** `stripeAngle` (PbZoneConfig f8, signed;
+-1=Optimized) was the ONE field the app exposes that our codec was missing — now
+decoded (`_ZONE_CONFIG_SIGNED_NAMES`) + settable via `set_task_config`
+(`encode_set_task_config(stripeAngle=…)`; -1 encodes to the exact 10-byte varint
+the app sends). Tested.
+
+**Confirmed-correct (no change needed):** envelope, obsDecMode/followDetectMode/
+detectMode value maps, channel config fields, `encode_query_robot_config`
+(f9={f10:1} — saw `4a025001` on the wire).
+
+**Still open (honest):**
+- **chargingMode / zoneOrder select labels** — the app's "Mowing Order (Main Area
+  First / Perimeter First)" is **pathOrder f14 (bool), NOT** PbTaskConfig.zoneOrder.
+  No "Return to Dock route (Direct/Perimeter)" toggle was found in the current app
+  (3.0.x) Device/Mowing settings, so `select.return_to_dock_route` /
+  `select.zone_order` labels remain best-effort; the wire VALUE (PbTaskConfig f1/f2)
+  is read correctly. Likely set via the Select-Mow flow — needs that capture.
+- **set_wifi / bind_rtk / set_pin** — encoders exist + tested + were BLE-validated
+  2026-05-30. NOT re-triggered this session: re-applying requires re-entering the
+  WiFi password / RTK base-id / PIN, and a mistype disconnects/unbinds the robot
+  (needs the user physically present, per the standing rule).
+- **Map edits (Edit Boundary, userCtrl 10/11)** — services exist (add_zone/nogo/
+  channel, split/merge); live validation drives the robot around the yard to record
+  a boundary → genuinely needs hands-on supervision, NOT done blind from ADB.
