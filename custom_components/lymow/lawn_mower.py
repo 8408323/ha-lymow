@@ -1478,8 +1478,10 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
         # response omits these fields, so absent ≠ disabled.
         if hl_start and hl_end:
             is_enabled = (
-                hl_start.get("hour", 0) != 0 or hl_start.get("minute", 0) != 0
-                or hl_end.get("hour", 0) != 0 or hl_end.get("minute", 0) != 0
+                hl_start.get("hour", 0) != 0
+                or hl_start.get("minute", 0) != 0
+                or hl_end.get("hour", 0) != 0
+                or hl_end.get("minute", 0) != 0
             )
             attrs["headlight_enabled"] = is_enabled
             if is_enabled:

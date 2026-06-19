@@ -568,6 +568,23 @@ def test_wifi_ssid_sensor_reads_dotted_path() -> None:
     assert sensor.native_value == "Haraldsson"
 
 
+def test_lcd_pin_sensor_disabled_by_default_diagnostic_and_reads_value() -> None:
+    from homeassistant.const import EntityCategory
+
+    desc = next(s for s in SENSORS if s.key == "lcd_pin")
+    assert desc.value_key == "robotConfig.lcdPin"
+    assert desc.entity_registry_enabled_default is False  # opt-in: PIN is sensitive
+    assert desc.entity_category == EntityCategory.DIAGNOSTIC
+    coord = _make_coord({"robotConfig": {"lcdPin": "0000"}})
+    assert LymowSensor(coord, DEVICE, desc).native_value == "0000"
+
+
+def test_lcd_pin_sensor_none_when_absent() -> None:
+    desc = next(s for s in SENSORS if s.key == "lcd_pin")
+    coord = _make_coord({"robotConfig": {}})
+    assert LymowSensor(coord, DEVICE, desc).native_value is None
+
+
 def test_wifi_ssid_sensor_returns_none_when_network_info_missing() -> None:
     """Defensive: a stale state with no networkInfo dict must not raise."""
     coord = _make_coord({"battery": 80})

@@ -222,9 +222,14 @@ class _RobotConfigBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     def is_on(self) -> bool | None:
         config = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
         value = config.get(self._config_key)
-        # Return False when the robot hasn't sent its config yet rather than
-        # None (which causes HA to display ⚡ instead of an interactive toggle).
-        return bool(value) if value is not None else False
+        # Absent ⇒ proto3 default (False): the robot omits a bool that's off, so
+        # an interactive off-toggle is correct, not the ⚡ that None renders as.
+        # Present-but-malformed ⇒ unknown (don't coerce untrusted wire data).
+        if value is None:
+            return False
+        if not isinstance(value, bool):
+            return None
+        return value
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         await self.coordinator.async_set_robot_config(self._thing_name, **{self._config_key: True})
@@ -248,18 +253,6 @@ class VehicleLedSwitch(_RobotConfigBoolSwitch):
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
         super().__init__(coordinator, device, "Vehicle LED", "mdi:led-on")
-
-    @property
-    def is_on(self) -> bool | None:
-        rc = (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig") or {}
-        v = rc.get("isOpenLed")
-        if v is not None:
-            return bool(v)
-        # Proto3 zero-default: if dockOnError is known the robot replied to the
-        # config query, and absent isOpenLed means LED is off.
-        if rc.get("dockOnError") is not None:
-            return False
-        return False  # default: off until robot confirms otherwise
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         from .protocol import SIGNAL_TURN_ON_VEHICLE_LIGHT
@@ -349,10 +342,13 @@ class _DeviceSettingsBoolSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntit
     def is_on(self) -> bool | None:
         tc = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData", {}).get("taskConfig") or {}
         value = tc.get(self._wire_key)
-        if not isinstance(value, bool):
-            # Return False when taskConfig hasn't arrived yet rather than None
-            # (None causes HA to display ⚡ instead of an interactive toggle).
-            return False
+        # Absent ⇒ proto3 default (wire False), then apply the UI inversion — so
+        # e.g. an omitted disableChargingPark reads as "handbrake on", not None
+        # (which renders as ⚡). Present-but-malformed ⇒ unknown, don't coerce.
+        if value is None:
+            value = False
+        elif not isinstance(value, bool):
+            return None
         return self._ui_from_wire(value)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
@@ -415,9 +411,14 @@ class RechargeResumeSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
         return (self.coordinator.data or {}).get(self._thing_name, {}).get("robotConfig", {}).get("rrConfig") or {}
 
     @property
-    def is_on(self) -> bool:
+    def is_on(self) -> bool | None:
         value = self._rr_config.get("enable")
-        return bool(value) if isinstance(value, bool) else False
+        # Absent ⇒ proto3 default (off); present-but-malformed ⇒ unknown.
+        if value is None:
+            return False
+        if not isinstance(value, bool):
+            return None
+        return value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:

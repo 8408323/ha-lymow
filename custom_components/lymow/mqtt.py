@@ -134,6 +134,12 @@ class LymowMqttClient:
     # Public API
     # ------------------------------------------------------------------
 
+    @property
+    def is_connected(self) -> bool:
+        """True once a connection is established — commands published before this
+        are dropped, so callers (e.g. the coordinator's startup query) must wait."""
+        return self._client is not None
+
     async def connect(
         self,
         things: list[str],

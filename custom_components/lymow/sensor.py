@@ -12,7 +12,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import DEGREE, PERCENTAGE, UnitOfArea, UnitOfLength, UnitOfTime
+from homeassistant.const import DEGREE, PERCENTAGE, EntityCategory, UnitOfArea, UnitOfLength, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -508,6 +508,16 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         name="Robot state (raw)",
         value_key="robotState",
         icon="mdi:robot",
+        entity_registry_enabled_default=False,
+    ),
+    # The 4-digit LCD-screen unlock PIN (PbRobotConfig.lcdPin). Sensitive, so
+    # off by default — the user opts in. Diagnostic category; value never logged.
+    LymowSensorDescription(
+        key="lcd_pin",
+        name="Screen PIN",
+        value_key="robotConfig.lcdPin",
+        icon="mdi:form-textbox-password",
+        entity_category=EntityCategory.DIAGNOSTIC,
         entity_registry_enabled_default=False,
     ),
 )

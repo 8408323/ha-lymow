@@ -12,6 +12,11 @@ REGION_CHOICES = [REGION_AUTO, "eu-west-1", "us-east-2", "ap-southeast-2", "ap-e
 # How often to poll REST device state (MQTT keeps live state between polls)
 POLLING_INTERVAL = 30  # seconds
 
+# Refresh Cognito tokens / AWS credentials this many seconds before they expire.
+# Without refresh the access token lapses (~24 h) and every REST poll 401s, taking
+# all entities unavailable until HA restarts.
+AUTH_REFRESH_MARGIN_SECONDS = 600
+
 # The robot exposes its onboard camera as a local RTSP h264 stream (640x480)
 # on the LAN. Confirmed by capture + a live frame pull from the device:
 #   rtsp://<robot_ip>:10022/h264ESVideoTest

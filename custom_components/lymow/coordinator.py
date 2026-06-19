@@ -10,12 +10,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
 from .bluetooth import LymowBleController
 from .const import (
+    AUTH_REFRESH_MARGIN_SECONDS,
     DOMAIN,
     POLLING_INTERVAL,
     USER_CTRL_CLEAN,
@@ -54,6 +55,44 @@ from .protocol import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# Proto3 omits scalar fields that equal their type default, so a config the
+# robot has never changed off-default simply never appears on the wire. Decoding
+# is therefore incomplete: an absent field *is* its default. We fill those
+# defaults into the merged state so settings entities show the real value (a
+# muted volume = 0, a select on its 0th option) instead of "unknown". Real wire
+# values always win — these only backfill keys the robot didn't send.
+_ROBOT_CONFIG_DEFAULTS: dict[str, Any] = {
+    "audioVolume": 0,
+    "metric_4g": False,
+    "isOpenLed": False,
+    "dockOnError": False,
+}
+_RR_CONFIG_DEFAULTS: dict[str, Any] = {"enable": False, "rechargeBat": 0, "resumeBat": 0}
+_TASK_CONFIG_DEFAULTS: dict[str, Any] = {
+    "chargingMode": 0,
+    "zoneOrder": 0,
+    "rainCleaning": False,
+    "disableChargingPark": False,
+}
+
+
+def _is_device_online(merged: dict[str, Any]) -> bool:
+    """True if the robot is online per either the MQTT notify-app flag or the
+    REST device-info ``deviceState`` (the latter is the only signal available
+    when the robot was already online before HA started — no transition fires)."""
+    return bool(merged.get("isOnline")) or str(merged.get("deviceState", "")).lower() == "online"
+
+
+def _apply_config_defaults(merged: dict[str, Any]) -> None:
+    """Backfill proto3 defaults for the robotConfig / taskConfig settings fields
+    in-place, so absent (default-valued) fields read as their default rather than
+    unknown. Real values already present are never overwritten."""
+    rc = {**_ROBOT_CONFIG_DEFAULTS, **(merged.get("robotConfig") or {})}
+    rc["rrConfig"] = {**_RR_CONFIG_DEFAULTS, **(rc.get("rrConfig") or {})}
+    merged["robotConfig"] = rc
+    map_data = merged.get("mapData") or {}
+    merged["mapData"] = {**map_data, "taskConfig": {**_TASK_CONFIG_DEFAULTS, **(map_data.get("taskConfig") or {})}}
 
 
 def build_schedule_entries(
@@ -242,6 +281,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # card can still show mow coverage after the robot docks (the robot stops
         # sending path data once docked, but the last session's track is useful).
         self._last_path_data: dict[str, dict] = {}
+        # Auth-refresh state, populated by set_auth_context() at setup. When the
+        # auth object is None (unit tests), refresh is a no-op. Cognito access
+        # tokens and the derived AWS credentials both expire; without refreshing
+        # them every REST poll eventually 401s and all entities go unavailable.
+        self._auth: Any | None = None
+        self._username: str | None = None
+        self._password: str | None = None
+        self._region: str | None = None
+        self._refresh_token: str | None = None
+        self._id_token: str | None = None
+        self._token_expiry: datetime | None = None
+        self._aws_creds_expiry: datetime | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -306,18 +357,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             existing = self.data[thing_name]
             merged_patch_for_data = self._merge_nested_patch(existing, patch)
             merged = {**existing, **merged_patch_for_data}
-            # Proto3 zero-default fill-in: the robot omits isOpenLed when the
-            # LED is off. Once dockOnError is known (robot has replied to a
-            # config query), treat absent isOpenLed as False. Safe: once set,
-            # isOpenLed stays in data and this branch never fires again.
-            rc = merged.get("robotConfig", {})
-            if rc.get("dockOnError") is not None and "isOpenLed" not in rc:
-                merged = {**merged, "robotConfig": {**rc, "isOpenLed": False}}
-                # Also write into _mqtt_state so the 30s REST poll rebuilds
-                # with isOpenLed=False rather than reverting to unknown.
-                self._mqtt_state.setdefault(thing_name, {}).setdefault(
-                    "robotConfig", {}
-                )["isOpenLed"] = False
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
@@ -504,10 +543,94 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             )
 
     # ------------------------------------------------------------------
+    # Auth refresh
+    # ------------------------------------------------------------------
+
+    def set_auth_context(
+        self,
+        auth: Any,
+        username: str,
+        password: str,
+        region: str,
+        tokens: dict[str, Any],
+        creds: dict[str, Any],
+    ) -> None:
+        """Hand the coordinator everything it needs to keep credentials fresh.
+
+        ``tokens`` is the Cognito AuthenticationResult (AccessToken / IdToken /
+        RefreshToken / ExpiresIn); ``creds`` is the get_aws_credentials() result
+        (its ``credentials.Expiration`` dates the temporary AWS keys)."""
+        self._auth = auth
+        self._username = username
+        self._password = password
+        self._region = region
+        self._refresh_token = tokens.get("RefreshToken")
+        self._id_token = tokens.get("IdToken")
+        self._token_expiry = self._expiry_from_expires_in(tokens.get("ExpiresIn"))
+        self._aws_creds_expiry = self._expiry_from_timestamp(creds.get("credentials", {}).get("Expiration"))
+
+    @staticmethod
+    def _expiry_from_expires_in(expires_in: Any) -> datetime:
+        seconds = int(expires_in) if isinstance(expires_in, (int, float)) else 3600
+        return datetime.now(UTC) + timedelta(seconds=seconds)
+
+    @staticmethod
+    def _expiry_from_timestamp(expiration: Any) -> datetime:
+        """AWS returns Expiration as a Unix epoch (number) or an ISO/datetime."""
+        if isinstance(expiration, datetime):
+            return expiration if expiration.tzinfo else expiration.replace(tzinfo=UTC)
+        if isinstance(expiration, (int, float)):
+            return datetime.fromtimestamp(expiration, tz=UTC)
+        # Unknown/absent → treat as already due so we refresh on the next poll.
+        return datetime.now(UTC)
+
+    async def _async_ensure_auth(self) -> None:
+        """Refresh Cognito tokens and/or AWS credentials before they expire.
+
+        No-op when auth context wasn't provided (unit tests). Token refresh uses
+        the RefreshToken, falling back to a full SRP re-login with stored creds;
+        if both fail it raises ConfigEntryAuthFailed so HA surfaces a reauth."""
+        if self._auth is None:
+            return
+        now = datetime.now(UTC)
+        margin = timedelta(seconds=AUTH_REFRESH_MARGIN_SECONDS)
+        token_due = self._token_expiry is None or now >= self._token_expiry - margin
+        creds_due = self._aws_creds_expiry is None or now >= self._aws_creds_expiry - margin
+        if not token_due and not creds_due:
+            return
+
+        if token_due:
+            await self._async_refresh_tokens(now)
+            creds_due = True  # the new id token requires fresh AWS credentials
+        if creds_due:
+            await self._async_refresh_aws_credentials()
+
+    async def _async_refresh_tokens(self, now: datetime) -> None:
+        try:
+            result = await self._auth.refresh_tokens(self._refresh_token, self._region)
+        except Exception as refresh_err:  # noqa: BLE001
+            _LOGGER.debug("Lymow token refresh failed, falling back to re-login: %s", refresh_err)
+            try:
+                result = await self._auth.login_region(self._username, self._password, self._region)
+            except Exception as login_err:
+                raise ConfigEntryAuthFailed("Lymow re-authentication failed") from login_err
+            self._refresh_token = result.get("RefreshToken") or self._refresh_token
+        self._client.update_tokens(result["AccessToken"])
+        self._id_token = result.get("IdToken", self._id_token)
+        self._token_expiry = self._expiry_from_expires_in(result.get("ExpiresIn"))
+
+    async def _async_refresh_aws_credentials(self) -> None:
+        creds = await self._auth.get_aws_credentials(self._id_token, self._region)
+        aws = creds["credentials"]
+        self._client.update_aws_credentials(aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"))
+        self._aws_creds_expiry = self._expiry_from_timestamp(aws.get("Expiration"))
+
+    # ------------------------------------------------------------------
     # REST polling
     # ------------------------------------------------------------------
 
     async def _async_update_data(self) -> dict[str, dict[str, Any]]:
+        await self._async_ensure_auth()
         try:
             result: dict[str, dict[str, Any]] = {}
             for device in self.devices:
@@ -532,11 +655,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     **self._ota_state.get(thing, {}),
                     **self._mqtt_state.get(thing, {}),
                 }
+                _apply_config_defaults(merged)
                 result[thing] = merged
                 # Fire robotConfig + map queries once per HA session so
                 # switch entities (vehicle_led, rainy_mowing, etc.) populate
                 # even when the robot was already online before HA started.
-                if thing not in self._startup_queried and merged.get("isOnline"):
+                # Gate on REST deviceState too: a robot already online at HA
+                # start sends no notify-app transition, so isOnline stays unset
+                # and the config query would otherwise never fire. Require MQTT
+                # connected — the first poll runs during setup before connect, and
+                # a command published then is silently dropped.
+                if thing not in self._startup_queried and _is_device_online(merged) and self._mqtt.is_connected:
                     self._startup_queried.add(thing)
                     self.hass.async_create_task(self.async_query_robot_config(thing))
                     self.hass.async_create_task(self.async_query_map(thing))
@@ -821,6 +950,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Request map data for every registered device."""
         for device in self.devices:
             await self.async_query_map(device["deviceThingName"])
+
+    async def async_query_all_robot_configs(self) -> None:
+        """Request robotConfig for every device (call once MQTT is connected).
+
+        Marks each device queried so the per-poll startup gate doesn't fire a
+        duplicate. The offline-then-online case is still covered independently by
+        ``on_mqtt_online``, which re-queries on the notify-app transition."""
+        for device in self.devices:
+            thing = device["deviceThingName"]
+            self._startup_queried.add(thing)
+            await self.async_query_robot_config(thing)
 
     async def async_query_schedules(self, thing_name: str) -> None:
         """Send USER_CTRL_QUERY_SCHEDULES to request schedule data from the robot.
