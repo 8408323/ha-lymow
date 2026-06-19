@@ -6,8 +6,14 @@ import pytest
 from lymow.protocol import (
     _decode_fields,
     _first,
+    decode_channel,
+    decode_clean_report,
     decode_map_response,
     decode_pboutput,
+    decode_robot_config,
+    decode_rr_config,
+    decode_schedule_entry,
+    decode_task_config,
     encode_ble_drive,
     encode_clear_schedules,
     encode_delete_channel,
@@ -430,3 +436,208 @@ def test_set_run_time_config_full_is_byte_stable() -> None:
         encode_set_run_time_config(cutHeight=30, moveSpeed=0.5, cutSpeed=200).hex()
         == "10312832620c6a0a081e150000003f18c801"
     )
+
+
+# ---------------------------------------------------------------------------
+# Decoder snapshots — lock the wire-side field-number maps that pboutput and
+# map_response *navigate to* but don't decode themselves. Drift target: a
+# Hermes-RE'd field number changing under a rename, or a wire-type flip
+# (varint vs. fixed32) silently widening a value through ``_first``.
+# ---------------------------------------------------------------------------
+
+
+def test_decode_task_config_all_fields_synthetic_golden() -> None:
+    """PbTaskConfig — the four-field "Device Settings" sub-message:
+    f1 chargingMode (int), f2 zoneOrder (int), f3 rainCleaning (bool),
+    f4 disableChargingPark (bool). The two bool fields are *dropped* (key
+    omitted) if the wire value isn't 0 or 1, not coerced — pinning the
+    layout so a refactor can't silently start surfacing 2+ as True."""
+    from lymow.protocol import _field_i32
+
+    pb = _field_i32(1, 1) + _field_i32(2, 0) + _field_i32(3, 1) + _field_i32(4, 0)
+    assert pb.hex() == "0801100018012000"
+    assert decode_task_config(pb) == {
+        "chargingMode": 1,
+        "zoneOrder": 0,
+        "rainCleaning": True,
+        "disableChargingPark": False,
+    }
+
+
+def test_decode_channel_full_synthetic_golden() -> None:
+    """PbChannel (path connector between two zones): f1 hashId, f2 zone1,
+    f3 zone2, f4 isValid, f5 polygon (repeated points), f6 isDockingChannel,
+    f9 cutHeight, f10 channelLift. Polygon at f5 is the same point-sub-message
+    shape used elsewhere on the wire (PbMapPoint{f1=x, f2=y, both float32})."""
+    from lymow.protocol import _field_bytes, _field_f32, _field_i32, _field_str
+
+    poly = _field_bytes(1, _field_f32(1, 0.0) + _field_f32(2, 0.0)) + _field_bytes(
+        1, _field_f32(1, 1.0) + _field_f32(2, 1.0)
+    )
+    pb = (
+        _field_str(1, "CH000001")
+        + _field_str(2, "ZONE0001")
+        + _field_str(3, "ZONE0002")
+        + _field_i32(4, 1)
+        + _field_bytes(5, poly)
+        + _field_i32(6, 1)
+        + _field_i32(9, 40)
+        + _field_i32(10, 1)
+    )
+    assert pb.hex() == (
+        "0a08434830303030303112085a4f4e45303030311a085a4f4e453030303220012a180a0a0d000000001500000000"
+        "0a0a0d0000803f150000803f300148285001"
+    )
+    out = decode_channel(pb)
+    assert out["hashId"] == "CH000001"
+    assert out["zone1"] == "ZONE0001"
+    assert out["zone2"] == "ZONE0002"
+    assert out["isValid"] is True
+    assert out["isDockingChannel"] is True
+    assert out["cutHeight"] == 40
+    assert out["channelLift"] == 1
+    assert out["polygon"] == [
+        {"x": pytest.approx(0.0), "y": pytest.approx(0.0)},
+        {"x": pytest.approx(1.0), "y": pytest.approx(1.0)},
+    ]
+
+
+def test_decode_rr_config_full_synthetic_golden() -> None:
+    """PbRRConfig — mirrors :func:`encode_set_recharge_resume`'s wire output.
+    Pins the read-side too so the round-trip (write then decode) can't drift:
+    f1 enableRr (bool), f2/f3 period PbTimeZones, f4/f5 rechargeBat/resumeBat
+    (int, bounded 0-100)."""
+    from lymow.protocol import _field_bytes, _field_i32
+
+    pb = (
+        _field_i32(1, 1)
+        + _field_bytes(2, _field_i32(1, 9) + _field_i32(2, 0))
+        + _field_bytes(3, _field_i32(1, 18) + _field_i32(2, 0))
+        + _field_i32(4, 20)
+        + _field_i32(5, 80)
+    )
+    assert pb.hex() == "08011204080910001a040812100020142850"
+    assert decode_rr_config(pb) == {
+        "enable": True,
+        "periodStart": {"hour": 9, "minute": 0},
+        "periodEnd": {"hour": 18, "minute": 0},
+        "rechargeBat": 20,
+        "resumeBat": 80,
+    }
+
+
+def test_decode_robot_config_full_synthetic_golden() -> None:
+    """PbRobotConfig — the wide settings sub-message published by the robot.
+    Pins the full field map captured from PbRobotConfig.encode (Hermes #9506):
+    int/bool varints at f4-f11 + f21/f22, PbTimeZones at f14/f15, and
+    PbRRConfig at f18. Drift target: any single field number shifting silently
+    breaks an entire settings entity but with no exception — a snapshot makes
+    that visible at test time."""
+    from lymow.protocol import _field_bytes, _field_i32
+
+    tz_open = _field_i32(1, 21) + _field_i32(2, 0)
+    tz_close = _field_i32(1, 6) + _field_i32(2, 30)
+    rr = (
+        _field_i32(1, 1)
+        + _field_bytes(2, _field_i32(1, 9) + _field_i32(2, 0))
+        + _field_bytes(3, _field_i32(1, 18) + _field_i32(2, 0))
+        + _field_i32(4, 20)
+        + _field_i32(5, 80)
+    )
+    pb = (
+        _field_i32(4, 1)
+        + _field_i32(5, 0)
+        + _field_i32(6, 60)
+        + _field_i32(7, 1)
+        + _field_i32(8, 0)
+        + _field_i32(10, 1)
+        + _field_i32(11, 1)
+        + _field_bytes(14, tz_open)
+        + _field_bytes(15, tz_close)
+        + _field_bytes(18, rr)
+        + _field_i32(21, 3600)
+        + _field_i32(22, 0)
+    )
+    assert pb.hex() == (
+        "20012800303c38014000500158017204081510007a040806101e92011208011204080910001a040812100020142850a801901cb00100"
+    )
+    out = decode_robot_config(pb)
+    assert out["audioVolume"] == 60
+    assert out["signal"] == 0
+    assert out["timezoneOffset"] == 3600
+    assert out["rcRaiseCutHeight"] is True
+    assert out["rcLowerCutHeight"] is False
+    assert out["isOpenLed"] is True
+    assert out["cmdCellularSwitch"] is True
+    assert out["metric_4g"] is True
+    assert out["dockOnError"] is False
+    assert out["openLedTime"] == {"hour": 21, "minute": 0}
+    assert out["closeLedTime"] == {"hour": 6, "minute": 30}
+    assert out["rrConfig"]["enable"] is True
+    assert out["rrConfig"]["rechargeBat"] == 20
+
+
+def test_decode_clean_report_full_synthetic_golden() -> None:
+    """PbCleanReport — the QUERY_CLEANING_SUMMARY reply. Pins field shapes
+    that are easy to drift on a refactor: f4 errorList is *non-packed* repeated
+    sub-messages (each entry is its own length-delimited segment with a f1 int
+    code and a f2 *float32* percent), and f5 statusTimes is a packed-int32
+    array indexed positionally by workStatus."""
+    import struct
+
+    from lymow.protocol import _encode_varint, _field_bytes, _field_i32
+
+    def _err(code: int, fraction: float) -> bytes:
+        return _field_i32(1, code) + b"\x15" + struct.pack("<f", fraction)
+
+    pb = (
+        _field_i32(1, 1700000000)
+        + _field_i32(3, 2)
+        + _field_bytes(4, _err(42, 0.5))
+        + _field_bytes(4, _err(99, 1.0))
+        + _field_bytes(
+            5,
+            _encode_varint(0) + _encode_varint(120) + _encode_varint(60) + _encode_varint(0) + _encode_varint(30),
+        )
+        + _field_i32(6, 25)
+    )
+    assert pb.hex() == ("0880e2cfaa0618022207082a150000003f22070863150000803f2a0500783c001e3019")
+    out = decode_clean_report(pb)
+    assert out == {
+        "cleanStartTime": 1700000000,
+        "mowEndType": 2,
+        "errorList": [{"code": 42, "percent": 50.0}, {"code": 99, "percent": 100.0}],
+        "statusTimes": [0, 120, 60, 0, 30],
+        "usedBattery": 25,
+    }
+
+
+def test_decode_schedule_entry_full_synthetic_golden() -> None:
+    """PbSchedule — full entry layout: f1 dayOfWeek (packed varints), f2 hour,
+    f3 minute, f4 isRepeated, f5 zonesInfo (PbZoneBasicInfo with hashId at *f3*,
+    not f1), f6 id, f7 timeZone (int hours UTC offset), f8 isDisabled.
+    The zonesInfo nesting is the easiest place to drift — pinning the byte
+    string for a single ABCD0001 zone."""
+    from lymow.protocol import _encode_varint, _field_bytes, _field_i32, _field_str
+
+    pb = (
+        _field_bytes(1, _encode_varint(1) + _encode_varint(3) + _encode_varint(5))
+        + _field_i32(2, 9)
+        + _field_i32(3, 30)
+        + _field_i32(4, 1)
+        + _field_bytes(5, _field_str(3, "ABCD0001"))
+        + _field_i32(6, 7)
+        + _field_i32(7, 0)
+        + _field_i32(8, 0)
+    )
+    assert pb.hex() == "0a030103051009181e20012a0a1a084142434430303031300738004000"
+    assert decode_schedule_entry(pb) == {
+        "dayOfWeek": [1, 3, 5],
+        "hour": 9,
+        "minute": 30,
+        "isRepeated": True,
+        "isDisabled": False,
+        "zones": ["ABCD0001"],
+        "id": 7,
+        "timeZone": 0,
+    }
