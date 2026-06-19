@@ -3809,3 +3809,21 @@ bind, geofence/anti-theft, lock, OTA, find-my-robot, device rename.
 
 **Out of scope (unchanged):** remote camera KVS (#97), account/login, language/
 unit toggles, app-side device pairing.
+
+---
+
+## ✅ Cross Pattern CONFIRMED covered — 2026-06-19 (per-zone BLE capture)
+
+Toggled zone0's "Cross Pattern" ON (reveals a "Cross-Cutting Angle"), Saved, and
+captured the per-zone write (userCtrl=9, PbInput.f12 PbMap.goZones[*].f2
+configBox). Decoded the full PbZoneConfig — **every field maps to our codec, zero
+unmapped fields.** Cross Pattern is carried by:
+- `cleanMode` (f7) = **3** when ON (was 1 / normal when off) — the enable/mode
+- `relativeCleanDir` (f16) = the Cross-Cutting Angle (90° observed)
+Both already in `_TASK_CONFIG_FIELDS` / `decode_zone_config`, so
+`set_zone_config(cleanMode=3, relativeCleanDir=<angle>)` already drives it. No code
+change needed. zone0 reverted to Cross Pattern OFF. **Per-zone parity is 100%.**
+
+Net remaining app→HA gaps: only **Voice Pack** (niche mower voice-language packs;
+needs a download-capture to RE the wire, then a Select + service) and the
+user-deferred **Edit-Boundary** map drive (userCtrl 10/11, needs robot movement).
