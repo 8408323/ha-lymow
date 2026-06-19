@@ -3778,3 +3778,34 @@ f5=3) — fully confirms the encoder. Mower restored to its WiFi network.
 
 `scripts/parse_btsnoop.py` is hardcoded to handle 0x14 WRITE_CMD; a more general
 dumper (all handles + WRITE_REQ/Prepare) lives at /tmp/parse_all2.py for future use.
+
+---
+
+## 📊 App→HA parity — state as of 2026-06-19 (hands-on audit)
+
+The integration mirrors essentially the entire Lymow app. Confirmed live this
+session: WiFi (byte-for-byte, two SSIDs), PIN (read+set+new text entity),
+chargingMode labels (Follow Perimeter=0/Direct Route=1), per-zone Customize
+settings (all 15 fields covered), stripeAngle (added), channel detectMode
+(Smart=2/Touch=1). Backend has 47 services covering mowing settings (global +
+per-zone + per-channel), schedules, map ops (zones/no-go/channels add/delete/
+rename/merge/split/cut-height), backups, device settings, network priority, RTK
+bind, geofence/anti-theft, lock, OTA, find-my-robot, device rename.
+
+**Genuine remaining gaps (small):**
+- **Voice Pack** (Settings → Device Maintenance → Voice Pack) — mower voice-
+  LANGUAGE packs (French/Spanish/German/Italian/English; "English: In Use",
+  Download buttons). NOT in HA. Niche. To add: a Select entity + a `set_voice_pack`
+  service; needs a BLE capture of selecting a pack (download is robot-side).
+- **Cross Pattern** (per-zone, Customize) — double-cut at a relative angle. Almost
+  certainly already covered by `relativeCleanDir` (f16) + `cleanMode` (f7); a
+  toggle-capture would confirm whether there's a separate enable bool.
+- **Map edits — Edit Boundary** (drive-the-robot boundary record, userCtrl 10/11).
+  add/delete/rename/merge/split zones/channels are implemented; the drive-record
+  path needs supervised robot movement (user-deferred).
+- **zoneOrder** (Optimize/Custom) — wire (PbTaskConfig.f2) reads correctly; the
+  app UI location wasn't found (likely the Select-Mow ordering flow), so the
+  select's labels stay best-effort.
+
+**Out of scope (unchanged):** remote camera KVS (#97), account/login, language/
+unit toggles, app-side device pairing.
