@@ -3712,3 +3712,26 @@ before any SSID change.**
 Maintenance → Voice Pack — selectable mower voice/audio pack; not in HA),
 Audio Volume presets Mute/Low/Medium/High (we expose the raw 0-100 `audioVolume`,
 fine). Cross-Pattern per-zone wire still to confirm.
+
+---
+
+## 🔬 WiFi provisioning resolved — 2026-06-19 (phone next to mower, BT up)
+
+**SSID is `Haraldsson-IoT`** (the earlier "Haraldssons-IoT" was a typo). After a
+user mower-restart it reconnected to WiFi; cloud `networkInfo.wifiSsid =
+"Haraldsson-IoT"`, `deviceState online` — **goal met, mower is on the IoT WiFi.**
+
+**Provisioning model confirmed:** the app's Network Settings has NO SSID field —
+it provisions the mower to **the phone's current WiFi network**. You connect the
+phone to the target SSID, type the password, tap Reconnect, and the mower joins
+the same network. (The recurring BLE `f17{f3:1}` writes are wifi-status polls, not
+the set command.) Entered the `~/.wifi` password + Reconnect with the phone on
+Haraldsson-IoT, but the mower was already on it → no provisioning command fired
+(no-op), so no fresh capture this session. `encode_set_wifi` (`f17{f1:ssid,
+f2:password, f5:3}`) stays validated from 2026-05-30; our `lymow.set_wifi` also
+supports an explicit SSID (BLE, needs the sender in range).
+
+**Still TODO for full app parity (BLE captures; do while phone is at the mower):**
+Voice Pack (mower voice-language packs — Settings → Device Maintenance; not in HA;
+would be a select + service), Cross-Pattern per-zone exact wire (≈ relativeCleanDir
+f16 + an enable), and the user-deferred map edits (Edit Boundary, drives the mower).
