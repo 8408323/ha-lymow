@@ -3735,3 +3735,26 @@ supports an explicit SSID (BLE, needs the sender in range).
 Voice Pack (mower voice-language packs — Settings → Device Maintenance; not in HA;
 would be a select + service), Cross-Pattern per-zone exact wire (≈ relativeCleanDir
 f16 + an enable), and the user-deferred map edits (Edit Boundary, drives the mower).
+
+---
+
+## 🔧 WiFi correction — 2026-06-19 (network selector exists; capture inconclusive)
+
+CORRECTION to the note above: the app's Network Settings DOES have a **network-
+selector dropdown** (tap the SSID name above the password field → scanned-network
+list: Haraldsson, Haraldsson-IoT, Persson/Silfverbrand…). The earlier "no SSID
+field" was wrong — the selector only renders once BT connects and the screen
+finishes loading. So you pick the SSID in-app; you do NOT switch the phone's network.
+
+Tried the two-network validation (user's idea: provision to `Haraldsson`, then back
+to `Haraldsson-IoT`, same password → confirms both `f1`(ssid) and `f2`(password)).
+Selected `Haraldsson` in the dropdown, entered the password (8 dots), tapped
+Reconnect — but **no set-WiFi command surfaced in btsnoop on ANY handle/op**
+(checked WRITE_CMD 0x52 + WRITE_REQ 0x12, all handles, searched for the SSID
+bytes), and the mower stayed on `Haraldsson-IoT`. So the Reconnect either didn't
+transmit a switch (a different-SSID switch may need a confirm step) or routed via
+the cloud — which can't be captured here without force-stopping the app, and that
+drops the BT the WiFi screen needs (catch-22). `encode_set_wifi` (`f17{f1:ssid,
+f2:password, f5:3}`) remains validated from the 2026-05-30 BLE capture; mower is
+on the correct network. `scripts/parse_btsnoop.py` only reads handle 0x14
+WRITE_CMD — extend it to all handles + WRITE_REQ if a future WiFi capture is needed.
