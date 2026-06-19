@@ -3758,3 +3758,23 @@ drops the BT the WiFi screen needs (catch-22). `encode_set_wifi` (`f17{f1:ssid,
 f2:password, f5:3}`) remains validated from the 2026-05-30 BLE capture; mower is
 on the correct network. `scripts/parse_btsnoop.py` only reads handle 0x14
 WRITE_CMD — extend it to all handles + WRITE_REQ if a future WiFi capture is needed.
+
+---
+
+## ✅ WiFi VALIDATED byte-for-byte — 2026-06-19 (two-network test)
+
+Resolved the earlier inconclusive note. The app's Network Settings DOES have a
+network-selector dropdown; pick the SSID, enter the password, Reconnect — and the
+mower switches (title flips to "Connected to <SSID> successfully", no popups, ~3 s).
+My earlier captures pulled the btsnoop too early (before the command fired) — fixed
+by polling the title-change before pulling.
+
+Captured the BLE set-WiFi for TWO networks (same password, different SSID) and
+decoded both: `wifiConfig (PbInput.f17) {f1: ssid, f2: password, f5: 3}`,
+WRITE_CMD to handle 0x14. **`encode_set_wifi(ssid, password)` is byte-IDENTICAL to
+the captured wire for both SSIDs** (f1 varies with the SSID, f2 password constant,
+f5=3) — fully confirms the encoder. Mower restored to its WiFi network.
+(SSID/password values are sensitive — kept out of git; capture `.cfa` files scrubbed.)
+
+`scripts/parse_btsnoop.py` is hardcoded to handle 0x14 WRITE_CMD; a more general
+dumper (all handles + WRITE_REQ/Prepare) lives at /tmp/parse_all2.py for future use.
