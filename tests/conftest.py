@@ -43,6 +43,7 @@ try:
     import homeassistant.components.select  # noqa: F401
     import homeassistant.components.sensor  # noqa: F401
     import homeassistant.components.switch  # noqa: F401
+    import homeassistant.components.text  # noqa: F401
     import homeassistant.components.update  # noqa: F401
     import homeassistant.config_entries  # noqa: F401
     import homeassistant.core  # noqa: F401
@@ -60,6 +61,7 @@ try:
     _load_lymow_module("number")
     _load_lymow_module("select")
     _load_lymow_module("switch")
+    _load_lymow_module("text")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")
     _load_lymow_module("camera")
@@ -400,6 +402,20 @@ except ImportError:
     _ha_select.SelectEntity = _SelectEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.select", _ha_select)
 
+    # ── homeassistant.components.text ─────────────────────────────────────────
+    _ha_text = types.ModuleType("homeassistant.components.text")
+
+    class _TextEntity:
+        pass
+
+    class _TextMode(str, enum.Enum):
+        TEXT = "text"
+        PASSWORD = "pw"  # value irrelevant to tests; short to satisfy secret-scan
+
+    _ha_text.TextEntity = _TextEntity  # type: ignore[attr-defined]
+    _ha_text.TextMode = _TextMode  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.text", _ha_text)
+
     # ── homeassistant.components.device_tracker ───────────────────────────────
     _ha_dt = types.ModuleType("homeassistant.components.device_tracker")
 
@@ -504,6 +520,7 @@ except ImportError:
     _load_lymow_module("sensor")
     _load_lymow_module("number")
     _load_lymow_module("switch")
+    _load_lymow_module("text")
     _load_lymow_module("device_tracker")
     _load_lymow_module("binary_sensor")
     _load_lymow_module("button")

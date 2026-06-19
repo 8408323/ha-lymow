@@ -3663,3 +3663,52 @@ detectMode value maps, channel config fields, `encode_query_robot_config`
 - **Map edits (Edit Boundary, userCtrl 10/11)** — services exist (add_zone/nogo/
   channel, split/merge); live validation drives the robot around the yard to record
   a boundary → genuinely needs hands-on supervision, NOT done blind from ADB.
+
+---
+
+## 🔬 Live app validation #2 — 2026-06-19 evening (user-supervised)
+
+User authorised live changes (PIN→1234, WiFi creds in ~/private_projects/.wifi)
+and pointed out the exact app locations. Drove the app over ADB; commands go over
+BLE (btsnoop) or the cloud depending on BT state.
+
+**Return to Dock (chargingMode) — CONFIRMED.** Settings → Device Settings →
+(scroll) "Return to Dock" = **Follow Perimeter / Direct Route**. "Follow Perimeter"
+was selected with the robot at chargingMode=0 ⇒ **0=Follow Perimeter, 1=Direct
+Route — matches `select.py` `_CHARGING_MODE_OPTIONS` exactly.** No code change.
+(Note: the app's "Mowing Order: Main Area First/Perimeter First" is `pathOrder`
+f14, a DIFFERENT setting from PbTaskConfig.zoneOrder.)
+
+**Customize (per-zone) settings — FULL COVERAGE CONFIRMED.** Mowing Settings →
+Customize → zone0/zone1 + channel0/channel1. Enumerated all 15 per-zone fields:
+Name, Moving Speed, Cutting Height, Blade Speed, Path Spacing, **Stripe Angle
+(Optimized / User-Defined + 0-180°)**, Cross Pattern (toggle + angle), Mowing
+Order, Zone OD, Perimeter OD, Perimeter Direction, No-Go Laps, Zone Perimeter
+Laps, Turn-Off Outer Motor, Safe-margin. All map to our PbZoneConfig codec and are
+settable per-zone via `set_zone_config` (`_encode_zone_config_submessage` iterates
+`_TASK_CONFIG_FIELDS`, which now includes `stripeAngle`). "Cross Pattern" ≈
+`relativeCleanDir` f16 / `cleanMode` f7 (only field still to pin down exactly).
+Per-zone cut-height range in app is 30-100mm; stripe angle 0-180°.
+
+**PIN — validated + now settable from HA.** PIN screen: 4-digit input + Update.
+Set it to 1234 (the change took). `encode_set_pin("1234")` =
+`PbInput{f13:robotConfig{f9:lcdPinCode{f1:[1,2,3,4]}}}` — the exact f9 format the
+robot reports back (decode-confirmed). Added **`text.<id>_screen_pin`** (TextEntity,
+PASSWORD mode, 4-digit pattern, disabled-by-default, CONFIG) so the PIN is settable
+from the dashboard, not just the `lymow.set_pin` service. Service tested
+end-to-end via the HA API (HTTP 200, MQTT path). **PIN is currently 1234.**
+
+**WiFi — encoder confirmed; live re-capture blocked.** App → Settings → Network
+Settings has ONLY a "Wi-Fi Password" field + "Reconnect" (NO SSID field — it
+re-applies to the provisioned SSID; SSID change happens at pairing). BT was
+disconnected at the time (robot docked, out of phone BLE range) so no live capture.
+`encode_set_wifi` (`{f1:ssid, f2:password, f5:3}`, BLE) was already captured/
+validated 2026-05-30 and our `lymow.set_wifi` DOES support a new SSID — but it
+sends over BLE, needing the sender in Bluetooth range of the mower. **SSID note:
+robot reports `Haraldsson-IoT`; user wrote `Haraldssons-IoT` — confirm spelling
+before any SSID change.**
+
+**New app features spotted (candidate gaps):** "Voice Pack" (Settings → Device
+Maintenance → Voice Pack — selectable mower voice/audio pack; not in HA),
+Audio Volume presets Mute/Low/Medium/High (we expose the raw 0-100 `audioVolume`,
+fine). Cross-Pattern per-zone wire still to confirm.
