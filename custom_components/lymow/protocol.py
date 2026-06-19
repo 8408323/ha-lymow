@@ -501,7 +501,9 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
 #   f4  moveSpeed (float32, m/s)             — confirmed (app 0.6)
 #   f6  cutSpeed (int)                       — anchored
 #   f7  cleanMode (int)                      — anchored
-#   f8  enabledZoneMask (uint64 bitmask)     — decode-only, not a setting
+#   f8  stripeAngle (signed int32)           — CONFIRMED live 2026-06-19: set
+#       Stripe Angle "User-Defined 90°" → f8=90; "Optimized" → f8=-1 (the
+#       10-byte sign-extended varint the app sends). NOT enabledZoneMask.
 #   f9  pathSpacing (int, cm)                — CONFIRMED (app 35cm = f9)
 #   f10 perimeterMowLaps (int)               — CONFIRMED (app Zone-Perimeter)
 #   f11 perimeterMowDir (int)                — anchored
@@ -518,9 +520,9 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
 #   f19 followDetectMode (int)               — anchored
 # NOTE: the prior layout mislabeled f9 as relativeCleanDir / f10 as pathSpacing
 # (a +1 shift). The full PbZoneConfig map is now APK-verified (Hermes v96):
-# cleanDir=f8, startProgress=f15, brushSpeed=f5 exist but we don't surface them
-# (no HA use). raiseCutHeight/lowerCutHeight are momentary +/- commands, kept
-# as-is. All field NUMBERS we DO use are confirmed correct.
+# startProgress=f15, brushSpeed=f5 exist but we don't surface them (no HA use).
+# raiseCutHeight/lowerCutHeight are momentary +/- commands, kept as-is. All
+# field NUMBERS we DO use are confirmed correct (f8 stripeAngle live-confirmed).
 _ZONE_CONFIG_BOOL_FIELDS = {14, 17, 18}
 _ZONE_CONFIG_INT_NAMES: dict[int, str] = {
     1: "cutHeight",
@@ -1253,6 +1255,16 @@ _TASK_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "followDetectMode": (19, "int"),
 }
 
+# Global channel settings — PbChannelConfig carried at PbMap.f12 (alongside the
+# PbMap.f11 globalZoneConfig). The app's global Save sends BOTH; field map
+# live-confirmed 2026-06-19 from a captured global write (f1=2 detectMode Smart,
+# f2=60 deck height, f3=0 raise-omni). detectMode: Smart=2 / Touch-Only=1.
+_CHANNEL_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
+    "channelDetectMode": (1, "int"),  # obstacle detection crossing a channel (Smart=2/Touch=1)
+    "channelDeckHeight": (2, "int"),  # deck module height when crossing a channel (mm)
+    "channelRaiseOmni": (3, "bool"),  # raise the omni wheels on channel
+}
+
 
 def encode_set_task_config(**fields: Any) -> bytes:
     """Encode a global mowing-settings write setting only the given fields.
@@ -1267,27 +1279,41 @@ def encode_set_task_config(**fields: Any) -> bytes:
     the global mowing settings while preserving per-zone customs), NOT the old
     userCtrl=36+PbTaskConfig(f26) which is the unrelated Device Settings page.
     The robot merges the partial globalZoneConfig (same as the per-zone
-    userCtrl=9 path). The app also sends a sibling PbMap.f12 globalChannelConfig
-    snapshot; we omit it (only mowing fields are being written here).
+    userCtrl=9 path). Channel fields (``_CHANNEL_CONFIG_FIELDS``) ride alongside
+    in the sibling PbMap.f12 globalChannelConfig — exactly as the app's Save sends
+    both snapshots together.
     """
-    cfg = b""
+
+    def _encode(field_no: int, kind: str, value: Any) -> bytes:
+        if kind == "bool":
+            return _field_i32(field_no, 1 if value else 0)
+        if kind == "float":
+            return _field_f32(field_no, float(value))
+        return _field_i32(field_no, int(value))
+
+    zone_cfg = b""
+    chan_cfg = b""
     for name, value in fields.items():
         if value is None:
             continue
-        if name not in _TASK_CONFIG_FIELDS:
-            raise ValueError(f"unknown task-config field: {name}")
-        field_no, kind = _TASK_CONFIG_FIELDS[name]
-        if kind == "bool":
-            cfg += _field_i32(field_no, 1 if value else 0)
-        elif kind == "float":
-            cfg += _field_f32(field_no, float(value))
+        if name in _TASK_CONFIG_FIELDS:
+            field_no, kind = _TASK_CONFIG_FIELDS[name]
+            zone_cfg += _encode(field_no, kind, value)
+        elif name in _CHANNEL_CONFIG_FIELDS:
+            field_no, kind = _CHANNEL_CONFIG_FIELDS[name]
+            chan_cfg += _encode(field_no, kind, value)
         else:
-            cfg += _field_i32(field_no, int(value))
+            raise ValueError(f"unknown task-config field: {name}")
     from .const import USER_CTRL_GLOBAL_SETTING_N
 
+    pb_map = b""
+    if zone_cfg:
+        pb_map += _field_bytes(11, zone_cfg)  # PbMap.globalZoneConfig
+    if chan_cfg:
+        pb_map += _field_bytes(12, chan_cfg)  # PbMap.globalChannelConfig
     pb = _field_i32(2, PB_VERSION)
     pb += _field_i32(5, USER_CTRL_GLOBAL_SETTING_N)
-    pb += _field_bytes(12, _field_bytes(11, cfg))  # PbInput.map (f12) → PbMap.globalZoneConfig (f11)
+    pb += _field_bytes(12, pb_map)  # PbInput.map (f12)
     return pb
 
 
