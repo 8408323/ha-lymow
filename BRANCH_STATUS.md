@@ -3869,3 +3869,33 @@ modules protocol.py/lawn_mower.py remain 100%.)
 "In Use", French/German/Spanish/Italian downloadable) — niche, needs a
 download-capture to RE the wire. Edit-Boundary map drive still user-deferred
 (movement).
+
+---
+
+## ✅ MERGED TO MAIN — 2026-06-19 (PR #199, squash 0f7d5cc)
+
+`feat/map-lovelace-card` (227 commits) reconciled with `origin/main` (40 PRs,
+#159–#196) and squash-merged to main. GitHub CI is out of credits, so the gate
+was the **full local suite (1637 passed) + ruff clean**, then a live deploy +
+restart on HA (192.168.1.99): integration reloads clean, 69 entities,
+`lawn_mower.7b6521` docked. Merged with `--admin` (CI bypassed) per maintainer.
+
+**Reconciliation decisions (HEAD = this branch, the deployed/live-validated side):**
+- Wire paths win for HEAD: `encode_set_task_config` = userCtrl=49 globalZoneConfig
+  + globalChannelConfig (NOT main's deprecated userCtrl=36 PbTaskConfig); f8=stripeAngle;
+  f1=missionTimeMin (minutes); `set_headlight_schedule` kept over main's `set_night_mode`.
+- main's additive features unioned: dock f24, theftLock f27, cleanReport helper,
+  outputCtrl f18, remainCleanTime f4, mapArea f6, AE-gear/lens-heater label decode,
+  wheelVer/knifeVer, ERROR/WARNING name tables + parity test, defensive mowProgress,
+  offline-notification dedup, live-dock merge, pause/cleaning-summary services.
+- const.py = main's test-compliant ERROR/WARNING tables + names + HEAD's ERROR_REMEDIATION.
+- Security: sensitive wifiSsid/rtkSn/simId kept OUT of always-on device-profile decode.
+
+**Deferred to 2026-07-01 (with the CI restore):**
+- Total coverage 97% (pre-existing camera.py 39% / bluetooth.py 93% / __init__.py 88%
+  gaps; suite is stub-mode, real-HA paths uncovered locally).
+- PbRunTimeConfig field numbers: HEAD f2/f3 (deployed) vs an earlier f4/f6 read —
+  re-verify moveSpeed/cutSpeed against the APK on the next capture pass.
+- Redundant dock buttons: CancelTaskButton + DockAndForgetProgressButton both
+  USER_CTRL_DOCK — collapse to one.
+- Voice Pack (cloud feature) still un-RE'd; Edit-Boundary map drive still movement-deferred.
