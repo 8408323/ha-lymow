@@ -500,17 +500,16 @@ class LymowMapCard extends HTMLElement {
     // ── Mow track overlay ────────────────────────────────────────────────────
     // During an active mow: show the live position trail (breadcrumb polyline).
     // After mowing ends: show the session's mowed-area overlay from QUERY_PATH.
-    // trackPoints are ordered GPS fixes along each strip — rendering them as a
-    // polygon connects them in recording order (jagged/self-intersecting). Instead
-    // compute the convex hull of all track points to approximate the mowed area.
+    // QUERY_PATH returns the swept path as flat polyline segments. Approximate the
+    // mowed area as the convex hull of all path points, clipped per zone — the hull
+    // avoids the self-intersections of raw recording-order points. Shown whether or
+    // not the card was open during the mow (path is server-polled every 30 s).
     const isMowingNow = this._mowTrailActive;
-    const mowedByZone = {};
-    // Show stored path overlay both when mowing and when not, so the user can
-    // see how much has been done during an active session via QUERY_PATH polls.
-    for (const zt of (mowPath?.goZones || [])) {
-      if (zt.hashId && zt.trackPoints?.length >= 3) mowedByZone[zt.hashId] = zt;
-    }
-    const hasMowData = Object.keys(mowedByZone).length > 0;
+    const mowPts = [];
+    for (const seg of (mowPath?.segments || [])) for (const p of seg) mowPts.push(p);
+    const mowHull = mowPts.length >= 3 ? _convexHull(mowPts) : [];
+    const hasMowData = mowHull.length >= 3;
+    const mowHullPts = mowHull.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
 
     // ── Live mow trail (breadcrumb during active mow) ─────────────────────────
     let liveTrail = "";
@@ -520,13 +519,22 @@ class LymowMapCard extends HTMLElement {
       liveTrail = `<polyline points="${pts}" fill="none" stroke="#00e676" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.95" pointer-events="none"/>`;
     }
 
+    // ── Persistent mow trail (server-side, from QUERY_PATH polls) ──────────────
+    // Drawn whether or not the card was open during the mow: the coordinator polls
+    // QUERY_PATH every 30 s, so the full swept path lives in mow_path.segments.
+    let serverTrail = "";
+    for (const seg of (mowPath?.segments || [])) {
+      if (seg.length < 2) continue;
+      const pts = seg.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      serverTrail += `<polyline points="${pts}" fill="none" stroke="#1b5e20" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" pointer-events="none"/>`;
+    }
+
     // ── Go-zones ──────────────────────────────────────────────────────────────
     const goPaths = goZones.map((z) => {
       const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
       const selected = this._selectedZones.has(z.hashId);
       const beingEdited = this._editing && this._editHash === z.hashId;
       const enabled = z.isEnabled !== false;
-      const mowed = mowedByZone[z.hashId];
 
       // Zone base fill is always medium green — the mowed overlay sits on top.
       const baseFill = beingEdited ? "#fff3e0"
@@ -536,20 +544,16 @@ class LymowMapCard extends HTMLElement {
       const stroke = beingEdited ? "#ef6c00" : selected ? "#a5d6a7" : enabled ? "#2e7d32" : "#9e9e9e";
       const dash = enabled ? "" : `stroke-dasharray="2,1"`;
 
-      // Mowed-area overlay: convex hull of track points, clipped to zone polygon,
-      // filled with dark forest green. Convex hull covers the full swept area
-      // without the self-intersections you'd get from raw recording-order GPS fixes.
+      // Mowed-area overlay: convex hull of the swept path, clipped to this zone
+      // polygon, filled dark forest green. The hull covers the swept area without
+      // the self-intersections of raw recording-order GPS fixes.
       let mowedOverlay = "";
-      if (mowed && !beingEdited) {
-        const hull = _convexHull(mowed.trackPoints);
-        if (hull.length >= 3) {
-          const hpts = hull.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
-          const clipId = `mow-clip-${z.hashId}`;
-          mowedOverlay = `
-            <defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>
-            <polygon points="${hpts}" fill="#1b5e20" fill-opacity="0.72" stroke="none"
-              clip-path="url(#${clipId})" pointer-events="none"/>`;
-        }
+      if (hasMowData && !beingEdited) {
+        const clipId = `mow-clip-${z.hashId}`;
+        mowedOverlay = `
+          <defs><clipPath id="${clipId}"><polygon points="${pts}"/></clipPath></defs>
+          <polygon points="${mowHullPts}" fill="#1b5e20" fill-opacity="0.72" stroke="none"
+            clip-path="url(#${clipId})" pointer-events="none"/>`;
       }
 
       return `<polygon data-hash="${z.hashId}" data-type="go" points="${pts}"
@@ -579,11 +583,9 @@ class LymowMapCard extends HTMLElement {
       const textAttrs = `x="${sx(cx)}" text-anchor="middle" font-weight="bold" fill="white" pointer-events="none" font-size="${zoneFontSz}" ${clip}`;
       const lineH = (parseFloat(zoneFontSz) * 1.3).toFixed(2);
 
-      // Mow progress line — shown when QUERY_PATH data is available for this zone
-      const mowedZone = mowedByZone[z.hashId];
-      // Don't show strip count while actively mowing (data is from previous session)
-      const progressPart = (!isMowingNow && mowedZone != null)
-        ? `${mowedZone.stripsDone ?? "?"} strips` : "";
+      // Per-zone strip count isn't carried by the flat QUERY_PATH path; overall
+      // mow progress is shown in the card header instead.
+      const progressPart = "";
 
       // Mode 2 (both): two stacked lines; modes 0/1 single line.
       if (m === 2 && areaPart) {
@@ -1213,6 +1215,7 @@ class LymowMapCard extends HTMLElement {
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
             ${goPaths}
+            ${serverTrail}
             ${liveTrail}
             ${goLabels}
             ${nogoPaths}

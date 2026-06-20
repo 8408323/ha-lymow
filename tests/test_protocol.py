@@ -1709,27 +1709,31 @@ def test_decode_pboutput_no_current_task_zone_when_absent() -> None:
     assert "currentTaskZoneHashId" not in decode_pboutput(pb)
 
 
-def test_decode_path_response_full() -> None:
-    """QUERY_PATH reply → per-zone track polyline + stripsDone.
+def _path_point(x: float, y: float) -> bytes:
+    return _field_bytes(1, _field_f32(1, x) + _field_f32(2, y))
 
-    Wire: pb.f23 → f2 → f3 → repeated f1; each f1 has .f1{f3=hashId, f5=points}
-    and .f2{f1=stripsDone}; each point is a PbPoint {f1=x, f2=y} float32.
+
+def test_decode_path_response_full() -> None:
+    """QUERY_PATH reply → flat polyline split into segments by sentinel points.
+
+    Wire: pb.f23 → f2{f1=flag, f3=points} → repeated f1, each a point {f1=x, f2=y}
+    float32. Sentinel points (x≈y≈333 break, ≈444 start/end) split the segments.
     """
     from lymow.protocol import decode_path_response
 
-    pt1 = _field_f32(1, 1.5) + _field_f32(2, 2.5)
-    pt2 = _field_f32(1, 3.0) + _field_f32(2, 4.0)
-    polyline = _field_bytes(1, pt1) + _field_bytes(1, pt2)  # f5 holds repeated f1 points
-    zone_info = _field_str(3, "wsmjco1T") + _field_bytes(5, polyline)
-    gz_raw = _field_bytes(1, zone_info) + _field_bytes(2, _field_i32(1, 7))
-    pb = _field_bytes(23, _field_bytes(2, _field_bytes(3, _field_bytes(1, gz_raw))))
+    points = (
+        _path_point(444, 444)
+        + _path_point(1.5, 2.5)
+        + _path_point(3.0, 4.0)
+        + _path_point(333, 333)
+        + _path_point(5.0, 6.0)
+        + _path_point(444, 444)
+    )
+    pb = _field_bytes(23, _field_bytes(2, _field_i32(1, 1) + _field_bytes(3, points)))
     assert decode_path_response(pb) == {
-        "goZones": [
-            {
-                "hashId": "wsmjco1T",
-                "trackPoints": [{"x": 1.5, "y": 2.5}, {"x": 3.0, "y": 4.0}],
-                "stripsDone": 7,
-            }
+        "segments": [
+            [{"x": 1.5, "y": 2.5}, {"x": 3.0, "y": 4.0}],
+            [{"x": 5.0, "y": 6.0}],
         ]
     }
 
@@ -1738,25 +1742,65 @@ def test_decode_path_response_empty_without_content() -> None:
     from lymow.protocol import decode_path_response
 
     # f23 present but no f2 sub-message.
-    assert decode_path_response(_field_bytes(23, b"")) == {"goZones": []}
+    assert decode_path_response(_field_bytes(23, b"")) == {"segments": []}
 
 
 def test_decode_path_response_empty_without_path_data() -> None:
     from lymow.protocol import decode_path_response
 
     # f23.f2 present but no f3 sub-message.
-    assert decode_path_response(_field_bytes(23, _field_bytes(2, b""))) == {"goZones": []}
+    assert decode_path_response(_field_bytes(23, _field_bytes(2, b""))) == {"segments": []}
 
 
-def test_decode_path_response_skips_malformed_entries() -> None:
+def test_decode_path_response_rejects_map_shaped_reply() -> None:
+    """A map reply shares the f23→f2→f3 shape but its f1 entries are sub-messages,
+    not i32 points — decode_path_response must yield no segments so the caller
+    falls through to decode_map_response."""
     from lymow.protocol import decode_path_response
 
-    # A varint where a go-zone sub-message is expected, and a zone entry with no
-    # hashId (only stats), are both skipped.
-    bad_varint = _field_i32(1, 5)
-    no_hash = _field_bytes(1, _field_bytes(2, _field_i32(1, 3)))
-    pb = _field_bytes(23, _field_bytes(2, _field_bytes(3, bad_varint + no_hash)))
-    assert decode_path_response(pb) == {"goZones": []}
+    go_zone = _field_bytes(1, _field_str(3, "wsmjco1T"))  # f1 is bytes, not an i32 point
+    pb = _field_bytes(23, _field_bytes(2, _field_i32(1, 1) + _field_bytes(3, _field_bytes(1, go_zone))))
+    assert decode_path_response(pb) == {"segments": []}
+
+
+def test_decode_path_response_aborts_on_non_point_entry() -> None:
+    """A varint where a point sub-message is expected (wrong shape) yields no segments."""
+    from lymow.protocol import decode_path_response
+
+    pb = _field_bytes(23, _field_bytes(2, _field_i32(1, 1) + _field_bytes(3, _field_i32(1, 5))))
+    assert decode_path_response(pb) == {"segments": []}
+
+
+def test_decode_path_response_flushes_segment_without_trailing_sentinel() -> None:
+    """A path that ends mid-segment (no closing sentinel) still flushes the segment."""
+    from lymow.protocol import decode_path_response
+
+    points = _path_point(1.0, 2.0) + _path_point(3.0, 4.0)
+    pb = _field_bytes(23, _field_bytes(2, _field_i32(1, 1) + _field_bytes(3, points)))
+    assert decode_path_response(pb) == {"segments": [[{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]]}
+
+
+def test_decode_path_response_real_capture() -> None:
+    """Live-captured QUERY_PATH reply → 3 segments (zone outline + 2 perimeter laps)."""
+    import base64
+    import pathlib
+
+    from lymow.protocol import decode_path_response
+
+    b64 = (pathlib.Path(__file__).parent / "data" / "query_path_response.b64").read_text().strip()
+    result = decode_path_response(base64.b64decode(b64))
+    assert [len(seg) for seg in result["segments"]] == [4, 497, 497]
+
+
+def test_encode_query_path_matches_app_request() -> None:
+    """encode_query_path(0) reproduces the app's captured queryCleanPath request."""
+    import base64
+
+    from lymow.protocol import encode_query_path
+
+    assert encode_query_path(0) == base64.b64decode("EDEoF7oBBAgAGAE=")
+    # Only the index byte (f23.f1 value) changes between requests.
+    assert encode_query_path(2) == encode_query_path(0)[:8] + bytes([2]) + encode_query_path(0)[9:]
 
 
 def test_decode_pboutput_network_info_field_34() -> None:

@@ -344,7 +344,7 @@ def test_map_sensor_extra_attrs_path_rtk_and_progress() -> None:
     coord = _make_coord(
         {
             "mapData": {"goZones": []},
-            "pathData": {"goZones": [{"hashId": "z1", "trackPoints": [{"x": 1.23456, "y": 2.34567}]}]},
+            "pathData": {"segments": [[{"x": 1.23456, "y": 2.34567}]]},
             "rtkStatus": 2,
             "mowProgress": 45,
             "mowStripCount": 12,
@@ -353,7 +353,7 @@ def test_map_sensor_extra_attrs_path_rtk_and_progress() -> None:
     )
     attrs = LymowMapSensor(coord, DEVICE).extra_state_attributes
     # mow path track points are trimmed to 4 dp like zone polygons
-    assert attrs["mow_path"] == {"goZones": [{"hashId": "z1", "trackPoints": [{"x": 1.2346, "y": 2.3457}]}]}
+    assert attrs["mow_path"] == {"segments": [[{"x": 1.2346, "y": 2.3457}]]}
     assert attrs["rtkLabel"] == "Fixed"
     assert attrs["mowProgress"] == 45
     assert attrs["mowStripCount"] == 12

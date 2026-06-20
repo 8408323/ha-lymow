@@ -27,7 +27,6 @@ from .const import (
     USER_CTRL_QUERY_CLEANING_INFO,
     USER_CTRL_QUERY_CLEANING_SUMMARY,
     USER_CTRL_QUERY_NET_DETAIL,
-    USER_CTRL_QUERY_PATH,
     USER_CTRL_QUERY_RTK_DIAGNOSTIC_L1,
     USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2,
     USER_CTRL_QUERY_RUN_TIME_CONFIG,
@@ -47,6 +46,7 @@ from .mqtt import LymowMqttClient
 from .protocol import (
     encode_delete_zone,
     encode_query_map,
+    encode_query_path,
     encode_query_robot_config,
     encode_query_schedules,
     encode_start_zones,
@@ -357,7 +357,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             patch = self._apply_channel_name_overrides(thing_name, patch)
         # Cache non-empty pathData so the map card can show last-mow coverage
         # even after the robot docks (robot stops sending path data when docked).
-        if "pathData" in patch and patch["pathData"].get("goZones"):
+        if "pathData" in patch and patch["pathData"].get("segments"):
             self._last_path_data[thing_name] = patch["pathData"]
         # If this patch has no pathData but we have a cached one, inject it so
         # the sensor attribute stays populated until next mow clears/replaces it.
@@ -1297,7 +1297,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_query_robot_config())
 
     async def async_query_path(self, thing_name: str) -> None:
-        await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+        await self._mqtt.async_publish_command(thing_name, encode_query_path())
 
     async def _async_poll_path(self, thing_name: str) -> None:
         """Poll QUERY_PATH every 30 s while the robot is mowing.
@@ -1308,7 +1308,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """
         try:
             await asyncio.sleep(2)  # brief delay so robot finishes the current strip
-            await self._publish_userctrl(thing_name, USER_CTRL_QUERY_PATH)
+            await self._mqtt.async_publish_command(thing_name, encode_query_path())
             await asyncio.sleep(28)  # rest of the 30 s window
             # If still mowing, kick off the next cycle immediately
             ws = (self.data or {}).get(thing_name, {}).get("workStatus")

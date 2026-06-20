@@ -809,11 +809,9 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
         path_data = (self.coordinator.data.get(self._thing_name) or {}).get("pathData")
         if path_data:
-            # Also trim mow-path track points to 4 dp
-            trimmed_zones = [
-                {**gz, "trackPoints": self._trim_poly(gz.get("trackPoints", []))} for gz in path_data.get("goZones", [])
-            ]
-            attrs["mow_path"] = {"goZones": trimmed_zones}
+            # Trim each mow-path segment's points to 4 dp
+            trimmed_segments = [self._trim_poly(seg) for seg in path_data.get("segments", [])]
+            attrs["mow_path"] = {"segments": trimmed_segments}
 
         # Live robot + RTK position and fix quality
         for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM", "rtkStatus", "workStatus"):

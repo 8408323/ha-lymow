@@ -265,12 +265,16 @@ class LymowMqttClient:
 
         pb_bytes = unwrap_envelope(payload)
         state = decode_pboutput(pb_bytes)
-        map_data = decode_map_response(pb_bytes)
-        if map_data:
-            state["mapData"] = map_data
+        # A QUERY_PATH reply and a map reply share the f23→f2→f3 shape. Decode the
+        # path first (strict — only matches i32 point lists) and fall through to
+        # the map decoder otherwise, so a path reply never corrupts the map.
         path_data = decode_path_response(pb_bytes)
-        if path_data.get("goZones"):
+        if path_data.get("segments"):
             state["pathData"] = path_data
+        else:
+            map_data = decode_map_response(pb_bytes)
+            if map_data:
+                state["mapData"] = map_data
         self._on_state(thing_name, state)
 
     def _handle_notify(self, thing_name: str, payload: bytes | str) -> None:
