@@ -45,7 +45,7 @@ async def async_setup_entry(
                 LockRobotButton(coordinator, device),
                 CancelTaskButton(coordinator, device),
                 SelfCheckButton(coordinator, device),
-                ForceReinitButton(coordinator, device),
+                DockAndForgetProgressButton(coordinator, device),
                 ChargingStationResetButton(coordinator, device),
                 SetChargingStationHereButton(coordinator, device),
                 AbortOtaButton(coordinator, device),
@@ -202,13 +202,15 @@ class SelfCheckButton(_UserCtrlButton):
 
 
 class CancelTaskButton(_UserCtrlButton):
-    """Cancel the current mowing task and return to dock — the app's
-    Settings → Cancel Task action. Distinct from the lawn-mower entity's
-    DOCK service (RECHARGE_DOCK=33, which preserves task progress); this
-    one (USER_CTRL_DOCK=2) ends the task before docking.
+    """Cancel the current mowing task — the app's Settings → Cancel Task action.
+
+    Live-captured: the app's Cancel Task sends USER_CTRL_FORCE_REINIT=28
+    (frame ``10 31 28 1c``), NOT userCtrl=2 (which is the plain idle-Dock, exposed
+    by DockAndForgetProgressButton). Stops the task and resets the robot to
+    waiting.
     """
 
-    _user_ctrl = USER_CTRL_DOCK
+    _user_ctrl = USER_CTRL_FORCE_REINIT
     _key = "cancel_task"
     _attr_entity_registry_enabled_default = False
 
@@ -216,15 +218,19 @@ class CancelTaskButton(_UserCtrlButton):
         super().__init__(coordinator, device, "Cancel task", "mdi:cancel")
 
 
-class ForceReinitButton(_UserCtrlButton):
-    """Stop in place and reset to waiting (soft stop)."""
+class DockAndForgetProgressButton(_UserCtrlButton):
+    """Dock now and forget task progress — USER_CTRL_DOCK=2 (live-captured idle-Dock
+    frame ``10 31 28 02``). The app sends this for "Dock → forget progress". Distinct
+    from the lawn-mower DOCK service (RECHARGE_DOCK=33, which preserves progress) and
+    from CancelTaskButton (userCtrl=28). Destructive — progress is lost.
+    """
 
-    _user_ctrl = USER_CTRL_FORCE_REINIT
-    _key = "force_reinit"
+    _user_ctrl = USER_CTRL_DOCK
+    _key = "dock_and_forget_progress"
     _attr_entity_registry_enabled_default = False
 
     def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
-        super().__init__(coordinator, device, "Force stop", "mdi:stop-circle")
+        super().__init__(coordinator, device, "Dock and forget progress", "mdi:home-import-outline")
 
 
 class ChargingStationResetButton(_UserCtrlButton):
