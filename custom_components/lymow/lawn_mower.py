@@ -1457,6 +1457,13 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
         if not self._device_data.get("isOnline", True):
             return LawnMowerActivity.ERROR
 
+        # robotStatus (f1) reports pause/error live; workStatus (f6) stays MOWING through both.
+        robot_state = self._device_data.get("robotState")
+        if robot_state in WORK_STATUS_ERROR_GROUP:
+            return LawnMowerActivity.ERROR
+        if robot_state in WORK_STATUS_PAUSED_GROUP:
+            return LawnMowerActivity.PAUSED
+
         ws = self._device_data.get("workStatus", WORK_STATUS_OFFLINE)
 
         if ws in WORK_STATUS_MOWING_GROUP:

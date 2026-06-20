@@ -149,6 +149,16 @@ def test_activity_error_code() -> None:
     assert m.activity == LawnMowerActivity.ERROR
 
 
+def test_activity_robot_state_paused_overrides_work_status_mowing() -> None:
+    m = _make_mower({"isOnline": True, "workStatus": WORK_STATUS_MOWING, "robotState": WORK_STATUS_PAUSE})
+    assert m.activity == LawnMowerActivity.PAUSED
+
+
+def test_activity_robot_state_error_overrides_work_status_mowing() -> None:
+    m = _make_mower({"isOnline": True, "workStatus": WORK_STATUS_MOWING, "robotState": WORK_STATUS_ERROR})
+    assert m.activity == LawnMowerActivity.ERROR
+
+
 def test_activity_offline_status_returns_error() -> None:
     m = _make_mower({"isOnline": True, "workStatus": WORK_STATUS_OFFLINE})
     assert m.activity == LawnMowerActivity.ERROR
