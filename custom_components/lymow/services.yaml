@@ -497,11 +497,12 @@ set_pin:
 set_wifi:
   name: Set Wi-Fi network
   description: >
-    Provision the mower's Wi-Fi (PbInput.wifiConfig). NOTE: Wi-Fi provisioning
-    is BLE-only — the robot ignores this command over the cloud/MQTT connection
-    this integration uses, so the service currently raises an error (see GitHub
-    issue #200). The wire format is confirmed and retained for a future BLE
-    transport. The password is sensitive and is never logged by the integration.
+    Provision the mower's Wi-Fi over Bluetooth. Wi-Fi provisioning is BLE-only —
+    the robot ignores this command over the cloud/MQTT connection — so this
+    service writes the config to the robot's BLE GATT characteristic directly.
+    The robot must be powered and in BLE range; if its address can't be found,
+    the service raises an error (set the BLE address in the integration options
+    to skip discovery). The password is sensitive and is never logged.
   target:
     entity:
       integration: lymow
