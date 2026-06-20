@@ -11,9 +11,9 @@ from lymow.button import (
     ChargingStationResetButton,
     ClearAllZonesAndChannelsButton,
     CompleteZonePartitionButton,
+    DockAndForgetProgressButton,
     ExitRemoteControlButton,
     FindMyRobotPlaySoundButton,
-    ForceReinitButton,
     LockRobotButton,
     RestoreFactoryDefaultsButton,
     SelfCheckButton,
@@ -66,11 +66,12 @@ def test_self_check_button_metadata() -> None:
     assert "Self-check" in e._attr_name
 
 
-def test_force_reinit_button_disabled_by_default() -> None:
+def test_dock_and_forget_button_disabled_by_default() -> None:
     coord = _make_coord()
-    e = ForceReinitButton(coord, DEVICE)
+    e = DockAndForgetProgressButton(coord, DEVICE)
     assert e._attr_entity_registry_enabled_default is False
-    assert "Force stop" in e._attr_name
+    assert e._attr_unique_id == f"{THING}_dock_and_forget_progress"
+    assert "Dock and forget" in e._attr_name
 
 
 def test_charging_station_reset_button_disabled_by_default() -> None:
@@ -104,20 +105,22 @@ def test_cancel_task_button_disabled_by_default() -> None:
     assert "Cancel task" in e._attr_name
 
 
-async def test_cancel_task_press_sends_user_ctrl_dock_2() -> None:
-    """USER_CTRL_DOCK=2 is the destructive 'end task and dock' variant,
-    distinct from the lawn-mower entity's progress-preserving RECHARGE_DOCK=33."""
+async def test_cancel_task_press_sends_user_ctrl_force_reinit_28() -> None:
+    """The app's Cancel Task is USER_CTRL_FORCE_REINIT=28 (live-captured 10 31 28 1c),
+    not userCtrl=2 — it cancels the current task and resets to waiting."""
     coord = _make_coord()
     e = CancelTaskButton(coord, DEVICE)
     await e.async_press()
-    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_DOCK)
-
-
-async def test_force_reinit_press_sends_user_ctrl_force_reinit() -> None:
-    coord = _make_coord()
-    e = ForceReinitButton(coord, DEVICE)
-    await e.async_press()
     coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_FORCE_REINIT)
+
+
+async def test_dock_and_forget_press_sends_user_ctrl_dock_2() -> None:
+    """USER_CTRL_DOCK=2 is the destructive idle-Dock 'forget progress' variant,
+    distinct from the lawn-mower entity's progress-preserving RECHARGE_DOCK=33."""
+    coord = _make_coord()
+    e = DockAndForgetProgressButton(coord, DEVICE)
+    await e.async_press()
+    coord.async_send_user_ctrl.assert_awaited_once_with(THING, USER_CTRL_DOCK)
 
 
 async def test_charging_station_reset_press_sends_user_ctrl() -> None:
@@ -176,7 +179,7 @@ async def test_async_setup_entry_creates_all_buttons_per_device() -> None:
         "LockRobotButton",
         "CancelTaskButton",
         "SelfCheckButton",
-        "ForceReinitButton",
+        "DockAndForgetProgressButton",
         "ChargingStationResetButton",
         "SetChargingStationHereButton",
         "AbortOtaButton",

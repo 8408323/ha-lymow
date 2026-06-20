@@ -139,8 +139,8 @@ def test_user_ctrl_values_form_a_dense_range() -> None:
 _EXPECTED_BUTTON_MAPPING: dict[str, int] = {
     "LockRobotButton": USER_CTRL_LOCK,
     "SelfCheckButton": USER_CTRL_SELF_CHECKING,
-    "CancelTaskButton": USER_CTRL_DOCK,
-    "ForceReinitButton": USER_CTRL_FORCE_REINIT,
+    "CancelTaskButton": USER_CTRL_FORCE_REINIT,
+    "DockAndForgetProgressButton": USER_CTRL_DOCK,
     "ChargingStationResetButton": USER_CTRL_CHARGING_STATION_RESET,
     "SetChargingStationHereButton": USER_CTRL_MODIFY_STATION,
     "AbortOtaButton": USER_CTRL_ABORT_OTA,
