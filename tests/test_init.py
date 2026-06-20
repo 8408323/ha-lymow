@@ -632,3 +632,92 @@ async def test_async_setup_entry_skips_dashboard_task_when_already_created() -> 
         await async_setup_entry(hass, entry)
 
     hass.async_create_task.assert_not_called()
+
+
+def test_card_url_uses_manifest_version_when_readable() -> None:
+    """Readable manifest.json yields a ?v=<version> cache-buster from its version field."""
+    url = _lymow._card_url("lymow-map-card.js")
+    assert url.startswith(f"/custom_components/{DOMAIN}/lymow-map-card.js?v=")
+    # The version comes straight from the real manifest, not the "0" fallback.
+    assert not url.endswith("?v=0")
+
+
+def _stub_lovelace_resources_module() -> None:
+    """Inject a stub homeassistant.components.lovelace.resources with ResourceStorageCollection."""
+    import types as _types
+
+    if "homeassistant.components.lovelace" not in sys.modules:
+        sys.modules["homeassistant.components.lovelace"] = _types.ModuleType("homeassistant.components.lovelace")
+    mod = _types.ModuleType("homeassistant.components.lovelace.resources")
+
+    class ResourceStorageCollection:  # noqa: D401 - stub class, attr presence is all that matters
+        pass
+
+    mod.ResourceStorageCollection = ResourceStorageCollection
+    sys.modules["homeassistant.components.lovelace.resources"] = mod
+
+
+async def test_ensure_lovelace_resources_updates_and_creates() -> None:
+    """Stale ?v= entries are updated in-place; missing card files are created."""
+    _stub_lovelace_resources_module()
+
+    resources = MagicMock()
+    resources.async_load = AsyncMock()
+    resources.async_update_item = AsyncMock()
+    resources.async_create_item = AsyncMock()
+    # Existing items: one stale (map card with old version → update branch),
+    # one already current (camera card → no-op), plus an unrelated resource.
+    current_map_url = _lymow._card_url("lymow-map-card.js")
+    stale_map_url = f"/custom_components/{DOMAIN}/lymow-map-card.js?v=old"
+    current_camera_url = _lymow._card_url("lymow-camera-card.js")
+    resources.async_items = MagicMock(
+        return_value=[
+            {"id": "res-map", "url": stale_map_url},
+            {"id": "res-cam", "url": current_camera_url},
+            {"id": "res-other", "url": "/local/unrelated.js?v=1"},
+        ]
+    )
+
+    hass = MagicMock()
+    hass.data = {"lovelace": {"resources": resources}}
+
+    await _lymow._ensure_lovelace_resources(hass)
+
+    # Stale map card → updated in-place to the current version.
+    resources.async_update_item.assert_awaited_once_with("res-map", {"res_type": "module", "url": current_map_url})
+    # The four cards with no existing entry are created (camera already current).
+    created_urls = {call.args[0]["url"] for call in resources.async_create_item.await_args_list}
+    assert _lymow._card_url("lymow-drive-card.js") in created_urls
+    assert _lymow._card_url("lymow-schedule-card.js") in created_urls
+    assert _lymow._card_url("lymow-backup-card.js") in created_urls
+    assert _lymow._card_url("lymow-settings-card.js") in created_urls
+    assert current_camera_url not in created_urls
+    assert current_map_url not in created_urls
+
+
+async def test_ensure_lovelace_resources_returns_when_lovelace_missing() -> None:
+    """No 'lovelace' in hass.data → early return, no resource calls."""
+    _stub_lovelace_resources_module()
+    hass = MagicMock()
+    hass.data = {}
+    # Must not raise; nothing to do.
+    await _lymow._ensure_lovelace_resources(hass)
+
+
+async def test_ensure_lovelace_resources_returns_when_resources_missing() -> None:
+    """'lovelace' present but no resources collection → early return."""
+    _stub_lovelace_resources_module()
+    hass = MagicMock()
+    hass.data = {"lovelace": {"resources": None}}
+    await _lymow._ensure_lovelace_resources(hass)
+
+
+async def test_ensure_lovelace_resources_swallows_errors() -> None:
+    """An exception inside the block is swallowed (add_extra_js_url is the fallback)."""
+    _stub_lovelace_resources_module()
+    resources = MagicMock()
+    resources.async_load = AsyncMock(side_effect=RuntimeError("boom"))
+    hass = MagicMock()
+    hass.data = {"lovelace": {"resources": resources}}
+    # Must not raise despite the failing async_load.
+    await _lymow._ensure_lovelace_resources(hass)
