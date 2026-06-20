@@ -704,6 +704,13 @@ def test_dotted_value_key_sensor_walks_nested_dict() -> None:
     assert sensor.native_value == "100.116.126.140"
 
 
+def test_dotted_value_key_returns_none_when_intermediate_not_a_dict() -> None:
+    """A dotted value_key whose intermediate isn't a dict yields None, not a crash."""
+    coord = _make_coord({"networkInfo": "not-a-dict"})
+    desc = next(s for s in SENSORS if s.key == "cellular_ip")
+    assert LymowSensor(coord, DEVICE, desc).native_value is None
+
+
 def test_lcd_pin_sensor_disabled_by_default_diagnostic_and_reads_value() -> None:
     from homeassistant.const import EntityCategory
 

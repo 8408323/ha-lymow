@@ -140,7 +140,6 @@ _EXPECTED_BUTTON_MAPPING: dict[str, int] = {
     "LockRobotButton": USER_CTRL_LOCK,
     "SelfCheckButton": USER_CTRL_SELF_CHECKING,
     "CancelTaskButton": USER_CTRL_DOCK,
-    "DockAndForgetProgressButton": USER_CTRL_DOCK,
     "ForceReinitButton": USER_CTRL_FORCE_REINIT,
     "ChargingStationResetButton": USER_CTRL_CHARGING_STATION_RESET,
     "SetChargingStationHereButton": USER_CTRL_MODIFY_STATION,
@@ -200,19 +199,11 @@ def test_button_mapping_covers_every_user_ctrl_button() -> None:
 
 
 def test_button_classes_use_distinct_user_ctrl_values() -> None:
-    """Two buttons sharing one USER_CTRL is almost always a copy-paste bug.
-
-    Known-intentional exception: CancelTaskButton and DockAndForgetProgressButton
-    are two distinct UX entry points for the same dock-and-cancel action (both
-    USER_CTRL_DOCK). TODO(2026-07-01): collapse to one to de-duplicate the UI.
-    """
-    allowed_shared = {frozenset({"CancelTaskButton", "DockAndForgetProgressButton"})}
+    """Two buttons sharing one USER_CTRL is almost always a copy-paste bug."""
     by_ctrl: dict[int, list[str]] = {}
     for cls_name, ctrl in _EXPECTED_BUTTON_MAPPING.items():
         by_ctrl.setdefault(ctrl, []).append(cls_name)
-    dupes = {
-        ctrl: names for ctrl, names in by_ctrl.items() if len(names) > 1 and frozenset(names) not in allowed_shared
-    }
+    dupes = {ctrl: names for ctrl, names in by_ctrl.items() if len(names) > 1}
     assert not dupes, f"two button classes bound to the same USER_CTRL: {dupes}"
 
 

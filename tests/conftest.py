@@ -7,6 +7,29 @@ import os
 import sys
 import types
 
+# aioresponses 0.7.8 (latest on PyPI) predates aiohttp 3.14, which made
+# ClientResponse.__init__'s `stream_writer` a required kwarg. The mock's
+# _build_response() passes writer=None, and aiohttp then reads
+# `stream_writer.output_size` — so a default of None isn't enough; supply a
+# tiny stub exposing output_size. Only the mock's incomplete call is affected
+# (setdefault leaves real aiohttp calls, which pass stream_writer, untouched).
+# Remove once aioresponses ships an aiohttp-3.14-compatible release.
+import aiohttp.client_reqrep as _aiohttp_reqrep
+
+_orig_client_response_init = _aiohttp_reqrep.ClientResponse.__init__
+
+
+class _StubStreamWriter:
+    output_size = 0
+
+
+def _patched_client_response_init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+    kwargs.setdefault("stream_writer", _StubStreamWriter())
+    _orig_client_response_init(self, *args, **kwargs)
+
+
+_aiohttp_reqrep.ClientResponse.__init__ = _patched_client_response_init
+
 _BASE = os.path.join(os.path.dirname(__file__), "..", "custom_components", "lymow")
 
 

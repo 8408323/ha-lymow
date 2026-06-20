@@ -55,7 +55,6 @@ async def async_setup_entry(
                 ClearAllZonesAndChannelsButton(coordinator, device),
                 ToggleLteAirplaneButton(coordinator, device),
                 BackupMapButton(coordinator, device),
-                DockAndForgetProgressButton(coordinator, device),
                 FindMyRobotPlaySoundButton(coordinator, device),
                 SyncTimezoneButton(coordinator, device, hass),
                 BtBroadcastButton(coordinator, device),
@@ -370,21 +369,3 @@ class FindMyRobotPlaySoundButton(CoordinatorEntity[LymowCoordinator], ButtonEnti
 
     async def async_press(self) -> None:
         await self.coordinator.async_find_my_robot_play_sound(self._thing_name)
-
-
-class DockAndForgetProgressButton(_UserCtrlButton):
-    """Dock the robot and cancel any in-progress task (USER_CTRL_DOCK = 2).
-
-    The Lymow app shows a confirmation dialog when Dock is tapped during an
-    active mow: Yes (forget progress) → userCtrl=2, No (keep progress) →
-    userCtrl=33. The standard HA dock service uses userCtrl=33 (preserve);
-    this button exposes the destructive variant explicitly. Disabled by
-    default because progress is lost on press.
-    """
-
-    _user_ctrl = USER_CTRL_DOCK
-    _key = "dock_and_forget_progress"
-    _attr_entity_registry_enabled_default = False
-
-    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
-        super().__init__(coordinator, device, "Dock and forget progress", "mdi:home-import-outline")

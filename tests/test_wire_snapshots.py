@@ -571,8 +571,9 @@ def test_decode_robot_config_full_synthetic_golden() -> None:
     assert out["cmdCellularSwitch"] is True
     assert out["metric_4g"] is True
     assert out["dockOnError"] is False
-    assert out["openLedTime"] == {"hour": 21, "minute": 0}
-    assert out["closeLedTime"] == {"hour": 6, "minute": 30}
+    # f14/f15 decode under the UI-derived names (the deployed headlight schedule).
+    assert out["headlightStart"] == {"hour": 21, "minute": 0}
+    assert out["headlightEnd"] == {"hour": 6, "minute": 30}
     assert out["rrConfig"]["enable"] is True
     assert out["rrConfig"]["rechargeBat"] == 20
 
