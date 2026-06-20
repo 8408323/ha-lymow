@@ -3869,3 +3869,35 @@ modules protocol.py/lawn_mower.py remain 100%.)
 "In Use", French/German/Spanish/Italian downloadable) — niche, needs a
 download-capture to RE the wire. Edit-Boundary map drive still user-deferred
 (movement).
+
+---
+
+## ✅ Live HA→app round-trip verified — 2026-06-20
+
+Tested whether HA control changes reach the robot AND show in the Lymow app.
+
+**Result: HA→robot works; the app caches its settings pages.**
+- `lymow.set_task_config(obs_dec_mode=1)` from HA → after `query_map`, HA read back
+  `globalZoneConfig.obsDecMode=1`, i.e. **the robot applied it**. Reverted to 2.
+- `switch.rainy_mowing` on (PbTaskConfig, which the robot never echoes over MQTT) →
+  also applied. Reverted to off.
+- In the app, navigating **out and back in within the app did NOT refresh** the
+  Mowing Settings / Device Settings page (kept showing the cached pre-change value).
+  A **full app restart** (force-stop + relaunch) made the app re-fetch from the
+  robot — then it correctly showed "Touch-Only" and "Rainy Mowing ON".
+
+**Takeaway for users:** HA setting changes DO take effect on the robot. The Lymow
+app caches each settings page per app-session, so to *see* an HA-made change you must
+**fully restart the Lymow app** (swipe it away / force-stop), not just back out and
+re-open the page. No integration fix needed — this is app-side caching.
+
+### Still pending: PbRunTimeConfig field numbers (low impact)
+The 3 "Live cut-height / move-speed / cut-speed" Number entities
+(`LiveCutHeightNumber` etc., USER_CTRL_SET_RUN_TIME_CONFIG) are **disabled by
+default** and only act during an active mow. Their wire field numbers are still
+unconfirmed: the deployed encoder uses cutHeight=f1/moveSpeed=f2/cutSpeed=f3
+(Hermes #9456), while an earlier RE pass read moveSpeed=f4/cutSpeed=f6
+(PbZoneConfig numbering). Not verifiable on a docked robot (runtime config only
+applies mid-mow) and no Hermes decompiler is installed to read PbRunTimeConfig.encode
+from the APK. **To resolve:** capture what the app sends when adjusting cut height
+during a live mow, or decompile the APK's index.android.bundle (Hermes v96).
