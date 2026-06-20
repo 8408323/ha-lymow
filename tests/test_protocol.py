@@ -3461,12 +3461,12 @@ def test_encode_set_run_time_config_wraps_in_pbinput_map() -> None:
     # PbInput.map (field 12) → PbMap.runTimeConfig (field 13) → PbRunTimeConfig
     pb_map = _decode_fields(_first(f, 12))
     cfg = _decode_fields(_first(pb_map, 13))
-    # Wire field numbers pinned to canonical PbRunTimeConfig (Hermes #9456):
-    # f1 cutHeight / f2 moveSpeed / f3 cutSpeed / f4 channelConfig.
+    # Wire field numbers DISASSEMBLY-CONFIRMED from PbRunTimeConfig.encode (Hermes
+    # #9465): f1 cutHeight / f4 moveSpeed / f6 cutSpeed / f7 channelConfig.
     assert _first(cfg, 1) == 45  # cutHeight
-    assert _first(cfg, 3) == 120  # cutSpeed
-    # moveSpeed is float32 (wire type 5)
-    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 2)))[0] == pytest.approx(0.6, rel=1e-5)
+    assert _first(cfg, 6) == 120  # cutSpeed
+    # moveSpeed is float32 (wire type 5) at field 4
+    assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.6, rel=1e-5)
 
 
 def test_encode_set_run_time_config_skips_none_and_rejects_unknown() -> None:
@@ -3474,7 +3474,7 @@ def test_encode_set_run_time_config_skips_none_and_rejects_unknown() -> None:
 
     pb = encode_set_run_time_config(cutHeight=None, cutSpeed=80)
     cfg = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 12)), 13))
-    assert _first(cfg, 3) == 80  # cutSpeed present
+    assert _first(cfg, 6) == 80  # cutSpeed present (field 6)
     assert _first(cfg, 1) is None  # cutHeight (None) skipped
     with pytest.raises(ValueError, match="unknown run-time-config field"):
         encode_set_run_time_config(nonsense=1)

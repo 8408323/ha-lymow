@@ -198,6 +198,13 @@ def _wire_entries_from_cached(schedules: list[dict[str, Any]], map_data: dict[st
 # (default 30 s) because both backup-map sensors are disabled-by-default and
 # backups themselves are written infrequently.
 _BACKUP_MAP_REFRESH_INTERVAL = 300
+# The app/backend stores at most 5 map backups; a 6th create is rejected server-side
+# (looks like a silent failure), so fail fast with a clear message instead.
+_MAX_BACKUP_MAPS = 5
+# After a backup, the backend needs time to snapshot + upload before /get-backup-map
+# lists the new entry. Re-poll at these offsets (s) so it surfaces quickly instead of
+# being masked by the 5-min list cache until the next slow refresh.
+_BACKUP_REFRESH_OFFSETS_S = (8, 20, 45)
 
 # How often to re-check /prod/check-update. Firmware doesn't change that often.
 _OTA_CHECK_INTERVAL = timedelta(hours=6)
@@ -1746,11 +1753,35 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_backup_map(self, thing_name: str) -> None:
         """Snapshot the robot's current map to cloud (USER_CTRL_FLOOR_BACKUP).
 
-        Drops the cached backup snapshot so the backup sensors pick up the new
-        entry on the next poll instead of waiting out the 5-minute cache.
+        Fails fast if backup storage is already full (the backend caps it at 5 and
+        silently drops a 6th — which otherwise looks like the button doing nothing,
+        prompting repeated clicks). After creating, re-polls the backup list a few
+        times so the new entry surfaces promptly rather than after the 5-min cache.
         """
+        self._backup_map_cache.pop(thing_name, None)  # force a fresh count
+        fields = await self._fetch_backup_map_fields(thing_name)
+        count = fields.get("backupMapCount", 0) if isinstance(fields, dict) else 0
+        if count >= _MAX_BACKUP_MAPS:
+            raise HomeAssistantError(
+                f"Backup storage is full ({count}/{_MAX_BACKUP_MAPS}). Delete a backup before creating a new one."
+            )
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(USER_CTRL_FLOOR_BACKUP))
         self._backup_map_cache.pop(thing_name, None)
+        self.hass.async_create_task(self._async_refresh_backups_soon(thing_name))
+
+    async def _async_refresh_backups_soon(self, thing_name: str) -> None:
+        """Re-poll the backup list shortly after a create so the new entry appears
+        without waiting out the 5-min list cache (the backend lists it only once the
+        snapshot has uploaded). Each poll forces a fresh fetch and pushes an update."""
+        import asyncio
+
+        for delay in _BACKUP_REFRESH_OFFSETS_S:
+            await asyncio.sleep(delay)
+            self._backup_map_cache.pop(thing_name, None)
+            fields = await self._fetch_backup_map_fields(thing_name)
+            if isinstance(fields, dict) and fields and self.data and thing_name in self.data:
+                merged = {**self.data[thing_name], **fields}
+                self.async_set_updated_data({**self.data, thing_name: merged})
 
     async def async_delete_backup_map(self, thing_name: str, object_key: str) -> None:
         """Delete a saved backup map and drop the cached backup snapshot."""

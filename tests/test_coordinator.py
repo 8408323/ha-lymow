@@ -3281,12 +3281,49 @@ async def test_async_backup_map_publishes_and_drops_cache() -> None:
     from lymow.const import USER_CTRL_FLOOR_BACKUP
     from lymow.protocol import _decode_fields, _first
 
-    coord, mqtt, _ = _make_coordinator()
+    coord, mqtt, _ = _make_coordinator()  # get_backup_map_list returns [] → not full
+    coord.hass.async_create_task = _make_task_closer()
     coord._backup_map_cache[THING] = ("t", {})
     await coord.async_backup_map(THING)
     _thing, pb = mqtt.async_publish_command.await_args.args
     assert _first(_decode_fields(pb), 5) == USER_CTRL_FLOOR_BACKUP
     assert THING not in coord._backup_map_cache  # cache invalidated so sensor refreshes
+    coord.hass.async_create_task.assert_called_once()  # scheduled the prompt re-poll
+
+
+async def test_async_backup_map_rejects_when_storage_full() -> None:
+    """At the backend's 5-backup cap, fail fast instead of a silent no-op (which
+    would make users click again and pile up duplicates)."""
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, api = _make_coordinator()
+    api.get_backup_map_list = AsyncMock(return_value=[{"map_file": f"m{i}"} for i in range(5)])
+    coord.hass.async_create_task = _make_task_closer()
+    with pytest.raises(HomeAssistantError, match="full"):
+        await coord.async_backup_map(THING)
+    mqtt.async_publish_command.assert_not_awaited()
+
+
+async def test_async_refresh_backups_soon_repolls_and_pushes_updates(monkeypatch) -> None:
+    """After a backup, re-poll the list a few times and push each result so the new
+    entry surfaces without waiting out the 5-min cache."""
+    coord, _, api = _make_coordinator()
+    coord.data = {THING: {"battery": 50}}
+    coord.async_set_updated_data = MagicMock()
+    api.get_backup_map_list = AsyncMock(return_value=[{"map_file": "m1", "backup_time": 1_700_000_000}])
+
+    async def _no_sleep(_delay):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    await coord._async_refresh_backups_soon(THING)
+
+    from lymow.coordinator import _BACKUP_REFRESH_OFFSETS_S
+
+    assert coord.async_set_updated_data.call_count == len(_BACKUP_REFRESH_OFFSETS_S)
+    pushed = coord.async_set_updated_data.call_args[0][0]
+    assert pushed[THING]["backupMapCount"] == 1  # new backup surfaced
+    assert pushed[THING]["battery"] == 50  # existing fields preserved
 
 
 async def test_async_rename_backup_map_drops_cache() -> None:
