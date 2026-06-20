@@ -236,3 +236,16 @@ async def test_reconnects_after_drop(monkeypatch):
     created[0].connected = False  # simulate a dropped link
     await ctrl.async_drive(0.2, 0.0)
     assert len(created) == 2  # a fresh client was built
+
+
+async def test_async_write_once_writes_payload_then_disconnects():
+    """One-shot write connects, writes the payload unacknowledged, and tears the
+    link down so it can't interfere with a later drive session."""
+    make, created = _factory()
+    ctrl = LymowBleController("x", client_factory=make)
+    await ctrl.async_write_once(b"wifi-provision-bytes")
+    c = created[0]
+    assert c.connects == 1
+    assert c.writes == [(BLE_DRIVE_CHARACTERISTIC_UUID, b"wifi-provision-bytes", False)]
+    assert c.disconnects == 1
+    assert ctrl._client is None

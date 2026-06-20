@@ -216,6 +216,30 @@ def test_extra_attrs_zone_enabled_defaults_true() -> None:
     assert m.extra_state_attributes["zones"][0]["enabled"] is True
 
 
+def test_extra_attrs_headlight_window_enabled_and_formatted() -> None:
+    m = _make_mower(
+        {"robotConfig": {"headlightStart": {"hour": 21, "minute": 0}, "headlightEnd": {"hour": 6, "minute": 30}}}
+    )
+    attrs = m.extra_state_attributes
+    assert attrs["headlight_enabled"] is True
+    assert attrs["headlight_start"] == "21:00"
+    assert attrs["headlight_end"] == "06:30"
+
+
+def test_extra_attrs_headlight_disabled_when_window_all_zero() -> None:
+    m = _make_mower(
+        {"robotConfig": {"headlightStart": {"hour": 0, "minute": 0}, "headlightEnd": {"hour": 0, "minute": 0}}}
+    )
+    attrs = m.extra_state_attributes
+    assert attrs["headlight_enabled"] is False
+    assert "headlight_start" not in attrs
+
+
+def test_extra_attrs_rr_enabled_from_robot_config() -> None:
+    m = _make_mower({"robotConfig": {"rrConfig": {"enable": True}}})
+    assert m.extra_state_attributes["rr_enabled"] is True
+
+
 # ---------------------------------------------------------------------------
 # async_setup_entry
 # ---------------------------------------------------------------------------
