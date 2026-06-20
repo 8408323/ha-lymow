@@ -1691,15 +1691,17 @@ def encode_set_pin(pin: str) -> bytes:
     return pb
 
 
-# PbRunTimeConfig field map — pinned to Hermes class #9456: f1 cutHeight, f2
-# moveSpeed, f3 cutSpeed, f4 channelConfig (PbChannelConfig — per-channel
-# override, not exposed here). Carried at PbMap.runTimeConfig (PbInput.f12 →
-# PbMap.f13) under USER_CTRL_SET_RUN_TIME_CONFIG. Distinct shape from
-# PbZoneConfig — don't reuse those field numbers.
+# PbRunTimeConfig field map — DISASSEMBLY-CONFIRMED 2026-06-20 from the APK's
+# PbRunTimeConfig.encode (Hermes fn #9465): writer.uint32(8).int32 → cutHeight f1;
+# .uint32(37).float → moveSpeed f4 (37=(4<<3)|5); .uint32(48).int32 → cutSpeed f6
+# (48=(6<<3)|0); f7 channelConfig (PbChannelConfig, not exposed). NOTE: these reuse
+# PbZoneConfig's f4/f6 numbering — an earlier guess of f2/f3 was WRONG (the robot
+# ignored move/cut speed). Carried at PbMap.runTimeConfig (PbInput.f12 → PbMap.f13)
+# under USER_CTRL_SET_RUN_TIME_CONFIG.
 _RUN_TIME_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "cutHeight": (1, "int"),
-    "moveSpeed": (2, "float"),
-    "cutSpeed": (3, "int"),
+    "moveSpeed": (4, "float"),
+    "cutSpeed": (6, "int"),
 }
 
 

@@ -426,15 +426,13 @@ def test_set_device_settings_full_is_byte_stable() -> None:
 
 
 def test_set_run_time_config_full_is_byte_stable() -> None:
-    """cutHeight (f1, int) + moveSpeed (f2, float32) + cutSpeed (f3, int) —
-    PbRunTimeConfig field map pinned to Hermes class #9456. Pins both the
-    field-number map and the float32-vs-int wire types.
-    NOTE(2026-06-19): a prior RE pass read moveSpeed/cutSpeed as f4/f6 (PbZoneConfig
-    numbering); the deployed encoder uses f2/f3 — re-verify against the APK on the
-    next capture pass (tracked for the 2026-07-01 cleanup)."""
+    """cutHeight (f1, int) + moveSpeed (f4, float32) + cutSpeed (f6, int) —
+    DISASSEMBLY-CONFIRMED 2026-06-20 from PbRunTimeConfig.encode (Hermes #9465:
+    uint32(8).int32 / uint32(37).float / uint32(48).int32). Pins both the
+    field-number map and the float32-vs-int wire types."""
     assert (
         encode_set_run_time_config(cutHeight=30, moveSpeed=0.5, cutSpeed=200).hex()
-        == "10312832620c6a0a081e150000003f18c801"
+        == "10312832620c6a0a081e250000003f30c801"
     )
 
 
