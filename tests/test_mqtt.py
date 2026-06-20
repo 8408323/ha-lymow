@@ -454,12 +454,48 @@ def test_handle_pboutput_with_path_data(monkeypatch):
     monkeypatch.setattr(proto, "unwrap_envelope", lambda b: b"")
     monkeypatch.setattr(proto, "decode_pboutput", lambda b: {"state": 1})
     monkeypatch.setattr(proto, "decode_map_response", lambda b: {})
-    monkeypatch.setattr(proto, "decode_path_response", lambda b: {"goZones": [{"hashId": "z1"}]})
+    monkeypatch.setattr(proto, "decode_path_response", lambda b: {"segments": [[{"x": 1.0, "y": 2.0}]]})
 
     states = {}
     client = LymowMqttClient("h", "eu-west-1", lambda t, s: states.update(s), lambda *a: None)
     client._handle_pboutput("m1", b"raw")
-    assert states["pathData"] == {"goZones": [{"hashId": "z1"}]}
+    assert states["pathData"] == {"segments": [[{"x": 1.0, "y": 2.0}]]}
+
+
+def test_handle_pboutput_path_reply_skips_map_decode(monkeypatch):
+    """A path reply must not run the map decoder (it would mis-read the path's
+    point list as bogus zones and corrupt the map)."""
+    import sys
+
+    proto = sys.modules["lymow.protocol"]
+    monkeypatch.setattr(proto, "unwrap_envelope", lambda b: b"")
+    monkeypatch.setattr(proto, "decode_pboutput", lambda b: {})
+    map_calls = []
+    monkeypatch.setattr(proto, "decode_map_response", lambda b: map_calls.append(1) or {"goZones": [1]})
+    monkeypatch.setattr(proto, "decode_path_response", lambda b: {"segments": [[{"x": 1.0, "y": 2.0}]]})
+
+    states = {}
+    client = LymowMqttClient("h", "eu-west-1", lambda t, s: states.update(s), lambda *a: None)
+    client._handle_pboutput("m1", b"raw")
+    assert "mapData" not in states
+    assert map_calls == []
+
+
+def test_handle_pboutput_falls_through_to_map_without_path(monkeypatch):
+    """A non-path reply falls through to the map decoder."""
+    import sys
+
+    proto = sys.modules["lymow.protocol"]
+    monkeypatch.setattr(proto, "unwrap_envelope", lambda b: b"")
+    monkeypatch.setattr(proto, "decode_pboutput", lambda b: {})
+    monkeypatch.setattr(proto, "decode_map_response", lambda b: {"goZones": [{"hashId": "z1"}]})
+    monkeypatch.setattr(proto, "decode_path_response", lambda b: {"segments": []})
+
+    states = {}
+    client = LymowMqttClient("h", "eu-west-1", lambda t, s: states.update(s), lambda *a: None)
+    client._handle_pboutput("m1", b"raw")
+    assert states["mapData"] == {"goZones": [{"hashId": "z1"}]}
+    assert "pathData" not in states
 
 
 # ---------------------------------------------------------------------------

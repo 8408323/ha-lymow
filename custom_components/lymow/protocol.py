@@ -1329,60 +1329,69 @@ def decode_schedule_entry(data: bytes) -> dict[str, Any]:
     return entry
 
 
+# QUERY_PATH polyline sentinels: the robot inserts a marker point (x≈y≈333 to
+# break between segments, ≈444 to mark start/end) between path segments. Real
+# coordinates are ENU metres within a few tens of m, so these are unambiguous.
+_PATH_SENTINELS = (333.0, 444.0)
+
+
+def _is_path_sentinel(x: float, y: float) -> bool:
+    return any(abs(x - s) < 1.0 and abs(y - s) < 1.0 for s in _PATH_SENTINELS)
+
+
 def decode_path_response(pb_bytes: bytes) -> dict[str, Any]:
-    """Decode a userCtrl=23 (QUERY_PATH) response into per-zone track polylines.
+    """Decode a userCtrl=23 (QUERY_PATH) response into mow-path polyline segments.
 
-    Returns {"goZones": [{"hashId": str, "trackPoints": [{"x": float, "y": float}], "stripsDone": int}]}
-    The track points are ENU metres from the RTK base station, same coordinate
-    space as the zone polygons returned by decode_map_response.
+    Returns {"segments": [[{"x": float, "y": float}, ...], ...]} — ENU metres from
+    the RTK base, same space as the zone polygons. The robot returns the whole
+    swept path (perimeter laps + zone lines) as one flat point list split by
+    sentinel markers into segments.
 
-    Wire layout (confirmed from live capture while robot is mowing):
-      pboutput.f23 → f2 → f3 → repeated f1 (go-zone path entries)
-      Each f1 entry:
-        .f1 sub-message: .f3=hashId(str), .f5 repeated PbPoint sub-messages
-          Each PbPoint: f1=x(float32), f2=y(float32)
-        .f2 sub-message: .f1=stripsDone(int)
+    Wire layout (live-captured while mowing):
+      pboutput.f23 → f2 → f3 → repeated f1, each a point {f1=x, f2=y} as float32.
+    A map reply shares the f23→f2→f3 shape, but its f1 entries are sub-messages
+    (wire type 2), not i32 points — so this returns no segments for a map reply,
+    letting the caller fall through to decode_map_response.
     """
     outer = _first(_decode_fields(pb_bytes), 23)
     if not isinstance(outer, bytes):
-        return {"goZones": []}
+        return {"segments": []}
     content = _first(_decode_fields(outer), 2)
     if not isinstance(content, bytes):
-        return {"goZones": []}
+        return {"segments": []}
     path_data = _first(_decode_fields(content), 3)
     if not isinstance(path_data, bytes):
-        return {"goZones": []}
+        return {"segments": []}
 
-    go_zones: list[dict[str, Any]] = []
-    for gz_raw in _all(_decode_fields(path_data), 1):
-        if not isinstance(gz_raw, bytes):
+    segments: list[list[dict[str, float]]] = []
+    current: list[dict[str, float]] = []
+    for entry in _all(_decode_fields(path_data), 1):
+        if not isinstance(entry, bytes):
+            return {"segments": []}
+        fields = _decode_fields(entry)
+        if not any(fn == 1 and wt == 5 for fn, wt, _ in fields):
+            return {"segments": []}
+        pt = _decode_map_point(entry)
+        if _is_path_sentinel(pt["x"], pt["y"]):
+            if current:
+                segments.append(current)
+                current = []
             continue
-        zone_info = _first(_decode_fields(gz_raw), 1)
-        hash_id: str | None = None
-        track_points: list[dict[str, float]] = []
-        if isinstance(zone_info, bytes):
-            for fn, _wt, val in _decode_fields(zone_info):
-                if fn == 3 and isinstance(val, bytes):
-                    hash_id = val.decode("utf-8", errors="replace")
-                elif fn == 5 and isinstance(val, bytes):
-                    for pfn, _pwt, pval in _decode_fields(val):
-                        if pfn == 1 and isinstance(pval, bytes):
-                            pt = _decode_map_point(pval)
-                            if pt["x"] is not None and pt["y"] is not None:
-                                track_points.append(pt)
-        if hash_id is None:
-            continue
-        strips_done: int | None = None
-        stats = _first(_decode_fields(gz_raw), 2)
-        if isinstance(stats, bytes):
-            sv = _first(_decode_fields(stats), 1)
-            if sv is not None:
-                strips_done = int(sv)
-        entry: dict[str, Any] = {"hashId": hash_id, "trackPoints": track_points}
-        if strips_done is not None:
-            entry["stripsDone"] = strips_done
-        go_zones.append(entry)
-    return {"goZones": go_zones}
+        current.append(pt)
+    if current:
+        segments.append(current)
+    return {"segments": segments}
+
+
+def encode_query_path(index: int = 0) -> bytes:
+    """Encode a QUERY_PATH command (userCtrl=23) requesting the clean-path polyline.
+
+    The robot only returns the path when the request carries the f23 query params
+    {f1=packet index, f3=1}; a bare userCtrl=23 yields an empty reply. (App
+    request for index 0 is EDEoF7oBBAgAGAE=.)
+    """
+    params = _field_i32(1, index) + _field_i32(3, 1)
+    return _field_i32(2, PB_VERSION) + _field_i32(5, 23) + _field_bytes(23, params)
 
 
 # ---------------------------------------------------------------------------

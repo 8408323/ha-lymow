@@ -441,7 +441,7 @@ def test_on_mqtt_state_deep_merges_nested_rr_config_partial_patch() -> None:
 
 def test_on_mqtt_state_caches_path_data_and_reinjects_when_absent() -> None:
     coord, _, _ = _make_coordinator()
-    path = {"goZones": [{"hashId": "z1", "trackPoints": []}]}
+    path = {"segments": [[{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]]}
     coord.on_mqtt_state(THING, {"pathData": path})
     assert coord._last_path_data[THING] == path
     # A later patch without pathData re-injects the cached track so the sensor
@@ -456,7 +456,7 @@ def test_on_mqtt_state_mowing_start_clears_cache_and_schedules_poll() -> None:
     coord, _, _ = _make_coordinator()
     mow = next(iter(WORK_STATUS_MOWING_GROUP))
     coord._async_poll_path = MagicMock()  # avoid creating a real coroutine here
-    coord._last_path_data[THING] = {"goZones": [{"hashId": "old"}]}
+    coord._last_path_data[THING] = {"segments": [[{"x": 1.0, "y": 2.0}]]}
     coord.on_mqtt_state(THING, {"workStatus": mow})  # prev (-1) → mowing
     assert THING not in coord._last_path_data
     assert coord._path_poll_pending[THING] is True
@@ -468,10 +468,10 @@ async def test_async_poll_path_reschedules_while_mowing() -> None:
     import asyncio
     from unittest.mock import patch as _patch
 
-    from lymow.const import USER_CTRL_QUERY_PATH, WORK_STATUS_MOWING_GROUP
+    from lymow.const import WORK_STATUS_MOWING_GROUP
+    from lymow.protocol import encode_query_path
 
-    coord, _, _ = _make_coordinator()
-    coord._publish_userctrl = AsyncMock()
+    coord, mqtt, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": next(iter(WORK_STATUS_MOWING_GROUP))}}
     coord._path_poll_pending[THING] = True
     created: list = []
@@ -484,7 +484,7 @@ async def test_async_poll_path_reschedules_while_mowing() -> None:
     coord.hass.async_create_task = MagicMock(side_effect=_create)
     with _patch("asyncio.sleep", AsyncMock()):
         await coord._async_poll_path(THING)
-    coord._publish_userctrl.assert_awaited_once_with(THING, USER_CTRL_QUERY_PATH)
+    mqtt.async_publish_command.assert_awaited_once_with(THING, encode_query_path())
     assert len(created) == 1  # re-scheduled itself for the next 30 s cycle
 
 
@@ -492,15 +492,14 @@ async def test_async_poll_path_reschedules_while_mowing() -> None:
 async def test_async_poll_path_stops_when_no_longer_mowing() -> None:
     from unittest.mock import patch as _patch
 
-    from lymow.const import USER_CTRL_QUERY_PATH
+    from lymow.protocol import encode_query_path
 
-    coord, _, _ = _make_coordinator()
-    coord._publish_userctrl = AsyncMock()
+    coord, mqtt, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": 5}}  # docked → no re-schedule
     coord._path_poll_pending[THING] = True
     with _patch("asyncio.sleep", AsyncMock()):
         await coord._async_poll_path(THING)
-    coord._publish_userctrl.assert_awaited_once_with(THING, USER_CTRL_QUERY_PATH)
+    mqtt.async_publish_command.assert_awaited_once_with(THING, encode_query_path())
     assert coord._path_poll_pending[THING] is False
     coord.hass.async_create_task.assert_not_called()
 

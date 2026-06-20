@@ -520,6 +520,16 @@ class LymowMapCard extends HTMLElement {
       liveTrail = `<polyline points="${pts}" fill="none" stroke="#00e676" stroke-width="0.9" stroke-linecap="round" stroke-linejoin="round" opacity="0.95" pointer-events="none"/>`;
     }
 
+    // ── Persistent mow trail (server-side, from QUERY_PATH polls) ──────────────
+    // Drawn whether or not the card was open during the mow: the coordinator polls
+    // QUERY_PATH every 30 s, so the full swept path lives in mow_path.segments.
+    let serverTrail = "";
+    for (const seg of (mowPath?.segments || [])) {
+      if (seg.length < 2) continue;
+      const pts = seg.map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      serverTrail += `<polyline points="${pts}" fill="none" stroke="#1b5e20" stroke-width="0.7" stroke-linecap="round" stroke-linejoin="round" opacity="0.85" pointer-events="none"/>`;
+    }
+
     // ── Go-zones ──────────────────────────────────────────────────────────────
     const goPaths = goZones.map((z) => {
       const pts = (z.polygon || []).map((p) => `${sx(p.x)},${sy(p.y)}`).join(" ");
@@ -1213,6 +1223,7 @@ class LymowMapCard extends HTMLElement {
             <g transform="rotate(${this._mapRotation.toFixed(2)}, ${(this._vx + this._vw/2).toFixed(3)}, ${(this._vy + this._vh/2).toFixed(3)})">
             ${channelPaths}
             ${goPaths}
+            ${serverTrail}
             ${liveTrail}
             ${goLabels}
             ${nogoPaths}
