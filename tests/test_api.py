@@ -168,6 +168,7 @@ RE_BACKUP_MAP = re.compile(
     r"https://" + re.escape(REGION_CONFIG[REGION]["api_map"]) + r"\.execute-api\..+/prod/get-backup-map"
 )
 _GW_MAP = re.escape(REGION_CONFIG[REGION]["api_map"])
+RE_GET_S3 = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/get-s3-object.*")
 RE_RESTORE_MAP = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/restore-map-v2")
 RE_DELETE_MAP = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/delete-backup-map")
 RE_RENAME_MAP = re.compile(r"https://" + _GW_MAP + r"\.execute-api\..+/prod/update-backup-map-metadata")
@@ -536,6 +537,39 @@ class TestGetBackupMapList:
             m.get(RE_BACKUP_MAP, payload={"mapList": "oops"})
             result = await client.get_backup_map_list("mower-001")
         assert result == []
+
+
+class TestDownloadBackupMap:
+    async def test_download_url_returns_presigned(self, client):
+        with aioresponses() as m:
+            m.get(RE_GET_S3, payload={"downloadUrl": "https://s3.example/x.pb?sig=1", "expiresIn": 600})
+            url = await client.get_backup_map_download_url("dev1", "dev1/map/x.pb")
+        assert url == "https://s3.example/x.pb?sig=1"
+
+    async def test_download_url_none_when_field_missing(self, client):
+        with aioresponses() as m:
+            m.get(RE_GET_S3, payload={"expiresIn": 600})
+            url = await client.get_backup_map_download_url("dev1", "x.pb")
+        assert url is None
+
+    async def test_download_url_none_when_not_dict(self, client):
+        with aioresponses() as m:
+            m.get(RE_GET_S3, payload=["nope"])
+            url = await client.get_backup_map_download_url("dev1", "x.pb")
+        assert url is None
+
+    async def test_download_backup_map_returns_bytes(self, client):
+        with aioresponses() as m:
+            m.get(RE_GET_S3, payload={"downloadUrl": "https://s3.example/x.pb?sig=1"})
+            m.get("https://s3.example/x.pb?sig=1", body=b"\x10\x20\x30")
+            raw = await client.download_backup_map("dev1", "x.pb")
+        assert raw == b"\x10\x20\x30"
+
+    async def test_download_backup_map_none_when_no_url(self, client):
+        with aioresponses() as m:
+            m.get(RE_GET_S3, payload={})
+            raw = await client.download_backup_map("dev1", "x.pb")
+        assert raw is None
 
 
 class TestStartVideoSession:

@@ -44,6 +44,7 @@ from .const import (
 )
 from .mqtt import LymowMqttClient
 from .protocol import (
+    decode_backup_map,
     encode_delete_zone,
     encode_query_map,
     encode_query_path,
@@ -260,6 +261,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._prev_online: dict[str, bool | None] = {}
         # Cached backup-map snapshot per device: (fetched_at, fields).
         self._backup_map_cache: dict[str, tuple[Any, dict[str, Any]]] = {}
+        # Cached per-backup map preview geometry, keyed by S3 object key (backups
+        # are immutable, so a key's preview never changes once fetched).
+        self._backup_preview_cache: dict[str, dict[str, Any]] = {}
         # RTK auto-pause guard: per-device knobs and tracking.
         # Enabled defaults off — opt-in safety feature.
         self._rtk_guard_enabled: dict[str, bool] = {}
@@ -835,13 +839,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 if candidate in entry and entry[candidate]:
                     file_key = entry[candidate]
                     break
-            normalised.append(
-                {
-                    "file": file_key,
-                    "name": entry.get("name") or "",
-                    "backupTime": entry.get("backup_time"),
-                }
-            )
+            item: dict[str, Any] = {
+                "file": file_key,
+                "name": entry.get("name") or "",
+                "backupTime": entry.get("backup_time"),
+            }
+            if file_key:
+                preview = await self._fetch_backup_preview(thing_name, file_key)
+                if preview:
+                    item["preview"] = preview
+            normalised.append(item)
         out: dict[str, Any] = {
             "backupMapCount": len(normalised),
             "backupMapList": normalised,
@@ -854,6 +861,53 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 pass
         self._backup_map_cache[thing_name] = (now, out)
         return out
+
+    @staticmethod
+    def _downsample_polygon(points: list[dict], max_points: int = 60) -> list[dict]:
+        """Thin a polygon to at most max_points for a lightweight thumbnail."""
+        if not isinstance(points, list) or len(points) <= max_points:
+            return points if isinstance(points, list) else []
+        step = len(points) / max_points
+        return [points[int(i * step)] for i in range(max_points)]
+
+    async def _fetch_backup_preview(self, thing_name: str, file_key: str) -> dict[str, Any] | None:
+        """Download + decode a backup map's geometry for a thumbnail (cached per key).
+
+        Backups are immutable, so a key's preview is fetched once and cached. Failures
+        are non-fatal — the backup still lists, just without a thumbnail.
+        """
+        if file_key in self._backup_preview_cache:
+            return self._backup_preview_cache[file_key]
+        try:
+            raw = await self._client.download_backup_map(thing_name, file_key)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("backup preview download failed for %s: %s", file_key, err)
+            return None
+        if not raw:
+            return None
+        try:
+            decoded = decode_backup_map(raw)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("backup preview decode failed for %s: %s", file_key, err)
+            return None
+        preview = {
+            "goZones": [
+                {
+                    "hashId": z.get("hashId", ""),
+                    "isEnabled": z.get("isEnabled", True),
+                    "polygon": self._downsample_polygon(z.get("polygon", [])),
+                }
+                for z in decoded.get("goZones", [])
+            ],
+            "nogoZones": [
+                {"polygon": self._downsample_polygon(z.get("polygon", []))} for z in decoded.get("nogoZones", [])
+            ],
+            "channels": [
+                {"polygon": self._downsample_polygon(c.get("polygon", []))} for c in decoded.get("channels", [])
+            ],
+        }
+        self._backup_preview_cache[file_key] = preview
+        return preview
 
     # ------------------------------------------------------------------
     # Commands (published via MQTT)

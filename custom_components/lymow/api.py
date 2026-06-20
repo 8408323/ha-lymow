@@ -491,3 +491,29 @@ class LymowApiClient:
         async with self._session.get(url, headers=headers) as resp:
             resp.raise_for_status()
             return await resp.read()
+
+    async def get_backup_map_download_url(self, thing_name: str, object_key: str) -> str | None:
+        """Return a short-lived presigned S3 URL for a backup map via /prod/get-s3-object.
+
+        The Cognito identity role has no direct s3:GetObject on backup objects, so the
+        backend issues a presigned URL (valid ~10 min) instead.
+        """
+        url = _api_url(self._region, "api_map", "/prod/get-s3-object")
+        params = {"deviceThingName": thing_name, "objectKey": object_key}
+        async with self._session.get(url, headers=self._headers, params=params) as resp:
+            resp.raise_for_status()
+            data = await resp.json(content_type=None)
+        if isinstance(data, dict):
+            download_url = data.get("downloadUrl")
+            if isinstance(download_url, str) and download_url:
+                return download_url
+        return None
+
+    async def download_backup_map(self, thing_name: str, object_key: str) -> bytes | None:
+        """Download a backup map's raw protobuf via a backend-issued presigned URL."""
+        download_url = await self.get_backup_map_download_url(thing_name, object_key)
+        if not download_url:
+            return None
+        async with self._session.get(download_url) as resp:
+            resp.raise_for_status()
+            return await resp.read()

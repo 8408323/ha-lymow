@@ -703,6 +703,21 @@ def test_decode_map_response_missing_f23() -> None:
     assert result == {}
 
 
+def test_decode_backup_map_decodes_raw_content() -> None:
+    """A backup .pb is raw PbMap content (no f23 envelope); decode_backup_map wraps it."""
+    from lymow.protocol import decode_backup_map, extract_raw_map_content
+
+    full = _build_map_response(
+        go_zones=[{"hashId": "z1", "polygon": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]}],
+        nogo_zones=[{"hashId": "n1", "polygon": [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 0.0}]}],
+    )
+    content = extract_raw_map_content(full)  # what an S3 backup .pb actually contains
+    assert isinstance(content, bytes)
+    # decode_backup_map(content) reproduces the full decode of the wrapped form.
+    assert decode_backup_map(content) == decode_map_response(full)
+    assert len(decode_backup_map(content)["goZones"]) == 1
+
+
 def test_decode_map_response_go_zone_basic() -> None:
     pb = _build_map_response(
         go_zones=[
