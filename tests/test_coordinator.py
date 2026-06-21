@@ -3859,3 +3859,28 @@ async def test_fetch_backup_map_fields_attaches_preview(monkeypatch) -> None:
     lst = fields["backupMapList"]
     assert lst[0]["preview"]["goZones"][0]["hashId"] == "z1"
     assert "preview" not in lst[1]  # download returned None → skipped
+
+
+# ---------------------------------------------------------------------------
+# Edit Boundary (drive-record): start (userCtrl=10) + complete (userCtrl=29)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_start_edit_boundary_publishes_modify_zone_start() -> None:
+    from lymow.protocol import encode_modify_zone_start
+
+    coord, mqtt, _ = _make_coordinator()
+    await coord.async_start_edit_boundary(THING, "KX1kGyat")
+    mqtt.async_publish_command.assert_awaited_once_with(THING, encode_modify_zone_start("KX1kGyat"))
+
+
+@pytest.mark.asyncio
+async def test_async_complete_edit_boundary_publishes_and_requeries_map() -> None:
+    from lymow.protocol import encode_complete_zone_partition
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.async_query_map = AsyncMock()
+    await coord.async_complete_edit_boundary(THING)
+    mqtt.async_publish_command.assert_awaited_once_with(THING, encode_complete_zone_partition())
+    coord.async_query_map.assert_awaited_once_with(THING)

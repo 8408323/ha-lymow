@@ -1523,3 +1523,32 @@ query_rtk_diagnostic_l2:
     entity:
       integration: lymow
       domain: lawn_mower
+
+start_edit_boundary:
+  name: Start edit boundary
+  description: >
+    Begin recording a new boundary for a go-zone by driving (USER_CTRL_MODIFY_ZONE_EDGE_START=10).
+    Drive the robot along the new boundary with the ble_drive service, then call
+    complete_edit_boundary to commit the recorded path. Mirrors the app's "Edit Boundary".
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower
+  fields:
+    zone_hash_id:
+      name: Zone hash ID
+      description: 8-character hash ID of the go-zone whose boundary to record.
+      required: true
+      example: "KX1kGyat"
+      selector:
+        text:
+
+complete_edit_boundary:
+  name: Complete edit boundary
+  description: >
+    Commit the driven path as the zone's new boundary (USER_CTRL_COMPLETE_ZONE_PARTITION=29)
+    and re-query the map. Call after start_edit_boundary and driving the border.
+  target:
+    entity:
+      integration: lymow
+      domain: lawn_mower

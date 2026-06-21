@@ -1418,6 +1418,27 @@ def encode_userctrl(command: int) -> bytes:
     return pb
 
 
+def encode_modify_zone_start(hash_id: str) -> bytes:
+    """Encode startModifyZone (userCtrl=10) — begin recording a zone's boundary by driving.
+
+    PbInput{f2=version, f5=10 (MODIFY_ZONE_EDGE_START), f12=PbMap{goZones[0].basicInfo.f3=hashId}}.
+    The robot records its driven path until encode_complete_zone_partition() commits it.
+    Byte-validated against the app (Edit Boundary).
+    """
+    basic_info = _field_bytes(3, hash_id.encode("utf-8"))
+    go_zone = _field_bytes(1, basic_info)
+    pb_map = _field_bytes(1, go_zone)
+    return _field_i32(2, PB_VERSION) + _field_i32(5, 10) + _field_bytes(12, pb_map)
+
+
+def encode_complete_zone_partition() -> bytes:
+    """Encode completeZonePartition (userCtrl=29) — commit the driven path as the new boundary.
+
+    PbInput{f2=version, f5=29 (COMPLETE_ZONE_PARTITION)}, no payload. Byte-validated against the app.
+    """
+    return _field_i32(2, PB_VERSION) + _field_i32(5, 29)
+
+
 # PbZoneConfig field map — (proto field number, wire kind). Field numbers
 # LIVE-CONFIRMED 2026-05-30 (BRANCH_STATUS C/I/K/M): pathSpacing=f9,
 # perimeterMowLaps=f10, noGoMowLaps=f12, safeMarginMode=f17,

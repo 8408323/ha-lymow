@@ -45,7 +45,9 @@ from .const import (
 from .mqtt import LymowMqttClient
 from .protocol import (
     decode_backup_map,
+    encode_complete_zone_partition,
     encode_delete_zone,
+    encode_modify_zone_start,
     encode_query_map,
     encode_query_path,
     encode_query_robot_config,
@@ -1352,6 +1354,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_query_path(self, thing_name: str) -> None:
         await self._mqtt.async_publish_command(thing_name, encode_query_path())
+
+    async def async_start_edit_boundary(self, thing_name: str, hash_id: str) -> None:
+        """Begin recording a new boundary for a go-zone (userCtrl=10). Drive the robot
+        (async_ble_drive) along the boundary, then async_complete_edit_boundary."""
+        await self._mqtt.async_publish_command(thing_name, encode_modify_zone_start(hash_id))
+
+    async def async_complete_edit_boundary(self, thing_name: str) -> None:
+        """Commit the driven path as the zone's new boundary (userCtrl=29) and re-query the map."""
+        await self._mqtt.async_publish_command(thing_name, encode_complete_zone_partition())
+        await self.async_query_map(thing_name)
 
     async def _async_poll_path(self, thing_name: str) -> None:
         """Poll QUERY_PATH every 30 s while the robot is mowing.
