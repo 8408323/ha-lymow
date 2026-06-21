@@ -58,6 +58,34 @@ class LymowBackupCard extends HTMLElement {
     return st?.attributes?.backups || [];
   }
 
+  // Build a small SVG mini-map from a backup's preview geometry (ENU metres).
+  _thumbnail(preview) {
+    if (!preview) return "";
+    const all = [];
+    const collect = (arr) => (arr || []).forEach(z => (z.polygon || []).forEach(p => all.push(p)));
+    collect(preview.goZones); collect(preview.nogoZones); collect(preview.channels);
+    if (all.length < 3) return "";
+    const xs = all.map(p => p.x), ys = all.map(p => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    const w = (maxX - minX) || 1, h = (maxY - minY) || 1;
+    const S = 56, pad = 3;
+    const scale = Math.min((S - 2 * pad) / w, (S - 2 * pad) / h);
+    const ox = pad + ((S - 2 * pad) - w * scale) / 2;
+    const oy = pad + ((S - 2 * pad) - h * scale) / 2;
+    const sx = (x) => (ox + (x - minX) * scale).toFixed(1);
+    const sy = (y) => (oy + (maxY - y) * scale).toFixed(1); // flip ENU y (up) → SVG y (down)
+    const poly = (pts, fill, stroke) => {
+      if (!pts || pts.length < 3) return "";
+      const s = pts.map(p => `${sx(p.x)},${sy(p.y)}`).join(" ");
+      return `<polygon points="${s}" fill="${fill}" stroke="${stroke}" stroke-width="0.5"/>`;
+    };
+    let svg = "";
+    (preview.channels || []).forEach(c => svg += poly(c.polygon, "rgba(120,120,120,0.35)", "#9e9e9e"));
+    (preview.goZones || []).forEach(z => svg += poly(z.polygon, z.isEnabled !== false ? "#43a047" : "#bdbdbd", "#2e7d32"));
+    (preview.nogoZones || []).forEach(z => svg += poly(z.polygon, "rgba(244,67,54,0.55)", "#c62828"));
+    return `<svg class="thumb" viewBox="0 0 ${S} ${S}" width="${S}" height="${S}">${svg}</svg>`;
+  }
+
   _build() {
     if (this._built) return;
     const root = this.attachShadow({ mode: "open" });
@@ -68,8 +96,12 @@ class LymowBackupCard extends HTMLElement {
         .title { font-weight:600; font-size:16px; }
         .backup-now-btn { border:0; background:var(--primary-color,#03a9f4); color:#fff; padding:4px 12px; border-radius:16px; cursor:pointer; font-size:13px; }
         .list { padding:8px 0; }
-        .row { padding:8px 16px; border-bottom:1px solid var(--divider-color,#e0e0e0); }
+        .row { display:flex; gap:10px; align-items:flex-start; padding:8px 16px; border-bottom:1px solid var(--divider-color,#e0e0e0); }
         .row:last-child { border-bottom:0; }
+        .row-thumb { flex:0 0 auto; }
+        .row-content { flex:1; min-width:0; }
+        .thumb { background:var(--secondary-background-color,#f5f5f5); border-radius:4px; display:block; }
+        .thumb-empty { width:56px; height:56px; border-radius:4px; background:var(--secondary-background-color,#f5f5f5); display:flex; align-items:center; justify-content:center; font-size:18px; opacity:0.5; }
         .row-top { display:flex; align-items:center; gap:8px; }
         .row-name { flex:1; font-size:14px; font-weight:500; cursor:pointer; }
         .row-name.editing { display:none; }
@@ -119,17 +151,21 @@ class LymowBackupCard extends HTMLElement {
 
       const row = document.createElement("div");
       row.className = "row";
+      const thumb = this._thumbnail(b.preview) || `<div class="thumb-empty" title="No preview">🗺️</div>`;
       row.innerHTML = `
-        <div class="row-top">
-          <span class="row-name" title="Click to rename">${name}</span>
-          <input class="name-input hidden" type="text" value="${name}">
-          <div class="row-btns">
-            <button class="icon-btn" title="Rename">✏️</button>
-            <button class="icon-btn restore" title="Restore this backup">↩️</button>
-            <button class="icon-btn del" title="Delete">🗑️</button>
+        <div class="row-thumb">${thumb}</div>
+        <div class="row-content">
+          <div class="row-top">
+            <span class="row-name" title="Click to rename">${name}</span>
+            <input class="name-input hidden" type="text" value="${name}">
+            <div class="row-btns">
+              <button class="icon-btn" title="Rename">✏️</button>
+              <button class="icon-btn restore" title="Restore this backup">↩️</button>
+              <button class="icon-btn del" title="Delete">🗑️</button>
+            </div>
           </div>
-        </div>
-        <div class="row-date">${ts}</div>`;
+          <div class="row-date">${ts}</div>
+        </div>`;
 
       const nameSpan = row.querySelector(".row-name");
       const nameInput = row.querySelector(".name-input");

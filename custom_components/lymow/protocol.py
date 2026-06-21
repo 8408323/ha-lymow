@@ -458,6 +458,18 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
     return result
 
 
+def decode_backup_map(pb_bytes: bytes) -> dict[str, Any]:
+    """Decode a backup-map ``.pb`` into the same shape as decode_map_response.
+
+    A backup ``.pb`` (downloaded from S3) stores the raw PbMap content directly
+    (top-level f1=goZones, f2=nogoZones, f3=channels), without the PbOutput
+    f23→f2→f3 envelope a live map reply carries. Wrap it so the shared decoder
+    parses it.
+    """
+    wrapped = _field_bytes(23, _field_bytes(2, _field_i32(1, 1) + _field_bytes(3, pb_bytes)))
+    return decode_map_response(wrapped)
+
+
 def decode_task_config(data: bytes) -> dict[str, Any]:
     """Decode a PbTaskConfig sub-message (the four-field Device-Settings one).
 

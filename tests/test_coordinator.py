@@ -3771,3 +3771,91 @@ async def test_async_sync_map_publishes_sync_then_queries_map() -> None:
     assert thing == THING
     f = _decode_fields(pb)
     assert _first(f, 5) == USER_CTRL_SYNC_MAP
+
+
+# ---------------------------------------------------------------------------
+# Backup map preview (thumbnail geometry)
+# ---------------------------------------------------------------------------
+
+
+def test_downsample_polygon_thins_and_passes_through() -> None:
+    coord, _, _ = _make_coordinator()
+    pts = [{"x": i, "y": i} for i in range(200)]
+    out = coord._downsample_polygon(pts, max_points=50)
+    assert len(out) == 50
+    short = [{"x": 1, "y": 1}, {"x": 2, "y": 2}]
+    assert coord._downsample_polygon(short) == short
+    assert coord._downsample_polygon("not-a-list") == []
+
+
+_FAKE_DECODE = {
+    "goZones": [{"hashId": "z1", "isEnabled": True, "polygon": [{"x": i, "y": i} for i in range(120)]}],
+    "nogoZones": [{"polygon": [{"x": 0, "y": 0}, {"x": 1, "y": 1}, {"x": 2, "y": 0}]}],
+    "channels": [{"polygon": [{"x": 5, "y": 5}, {"x": 6, "y": 6}]}],
+}
+
+
+@pytest.mark.asyncio
+async def test_fetch_backup_preview_decodes_downsamples_and_caches(monkeypatch) -> None:
+    coord, _, api = _make_coordinator()
+    api.download_backup_map = AsyncMock(return_value=b"rawbytes")
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "decode_backup_map", lambda raw: _FAKE_DECODE)
+    preview = await coord._fetch_backup_preview(THING, "k1")
+    assert preview["goZones"][0]["hashId"] == "z1"
+    assert len(preview["goZones"][0]["polygon"]) <= 60  # downsampled
+    assert preview["nogoZones"] and preview["channels"]
+    # Cached by key — a second call must not re-download.
+    api.download_backup_map.reset_mock()
+    again = await coord._fetch_backup_preview(THING, "k1")
+    assert again is preview
+    api.download_backup_map.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_fetch_backup_preview_none_on_download_error() -> None:
+    coord, _, api = _make_coordinator()
+    api.download_backup_map = AsyncMock(side_effect=RuntimeError("boom"))
+    assert await coord._fetch_backup_preview(THING, "k2") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_backup_preview_none_when_no_bytes() -> None:
+    coord, _, api = _make_coordinator()
+    api.download_backup_map = AsyncMock(return_value=None)
+    assert await coord._fetch_backup_preview(THING, "k3") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_backup_preview_none_on_decode_error(monkeypatch) -> None:
+    coord, _, api = _make_coordinator()
+    api.download_backup_map = AsyncMock(return_value=b"x")
+
+    def _boom(_raw):
+        raise ValueError("bad pb")
+
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "decode_backup_map", _boom)
+    assert await coord._fetch_backup_preview(THING, "k4") is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_backup_map_fields_attaches_preview(monkeypatch) -> None:
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list = AsyncMock(
+        return_value=[
+            {"map_file": "dev/map/a.pb", "name": "", "backup_time": 100},
+            {"map_file": "dev/map/b.pb", "name": "", "backup_time": 90},
+        ]
+    )
+    # First backup decodes; second download fails → no preview key on it.
+    calls = {"n": 0}
+
+    async def _dl(_thing, key):
+        calls["n"] += 1
+        return b"raw" if key.endswith("a.pb") else None
+
+    api.download_backup_map = _dl
+    monkeypatch.setattr(sys.modules["lymow.coordinator"], "decode_backup_map", lambda raw: _FAKE_DECODE)
+    fields = await coord._fetch_backup_map_fields(THING)
+    lst = fields["backupMapList"]
+    assert lst[0]["preview"]["goZones"][0]["hashId"] == "z1"
+    assert "preview" not in lst[1]  # download returned None → skipped
