@@ -58,6 +58,8 @@ def _discover_ble_address(hass: HomeAssistant, ble_name: str) -> str | None:
 _SERVICE_DELETE_ZONE = "delete_zone"
 _SERVICE_DELETE_CHANNEL = "delete_channel"
 _SERVICE_DELETE_NOGO_ZONE = "delete_nogo_zone"
+_SERVICE_START_EDIT_BOUNDARY = "start_edit_boundary"
+_SERVICE_COMPLETE_EDIT_BOUNDARY = "complete_edit_boundary"
 _ATTR_ZONE_HASH_ID = "zone_hash_id"
 _ATTR_CHANNEL_HASH_ID = "channel_hash_id"
 _ATTR_NOGO_HASH_ID = "nogo_hash_id"
@@ -261,6 +263,12 @@ _QUERY_SERVICES: tuple[tuple[str, str], ...] = (
 
 _ENTITY_ID_SCHEMA = vol.Schema({vol.Required("entity_id"): cv.entity_ids})
 _DELETE_ZONE_SCHEMA = vol.Schema(
+    {
+        vol.Required("entity_id"): cv.entity_ids,
+        vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
+    }
+)
+_START_EDIT_BOUNDARY_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
         vol.Required(_ATTR_ZONE_HASH_ID): cv.string,
@@ -1271,7 +1279,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             )
         await coordinator.async_ble_drive(address, linear, angular, duration)
 
+    async def handle_start_edit_boundary(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is None:
+                continue
+            thing_name = entity._thing_name
+            map_data = coordinator.data.get(thing_name, {}).get("mapData") or {}
+            go_ids = {z.get("hashId") for z in map_data.get("goZones", [])}
+            if go_ids and hash_id not in go_ids:
+                raise ServiceValidationError(f"Zone {hash_id!r} not found in map. Known go zones: {sorted(go_ids)}")
+            await coordinator.async_start_edit_boundary(thing_name, hash_id)
+
+    async def handle_complete_edit_boundary(call: ServiceCall) -> None:
+        entity_ids: list[str] = call.data["entity_id"]
+        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        for eid in entity_ids:
+            entity = entity_map.get(eid)
+            if entity is not None:
+                await coordinator.async_complete_edit_boundary(entity._thing_name)
+
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_ZONE, handle_delete_zone, schema=_DELETE_ZONE_SCHEMA)
+    hass.services.async_register(
+        DOMAIN, _SERVICE_START_EDIT_BOUNDARY, handle_start_edit_boundary, schema=_START_EDIT_BOUNDARY_SCHEMA
+    )
+    hass.services.async_register(
+        DOMAIN, _SERVICE_COMPLETE_EDIT_BOUNDARY, handle_complete_edit_boundary, schema=_ENTITY_ID_SCHEMA
+    )
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_CHANNEL, handle_delete_channel, schema=_DELETE_CHANNEL_SCHEMA)
     hass.services.async_register(
         DOMAIN, _SERVICE_DELETE_NOGO_ZONE, handle_delete_nogo_zone, schema=_DELETE_NOGO_ZONE_SCHEMA

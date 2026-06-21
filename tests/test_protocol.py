@@ -1818,6 +1818,24 @@ def test_encode_query_path_matches_app_request() -> None:
     assert encode_query_path(2) == encode_query_path(0)[:8] + bytes([2]) + encode_query_path(0)[9:]
 
 
+def test_encode_modify_zone_start_matches_app() -> None:
+    """startModifyZone reproduces the app's Edit Boundary start command (userCtrl=10 + zone)."""
+    import base64
+
+    from lymow.protocol import encode_modify_zone_start
+
+    assert encode_modify_zone_start("KX1kGyat") == base64.b64decode("EDEoCmIOCgwKChoIS1gxa0d5YXQ=")
+
+
+def test_encode_complete_zone_partition_matches_app() -> None:
+    """completeZonePartition reproduces the app's Edit Boundary save command (userCtrl=29)."""
+    import base64
+
+    from lymow.protocol import encode_complete_zone_partition
+
+    assert encode_complete_zone_partition() == base64.b64decode("EDEoHQ==")
+
+
 def test_decode_pboutput_network_info_field_34() -> None:
     """PbOutput.f34 networkInfo (populated by query_rtk_diagnostic_l1).
 

@@ -36,6 +36,8 @@ def _make_coord(state: dict | None = None) -> MagicMock:
     coord.async_delete_zone = AsyncMock()
     coord.async_delete_channel = AsyncMock()
     coord.async_delete_nogo_zone = AsyncMock()
+    coord.async_start_edit_boundary = AsyncMock()
+    coord.async_complete_edit_boundary = AsyncMock()
     coord.async_start_zones = AsyncMock()
     coord.async_query_map = AsyncMock()
     coord.async_query_schedules = AsyncMock()
@@ -299,7 +301,7 @@ async def test_async_setup_entry_registers_services() -> None:
     # + 1 update-zone-cut-height + 1 set-zone-config + 1 set-geofence
     # + 1 update-channel-settings + 1 get-clean-history + main's merged services
     # (pause, query_cleaning_summary, …). Count is asserted against the live total.
-    assert hass.services.async_register.call_count == 57
+    assert hass.services.async_register.call_count == 59
 
 
 # ---------------------------------------------------------------------------
@@ -404,6 +406,69 @@ async def test_handle_delete_zone_unknown_zone_raises_validation_error() -> None
     call = _make_call(["lawn_mower.mower_1"], {"zone_hash_id": "z-unknown"})
     with pytest.raises(ServiceValidationError):
         await handlers2["delete_zone"](call)
+
+
+async def _edit_boundary_handlers(coord) -> dict:
+    """Set up services with a named mower entity; return the handlers dict."""
+    from lymow.const import DOMAIN
+
+    hass = MagicMock()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.mower_1"
+
+    await async_setup_entry(hass, entry, _add)
+    return handlers
+
+
+async def test_handle_start_edit_boundary_valid_zone_calls_coordinator() -> None:
+    coord = _make_coord({"mapData": {"goZones": [{"hashId": "z1"}]}})
+    handlers = await _edit_boundary_handlers(coord)
+    await handlers["start_edit_boundary"](_make_call(["lawn_mower.mower_1"], {"zone_hash_id": "z1"}))
+    coord.async_start_edit_boundary.assert_awaited_once_with(THING, "z1")
+
+
+async def test_handle_start_edit_boundary_no_map_skips_validation() -> None:
+    coord = _make_coord({})  # no mapData → go_ids empty → no validation
+    handlers = await _edit_boundary_handlers(coord)
+    await handlers["start_edit_boundary"](_make_call(["lawn_mower.mower_1"], {"zone_hash_id": "zX"}))
+    coord.async_start_edit_boundary.assert_awaited_once_with(THING, "zX")
+
+
+async def test_handle_start_edit_boundary_unknown_zone_raises() -> None:
+    coord = _make_coord({"mapData": {"goZones": [{"hashId": "z1"}]}})
+    handlers = await _edit_boundary_handlers(coord)
+    with pytest.raises(ServiceValidationError):
+        await handlers["start_edit_boundary"](_make_call(["lawn_mower.mower_1"], {"zone_hash_id": "nope"}))
+
+
+async def test_handle_start_edit_boundary_unknown_entity_skips() -> None:
+    coord = _make_coord({"mapData": {"goZones": [{"hashId": "z1"}]}})
+    handlers = await _edit_boundary_handlers(coord)
+    await handlers["start_edit_boundary"](_make_call(["lawn_mower.other"], {"zone_hash_id": "z1"}))
+    coord.async_start_edit_boundary.assert_not_called()
+
+
+async def test_handle_complete_edit_boundary_calls_coordinator() -> None:
+    coord = _make_coord({})
+    handlers = await _edit_boundary_handlers(coord)
+    await handlers["complete_edit_boundary"](_make_call(["lawn_mower.mower_1"]))
+    coord.async_complete_edit_boundary.assert_awaited_once_with(THING)
+
+
+async def test_handle_complete_edit_boundary_unknown_entity_skips() -> None:
+    coord = _make_coord({})
+    handlers = await _edit_boundary_handlers(coord)
+    await handlers["complete_edit_boundary"](_make_call(["lawn_mower.other"]))
+    coord.async_complete_edit_boundary.assert_not_called()
 
 
 async def test_handle_delete_channel_valid_calls_coordinator() -> None:
