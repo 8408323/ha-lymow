@@ -52,6 +52,8 @@ from .protocol import (
     encode_query_path,
     encode_query_robot_config,
     encode_query_schedules,
+    encode_set_nogo_polygon,
+    encode_set_zone_polygon,
     encode_start_zones,
     encode_sync_map,
     encode_userctrl,
@@ -1496,18 +1498,19 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self.async_sync_map(thing_name, updated)
 
     async def async_update_zone_polygon(self, thing_name: str, hash_id: str, polygon: list[dict]) -> None:
-        """Replace a go-zone's polygon with the caller-supplied vertices and SYNC_MAP.
+        """Replace a go-zone's polygon over WiFi and re-query the map.
 
-        ``polygon`` is a list of ``{"x": float, "y": float}`` points in the robot's
-        local ENU frame — the same shape the existing decoder produces. We don't
-        validate the polygon's geometry (self-intersection, winding order, etc.)
-        because the robot's behaviour with invalid input isn't documented; the
-        caller is responsible for sending well-formed shapes.
-
-        Marks ``modifyHashs`` so the robot knows which zone changed.
+        Uses USER_CTRL_MODIFY_ZONE_INFO with the zone (carrying its new polygon) in
+        PbInput.field 12 — the same envelope as rename/delete, which the robot honours.
+        (NOT sync_map: the robot ignores pushed full maps — verified live.) ``polygon``
+        is a list of ``{"x": float, "y": float}`` ENU points; geometry isn't validated.
         """
-        import copy
+        self._validate_polygon_edit(thing_name, hash_id, polygon, "goZones")
+        await self._mqtt.async_publish_command(thing_name, encode_set_zone_polygon(hash_id, polygon))
+        await self.async_query_map(thing_name)
 
+    def _validate_polygon_edit(self, thing_name: str, hash_id: str, polygon: list[dict], zone_field: str) -> None:
+        """Shared validation for go/no-go polygon edits."""
         map_data = (self.data or {}).get(thing_name, {}).get("mapData")
         if not map_data:
             raise HomeAssistantError("Map data not yet loaded — query map first")
@@ -1518,48 +1521,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         for pt in polygon:
             if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
                 raise HomeAssistantError("Polygon vertices must be dicts with 'x' and 'y' keys")
-        updated = copy.deepcopy(map_data)
-        target = None
-        for z in updated.get("goZones", []):
-            if z.get("hashId") == hash_id:
-                target = z
-                break
-        if target is None:
+        ids = {z.get("hashId") for z in map_data.get(zone_field, [])}
+        if ids and hash_id not in ids:
             raise HomeAssistantError(f"Zone {hash_id!r} not found in map")
-        target["polygon"] = [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon]
-        # Tell the robot which zone changed — same pattern used by delete_zone.
-        existing_modified = updated.get("modifyHashs") or []
-        if hash_id not in existing_modified:
-            updated["modifyHashs"] = [*existing_modified, hash_id]
-        await self.async_sync_map(thing_name, updated)
 
     async def async_update_nogo_polygon(self, thing_name: str, hash_id: str, polygon: list[dict]) -> None:
-        """Replace a no-go zone's polygon with the caller-supplied vertices and SYNC_MAP."""
-        import copy
-
-        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
-        if not map_data:
-            raise HomeAssistantError("Map data not yet loaded — query map first")
-        if not isinstance(polygon, list) or len(polygon) < 3:
-            raise HomeAssistantError(
-                f"Polygon needs at least 3 vertices, got {len(polygon) if isinstance(polygon, list) else type(polygon).__name__}"
-            )
-        for pt in polygon:
-            if not isinstance(pt, dict) or "x" not in pt or "y" not in pt:
-                raise HomeAssistantError("Polygon vertices must be dicts with 'x' and 'y' keys")
-        updated = copy.deepcopy(map_data)
-        target = None
-        for z in updated.get("nogoZones", []):
-            if z.get("hashId") == hash_id:
-                target = z
-                break
-        if target is None:
-            raise HomeAssistantError(f"No-go zone {hash_id!r} not found in map")
-        target["polygon"] = [{"x": float(p["x"]), "y": float(p["y"])} for p in polygon]
-        existing_modified = updated.get("modifyHashs") or []
-        if hash_id not in existing_modified:
-            updated["modifyHashs"] = [*existing_modified, hash_id]
-        await self.async_sync_map(thing_name, updated)
+        """Replace a no-go zone's polygon over WiFi (USER_CTRL_MODIFY_ZONE_INFO) and re-query."""
+        self._validate_polygon_edit(thing_name, hash_id, polygon, "nogoZones")
+        await self._mqtt.async_publish_command(thing_name, encode_set_nogo_polygon(hash_id, polygon))
+        await self.async_query_map(thing_name)
 
     async def async_move_charging_station(
         self, thing_name: str, x: float, y: float, theta: float | None = None

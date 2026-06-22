@@ -2219,6 +2219,33 @@ def encode_rename_nogo_zone(hash_id: str, name: str) -> bytes:
     return pb
 
 
+def encode_set_zone_polygon(hash_id: str, polygon: list) -> bytes:
+    """Encode a go-zone boundary edit over WiFi (USER_CTRL_MODIFY_ZONE_INFO).
+
+    Same envelope as rename (PbInput.field12 → PbMap.goZones → PbZone.basicInfo),
+    but basicInfo carries the new polygon (f5) instead of the name. The robot
+    applies the pushed polygon — verified live. (NOT sync_map, which the robot
+    ignores.) ``polygon`` is a list of {"x","y"} ENU points.
+    """
+    from .const import USER_CTRL_MODIFY_ZONE_INFO
+
+    basic_info = _field_str(3, hash_id) + _field_bytes(5, _encode_map_polygon(polygon))
+    zone = _field_bytes(1, basic_info)
+    pb_map = _field_bytes(1, zone)  # PbMap.goZones
+    return _field_i32(2, PB_VERSION) + _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO) + _field_bytes(12, pb_map)
+
+
+def encode_set_nogo_polygon(hash_id: str, polygon: list) -> bytes:
+    """Encode a no-go-zone boundary edit over WiFi — mirrors encode_set_zone_polygon
+    but the zone goes in PbMap.nogoZones (field 2)."""
+    from .const import USER_CTRL_MODIFY_ZONE_INFO
+
+    basic_info = _field_str(3, hash_id) + _field_bytes(5, _encode_map_polygon(polygon))
+    zone = _field_bytes(1, basic_info)
+    pb_map = _field_bytes(2, zone)  # PbMap.nogoZones
+    return _field_i32(2, PB_VERSION) + _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO) + _field_bytes(12, pb_map)
+
+
 def _encode_zone_config_submessage(cfg: dict[str, Any]) -> bytes:
     """Encode a PbZoneConfig sub-message from a dict of named fields.
 
