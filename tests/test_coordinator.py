@@ -2674,80 +2674,45 @@ _TWO_SQUARES = {
 
 
 @pytest.mark.asyncio
-async def test_async_merge_zones_replaces_inputs_with_combined_hull() -> None:
-    import copy
+async def test_async_merge_zones_reshapes_keeper_and_deletes_others() -> None:
+    """Client-side merge: reshape the first zone to the union hull (uc=9), delete the rest (uc=8)."""
+    from lymow.geometry import merge_zone_polygons
+    from lymow.protocol import encode_delete_zone, encode_set_zone_polygon
 
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
-    captured: dict = {}
-
-    async def _capture(thing, map_data):
-        captured["map"] = map_data
-
-    coord.async_sync_map = _capture  # type: ignore[method-assign]
-    new_id = await coord.async_merge_zones(THING, ["alpha", "beta"], name="combined")
-    # Original zones gone, new merged zone present.
-    ids_after = {z["hashId"] for z in captured["map"]["goZones"]}
-    assert "alpha" not in ids_after and "beta" not in ids_after
-    assert new_id in ids_after
-    merged = next(z for z in captured["map"]["goZones"] if z["hashId"] == new_id)
-    assert merged["name"] == "combined"
-    # Highest cutHeight wins (50 from beta).
-    assert merged["cutHeight"] == 50
-    # Convex hull of the two squares should be the bounding rectangle.
-    hull_set = {(p["x"], p["y"]) for p in merged["polygon"]}
-    assert hull_set == {(0.0, 0.0), (7.0, 0.0), (7.0, 2.0), (0.0, 2.0)}
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _TWO_SQUARES}}
+    coord.async_query_map = AsyncMock()
+    keeper = await coord.async_merge_zones(THING, ["alpha", "beta"])
+    assert keeper == "alpha"
+    hull = merge_zone_polygons(_TWO_SQUARES["goZones"][0]["polygon"], _TWO_SQUARES["goZones"][1]["polygon"])
+    sent = [c.args for c in mqtt.async_publish_command.await_args_list]
+    assert (THING, encode_set_zone_polygon("alpha", hull)) in sent
+    assert (THING, encode_delete_zone("beta")) in sent
+    coord.async_query_map.assert_awaited_once_with(THING)
 
 
 @pytest.mark.asyncio
-async def test_async_merge_zones_cascade_deletes_child_nogo_zones() -> None:
-    import copy
+async def test_async_merge_zones_applies_optional_name() -> None:
+    from lymow.protocol import encode_rename_zone
 
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
-    captured: dict = {}
-
-    async def _capture(thing, map_data):
-        captured["map"] = map_data
-
-    coord.async_sync_map = _capture  # type: ignore[method-assign]
-    await coord.async_merge_zones(THING, ["alpha", "beta"])
-    # nogo-a belongs to alpha → deleted with it.
-    assert captured["map"]["nogoZones"] == []
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _TWO_SQUARES}}
+    coord.async_query_map = AsyncMock()
+    await coord.async_merge_zones(THING, ["alpha", "beta"], name="combined")
+    sent = [c.args for c in mqtt.async_publish_command.await_args_list]
+    assert (THING, encode_rename_zone("alpha", "combined")) in sent
 
 
 @pytest.mark.asyncio
-async def test_async_merge_zones_marks_modified_hashes() -> None:
-    import copy
+async def test_async_merge_zones_applies_explicit_cut_height() -> None:
+    from lymow.protocol import encode_set_zone_config
 
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
-    captured: dict = {}
-
-    async def _capture(thing, map_data):
-        captured["map"] = map_data
-
-    coord.async_sync_map = _capture  # type: ignore[method-assign]
-    new_id = await coord.async_merge_zones(THING, ["alpha", "beta"])
-    modify = captured["map"]["modifyHashs"]
-    assert "alpha" in modify and "beta" in modify and new_id in modify
-
-
-@pytest.mark.asyncio
-async def test_async_merge_zones_respects_explicit_cut_height() -> None:
-    import copy
-
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
-    captured: dict = {}
-
-    async def _capture(thing, map_data):
-        captured["map"] = map_data
-
-    coord.async_sync_map = _capture  # type: ignore[method-assign]
-    new_id = await coord.async_merge_zones(THING, ["alpha", "beta"], cut_height_mm=30)
-    merged = next(z for z in captured["map"]["goZones"] if z["hashId"] == new_id)
-    assert merged["cutHeight"] == 30
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _TWO_SQUARES}}
+    coord.async_query_map = AsyncMock()
+    await coord.async_merge_zones(THING, ["alpha", "beta"], cut_height_mm=30)
+    sent = [c.args for c in mqtt.async_publish_command.await_args_list]
+    assert (THING, encode_set_zone_config([{"hashId": "alpha", "cutHeight": 30}])) in sent
 
 
 @pytest.mark.asyncio
@@ -2821,26 +2786,6 @@ async def test_async_merge_zones_raises_when_geometry_fails() -> None:
     }
     with pytest.raises(HomeAssistantError, match="Could not merge zones"):
         await coord.async_merge_zones(THING, ["a", "b"])
-
-
-@pytest.mark.asyncio
-async def test_async_merge_zones_retries_on_hash_collision() -> None:
-    """Defensive collision-retry path on token_hex — exercised by forcing one collision."""
-    import copy
-
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"mapData": copy.deepcopy(_TWO_SQUARES)}}
-
-    async def _noop(thing, map_data):
-        pass
-
-    coord.async_sync_map = _noop  # type: ignore[method-assign]
-
-    from unittest.mock import patch as _patch
-
-    with _patch("secrets.token_hex", side_effect=["alpha", "fresh001"]):
-        new_id = await coord.async_merge_zones(THING, ["alpha", "beta"])
-    assert new_id == "fresh001"
 
 
 # ---------------------------------------------------------------------------

@@ -52,7 +52,9 @@ from .protocol import (
     encode_query_path,
     encode_query_robot_config,
     encode_query_schedules,
+    encode_rename_zone,
     encode_set_nogo_polygon,
+    encode_set_zone_config,
     encode_set_zone_polygon,
     encode_start_zones,
     encode_sync_map,
@@ -1988,21 +1990,17 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         name: str = "",
         cut_height_mm: int | None = None,
     ) -> str:
-        """Merge two or more go-zones into a single convex-hull zone and SYNC_MAP.
+        """Merge two or more go-zones into one, client-side, over WiFi.
 
-        - Deletes every input zone (and their child no-go zones).
-        - Computes the convex hull of all input polygons' vertices.
-        - Adds a new zone with a fresh hashId carrying that hull as its polygon.
-        - Falls back to the highest input zone's ``cutHeight`` if ``cut_height_mm``
-          is not supplied.
+        The robot's native merge (USER_CTRL_MERGE_ZONE) is firmware-gated — it
+        silently ignores the command — so we compose the primitives the robot
+        *does* honour: reshape the first zone to the convex hull of all inputs
+        (USER_CTRL_MODIFY_ZONE_INFO) and delete the rest (USER_CTRL_CLEAR_ZONE).
 
-        Returns the new hashId. Raises ``HomeAssistantError`` if the map isn't
-        loaded, fewer than 2 zones are requested, or any requested zone is
-        missing from the cached map.
+        Returns the surviving (merged) zone's hashId — the first of ``hash_ids``.
+        Raises ``HomeAssistantError`` if the map isn't loaded, fewer than 2 zones
+        are requested, or any requested zone is missing from the cached map.
         """
-        import copy
-        import secrets
-
         from .geometry import merge_zone_polygons
 
         if len(hash_ids) < 2:
@@ -2014,9 +2012,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         missing = [h for h in hash_ids if h not in existing]
         if missing:
             raise HomeAssistantError(f"Zone(s) not found in map: {missing}")
-        polygons = [existing[h].get("polygon") or [] for h in hash_ids]
-        # Drop zones with no polygon — nothing useful to merge from them.
-        polygons = [p for p in polygons if p]
+        polygons = [p for p in (existing[h].get("polygon") or [] for h in hash_ids) if p]
         if not polygons:
             raise HomeAssistantError("None of the requested zones have a polygon to merge")
         try:
@@ -2024,42 +2020,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         except ValueError as err:
             raise HomeAssistantError(f"Could not merge zones: {err}") from err
 
-        if cut_height_mm is None:
-            cut_height_mm = max((existing[h].get("cutHeight") or 40) for h in hash_ids)
-
-        # Generate a non-clashing hash. Collision is vanishingly unlikely but
-        # the existing-ids set is cheap to consult.
-        all_ids = {z.get("hashId") for z in map_data.get("goZones", [])} | {
-            z.get("hashId") for z in map_data.get("nogoZones", [])
-        }
-        new_hash_id = secrets.token_hex(4)
-        while new_hash_id in all_ids:
-            new_hash_id = secrets.token_hex(4)
-
-        updated = copy.deepcopy(map_data)
-        # Remove the source zones AND their child no-go zones (cascade-delete
-        # mirrors the existing async_delete_zone behaviour).
-        hash_set = set(hash_ids)
-        updated["goZones"] = [z for z in updated.get("goZones", []) if z.get("hashId") not in hash_set]
-        updated["nogoZones"] = [
-            n
-            for n in updated.get("nogoZones", [])
-            if n.get("hashId") not in hash_set and n.get("parentZoneHashId") not in hash_set
-        ]
-        # Append the merged zone.
-        new_zone = {
-            "hashId": new_hash_id,
-            "name": name,
-            "isEnabled": True,
-            "cutHeight": int(cut_height_mm),
-            "polygon": merged_hull,
-        }
-        updated.setdefault("goZones", []).append(new_zone)
-        # Tell the robot which hashes changed.
-        existing_modified = updated.get("modifyHashs") or []
-        updated["modifyHashs"] = [*existing_modified, *hash_ids, new_hash_id]
-        await self.async_sync_map(thing_name, updated)
-        return new_hash_id
+        keeper = hash_ids[0]
+        await self._mqtt.async_publish_command(thing_name, encode_set_zone_polygon(keeper, merged_hull))
+        if name:
+            await self._mqtt.async_publish_command(thing_name, encode_rename_zone(keeper, name))
+        if cut_height_mm is not None:
+            await self._mqtt.async_publish_command(
+                thing_name, encode_set_zone_config([{"hashId": keeper, "cutHeight": int(cut_height_mm)}])
+            )
+        for h in hash_ids[1:]:
+            await self._mqtt.async_publish_command(thing_name, encode_delete_zone(h))
+        await self.async_query_map(thing_name)
+        return keeper
 
     async def async_pin_and_go(
         self,

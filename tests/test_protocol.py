@@ -3613,6 +3613,32 @@ def test_encode_set_nogo_polygon_uses_nogo_field() -> None:
     assert _decode_map_polygon(_first(bi, 5)) == poly
 
 
+def test_encode_merge_zones_matches_app_wire_format() -> None:
+    """Firmware-gated native merge (robot ignores it today) — byte-exact from APK setMergeZone."""
+    from lymow.protocol import encode_merge_zones
+
+    pb = encode_merge_zones(["aaaa1111", "bbbb2222"])
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 55  # USER_CTRL_MERGE_ZONE
+    merge = _decode_fields(_first(f, 30))  # PbInput.mergeZone = field 30
+    hashes = [v.decode() for fn, _wt, v in merge if fn == 1]  # PbMergeZone.mergeZoneHashIdList = field 1
+    assert hashes == ["aaaa1111", "bbbb2222"]
+
+
+def test_encode_cut_zone_matches_app_wire_format() -> None:
+    """Firmware-gated native split (robot ignores it today) — byte-exact from APK setCutZone."""
+    from lymow.protocol import _decode_map_point, encode_cut_zone
+
+    pts = [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]
+    pb = encode_cut_zone("zone0001", pts)
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 56  # USER_CTRL_CUT_ZONE
+    cut = _decode_fields(_first(f, 31))  # PbInput.cutZone = field 31
+    assert _first(cut, 1).decode() == "zone0001"  # cutZoneHashId = field 1
+    cut_pts = [_decode_map_point(v) for fn, _wt, v in cut if fn == 2]  # cutPoint = field 2 (repeated PbPoint)
+    assert cut_pts == pts
+
+
 def test_encode_set_zone_config_single_zone_carries_configbox() -> None:
     """Per-zone PbZoneConfig override via userCtrl=9 (app's Customize-tab path).
 
