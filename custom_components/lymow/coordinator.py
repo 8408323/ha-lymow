@@ -702,8 +702,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 # RTK keepalive: while any RTK diagnostic sensor is enabled, re-query each
                 # cycle so the robot keeps streaming RTK detail (it stops when unqueried).
                 if _is_device_online(merged) and self._mqtt.is_connected and self._wants_poll(thing, "rtk"):
-                    self.hass.async_create_task(self.async_query_rtk_diagnostic_l1(thing))
-                    self.hass.async_create_task(self.async_query_rtk_diagnostic_l2(thing))
+                    self.hass.async_create_task(self._rtk_keepalive(thing))
             return result
         except Exception as err:
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
@@ -1431,6 +1430,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     def _wants_poll(self, thing_name: str, group: str) -> bool:
         return self._poll_interest.get((thing_name, group), 0) > 0
+
+    async def _rtk_keepalive(self, thing_name: str) -> None:
+        """Re-query RTK diagnostics. L2 replies reliably; L1 (uc=57) only answers
+        intermittently, so send a short burst each cycle to keep it fresh."""
+        for i in range(3):
+            await self.async_query_rtk_diagnostic_l1(thing_name)
+            await self.async_query_rtk_diagnostic_l2(thing_name)
+            if i < 2:
+                await asyncio.sleep(1)
 
     async def async_update_zone_cut_height(self, thing_name: str, hash_id: str, mm: int) -> None:
         """Update cut height for a go-zone and push the map back to the robot."""

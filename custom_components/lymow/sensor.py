@@ -235,6 +235,13 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         entity_registry_enabled_default=False,
     ),
     LymowSensorDescription(
+        key="rtk_base_station_status",
+        name="RTK base station",
+        value_key="rtkL1.baseStationStatus",
+        icon="mdi:radio-tower",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
         key="rtk_differential_age",
         name="RTK differential age",
         value_key="rtkL2.differentialAgeSec",
