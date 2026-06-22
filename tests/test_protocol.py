@@ -3585,6 +3585,34 @@ def test_encode_rename_nogo_zone_uses_nogo_field() -> None:
     assert _first(bi, 3).decode() == "ngabcdef"
 
 
+def test_encode_set_zone_polygon_uses_modify_zone_info_with_polygon() -> None:
+    from lymow.protocol import _decode_map_polygon, encode_set_zone_polygon
+
+    poly = [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]
+    pb = encode_set_zone_polygon("wsmjco1T", poly)
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO (NOT sync_map=25)
+    assert _first(f, 23) is None  # not the (ignored) sync_map btMap field
+    pb_map = _decode_fields(_first(f, 12))  # PbMap → goZones field 1
+    bi = _decode_fields(_first(_decode_fields(_first(pb_map, 1)), 1))  # zone → basicInfo
+    assert _first(bi, 3).decode() == "wsmjco1T"  # hashId = field 3
+    assert _decode_map_polygon(_first(bi, 5)) == poly  # polygon = field 5
+
+
+def test_encode_set_nogo_polygon_uses_nogo_field() -> None:
+    from lymow.protocol import _decode_map_polygon, encode_set_nogo_polygon
+
+    poly = [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]
+    pb = encode_set_nogo_polygon("ngabcdef", poly)
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 9
+    pb_map = _decode_fields(_first(f, 12))
+    assert _first(pb_map, 1) is None  # no go-zone — nogo lives in PbMap field 2
+    bi = _decode_fields(_first(_decode_fields(_first(pb_map, 2)), 1))
+    assert _first(bi, 3).decode() == "ngabcdef"
+    assert _decode_map_polygon(_first(bi, 5)) == poly
+
+
 def test_encode_set_zone_config_single_zone_carries_configbox() -> None:
     """Per-zone PbZoneConfig override via userCtrl=9 (app's Customize-tab path).
 

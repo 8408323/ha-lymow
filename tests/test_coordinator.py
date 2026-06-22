@@ -1291,40 +1291,30 @@ async def test_update_zone_cut_height_only_modifies_target_zone() -> None:
 
 
 @pytest.mark.asyncio
-async def test_async_update_zone_polygon_replaces_vertices_and_marks_modified() -> None:
-    import copy
+async def test_async_update_zone_polygon_publishes_modify_zone_info_and_requeries() -> None:
+    from lymow.protocol import encode_set_zone_polygon
 
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_DATA)}}
-    captured = {}
-
-    async def _capture(thing, map_data):
-        captured["map"] = map_data
-
-    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_DATA}}
+    coord.async_query_map = AsyncMock()
     new_polygon = [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]
     await coord.async_update_zone_polygon(THING, "zone0001", new_polygon)
-    target = next(z for z in captured["map"]["goZones"] if z["hashId"] == "zone0001")
-    assert target["polygon"] == [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]
-    assert "zone0001" in captured["map"]["modifyHashs"]
+    mqtt.async_publish_command.assert_awaited_once_with(THING, encode_set_zone_polygon("zone0001", new_polygon))
+    coord.async_query_map.assert_awaited_once_with(THING)
 
 
 @pytest.mark.asyncio
-async def test_async_update_zone_polygon_does_not_mutate_other_zones() -> None:
-    import copy
+async def test_async_update_nogo_polygon_skips_hash_check_when_no_nogo_zones() -> None:
+    from lymow.protocol import encode_set_nogo_polygon
 
-    coord, _, _ = _make_coordinator()
-    orig = copy.deepcopy(_SAMPLE_MAP_DATA)
-    coord.data = {THING: {"mapData": orig}}
-
-    async def _noop(thing, map_data):
-        pass
-
-    coord.async_sync_map = _noop  # type: ignore[method-assign]
+    coord, mqtt, _ = _make_coordinator()
+    # _SAMPLE_MAP_DATA has no nogoZones → id set empty → hash-existence check skipped.
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_DATA}}
+    coord.async_query_map = AsyncMock()
     new_polygon = [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}, {"x": 5.0, "y": 6.0}]
-    await coord.async_update_zone_polygon(THING, "zone0001", new_polygon)
-    # Cached original is unchanged — we deep-copied before mutating.
-    assert orig["goZones"][0]["polygon"] == []
+    await coord.async_update_nogo_polygon(THING, "nogo0001", new_polygon)
+    mqtt.async_publish_command.assert_awaited_once_with(THING, encode_set_nogo_polygon("nogo0001", new_polygon))
+    coord.async_query_map.assert_awaited_once_with(THING)
 
 
 @pytest.mark.asyncio
@@ -1513,23 +1503,16 @@ _SAMPLE_MAP_WITH_NOGO = {
 
 
 @pytest.mark.asyncio
-async def test_async_update_nogo_polygon_replaces_vertices_and_marks_modified() -> None:
-    import copy
+async def test_async_update_nogo_polygon_publishes_modify_for_known_zone() -> None:
+    from lymow.protocol import encode_set_nogo_polygon
 
-    coord, _, _ = _make_coordinator()
-    coord.data = {THING: {"mapData": copy.deepcopy(_SAMPLE_MAP_WITH_NOGO)}}
-    captured: dict = {}
-
-    async def _capture(thing, map_data):
-        captured["map"] = map_data
-
-    coord.async_sync_map = _capture  # type: ignore[method-assign]
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": _SAMPLE_MAP_WITH_NOGO}}
+    coord.async_query_map = AsyncMock()
     new_poly = [{"x": 10.0, "y": 10.0}, {"x": 20.0, "y": 10.0}, {"x": 15.0, "y": 20.0}]
     await coord.async_update_nogo_polygon(THING, "nogo0001", new_poly)
-
-    target = next(z for z in captured["map"]["nogoZones"] if z["hashId"] == "nogo0001")
-    assert target["polygon"] == new_poly
-    assert "nogo0001" in captured["map"]["modifyHashs"]
+    mqtt.async_publish_command.assert_awaited_once_with(THING, encode_set_nogo_polygon("nogo0001", new_poly))
+    coord.async_query_map.assert_awaited_once_with(THING)
 
 
 @pytest.mark.asyncio
