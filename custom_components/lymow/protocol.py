@@ -2246,6 +2246,32 @@ def encode_set_nogo_polygon(hash_id: str, polygon: list) -> bytes:
     return _field_i32(2, PB_VERSION) + _field_i32(5, USER_CTRL_MODIFY_ZONE_INFO) + _field_bytes(12, pb_map)
 
 
+def encode_merge_zones(hash_ids: list[str]) -> bytes:
+    """Encode a native merge-zones command (USER_CTRL_MERGE_ZONE=55).
+
+    Wire layout from APK/Hermes setMergeZone + PbInput/PbMergeZone encoders:
+    PbInput.mergeZone = field 30 → PbMergeZone.mergeZoneHashIdList = field 1 (repeated string).
+    """
+    from .const import USER_CTRL_MERGE_ZONE
+
+    merge = b"".join(_field_str(1, h) for h in hash_ids)
+    return _field_i32(2, PB_VERSION) + _field_i32(5, USER_CTRL_MERGE_ZONE) + _field_bytes(30, merge)
+
+
+def encode_cut_zone(hash_id: str, cut_points: list) -> bytes:
+    """Encode a native split/cut-zone command (USER_CTRL_CUT_ZONE=56).
+
+    Wire layout from APK/Hermes setCutZone + PbInput/PbCutZone encoders:
+    PbInput.cutZone = field 31 → PbCutZone{cutZoneHashId = field 1 (string),
+    cutPoint = field 2 (repeated PbPoint)}. ``cut_points`` is a polyline of
+    {"x","y"} ENU points defining where to cut the zone.
+    """
+    from .const import USER_CTRL_CUT_ZONE
+
+    cut = _field_str(1, hash_id) + b"".join(_field_bytes(2, _encode_map_point(p)) for p in cut_points)
+    return _field_i32(2, PB_VERSION) + _field_i32(5, USER_CTRL_CUT_ZONE) + _field_bytes(31, cut)
+
+
 def _encode_zone_config_submessage(cfg: dict[str, Any]) -> bytes:
     """Encode a PbZoneConfig sub-message from a dict of named fields.
 
