@@ -805,11 +805,11 @@ class LymowMapCard extends HTMLElement {
         editActions = `
           ${this._editHash && !isChannel ? `<button class="btn save" data-action="save-edit">💾 Save</button>` : ""}
           ${this._editHash ? `<button class="btn rename" data-action="enter-rename">🏷 Rename</button>` : ""}
-          ${this._editHash && this._editType === "go" ? `<button class="btn pin" disabled style="background:#6a1b9a;opacity:.4;cursor:not-allowed" title="Split isn't supported by the robot firmware yet (the app gates it as 'coming soon')">✂ Split</button>` : ""}
+          ${this._editHash && this._editType === "go" ? `<button class="btn pin" disabled style="background:#6a1b9a;opacity:.4;cursor:not-allowed" title="Split isn't supported by the robot firmware yet (app gates it 'coming soon') — see GitHub issue #220">✂ Split</button>` : ""}
           ${this._editHash ? `<button class="btn cancel" style="background:#b71c1c" data-action="delete-zone" title="Delete permanently">🗑 Delete</button>` : ""}
-          ${!this._editHash ? `<button class="btn pin" disabled style="opacity:.4;cursor:not-allowed" title="Adding a go-zone isn't supported over WiFi — the robot creates zones during mapping">＋ Go-zone</button>` : ""}
-          ${!this._editHash ? `<button class="btn cancel" disabled style="opacity:.4;cursor:not-allowed" title="Adding a no-go zone needs BLE drive-record — not available over WiFi">＋ No-go</button>` : ""}
-          ${!this._editHash ? `<button class="btn pin" disabled style="background:#1565c0;opacity:.4;cursor:not-allowed" title="Adding a channel needs BLE drive-record — not available over WiFi">＋ Channel</button>` : ""}
+          ${!this._editHash ? `<button class="btn pin" disabled style="opacity:.4;cursor:not-allowed" title="Adding a go-zone isn't supported over WiFi — the robot creates zones by driving (see GitHub issue #220)">＋ Go-zone</button>` : ""}
+          ${!this._editHash ? `<button class="btn cancel" disabled style="opacity:.4;cursor:not-allowed" title="Adding a no-go zone needs BLE drive-record — not available over WiFi (see GitHub issue #220)">＋ No-go</button>` : ""}
+          ${!this._editHash ? `<button class="btn pin" disabled style="background:#1565c0;opacity:.4;cursor:not-allowed" title="Adding a channel needs BLE drive-record — not available over WiFi (see GitHub issue #220)">＋ Channel</button>` : ""}
           <button class="btn cancel" data-action="cancel-edit">✕ Cancel</button>`;
       }
       // Per-zone cut-height row — only when a go-zone is selected and not in
@@ -882,7 +882,7 @@ class LymowMapCard extends HTMLElement {
       const editBtn = this._config.mower_entity
         ? `<button class="btn edit" data-action="edit" title="Edit zones [E]">✏️ Edit</button>` : "";
       const pinBtn = this._config.mower_entity
-        ? `<button class="btn pin" disabled style="opacity:.4;cursor:not-allowed" title="Pin-and-go needs to create a temporary zone, which isn't supported over WiFi">📍</button>` : "";
+        ? `<button class="btn pin" disabled style="opacity:.4;cursor:not-allowed" title="Pin-and-go needs to create a temporary zone, which isn't supported over WiFi (see GitHub issue #220)">📍</button>` : "";
       const schedBtn = this._config.schedule_entity
         ? `<button class="btn sched${this._scheduleOpen ? " settings-active" : ""}" data-action="sched" title="Mowing schedules">📅</button>` : "";
       const backupBtn = this._config.mower_entity
@@ -1496,9 +1496,12 @@ class LymowMapCard extends HTMLElement {
         el.addEventListener("click", () => { if (!this._panMoved && !this._drawingZone) this._chooseEditZone(el.dataset.hash, "channel"); });
       });
       this.shadowRoot.querySelectorAll(".midpoint").forEach((el) => {
+        // Stop pointerdown reaching the SVG pan handler (it would setPointerCapture and swallow the click).
+        el.addEventListener("pointerdown", (e) => { e.stopPropagation(); });
         el.addEventListener("click", (e) => { e.stopPropagation(); this._insertVertex(+el.dataset.edge); });
       });
       this.shadowRoot.querySelectorAll(".delvert").forEach((el) => {
+        el.addEventListener("pointerdown", (e) => { e.stopPropagation(); });
         el.addEventListener("click", (e) => { e.stopPropagation(); this._deleteVertex(+el.dataset.idx); });
       });
       this.shadowRoot.querySelectorAll(".vertex").forEach((el) => {
