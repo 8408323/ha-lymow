@@ -540,11 +540,11 @@ class AppPresenceSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity, Resto
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         self.coordinator.async_set_presence(self._thing_name, True)
-        self.async_write_ha_state()
+        self.coordinator.async_update_listeners()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.coordinator.async_set_presence(self._thing_name, False)
-        self.async_write_ha_state()
+        self.coordinator.async_update_listeners()
 
 
 class RtkDiagnosticsPollSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity, RestoreEntity):
@@ -587,8 +587,8 @@ class RtkDiagnosticsPollSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity
                 title="Lymow: App presence enabled for RTK",
                 notification_id=f"lymow_rtk_presence_{self._thing_name}",
             )
-        self.async_write_ha_state()
+        self.coordinator.async_update_listeners()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.coordinator.async_set_rtk_polling(self._thing_name, False)
-        self.async_write_ha_state()
+        self.coordinator.async_update_listeners()
