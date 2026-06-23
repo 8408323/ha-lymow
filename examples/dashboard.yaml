@@ -3,6 +3,12 @@
 # Replace 'your_mower' with your mower's entity-id prefix (check its device page,
 # e.g. sensor.<prefix>_map). All custom cards used here ship with the integration.
 #
+# Notes:
+#  - Some sensors (Wi-Fi RSSI, the RTK detail metrics, etc.) are disabled by default.
+#    If a row shows "unavailable", enable that entity on the device page.
+#  - Per-zone entities depend on your own map, so they aren't included (see the
+#    Overview view's note).
+#
 # To use: Settings > Dashboards > Add dashboard > Open it > top-right menu >
 # Edit dashboard > top-right menu > Raw configuration editor > paste this file.
 
@@ -41,18 +47,17 @@ views:
             name: Returning for charge
           - entity: device_tracker.your_mower_location
             name: Location
+      - type: markdown
+        content: >-
+          **Per-zone entities** (an enable switch + a cut-height number per zone) are
+          generated from your own map's zones, so they're omitted from this example.
+          After importing, add a `switch.<prefix>_zone_<id>` and
+          `number.<prefix>_zone_<id>_cut_height` row per zone (find the ids on the
+          device page), or manage zones from the **Settings** view.
       - type: entities
-        title: Zones
+        title: Zone order
         show_header_toggle: false
         entities:
-          - entity: switch.your_mower_zone_wsmj
-            name: Zone wsmj
-          - entity: switch.your_mower_zone_kx1k
-            name: Zone KX1k
-          - entity: number.your_mower_zone_wsmj_cut_height
-            name: Zone wsmj Cut Height
-          - entity: number.your_mower_zone_kx1k_cut_height
-            name: Zone KX1k Cut Height
           - entity: select.your_mower_zone_order
             name: Zone order
       - type: custom:lymow-settings-card

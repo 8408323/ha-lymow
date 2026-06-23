@@ -168,9 +168,11 @@ title: My lawn                            # optional
 
 ## Example dashboard
 
-A complete dashboard — **Overview/map, Camera, Drive, Schedules, Backups, Settings, and Diagnostics** (with the RTK section) — is in [`examples/dashboard.yaml`](examples/dashboard.yaml). Every custom card it uses ships with the integration, so it works out of the box.
+A complete dashboard — **Overview/map, Camera, Drive, Schedules, Backups, Settings, and Diagnostics** (with the RTK section) — is in [`examples/dashboard.yaml`](examples/dashboard.yaml). Every custom card it uses ships with the integration.
 
 To use it: **Settings → Dashboards → Add dashboard**, open the new dashboard, then **⋮ → Edit dashboard → ⋮ → Raw configuration editor**, and paste the file. Replace `your_mower` with your mower's entity-id prefix (check its device page, e.g. `sensor.<prefix>_map`).
+
+Two caveats: a few sensors (Wi-Fi RSSI, the RTK detail metrics, …) are **disabled by default** — enable them on the device page if a row shows *unavailable*; and **per-zone** entities depend on your own map, so they're left out of the example.
 
 ## Contributing
 
