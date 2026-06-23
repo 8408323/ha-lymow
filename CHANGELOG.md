@@ -13,6 +13,11 @@ commit history and pull requests. When cutting a release, move items from
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-23
+
+### Added
+- README: example dashboard config for surfacing RTK diagnostics — the App presence / RTK diagnostics toggles plus a "Live RTK detail" card that's hidden (via a `visibility` condition) when RTK diagnostics is off.
+
 ## [0.3.1] - 2026-06-23
 
 ### Fixed
