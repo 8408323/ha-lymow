@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfTime
 from lymow.sensor import (
@@ -62,7 +61,6 @@ def test_rtk_basic_sensor_is_diagnostic_and_enabled_by_default() -> None:
     sensor = LymowSensor(_make_coord(), DEVICE, desc)
     assert sensor.entity_category == EntityCategory.DIAGNOSTIC
     assert sensor.entity_registry_enabled_default is True
-    assert sensor._poll_group == "rtk"
 
 
 def test_rtk_advanced_sensor_is_diagnostic_but_opt_in() -> None:
@@ -72,36 +70,12 @@ def test_rtk_advanced_sensor_is_diagnostic_but_opt_in() -> None:
     sensor = LymowSensor(_make_coord(), DEVICE, desc)
     assert sensor.entity_category == EntityCategory.DIAGNOSTIC
     assert sensor.entity_registry_enabled_default is False
-    assert sensor._poll_group == "rtk"
 
 
-def test_non_rtk_sensor_has_no_poll_group() -> None:
+def test_non_rtk_sensor_is_not_diagnostic() -> None:
     desc = next(d for d in SENSORS if d.key == "battery")
     sensor = LymowSensor(_make_coord(), DEVICE, desc)
-    assert sensor._poll_group is None
     assert sensor.entity_category is None
-
-
-@pytest.mark.asyncio
-async def test_rtk_sensor_registers_and_unregisters_poll_interest() -> None:
-    coord = _make_coord()
-    desc = next(d for d in SENSORS if d.key == "rtk_location_precision")
-    sensor = LymowSensor(coord, DEVICE, desc)
-    await sensor.async_added_to_hass()
-    coord.add_poll_interest.assert_called_once_with(THING, "rtk")
-    await sensor.async_will_remove_from_hass()
-    coord.remove_poll_interest.assert_called_once_with(THING, "rtk")
-
-
-@pytest.mark.asyncio
-async def test_non_rtk_sensor_skips_poll_interest() -> None:
-    coord = _make_coord()
-    desc = next(d for d in SENSORS if d.key == "battery")
-    sensor = LymowSensor(coord, DEVICE, desc)
-    await sensor.async_added_to_hass()
-    await sensor.async_will_remove_from_hass()
-    coord.add_poll_interest.assert_not_called()
-    coord.remove_poll_interest.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

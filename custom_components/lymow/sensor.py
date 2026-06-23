@@ -641,26 +641,16 @@ class LymowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{self._thing_name}_{description.key}"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
-        # RTK diagnostic sensors: group under Diagnostic and keep them fresh via a
-        # keepalive poll — the robot only streams RTK detail while it's being queried.
-        # rtkL1.* are the basic RTK page fields (shown by default); rtkL2.* are the
-        # app's "Advanced / Technical Support" fields (kept opt-in).
-        self._poll_group: str | None = None
+        # RTK diagnostic sensors: group under Diagnostic; the basic RTK page fields
+        # (rtkL1.*) are shown by default, the "Advanced / Technical Support" fields
+        # (rtkL2.*) are opt-in. NOTE: these only populate while the Lymow app's RTK
+        # Diagnostic page is open — the robot streams this detail only for an active
+        # app session and ignores HA's own queries (verified live). HA decodes the
+        # data whenever the app refreshes it.
         if description.key.startswith("rtk_"):
             self._attr_entity_category = EntityCategory.DIAGNOSTIC
-            self._poll_group = "rtk"
             if not description.value_key.startswith("rtkL2."):
                 self._attr_entity_registry_enabled_default = True
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-        if self._poll_group:
-            self.coordinator.add_poll_interest(self._thing_name, self._poll_group)
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._poll_group:
-            self.coordinator.remove_poll_interest(self._thing_name, self._poll_group)
-        await super().async_will_remove_from_hass()
 
     @property
     def native_value(self) -> Any:

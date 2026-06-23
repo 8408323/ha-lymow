@@ -10,7 +10,7 @@ import sys
 import types
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -953,52 +953,6 @@ async def test_startup_query_skipped_when_mqtt_not_connected() -> None:
     coord.hass.async_create_task = _make_task_closer(created)
     await coord._async_update_data()
     assert THING not in coord._startup_queried
-    assert created == []
-
-
-def test_poll_interest_ref_counting() -> None:
-    coord, _, _ = _make_coordinator()
-    assert not coord._wants_poll(THING, "rtk")
-    coord.add_poll_interest(THING, "rtk")
-    coord.add_poll_interest(THING, "rtk")
-    assert coord._wants_poll(THING, "rtk")
-    coord.remove_poll_interest(THING, "rtk")
-    assert coord._wants_poll(THING, "rtk")  # one reference left
-    coord.remove_poll_interest(THING, "rtk")
-    assert not coord._wants_poll(THING, "rtk")
-    coord.remove_poll_interest(THING, "rtk")  # underflow is a no-op
-    assert not coord._wants_poll(THING, "rtk")
-
-
-@pytest.mark.asyncio
-async def test_rtk_keepalive_scheduled_when_interest_registered() -> None:
-    coord, _, _ = _make_coordinator(rest_data={"deviceState": "online"})
-    coord._startup_queried.add(THING)  # isolate from the one-time startup queries
-    coord.add_poll_interest(THING, "rtk")
-    created: list = []
-    coord.hass.async_create_task = _make_task_closer(created)
-    await coord._async_update_data()
-    assert {c.cr_code.co_name for c in created} == {"_rtk_keepalive"}
-
-
-@pytest.mark.asyncio
-async def test_rtk_keepalive_bursts_l1_and_l2() -> None:
-    coord, _, _ = _make_coordinator()
-    coord.async_query_rtk_diagnostic_l1 = AsyncMock()
-    coord.async_query_rtk_diagnostic_l2 = AsyncMock()
-    with patch("asyncio.sleep", new=AsyncMock()):
-        await coord._rtk_keepalive(THING)
-    assert coord.async_query_rtk_diagnostic_l1.await_count == 3
-    assert coord.async_query_rtk_diagnostic_l2.await_count == 3
-
-
-@pytest.mark.asyncio
-async def test_rtk_keepalive_skipped_without_interest() -> None:
-    coord, _, _ = _make_coordinator(rest_data={"deviceState": "online"})
-    coord._startup_queried.add(THING)
-    created: list = []
-    coord.hass.async_create_task = _make_task_closer(created)
-    await coord._async_update_data()
     assert created == []
 
 

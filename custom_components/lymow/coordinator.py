@@ -292,10 +292,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # fired. Without this, restarting HA while the robot is already online
         # never triggers on_mqtt_online, so robotConfig/taskConfig stay unknown.
         self._startup_queried: set[str] = set()
-        # Reference count of enabled entities that need a recurring keepalive query,
-        # keyed by (thing_name, group). RTK diagnostic sensors register interest so
-        # the robot keeps streaming RTK detail (it stops when nothing queries it).
-        self._poll_interest: dict[tuple[str, str], int] = {}
         # Channel names have no protobuf field — store HA-side so renames survive
         # MQTT polls. Keyed by thing_name → {hashId → name}. Lost on HA restart;
         # the card's localStorage covers the browser-side persistence gap.
@@ -699,10 +695,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     self._startup_queried.add(thing)
                     self.hass.async_create_task(self.async_query_robot_config(thing))
                     self.hass.async_create_task(self.async_query_map(thing))
-                # RTK keepalive: while any RTK diagnostic sensor is enabled, re-query each
-                # cycle so the robot keeps streaming RTK detail (it stops when unqueried).
-                if _is_device_online(merged) and self._mqtt.is_connected and self._wants_poll(thing, "rtk"):
-                    self.hass.async_create_task(self._rtk_keepalive(thing))
             return result
         except Exception as err:
             raise UpdateFailed(f"Error fetching Lymow data: {err}") from err
@@ -1413,32 +1405,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_query_rtk_diagnostic_l2(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2)
-
-    def add_poll_interest(self, thing_name: str, group: str) -> None:
-        """Register that an enabled entity needs the recurring keepalive query for ``group``."""
-        key = (thing_name, group)
-        self._poll_interest[key] = self._poll_interest.get(key, 0) + 1
-
-    def remove_poll_interest(self, thing_name: str, group: str) -> None:
-        """Drop one keepalive reference; stop the poll once none remain."""
-        key = (thing_name, group)
-        remaining = self._poll_interest.get(key, 0) - 1
-        if remaining > 0:
-            self._poll_interest[key] = remaining
-        else:
-            self._poll_interest.pop(key, None)
-
-    def _wants_poll(self, thing_name: str, group: str) -> bool:
-        return self._poll_interest.get((thing_name, group), 0) > 0
-
-    async def _rtk_keepalive(self, thing_name: str) -> None:
-        """Re-query RTK diagnostics. L2 replies reliably; L1 (uc=57) only answers
-        intermittently, so send a short burst each cycle to keep it fresh."""
-        for i in range(3):
-            await self.async_query_rtk_diagnostic_l1(thing_name)
-            await self.async_query_rtk_diagnostic_l2(thing_name)
-            if i < 2:
-                await asyncio.sleep(1)
 
     async def async_update_zone_cut_height(self, thing_name: str, hash_id: str, mm: int) -> None:
         """Update cut height for a go-zone and push the map back to the robot."""
