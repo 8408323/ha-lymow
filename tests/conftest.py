@@ -360,6 +360,7 @@ except ImportError:
     # ── homeassistant.components (namespace) ──────────────────────────────────
     _ha_comp = types.ModuleType("homeassistant.components")
     sys.modules.setdefault("homeassistant.components", _ha_comp)
+    _ha_comp.persistent_notification = _ha_pn  # type: ignore[attr-defined]
 
     # ── homeassistant.components.lawn_mower ───────────────────────────────────
     _ha_lm = types.ModuleType("homeassistant.components.lawn_mower")

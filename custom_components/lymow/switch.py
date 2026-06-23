@@ -532,18 +532,19 @@ class AppPresenceSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity, Resto
         await super().async_added_to_hass()
         last = await self.async_get_last_state()
         if last is not None and last.state == "on":
-            self.coordinator.async_set_presence(self._thing_name, True)
+            self.coordinator.set_presence(self._thing_name, True)
+            self.coordinator.async_update_listeners()
 
     @property
     def is_on(self) -> bool:
         return self.coordinator.is_presence_on(self._thing_name)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        self.coordinator.async_set_presence(self._thing_name, True)
+        self.coordinator.set_presence(self._thing_name, True)
         self.coordinator.async_update_listeners()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        self.coordinator.async_set_presence(self._thing_name, False)
+        self.coordinator.set_presence(self._thing_name, False)
         self.coordinator.async_update_listeners()
 
 
@@ -568,14 +569,15 @@ class RtkDiagnosticsPollSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity
         await super().async_added_to_hass()
         last = await self.async_get_last_state()
         if last is not None and last.state == "on":
-            self.coordinator.async_set_rtk_polling(self._thing_name, True)
+            self.coordinator.set_rtk_polling(self._thing_name, True)
+            self.coordinator.async_update_listeners()
 
     @property
     def is_on(self) -> bool:
         return self.coordinator.is_rtk_polling(self._thing_name)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        presence_added = self.coordinator.async_set_rtk_polling(self._thing_name, True)
+        presence_added = self.coordinator.set_rtk_polling(self._thing_name, True)
         if presence_added:
             persistent_notification.async_create(
                 self.hass,
@@ -590,5 +592,5 @@ class RtkDiagnosticsPollSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity
         self.coordinator.async_update_listeners()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        self.coordinator.async_set_rtk_polling(self._thing_name, False)
+        self.coordinator.set_rtk_polling(self._thing_name, False)
         self.coordinator.async_update_listeners()

@@ -338,6 +338,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         failure on one transport can't leak the other's connection.
         """
         await super().async_shutdown()
+        if self._rtk_poll_unsub is not None:
+            self._rtk_poll_unsub()
+            self._rtk_poll_unsub = None
         try:
             await self._mqtt.disconnect()
         finally:
@@ -1420,7 +1423,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     def is_presence_on(self, thing_name: str) -> bool:
         return thing_name in self._presence_things
 
-    def async_set_presence(self, thing_name: str, enabled: bool) -> None:
+    def set_presence(self, thing_name: str, enabled: bool) -> None:
         """Start/stop the app-presence heartbeat for a device. Turning it off also
         stops RTK polling, which can't work without presence."""
         if enabled:
@@ -1433,7 +1436,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     def is_rtk_polling(self, thing_name: str) -> bool:
         return thing_name in self._rtk_poll_things
 
-    def async_set_rtk_polling(self, thing_name: str, enabled: bool) -> bool:
+    def set_rtk_polling(self, thing_name: str, enabled: bool) -> bool:
         """Start/stop RTK diagnostic polling. Enabling it also enables presence (the
         queries only work while the heartbeat registers an app). Returns True if
         presence was newly enabled as a side effect, so the caller can notify."""
