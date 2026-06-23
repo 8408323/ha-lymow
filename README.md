@@ -62,6 +62,17 @@ Each mower device exposes the following entities:
 | Mow progress | % | ✅ |
 | Mow strip count | — | ❌ |
 
+### RTK diagnostics
+
+Detailed RTK GNSS health — location precision, per-band satellite counts and SNR, base-station status, data-error rate, differential age, LoRa bandwidth, antenna gain — is exposed as **Diagnostic** sensors. The robot only streams this detail to a client it sees as a connected app, so two switches control it:
+
+| Switch | What it does |
+|--------|--------------|
+| App presence | Registers HA as a connected app via a periodic heartbeat. Kept separate because registering presence may affect other robot behaviour. |
+| RTK diagnostics | Keeps the RTK sensors live **without the Lymow app open**. Requires App presence — turning it on enables presence automatically and tells you where the presence toggle is. |
+
+Both are **off by default** (they run a continuous MQTT poll). Turn on **RTK diagnostics** to stream live RTK data; turn it off — or turn off **App presence** — to stop.
+
 ### Per-zone entities (one set per configured mowing zone)
 
 | Entity | Description |
