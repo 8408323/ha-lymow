@@ -1006,7 +1006,9 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             label = _RTK_L1_LABELS.get(fno)
             if label is None:
                 continue
-            if _wt == 5 and isinstance(v, int):
+            if label == "baseStationStatus" and isinstance(v, int):
+                l1[label] = "online" if v == 0 else "offline"
+            elif _wt == 5 and isinstance(v, int):
                 l1[label] = round(_decode_f32(v), 4)
             elif isinstance(v, int):
                 l1[label] = _signed32(v)
@@ -1104,7 +1106,8 @@ _RTK_L1_LABELS: dict[int, str] = {
     7: "l1SnrMedian",
     8: "l2SnrMedian",
     9: "l5SnrMedian",
-    10: "dataErrorRatePct",
+    10: "baseStationStatus",
+    11: "dataErrorRatePct",
 }
 _RTK_L2_LABELS: dict[int, str] = {
     1: "differentialAgeSec",

@@ -1871,16 +1871,11 @@ def test_decode_pboutput_no_network_info_when_field_34_absent() -> None:
     assert "networkInfo" not in state
 
 
-def test_decode_pboutput_rtk_diagnostic_l1_field_35() -> None:
-    """PbOutput.f35 rtkL1 — populated by query_rtk_diagnostic_l1.
-
-    Field labels cross-referenced 2026-05-27 against the app's Settings → RTK
-    Diagnostic page. f2 is the Location Precision float, f3-f9 are per-band
-    counts/SNRs, f10 is the data-error-rate percent. f1 (subMsgVersion=2)
-    is intentionally not surfaced — it's a wire marker, not a user signal.
-    """
-    l1 = (
-        _field_i32(1, 2)
+def _rtk_l1_blob(base_status: int = 0) -> bytes:
+    """Build a PbOutput.f35 rtkL1 blob with the live-confirmed wire layout."""
+    return _field_bytes(
+        35,
+        _field_i32(1, 2)  # rtkStatus marker (= rtk_status sensor) — dropped
         + _field_f32(2, 0.01135)
         + _field_i32(3, 23)
         + _field_i32(4, 16)
@@ -1889,12 +1884,16 @@ def test_decode_pboutput_rtk_diagnostic_l1_field_35() -> None:
         + _field_i32(7, 38)
         + _field_i32(8, 34)
         + _field_i32(9, 36)
-        + _field_i32(10, 0)
+        + _field_i32(10, base_status)  # baseStationStatus (0 = online)
+        + _field_f32(11, 0.0),  # dataErrorRatePct
     )
-    pb = _field_bytes(35, l1)
-    state = decode_pboutput(pb)
-    rtk = state["rtkL1"]
-    # Rounded to 4 decimals at decode time.
+
+
+def test_decode_pboutput_rtk_diagnostic_l1_field_35() -> None:
+    """PbOutput.f35 rtkL1 — layout confirmed live against the app's RTK Diagnostic
+    page: f2=precision, f3-f9=per-band counts/SNR, f10=base-station status (0=online),
+    f11=data-error-rate. f1 (rtkStatus) equals the rtk_status sensor, not re-surfaced."""
+    rtk = decode_pboutput(_rtk_l1_blob())["rtkL1"]
     assert rtk["locationPrecisionM"] == pytest.approx(0.0114, abs=1e-4)
     assert rtk["gnssSatellites"] == 23
     assert rtk["l1SatCount"] == 16
@@ -1903,9 +1902,14 @@ def test_decode_pboutput_rtk_diagnostic_l1_field_35() -> None:
     assert rtk["l1SnrMedian"] == 38
     assert rtk["l2SnrMedian"] == 34
     assert rtk["l5SnrMedian"] == 36
-    assert rtk["dataErrorRatePct"] == 0
-    # f1 (subMsgVersion) is intentionally dropped — not a user-facing signal.
+    assert rtk["baseStationStatus"] == "online"
+    assert rtk["dataErrorRatePct"] == pytest.approx(0.0, abs=1e-4)
     assert "subMsgVersion" not in rtk and "f1" not in rtk
+
+
+def test_decode_pboutput_rtk_base_station_offline() -> None:
+    rtk = decode_pboutput(_rtk_l1_blob(base_status=1))["rtkL1"]
+    assert rtk["baseStationStatus"] == "offline"
 
 
 def test_decode_pboutput_rtk_diagnostic_l2_field_36() -> None:

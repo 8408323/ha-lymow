@@ -50,6 +50,35 @@ def test_sensors_all_have_value_key() -> None:
 
 
 # ---------------------------------------------------------------------------
+# RTK diagnostic sensors — diagnostic category + keepalive interest
+# ---------------------------------------------------------------------------
+
+
+def test_rtk_basic_sensor_is_diagnostic_and_enabled_by_default() -> None:
+    from homeassistant.const import EntityCategory
+
+    desc = next(d for d in SENSORS if d.key == "rtk_location_precision")  # rtkL1.* = basic page
+    sensor = LymowSensor(_make_coord(), DEVICE, desc)
+    assert sensor.entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor.entity_registry_enabled_default is True
+
+
+def test_rtk_advanced_sensor_is_diagnostic_but_opt_in() -> None:
+    from homeassistant.const import EntityCategory
+
+    desc = next(d for d in SENSORS if d.key == "rtk_lora_bandwidth_l1")  # rtkL2.* = Technical Support
+    sensor = LymowSensor(_make_coord(), DEVICE, desc)
+    assert sensor.entity_category == EntityCategory.DIAGNOSTIC
+    assert sensor.entity_registry_enabled_default is False
+
+
+def test_non_rtk_sensor_is_not_diagnostic() -> None:
+    desc = next(d for d in SENSORS if d.key == "battery")
+    sensor = LymowSensor(_make_coord(), DEVICE, desc)
+    assert sensor.entity_category is None
+
+
+# ---------------------------------------------------------------------------
 # LymowSensor
 # ---------------------------------------------------------------------------
 

@@ -232,6 +232,12 @@ except ImportError:
         def __class_getitem__(cls, item):
             return cls
 
+        async def async_added_to_hass(self):
+            pass
+
+        async def async_will_remove_from_hass(self):
+            pass
+
     class _DataUpdateCoordinator:
         def __init__(self, hass=None, logger=None, *, name=None, update_interval=None, **kwargs):
             self.hass = hass
@@ -380,7 +386,19 @@ except ImportError:
         suggested_display_precision: int | None = None
 
     class _SensorEntity:
-        pass
+        @property
+        def entity_category(self):
+            if hasattr(self, "_attr_entity_category"):
+                return self._attr_entity_category
+            ed = getattr(self, "entity_description", None)
+            return ed.entity_category if ed is not None else None
+
+        @property
+        def entity_registry_enabled_default(self):
+            if hasattr(self, "_attr_entity_registry_enabled_default"):
+                return self._attr_entity_registry_enabled_default
+            ed = getattr(self, "entity_description", None)
+            return ed.entity_registry_enabled_default if ed is not None else True
 
     _ha_sensor.SensorDeviceClass = _SensorDeviceClass  # type: ignore[attr-defined]
     _ha_sensor.SensorStateClass = _SensorStateClass  # type: ignore[attr-defined]

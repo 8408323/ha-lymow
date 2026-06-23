@@ -235,6 +235,13 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
         entity_registry_enabled_default=False,
     ),
     LymowSensorDescription(
+        key="rtk_base_station_status",
+        name="RTK base station",
+        value_key="rtkL1.baseStationStatus",
+        icon="mdi:radio-tower",
+        entity_registry_enabled_default=False,
+    ),
+    LymowSensorDescription(
         key="rtk_differential_age",
         name="RTK differential age",
         value_key="rtkL2.differentialAgeSec",
@@ -634,6 +641,16 @@ class LymowSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{self._thing_name}_{description.key}"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
+        # RTK diagnostic sensors: group under Diagnostic; the basic RTK page fields
+        # (rtkL1.*) are shown by default, the "Advanced / Technical Support" fields
+        # (rtkL2.*) are opt-in. NOTE: these only populate while the Lymow app's RTK
+        # Diagnostic page is open — the robot streams this detail only for an active
+        # app session and ignores HA's own queries (verified live). HA decodes the
+        # data whenever the app refreshes it.
+        if description.key.startswith("rtk_"):
+            self._attr_entity_category = EntityCategory.DIAGNOSTIC
+            if not description.value_key.startswith("rtkL2."):
+                self._attr_entity_registry_enabled_default = True
 
     @property
     def native_value(self) -> Any:
