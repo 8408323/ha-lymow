@@ -248,9 +248,9 @@ views:
                 name: Total mow sessions
               - entity: sensor.your_mower_total_mow_time
                 name: Total mow time
-              - entity: sensor.your_mower_total_mowed_area
+              - entity: sensor.your_mower_map_area
                 name: Map area
-              - entity: sensor.your_mower_total_mowed_area_history
+              - entity: sensor.your_mower_map_area_history
                 name: Total mowed area (history)
               - entity: sensor.your_mower_mow_schedules
                 name: Mow schedules
@@ -304,43 +304,64 @@ views:
                 name: Self-check
                 show_state: false
                 tap_action:
-                  action: toggle
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_self_check
               - type: button
                 entity: button.your_mower_find_my_robot_play_sound
                 name: Find my robot (play sound)
                 show_state: false
                 tap_action:
-                  action: toggle
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_find_my_robot_play_sound
               - type: button
                 entity: button.your_mower_back_up_map
                 name: Back up map
                 show_state: false
                 tap_action:
-                  action: toggle
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_back_up_map
               - type: button
                 entity: button.your_mower_reset_charging_station
                 name: Reset charging station
                 show_state: false
                 tap_action:
-                  action: toggle
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_reset_charging_station
               - type: button
                 entity: button.your_mower_sync_timezone
                 name: Sync timezone
                 show_state: false
                 tap_action:
-                  action: toggle
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_sync_timezone
               - type: button
-                entity: button.your_mower_force_stop
+                entity: button.your_mower_cancel_task
                 name: Force stop
                 show_state: false
                 tap_action:
-                  action: toggle
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_cancel_task
               - type: button
                 entity: button.your_mower_abort_ota
                 name: Abort OTA
                 show_state: false
                 tap_action:
-                  action: toggle
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_abort_ota
       - type: grid
         cards:
           - type: heading
