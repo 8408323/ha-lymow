@@ -958,30 +958,30 @@ async def test_startup_query_skipped_when_mqtt_not_connected() -> None:
 
 def test_rtk_polling_auto_enables_presence_and_runs_one_timer() -> None:
     coord, _, _ = _make_coordinator()
-    assert coord.async_set_rtk_polling(THING, True) is True  # presence newly enabled
+    assert coord.set_rtk_polling(THING, True) is True  # presence newly enabled
     assert coord.is_rtk_polling(THING) and coord.is_presence_on(THING)
     timer = coord._rtk_poll_unsub
     assert timer is not None  # one shared timer started
-    assert coord.async_set_rtk_polling("thing-2", True) is True
+    assert coord.set_rtk_polling("thing-2", True) is True
     assert coord._rtk_poll_unsub is timer  # not recreated
     # Disabling RTK keeps presence (and the timer keeps sending heartbeats).
-    coord.async_set_rtk_polling(THING, False)
+    coord.set_rtk_polling(THING, False)
     assert not coord.is_rtk_polling(THING) and coord.is_presence_on(THING)
     assert coord._rtk_poll_unsub is timer
 
 
 def test_presence_off_cascades_rtk_off_and_stops_timer() -> None:
     coord, _, _ = _make_coordinator()
-    coord.async_set_rtk_polling(THING, True)  # presence + rtk on
-    coord.async_set_presence(THING, False)  # turning presence off stops RTK too
+    coord.set_rtk_polling(THING, True)  # presence + rtk on
+    coord.set_presence(THING, False)  # turning presence off stops RTK too
     assert not coord.is_presence_on(THING) and not coord.is_rtk_polling(THING)
     assert coord._rtk_poll_unsub is None  # timer stopped once nothing is active
 
 
 def test_set_rtk_polling_returns_false_when_presence_already_on() -> None:
     coord, _, _ = _make_coordinator()
-    coord.async_set_presence(THING, True)
-    assert coord.async_set_rtk_polling(THING, True) is False  # presence not newly added
+    coord.set_presence(THING, True)
+    assert coord.set_rtk_polling(THING, True) is False  # presence not newly added
 
 
 @pytest.mark.asyncio
@@ -1159,6 +1159,16 @@ async def test_async_shutdown_disconnects_mqtt() -> None:
     coord, mqtt, _ = _make_coordinator()
     await coord.async_shutdown()
     mqtt.disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_async_shutdown_stops_rtk_poll_timer() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.set_presence(THING, True)  # starts the poll timer
+    unsub = coord._rtk_poll_unsub = MagicMock()
+    await coord.async_shutdown()
+    unsub.assert_called_once()  # timer unsubscribed, no leaked callback
+    assert coord._rtk_poll_unsub is None
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,12 @@ commit history and pull requests. When cutting a release, move items from
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-23
+
+### Fixed
+- The RTK / app-presence poll timer is now stopped when the integration unloads (no leaked callback on reload).
+- The **App presence** and **RTK diagnostics** switches refresh each other when their state is restored at startup.
+
 ## [0.3.0] - 2026-06-23
 
 First feature release since the initial HACS publish (v0.1.0).
