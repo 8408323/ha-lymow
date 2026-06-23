@@ -1,0 +1,434 @@
+# Example Home Assistant dashboard for the Lymow integration.
+#
+# Replace 'your_mower' with your mower's entity-id prefix (check its device page,
+# e.g. sensor.<prefix>_map). All custom cards used here ship with the integration.
+#
+# Notes:
+#  - Some sensors (Wi-Fi RSSI, the RTK detail metrics, etc.) are disabled by default.
+#    If a row shows "unavailable", enable that entity on the device page.
+#  - Per-zone entities depend on your own map, so they aren't included (see the
+#    Overview view's note).
+#
+# To use: Settings > Dashboards > Add dashboard > Open it > top-right menu >
+# Edit dashboard > top-right menu > Raw configuration editor > paste this file.
+
+views:
+  - title: Overview
+    path: map
+    icon: mdi:robot-mower
+    cards:
+      - type: custom:lymow-map-card
+        entity: sensor.your_mower_map
+        mower_entity: lawn_mower.your_mower
+        schedule_entity: sensor.your_mower_mow_schedules
+        title: Lymow map
+        rtk_autopause: false
+      - type: entities
+        title: Status
+        show_header_toggle: false
+        entities:
+          - entity: lawn_mower.your_mower
+            name: Mower
+          - entity: sensor.your_mower_battery
+            name: Battery
+          - entity: sensor.your_mower_mow_progress
+            name: Mow progress
+          - entity: sensor.your_mower_remaining_area
+            name: Remaining area
+          - entity: sensor.your_mower_mission_time
+            name: Mission time
+          - entity: sensor.your_mower_rtk_status
+            name: RTK status
+          - entity: sensor.your_mower_connectivity
+            name: Connectivity
+          - entity: binary_sensor.your_mower_charging
+            name: Charging
+          - entity: binary_sensor.your_mower_returning_for_charge
+            name: Returning for charge
+          - entity: device_tracker.your_mower_location
+            name: Location
+      - type: markdown
+        content: >-
+          **Per-zone entities** (an enable switch + a cut-height number per zone) are
+          generated from your own map's zones, so they're omitted from this example.
+          After importing, add a `switch.<prefix>_zone_<id>` and
+          `number.<prefix>_zone_<id>_cut_height` row per zone (find the ids on the
+          device page), or manage zones from the **Settings** view.
+      - type: entities
+        title: Zone order
+        show_header_toggle: false
+        entities:
+          - entity: select.your_mower_zone_order
+            name: Zone order
+      - type: custom:lymow-settings-card
+        mower_entity: lawn_mower.your_mower
+        title: Mowing controls
+        sections:
+          - run_time
+          - zone_config
+          - start_zone
+          - resume
+  - title: Camera
+    path: camera
+    icon: mdi:cctv
+    cards:
+      - type: custom:lymow-camera-card
+        mower_entity: lawn_mower.your_mower
+        camera_entity: camera.your_mower_camera
+        title: Lymow camera
+        default_source: lan
+  - title: Drive
+    path: drive
+    icon: mdi:gamepad-variant
+    cards:
+      - type: custom:lymow-drive-card
+        mower_entity: lawn_mower.your_mower
+        camera_entity: camera.your_mower_camera
+        title: Drive
+  - title: Schedules
+    path: schedules
+    icon: mdi:calendar-clock
+    cards:
+      - type: custom:lymow-schedule-card
+        mower_entity: lawn_mower.your_mower
+  - title: Backups
+    path: backups
+    icon: mdi:cloud-upload
+    cards:
+      - type: custom:lymow-backup-card
+        mower_entity: lawn_mower.your_mower
+      - type: entities
+        title: Backup status
+        show_header_toggle: false
+        entities:
+          - entity: sensor.your_mower_latest_map_backup
+            name: Latest map backup
+          - entity: sensor.your_mower_backup_maps
+            name: Backup maps
+  - title: Settings
+    path: settings
+    icon: mdi:cog
+    type: sections
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Mowing
+            icon: mdi:mower
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: select.your_mower_return_to_dock_route
+                name: Return-to-dock route
+              - entity: switch.your_mower_rainy_mowing
+                name: Rainy mowing
+              - entity: switch.your_mower_charging_handbrake
+                name: Charging handbrake
+              - entity: switch.your_mower_auto_dock_on_error
+                name: Auto-dock on error
+              - entity: switch.your_mower_rtk_auto_pause
+                name: RTK auto-pause
+      - type: grid
+        cards:
+          - type: heading
+            heading: Charging & resume
+            icon: mdi:battery-charging
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: switch.your_mower_recharge_resume
+                name: Recharge & resume
+              - entity: number.your_mower_recharge_threshold
+                name: Recharge threshold
+              - entity: number.your_mower_resume_threshold
+                name: Resume threshold
+      - type: grid
+        cards:
+          - type: heading
+            heading: Device
+            icon: mdi:tune
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: number.your_mower_volume
+                name: Volume
+              - entity: switch.your_mower_vehicle_led
+                name: Vehicle LED
+              - entity: switch.your_mower_find_robot_beep
+                name: Find robot beep
+              - entity: switch.your_mower_prefer_4g
+                name: Prefer 4G
+      - type: grid
+        cards:
+          - type: heading
+            heading: Notifications
+            icon: mdi:bell
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: switch.your_mower_alerts_only
+                name: Alerts only
+              - entity: switch.your_mower_mobile_notifications
+                name: Mobile notifications
+      - type: grid
+        cards:
+          - type: heading
+            heading: Security
+            icon: mdi:shield-home
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: switch.your_mower_theft_detection
+                name: Theft detection
+              - entity: switch.your_mower_theft_lock
+                name: Theft lock
+              - entity: number.your_mower_geofence_radius
+                name: Geofence radius
+              - entity: binary_sensor.your_mower_device_locked
+                name: Device locked
+              - entity: binary_sensor.your_mower_stolen_alert
+                name: Stolen alert
+              - entity: button.your_mower_lock
+                name: Lock
+      - type: grid
+        cards:
+          - type: heading
+            heading: Firmware
+            icon: mdi:chip
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: update.your_mower_firmware
+                name: Firmware
+              - entity: sensor.your_mower_firmware_version
+                name: Firmware version
+              - entity: sensor.your_mower_minimum_firmware
+                name: Minimum firmware
+              - entity: update.lymow_update
+                name: Lymow Update
+      - type: grid
+        cards:
+          - type: heading
+            heading: Advanced
+            icon: mdi:cog-outline
+          - type: custom:lymow-settings-card
+            mower_entity: lawn_mower.your_mower
+            title: Advanced
+            sections:
+              - headlight
+              - device
+              - pin
+              - rtk
+              - wifi
+              - geofence
+            config:
+              title: Settings
+  - title: Diagnostics
+    path: diagnostics
+    icon: mdi:stethoscope
+    type: sections
+    sections:
+      - type: grid
+        cards:
+          - type: heading
+            heading: Mow statistics
+            icon: mdi:chart-box
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.your_mower_last_mow
+                name: Last mow
+              - entity: sensor.your_mower_last_mow_area
+                name: Last mow area
+              - entity: sensor.your_mower_last_mow_duration
+                name: Last mow duration
+              - entity: sensor.your_mower_last_mow_battery_used
+                name: Last mow battery used
+              - entity: sensor.your_mower_total_mow_sessions
+                name: Total mow sessions
+              - entity: sensor.your_mower_total_mow_time
+                name: Total mow time
+              - entity: sensor.your_mower_map_area
+                name: Map area
+              - entity: sensor.your_mower_total_mowed_area_history
+                name: Total mowed area (history)
+              - entity: sensor.your_mower_mow_schedules
+                name: Mow schedules
+      - type: grid
+        cards:
+          - type: heading
+            heading: Connectivity & network
+            icon: mdi:wifi
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.your_mower_ip_address
+                name: IP address
+              - entity: sensor.your_mower_wi_fi_rssi
+                name: Wi-Fi RSSI
+              - entity: sensor.your_mower_wi_fi_signal
+                name: Wi-Fi signal
+              - entity: sensor.your_mower_lte_signal
+                name: LTE signal
+              - entity: sensor.your_mower_sim_id
+                name: SIM ID
+              - entity: sensor.your_mower_bluetooth_name
+                name: Bluetooth name
+      - type: grid
+        cards:
+          - type: heading
+            heading: Device info
+            icon: mdi:information
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: sensor.your_mower_model
+                name: Model
+              - entity: sensor.your_mower_serial_number
+                name: Serial number
+              - entity: sensor.your_mower_robot_state_raw
+                name: Robot state (raw)
+              - entity: sensor.your_mower_error_code
+                name: Error code
+      - type: grid
+        cards:
+          - type: heading
+            heading: Actions
+            icon: mdi:gesture-tap-button
+          - type: grid
+            columns: 2
+            square: false
+            cards:
+              - type: button
+                entity: button.your_mower_self_check
+                name: Self-check
+                show_state: false
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_self_check
+              - type: button
+                entity: button.your_mower_find_my_robot_play_sound
+                name: Find my robot (play sound)
+                show_state: false
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_find_my_robot_play_sound
+              - type: button
+                entity: button.your_mower_back_up_map
+                name: Back up map
+                show_state: false
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_back_up_map
+              - type: button
+                entity: button.your_mower_reset_charging_station
+                name: Reset charging station
+                show_state: false
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_reset_charging_station
+              - type: button
+                entity: button.your_mower_sync_timezone
+                name: Sync timezone
+                show_state: false
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_sync_timezone
+              - type: button
+                entity: button.your_mower_cancel_task
+                name: Force stop
+                show_state: false
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_cancel_task
+              - type: button
+                entity: button.your_mower_abort_ota
+                name: Abort OTA
+                show_state: false
+                tap_action:
+                  action: perform-action
+                  perform_action: button.press
+                  target:
+                    entity_id: button.your_mower_abort_ota
+      - type: grid
+        cards:
+          - type: heading
+            heading: RTK diagnostics
+            icon: mdi:satellite-uplink
+          - type: entities
+            show_header_toggle: false
+            entities:
+              - entity: switch.your_mower_app_presence
+                name: App presence (heartbeat)
+              - entity: switch.your_mower_rtk_diagnostics
+                name: RTK diagnostics retrieval
+              - entity: sensor.your_mower_rtk_status
+                name: RTK status
+              - entity: sensor.your_mower_rtk_satellites
+                name: RTK satellites
+          - type: entities
+            title: Live RTK detail
+            show_header_toggle: false
+            visibility:
+              - condition: state
+                entity: switch.your_mower_rtk_diagnostics
+                state: 'on'
+            entities:
+              - entity: sensor.your_mower_location_precision
+                name: Location precision
+              - entity: sensor.your_mower_gnss_satellites
+                name: GNSS satellites
+              - entity: sensor.your_mower_rtk_base_station
+                name: Base station
+              - entity: sensor.your_mower_rtk_data_error_rate
+                name: Data error rate
+              - entity: sensor.your_mower_rtk_differential_age
+                name: Differential age
+              - entity: sensor.your_mower_l1_snr
+                name: SNR L1
+              - entity: sensor.your_mower_l2_snr
+                name: SNR L2
+              - entity: sensor.your_mower_l5_snr
+                name: SNR L5
+              - entity: sensor.your_mower_l1_satellites
+                name: Satellites L1
+              - entity: sensor.your_mower_l2_satellites
+                name: Satellites L2
+              - entity: sensor.your_mower_l5_satellites
+                name: Satellites L5
+              - entity: sensor.your_mower_rtk_cw_interference_l1
+                name: CW interference L1
+              - entity: sensor.your_mower_rtk_cw_interference_l2
+                name: CW interference L2
+              - entity: sensor.your_mower_rtk_cw_interference_l5
+                name: CW interference L5
+              - entity: sensor.your_mower_rtk_antenna_gain_l1
+                name: Antenna gain L1
+              - entity: sensor.your_mower_rtk_antenna_gain_l2
+                name: Antenna gain L2
+              - entity: sensor.your_mower_rtk_antenna_gain_l5
+                name: Antenna gain L5
+              - entity: sensor.your_mower_rtk_dc_voltage_l1
+                name: DC voltage L1
+              - entity: sensor.your_mower_rtk_dc_voltage_l2
+                name: DC voltage L2
+              - entity: sensor.your_mower_rtk_dc_voltage_l5
+                name: DC voltage L5
+              - entity: sensor.your_mower_lora_bandwidth_l1
+                name: LoRa bandwidth L1
+              - entity: sensor.your_mower_lora_bandwidth_l2
+                name: LoRa bandwidth L2
+              - entity: sensor.your_mower_lora_bandwidth_l5
+                name: LoRa bandwidth L5

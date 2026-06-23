@@ -13,6 +13,11 @@ commit history and pull requests. When cutting a release, move items from
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-06-23
+
+### Added
+- `examples/dashboard.yaml` — a complete, importable example dashboard (Overview/map, Camera, Drive, Schedules, Backups, Settings, Diagnostics + RTK). Every custom card it uses ships with the integration; README explains how to import it.
+
 ## [0.3.2] - 2026-06-23
 
 ### Added

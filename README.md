@@ -166,6 +166,14 @@ title: My lawn                            # optional
 - **View mode** — tap a go-zone to select it, then *Mow selected*.
 - **Edit mode** — tap *Edit map*, tap a go-zone, then drag the vertex handles, tap an edge **+** to insert a vertex or a vertex's **✕** to delete one, and *Save* (writes via `lymow.update_zone_polygon`).
 
+## Example dashboard
+
+A complete dashboard — **Overview/map, Camera, Drive, Schedules, Backups, Settings, and Diagnostics** (with the RTK section) — is in [`examples/dashboard.yaml`](examples/dashboard.yaml). Every custom card it uses ships with the integration.
+
+To use it: **Settings → Dashboards → Add dashboard**, open the new dashboard, then **⋮ → Edit dashboard → ⋮ → Raw configuration editor**, and paste the file. Replace `your_mower` with your mower's entity-id prefix (check its device page, e.g. `sensor.<prefix>_map`).
+
+Two caveats: a few sensors (Wi-Fi RSSI, the RTK detail metrics, …) are **disabled by default** — enable them on the device page if a row shows *unavailable*; and **per-zone** entities depend on your own map, so they're left out of the example.
+
 ## Contributing
 
 Pull requests are welcome. Please open an issue first to discuss what you'd like to change.
