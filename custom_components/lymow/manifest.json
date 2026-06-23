@@ -1,7 +1,7 @@
 {
   "domain": "lymow",
   "name": "Lymow",
-  "after_dependencies": ["http"],
+  "after_dependencies": ["http", "lovelace"],
   "codeowners": ["@8408323"],
   "config_flow": true,
   "dependencies": ["bluetooth", "ffmpeg"],
