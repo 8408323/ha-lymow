@@ -956,6 +956,63 @@ async def test_startup_query_skipped_when_mqtt_not_connected() -> None:
     assert created == []
 
 
+def test_rtk_polling_auto_enables_presence_and_runs_one_timer() -> None:
+    coord, _, _ = _make_coordinator()
+    assert coord.async_set_rtk_polling(THING, True) is True  # presence newly enabled
+    assert coord.is_rtk_polling(THING) and coord.is_presence_on(THING)
+    timer = coord._rtk_poll_unsub
+    assert timer is not None  # one shared timer started
+    assert coord.async_set_rtk_polling("thing-2", True) is True
+    assert coord._rtk_poll_unsub is timer  # not recreated
+    # Disabling RTK keeps presence (and the timer keeps sending heartbeats).
+    coord.async_set_rtk_polling(THING, False)
+    assert not coord.is_rtk_polling(THING) and coord.is_presence_on(THING)
+    assert coord._rtk_poll_unsub is timer
+
+
+def test_presence_off_cascades_rtk_off_and_stops_timer() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.async_set_rtk_polling(THING, True)  # presence + rtk on
+    coord.async_set_presence(THING, False)  # turning presence off stops RTK too
+    assert not coord.is_presence_on(THING) and not coord.is_rtk_polling(THING)
+    assert coord._rtk_poll_unsub is None  # timer stopped once nothing is active
+
+
+def test_set_rtk_polling_returns_false_when_presence_already_on() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.async_set_presence(THING, True)
+    assert coord.async_set_rtk_polling(THING, True) is False  # presence not newly added
+
+
+@pytest.mark.asyncio
+async def test_rtk_poll_once_heartbeat_only_vs_with_queries() -> None:
+    from lymow.protocol import encode_app_connect_heartbeat
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.async_query_rtk_diagnostic_l1 = AsyncMock()
+    coord.async_query_rtk_diagnostic_l2 = AsyncMock()
+    await coord._rtk_poll_once(THING, query_rtk=False)  # presence only
+    mqtt.async_publish_command.assert_awaited_once_with(THING, encode_app_connect_heartbeat(coord._rtk_session_id))
+    coord.async_query_rtk_diagnostic_l1.assert_not_awaited()
+    await coord._rtk_poll_once(THING, query_rtk=True)  # presence + queries
+    coord.async_query_rtk_diagnostic_l1.assert_awaited_once_with(THING)
+    coord.async_query_rtk_diagnostic_l2.assert_awaited_once_with(THING)
+
+
+@pytest.mark.asyncio
+async def test_rtk_poll_tick_schedules_presence_things_when_online() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._presence_things.add(THING)
+    created: list = []
+    coord.hass.async_create_task = _make_task_closer(created)
+    coord.data = {THING: {"deviceState": "offline"}}
+    coord._rtk_poll_tick(None)
+    assert created == []
+    coord.data = {THING: {"deviceState": "online"}}
+    coord._rtk_poll_tick(None)
+    assert {c.cr_code.co_name for c in created} == {"_rtk_poll_once"}
+
+
 @pytest.mark.asyncio
 async def test_async_query_all_robot_configs_queries_and_marks_each_device() -> None:
     devices = [{"deviceThingName": "mower-001"}, {"deviceThingName": "mower-002"}]

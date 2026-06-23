@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.components import persistent_notification
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -40,6 +43,8 @@ async def async_setup_entry(
                 ChargingHandbrakeSwitch(coordinator, device),
                 RechargeResumeSwitch(coordinator, device),
                 RtkAutoPauseSwitch(coordinator, device),
+                AppPresenceSwitch(coordinator, device),
+                RtkDiagnosticsPollSwitch(coordinator, device),
             ]
         )
     if feature_entities:
@@ -502,3 +507,88 @@ class RtkAutoPauseSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity):
     async def async_turn_off(self, **kwargs: Any) -> None:
         self.coordinator.set_rtk_guard_enabled(self._thing_name, False)
         self.async_write_ha_state()
+
+
+class AppPresenceSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity, RestoreEntity):
+    """Send the app-presence heartbeat so the robot treats HA like a connected app.
+
+    Separate from RTK polling because registering presence may affect other robot
+    behaviour (it thinks an app is watching). Off by default. Turning it off also
+    stops RTK diagnostics, which can't work without presence.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "App presence"
+    _attr_icon = "mdi:cellphone-link"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_app_presence"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state == "on":
+            self.coordinator.async_set_presence(self._thing_name, True)
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.is_presence_on(self._thing_name)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        self.coordinator.async_set_presence(self._thing_name, True)
+        self.coordinator.async_update_listeners()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator.async_set_presence(self._thing_name, False)
+        self.coordinator.async_update_listeners()
+
+
+class RtkDiagnosticsPollSwitch(CoordinatorEntity[LymowCoordinator], SwitchEntity, RestoreEntity):
+    """Retrieve RTK diagnostics continuously (queries L1+L2 on a fast timer) so the
+    RTK sensors stay live without the Lymow app. Requires App presence; enabling
+    this auto-enables it. Off by default — it's continuous MQTT traffic.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "RTK diagnostics"
+    _attr_icon = "mdi:radio-tower"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_rtk_diagnostics_poll"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is not None and last.state == "on":
+            self.coordinator.async_set_rtk_polling(self._thing_name, True)
+
+    @property
+    def is_on(self) -> bool:
+        return self.coordinator.is_rtk_polling(self._thing_name)
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        presence_added = self.coordinator.async_set_rtk_polling(self._thing_name, True)
+        if presence_added:
+            persistent_notification.async_create(
+                self.hass,
+                "RTK diagnostics retrieval also turned on the **App presence** switch — "
+                "the robot only streams RTK detail while it thinks an app is connected. "
+                "You'll find it next to RTK diagnostics under this mower's Diagnostic "
+                "controls. To stop everything, turn **App presence** off; to keep presence "
+                "but stop the RTK queries, just turn **RTK diagnostics** off.",
+                title="Lymow: App presence enabled for RTK",
+                notification_id=f"lymow_rtk_presence_{self._thing_name}",
+            )
+        self.coordinator.async_update_listeners()
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        self.coordinator.async_set_rtk_polling(self._thing_name, False)
+        self.coordinator.async_update_listeners()

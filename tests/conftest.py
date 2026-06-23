@@ -264,6 +264,34 @@ except ImportError:
     _ha_uc.UpdateFailed = _UpdateFailed  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.update_coordinator", _ha_uc)
 
+    # ── homeassistant.helpers.event ───────────────────────────────────────────
+    _ha_ev = types.ModuleType("homeassistant.helpers.event")
+
+    def _async_track_time_interval(hass, action, interval, *args, **kwargs):
+        return lambda: None  # no-op unsubscribe; tests patch this when they assert on it
+
+    _ha_ev.async_track_time_interval = _async_track_time_interval  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.event", _ha_ev)
+
+    # ── homeassistant.helpers.restore_state ───────────────────────────────────
+    _ha_rs = types.ModuleType("homeassistant.helpers.restore_state")
+
+    class _RestoreEntity:
+        async def async_get_last_state(self):
+            return getattr(self, "_test_last_state", None)
+
+    _ha_rs.RestoreEntity = _RestoreEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.restore_state", _ha_rs)
+
+    # ── homeassistant.components.persistent_notification ──────────────────────
+    _ha_pn = types.ModuleType("homeassistant.components.persistent_notification")
+
+    def _pn_async_create(hass, message, title=None, notification_id=None):
+        getattr(hass, "_notifications", []).append((title, message, notification_id))
+
+    _ha_pn.async_create = _pn_async_create  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.persistent_notification", _ha_pn)
+
     # ── homeassistant.helpers.entity_platform ─────────────────────────────────
     _ha_ep = types.ModuleType("homeassistant.helpers.entity_platform")
     _ha_ep.AddEntitiesCallback = None  # type: ignore[attr-defined]

@@ -1827,6 +1827,17 @@ def encode_set_device_settings(
     return pb
 
 
+def encode_app_connect_heartbeat(session_id: str) -> bytes:
+    """Encode the app-presence heartbeat the app sends to register as connected.
+
+    Wire layout from APK/Hermes `heartbeat` (fn #8981): PbInput{appConnect = field 7
+    = ConnectToggle.TOGGLE_CONNECTED (2), uuid = field 27 (string)}. No version field.
+    The robot only streams RTK diagnostics to a client that keeps sending this — so
+    HA must send it (plus the queries) to pull RTK detail without the app open.
+    """
+    return _field_i32(7, 2) + _field_bytes(27, session_id.encode())
+
+
 def encode_query_map(queryIndex: int = 0) -> bytes:
     """Encode a query-map command (userCtrl=19)."""
     sub = _field_i32(1, queryIndex) + _field_i32(4, 1)

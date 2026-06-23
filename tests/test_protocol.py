@@ -3617,6 +3617,18 @@ def test_encode_set_nogo_polygon_uses_nogo_field() -> None:
     assert _decode_map_polygon(_first(bi, 5)) == poly
 
 
+def test_encode_app_connect_heartbeat_registers_presence() -> None:
+    """App-presence heartbeat (PbInput{f7=TOGGLE_CONNECTED, f27=uuid}, no version) —
+    sending this is what unlocks the robot's RTK diagnostic stream for HA."""
+    from lymow.protocol import encode_app_connect_heartbeat
+
+    pb = encode_app_connect_heartbeat("sess123")
+    f = _decode_fields(pb)
+    assert _first(f, 7) == 2  # appConnect = ConnectToggle.TOGGLE_CONNECTED
+    assert _first(f, 27).decode() == "sess123"  # uuid
+    assert _first(f, 2) is None  # no version field, matching the app's heartbeat
+
+
 def test_encode_merge_zones_matches_app_wire_format() -> None:
     """Firmware-gated native merge (robot ignores it today) — byte-exact from APK setMergeZone."""
     from lymow.protocol import encode_merge_zones
