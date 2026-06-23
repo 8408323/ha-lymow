@@ -11,6 +11,10 @@ REGION_CHOICES = [REGION_AUTO, "eu-west-1", "us-east-2", "ap-southeast-2", "ap-e
 
 # How often to poll REST device state (MQTT keeps live state between polls)
 POLLING_INTERVAL = 30  # seconds
+# How often to send the app-presence heartbeat + RTK diagnostic queries while the
+# RTK diagnostics switch is on. The robot only streams RTK detail to a client that
+# keeps registering presence; ~5s sustains it without the Lymow app open.
+RTK_DIAGNOSTIC_POLL_SECONDS = 5
 
 # Refresh Cognito tokens / AWS credentials this many seconds before they expire.
 # Without refresh the access token lapses (~24 h) and every REST poll 401s, taking

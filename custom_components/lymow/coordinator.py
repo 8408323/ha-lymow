@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
@@ -19,6 +21,7 @@ from .const import (
     AUTH_REFRESH_MARGIN_SECONDS,
     DOMAIN,
     POLLING_INTERVAL,
+    RTK_DIAGNOSTIC_POLL_SECONDS,
     USER_CTRL_CLEAN,
     USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_PAUSE,
@@ -45,6 +48,7 @@ from .const import (
 from .mqtt import LymowMqttClient
 from .protocol import (
     decode_backup_map,
+    encode_app_connect_heartbeat,
     encode_complete_zone_partition,
     encode_delete_zone,
     encode_modify_zone_start,
@@ -292,6 +296,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # fired. Without this, restarting HA while the robot is already online
         # never triggers on_mqtt_online, so robotConfig/taskConfig stay unknown.
         self._startup_queried: set[str] = set()
+        # RTK diagnostics polling: while a device's switch is on, send the app-presence
+        # heartbeat + RTK queries on a fast timer so the robot streams RTK detail
+        # (it only streams to a client that keeps registering presence — see protocol).
+        self._presence_things: set[str] = set()
+        self._rtk_poll_things: set[str] = set()
+        self._rtk_poll_unsub: Any = None
+        self._rtk_session_id = uuid.uuid4().hex
         # Channel names have no protobuf field — store HA-side so renames survive
         # MQTT polls. Keyed by thing_name → {hashId → name}. Lost on HA restart;
         # the card's localStorage covers the browser-side persistence gap.
@@ -1405,6 +1416,61 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_query_rtk_diagnostic_l2(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2)
+
+    def is_presence_on(self, thing_name: str) -> bool:
+        return thing_name in self._presence_things
+
+    def async_set_presence(self, thing_name: str, enabled: bool) -> None:
+        """Start/stop the app-presence heartbeat for a device. Turning it off also
+        stops RTK polling, which can't work without presence."""
+        if enabled:
+            self._presence_things.add(thing_name)
+        else:
+            self._presence_things.discard(thing_name)
+            self._rtk_poll_things.discard(thing_name)  # RTK requires presence
+        self._ensure_poll_timer()
+
+    def is_rtk_polling(self, thing_name: str) -> bool:
+        return thing_name in self._rtk_poll_things
+
+    def async_set_rtk_polling(self, thing_name: str, enabled: bool) -> bool:
+        """Start/stop RTK diagnostic polling. Enabling it also enables presence (the
+        queries only work while the heartbeat registers an app). Returns True if
+        presence was newly enabled as a side effect, so the caller can notify."""
+        presence_added = False
+        if enabled:
+            self._rtk_poll_things.add(thing_name)
+            if thing_name not in self._presence_things:
+                self._presence_things.add(thing_name)
+                presence_added = True
+        else:
+            self._rtk_poll_things.discard(thing_name)
+        self._ensure_poll_timer()
+        return presence_added
+
+    def _ensure_poll_timer(self) -> None:
+        active = bool(self._presence_things or self._rtk_poll_things)
+        if active and self._rtk_poll_unsub is None:
+            self._rtk_poll_unsub = async_track_time_interval(
+                self.hass, self._rtk_poll_tick, timedelta(seconds=RTK_DIAGNOSTIC_POLL_SECONDS)
+            )
+        elif not active and self._rtk_poll_unsub is not None:
+            self._rtk_poll_unsub()
+            self._rtk_poll_unsub = None
+
+    @callback
+    def _rtk_poll_tick(self, _now: datetime) -> None:
+        for thing in self._presence_things | self._rtk_poll_things:
+            data = (self.data or {}).get(thing, {})
+            if _is_device_online(data) and self._mqtt.is_connected:
+                self.hass.async_create_task(self._rtk_poll_once(thing, thing in self._rtk_poll_things))
+
+    async def _rtk_poll_once(self, thing_name: str, query_rtk: bool) -> None:
+        """One cycle: register app presence; also query RTK L1+L2 when polling is on."""
+        await self._mqtt.async_publish_command(thing_name, encode_app_connect_heartbeat(self._rtk_session_id))
+        if query_rtk:
+            await self.async_query_rtk_diagnostic_l1(thing_name)
+            await self.async_query_rtk_diagnostic_l2(thing_name)
 
     async def async_update_zone_cut_height(self, thing_name: str, hash_id: str, mm: int) -> None:
         """Update cut height for a go-zone and push the map back to the robot."""

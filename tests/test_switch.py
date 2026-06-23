@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from lymow.switch import (
+    AppPresenceSwitch,
     FindRobotSwitch,
+    RtkDiagnosticsPollSwitch,
     TheftDetectionSwitch,
     TheftLockSwitch,
     VehicleLedSwitch,
@@ -877,3 +880,91 @@ async def test_recharge_resume_switch_turn_on_off_calls_coordinator() -> None:
     coord2 = _make_rr_coord({"enable": True})
     await RechargeResumeSwitch(coord2, DEVICE).async_turn_off()
     coord2.async_set_recharge_resume.assert_awaited_once_with(THING, enable=False)
+
+
+# ---------------------------------------------------------------------------
+# RtkDiagnosticsPollSwitch
+# ---------------------------------------------------------------------------
+
+
+def _make_poll_coord(polling: bool = False, presence: bool = False) -> MagicMock:
+    coord = MagicMock()
+    coord.data = {THING: {}}
+    coord.devices = [DEVICE]
+    coord.is_rtk_polling = MagicMock(return_value=polling)
+    coord.is_presence_on = MagicMock(return_value=presence)
+    coord.async_set_rtk_polling = MagicMock(return_value=False)
+    coord.async_set_presence = MagicMock()
+    return coord
+
+
+def test_rtk_diag_switch_is_on_reflects_coordinator() -> None:
+    assert RtkDiagnosticsPollSwitch(_make_poll_coord(True), DEVICE).is_on is True
+    assert RtkDiagnosticsPollSwitch(_make_poll_coord(False), DEVICE).is_on is False
+
+
+@pytest.mark.asyncio
+async def test_rtk_diag_switch_turn_on_off_toggles_polling() -> None:
+    coord = _make_poll_coord()
+    sw = RtkDiagnosticsPollSwitch(coord, DEVICE)
+    sw.hass = MagicMock(_notifications=[])
+    sw.async_write_ha_state = MagicMock()
+    await sw.async_turn_on()
+    coord.async_set_rtk_polling.assert_called_with(THING, True)
+    assert sw.hass._notifications == []
+    await sw.async_turn_off()
+    coord.async_set_rtk_polling.assert_called_with(THING, False)
+
+
+@pytest.mark.asyncio
+async def test_rtk_diag_switch_notifies_when_it_enables_presence() -> None:
+    coord = _make_poll_coord()
+    coord.async_set_rtk_polling = MagicMock(return_value=True)
+    sw = RtkDiagnosticsPollSwitch(coord, DEVICE)
+    sw.hass = MagicMock(_notifications=[])
+    sw.async_write_ha_state = MagicMock()
+    await sw.async_turn_on()
+    assert len(sw.hass._notifications) == 1
+
+
+def test_app_presence_switch_is_on_reflects_coordinator() -> None:
+    assert AppPresenceSwitch(_make_poll_coord(presence=True), DEVICE).is_on is True
+    assert AppPresenceSwitch(_make_poll_coord(presence=False), DEVICE).is_on is False
+
+
+@pytest.mark.asyncio
+async def test_app_presence_switch_turn_on_off() -> None:
+    coord = _make_poll_coord()
+    sw = AppPresenceSwitch(coord, DEVICE)
+    sw.async_write_ha_state = MagicMock()
+    await sw.async_turn_on()
+    coord.async_set_presence.assert_called_with(THING, True)
+    await sw.async_turn_off()
+    coord.async_set_presence.assert_called_with(THING, False)
+
+
+@pytest.mark.asyncio
+async def test_app_presence_switch_restores_on_state() -> None:
+    coord = _make_poll_coord()
+    sw = AppPresenceSwitch(coord, DEVICE)
+    sw._test_last_state = MagicMock(state="on")
+    await sw.async_added_to_hass()
+    coord.async_set_presence.assert_called_once_with(THING, True)
+
+
+@pytest.mark.asyncio
+async def test_rtk_diag_switch_restores_on_state() -> None:
+    coord = _make_poll_coord()
+    sw = RtkDiagnosticsPollSwitch(coord, DEVICE)
+    sw._test_last_state = MagicMock(state="on")
+    await sw.async_added_to_hass()
+    coord.async_set_rtk_polling.assert_called_once_with(THING, True)
+
+
+@pytest.mark.asyncio
+async def test_rtk_diag_switch_no_restore_when_absent() -> None:
+    coord = _make_poll_coord()
+    sw = RtkDiagnosticsPollSwitch(coord, DEVICE)
+    sw._test_last_state = None
+    await sw.async_added_to_hass()
+    coord.async_set_rtk_polling.assert_not_called()
