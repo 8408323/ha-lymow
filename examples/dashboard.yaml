@@ -250,7 +250,7 @@ views:
                 name: Total mow time
               - entity: sensor.your_mower_map_area
                 name: Map area
-              - entity: sensor.your_mower_map_area_history
+              - entity: sensor.your_mower_total_mowed_area_history
                 name: Total mowed area (history)
               - entity: sensor.your_mower_mow_schedules
                 name: Mow schedules
