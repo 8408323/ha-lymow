@@ -13,6 +13,12 @@ commit history and pull requests. When cutting a release, move items from
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-28
+
+### Changed
+- README screenshots moved below the feature documentation (before the Example dashboard section) so readers see what the integration does before seeing what it looks like.
+- Added `docs/SCREENSHOTS.md` with all dashboard views (Settings, Backups, Schedules, RTK diagnostics, integration page); README links to it from the two-screenshot inline preview.
+
 ## [0.3.3] - 2026-06-23
 
 ### Added
