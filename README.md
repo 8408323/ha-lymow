@@ -4,14 +4,6 @@ Home Assistant custom integration for [Lymow](https://www.lymow.com/) robotic la
 
 > **Status**: Working prototype — cloud auth + MQTT real-time state implemented.
 
-## Screenshots
-
-| Dashboard & map | RTK diagnostics |
-|---|---|
-| ![Dashboard overview](docs/screenshots/dashboard-overview.png) | ![RTK diagnostics](docs/screenshots/rtk-diagnostics.png) |
-
-![Integration setup](docs/screenshots/integration-page.png)
-
 ## Support
 
 If you find this integration useful, you can buy me a coffee ☕
@@ -173,6 +165,18 @@ title: My lawn                            # optional
 
 - **View mode** — tap a go-zone to select it, then *Mow selected*.
 - **Edit mode** — tap *Edit map*, tap a go-zone, then drag the vertex handles, tap an edge **+** to insert a vertex or a vertex's **✕** to delete one, and *Save* (writes via `lymow.update_zone_polygon`).
+
+## Screenshots
+
+| Dashboard & map | RTK diagnostics |
+|---|---|
+| ![Dashboard overview](docs/screenshots/dashboard-overview.png) | ![RTK diagnostics](docs/screenshots/rtk-diagnostics.png) |
+
+| Settings | Backups |
+|---|---|
+| ![Settings](docs/screenshots/dashboard-settings.png) | ![Backups](docs/screenshots/dashboard-backups.png) |
+
+![Integration setup](docs/screenshots/integration-page.png)
 
 ## Example dashboard
 
