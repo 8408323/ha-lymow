@@ -170,13 +170,9 @@ title: My lawn                            # optional
 
 | Dashboard & map | RTK diagnostics |
 |---|---|
-| ![Dashboard overview](docs/screenshots/dashboard-overview.png) | ![RTK diagnostics](docs/screenshots/rtk-diagnostics.png) |
+| ![Dashboard overview](docs/screenshots/dashboard-overview-cropped.png) | ![RTK diagnostics](docs/screenshots/rtk-diagnostics-cropped.png) |
 
-| Settings | Backups |
-|---|---|
-| ![Settings](docs/screenshots/dashboard-settings.png) | ![Backups](docs/screenshots/dashboard-backups.png) |
-
-![Integration setup](docs/screenshots/integration-page.png)
+→ [See all screenshots](docs/SCREENSHOTS.md) (Settings, Backups, Schedules, integration page)
 
 ## Example dashboard
 
