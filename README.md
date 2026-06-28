@@ -4,6 +4,14 @@ Home Assistant custom integration for [Lymow](https://www.lymow.com/) robotic la
 
 > **Status**: Working prototype — cloud auth + MQTT real-time state implemented.
 
+## Screenshots
+
+| Dashboard & map | RTK diagnostics |
+|---|---|
+| ![Dashboard overview](docs/screenshots/dashboard-overview.png) | ![RTK diagnostics](docs/screenshots/rtk-diagnostics.png) |
+
+![Integration setup](docs/screenshots/integration-page.png)
+
 ## Support
 
 If you find this integration useful, you can buy me a coffee ☕
