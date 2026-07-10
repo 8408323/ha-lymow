@@ -670,9 +670,10 @@ set_schedules:
     schedules:
       name: Schedules
       description: >
-        List of schedule entries. Each entry needs hour and minute, and may set
-        day_of_week (0-6 Sun-Sat, or names), zones (list of zone hash IDs to
-        mow), repeated (default true), and disabled (default false).
+        List of schedule entries. Each entry needs hour, minute and at least one
+        zone (list of zone hash IDs to mow — a zone-less entry is hidden by the
+        app and mows nothing), and may set day_of_week (0-6 Sun-Sat, or names),
+        repeated (default true), and disabled (default false).
       required: true
       example: |
         - hour: 9
@@ -715,7 +716,10 @@ add_schedule:
         object:
     zones:
       name: Zones
-      description: List of go-zone hash IDs to mow.
+      description: >
+        Go-zone hash IDs to mow. At least one is required — a zone-less schedule
+        is stored by the mower but does not appear in the app and mows nothing.
+      required: true
       example: ["wsmjco1T"]
       selector:
         object:
