@@ -11,8 +11,9 @@
  * Writes: lymow.add_schedule, toggle_schedule, delete_schedule, clear_schedules
  */
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// Indexed by the wire dayOfWeek code (0=Sun .. 6=Sat), matching the service's
+// day numbering, so DAYS[d] labels a schedule and a chip's index IS the code.
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 class LymowScheduleCard extends HTMLElement {
   setConfig(config) {
