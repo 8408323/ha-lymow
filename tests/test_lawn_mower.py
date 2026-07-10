@@ -2375,8 +2375,10 @@ def test_require_schedule_zones_passes_and_rejects() -> None:
     from lymow.lawn_mower import _require_schedule_zones
 
     _require_schedule_zones(["abc"])  # no raise
-    with pytest.raises(ServiceValidationError):
-        _require_schedule_zones([])
+    _require_schedule_zones(["", "abc"])  # at least one real zone -> no raise
+    for empty in ([], [""], ["  "]):
+        with pytest.raises(ServiceValidationError):
+            _require_schedule_zones(empty)
 
 
 async def test_handle_delete_schedule_forwards_id() -> None:
