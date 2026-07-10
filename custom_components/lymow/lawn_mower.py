@@ -578,11 +578,12 @@ _ADD_SCHEDULE_SCHEMA = vol.Schema(
 
 
 def _require_schedule_zones(zones: list[str]) -> None:
-    """A schedule needs >=1 non-blank zone; a zone-less one is hidden by the app and mows nothing."""
-    if not any(str(z).strip() for z in zones):
+    """A schedule needs >=1 zone and every zone ID must be non-blank (else the app hides it)."""
+    if not zones or any(not str(z).strip() for z in zones):
         raise ServiceValidationError(
-            "A mowing schedule must target at least one zone. A zone-less schedule is stored by "
-            "the mower but does not appear in the app and would mow nothing."
+            "A mowing schedule must target at least one zone, and every zone ID must be non-empty. "
+            "A zone-less (or blank-zone) schedule is stored by the mower but does not appear in the "
+            "app and would mow nothing."
         )
 
 
