@@ -250,10 +250,11 @@ class LymowScheduleCard extends HTMLElement {
 
     if (!timeVal) { this._setStatus("Please set a time.", true); return; }
 
-    // Collect selected zone IDs (empty = all zones)
+    // A zone-less schedule is hidden by the app and mows nothing, so "All zones"
+    // sends every available zone explicitly (the service requires at least one).
     const allOn = this._root.querySelector(".zone-chip[data-zone-id='__all__']")?.classList.contains("on");
     const zoneChips = [...this._root.querySelectorAll(".zone-chip.on")].filter(c => c.dataset.zoneId !== "__all__");
-    const zones = (allOn || !zoneChips.length) ? [] : zoneChips.map(c => c.dataset.zoneId);
+    const zones = (allOn || !zoneChips.length) ? this._zones().map(z => z.id) : zoneChips.map(c => c.dataset.zoneId);
 
     // The add_schedule service takes local time and converts to UTC itself.
     const [lh, lm] = timeVal.split(":").map(Number);
