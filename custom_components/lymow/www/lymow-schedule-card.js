@@ -171,14 +171,10 @@ class LymowScheduleCard extends HTMLElement {
       const row = document.createElement("div");
       row.className = "row";
 
+      // The mow_schedules sensor already exposes hour/minute/dayOfWeek in local time.
       const days = (s.dayOfWeek || []).map(d => DAYS[d] ?? `d${d}`).join(" ");
-      const utcH = s.hour ?? 0;
-      const utcM = s.minute ?? 0;
-      // Robot stores UTC time; timeZone field is hours offset (e.g. 2 = UTC+2)
-      const tzOffset = (s.timeZone ?? 0) * 60; // minutes
-      const localMins = utcH * 60 + utcM + tzOffset;
-      const lh = ((localMins / 60) % 24 + 24) % 24 | 0;
-      const lm = ((localMins % 60) + 60) % 60;
+      const lh = s.hour ?? 0;
+      const lm = s.minute ?? 0;
       const timeStr = `${String(lh).padStart(2, "0")}:${String(lm).padStart(2, "0")}`;
       const zoneStr = (s.zones && s.zones.length) ? `Zones: ${s.zones.join(", ")}` : "All zones";
 
@@ -258,16 +254,11 @@ class LymowScheduleCard extends HTMLElement {
     const zoneChips = [...this._root.querySelectorAll(".zone-chip.on")].filter(c => c.dataset.zoneId !== "__all__");
     const zones = (allOn || !zoneChips.length) ? [] : zoneChips.map(c => c.dataset.zoneId);
 
-    // Convert local time to UTC
+    // The add_schedule service takes local time and converts to UTC itself.
     const [lh, lm] = timeVal.split(":").map(Number);
-    const d = new Date();
-    d.setHours(lh, lm, 0, 0);
-    const utcH = d.getUTCHours();
-    const utcM = d.getUTCMinutes();
-
     const payload = {
-      hour: utcH,
-      minute: utcM,
+      hour: lh,
+      minute: lm,
       day_of_week: days.length ? days : [0, 1, 2, 3, 4, 5, 6],
       repeated: repeat,
       disabled: false,

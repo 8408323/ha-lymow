@@ -849,12 +849,7 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
 
 def _schedule_to_local(sched: dict[str, Any]) -> dict[str, Any]:
-    """Return a copy of a decoded schedule with hour/minute/dayOfWeek in local time.
-
-    Schedules are stored on the robot in UTC plus a ``timeZone`` offset (whole
-    hours); the app shows local time, so convert back for display. The raw UTC
-    values stay in coordinator data, which the schedule write path reads.
-    """
+    """Copy a decoded schedule with hour/minute/dayOfWeek shifted from stored UTC to local (via timeZone)."""
     out = dict(sched)
     offset = int(sched.get("timeZone", 0) or 0)
     day_delta, out["hour"] = divmod(int(sched.get("hour", 0)) + offset, 24)
