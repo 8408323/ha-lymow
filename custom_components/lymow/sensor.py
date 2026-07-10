@@ -21,6 +21,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import DOMAIN, ERROR_DESCRIPTIONS, ERROR_REMEDIATION, MOW_END_TYPES, WARNING_DESCRIPTIONS
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
+from .geometry import polygon_area
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -628,6 +629,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowLastCleanSensor(coordinator, device))
         entities.append(LymowRobotTimezoneSensor(coordinator, device))
         entities.append(LymowHeadlightWindowSensor(coordinator, device))
+        entities.append(LymowTotalMappedAreaSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -989,6 +991,42 @@ class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], Sensor
             if val is not None:
                 attrs[attr] = val
         return attrs
+
+
+class LymowTotalMappedAreaSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Total mapped lawn — sum of the go-zone polygon areas (client-computed, ENU m²).
+
+    Distinct from the robot-reported area sensors (``map_area`` = ``mapAreaM2`` and
+    ``total_area_m2`` = ``totalTaskAreaM2``, the current task's area): this is a
+    static geometric sum over every mapped go-zone. Go-zone count is already the
+    ``Map`` sensor's state and mission/remaining time already have their own
+    sensors, so only this genuinely-new diagnostic is added.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:vector-square"
+    _attr_native_unit_of_measurement = UnitOfArea.SQUARE_METERS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_total_mapped_area"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Total mapped area"
+
+    @property
+    def native_value(self) -> float | None:
+        map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData")
+        zones = map_data.get("goZones", []) if isinstance(map_data, dict) else []
+        areas = [polygon_area(z["polygon"]) for z in zones if z.get("hashId") and isinstance(z.get("polygon"), list)]
+        if not areas:
+            return None  # no go-zones yet (map not loaded) — unknown, not a spurious 0
+        # Leave display rounding to suggested_display_precision, per this module's convention.
+        return sum(areas)
 
 
 class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
