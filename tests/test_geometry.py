@@ -243,3 +243,9 @@ def test_polygon_area_degenerate_is_zero() -> None:
 def test_polygon_area_tolerates_missing_coordinates() -> None:
     # A hostile/partial decode where a vertex lost a key counts it as origin, no raise.
     assert polygon_area([{"x": 0, "y": 0}, {"x": 2}, {"x": 2, "y": 2}, {"y": 2}]) >= 0.0
+
+
+def test_polygon_area_rejects_non_finite_coordinates() -> None:
+    # A malformed float32 decode can yield NaN/Inf; the area must stay finite (0.0), not propagate.
+    assert polygon_area([_pt(0, 0), _pt(float("nan"), 0), _pt(1, 1)]) == 0.0
+    assert polygon_area([_pt(0, 0), _pt(float("inf"), 0), _pt(1, 1)]) == 0.0

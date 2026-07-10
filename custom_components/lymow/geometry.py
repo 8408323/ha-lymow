@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -78,7 +79,9 @@ def polygon_area(polygon: list[dict[str, float]]) -> float:
         a = polygon[i]
         b = polygon[(i + 1) % n]
         total += a.get("x", 0.0) * b.get("y", 0.0) - b.get("x", 0.0) * a.get("y", 0.0)
-    return abs(total) / 2.0
+    area = abs(total) / 2.0
+    # A malformed float32 decode can yield NaN/Inf; don't propagate a non-finite area.
+    return area if math.isfinite(area) else 0.0
 
 
 def _line_side(line_p1: dict[str, float], line_p2: dict[str, float], pt: dict[str, float]) -> float:

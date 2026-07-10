@@ -1612,6 +1612,9 @@ def test_total_mapped_area_none_when_map_absent() -> None:
 
     assert LymowTotalMappedAreaSensor(_make_coord(), DEVICE).native_value is None
     assert LymowTotalMappedAreaSensor(_make_coord({"mapData": {}}), DEVICE).native_value is None
+    # mapData present (default taskConfig) but no go-zones yet -> unknown, not 0.
+    assert LymowTotalMappedAreaSensor(_make_coord({"mapData": {"taskConfig": {}}}), DEVICE).native_value is None
+    assert LymowTotalMappedAreaSensor(_make_coord({"mapData": {"goZones": []}}), DEVICE).native_value is None
 
 
 def test_total_mapped_area_ignores_zones_without_hashid_or_polygon() -> None:
