@@ -578,6 +578,26 @@ def test_mission_time_sensor_is_duration_minutes() -> None:
     assert desc.native_unit_of_measurement == UnitOfTime.MINUTES
 
 
+def test_last_mow_duration_sensor_reports_seconds() -> None:
+    """clean_time is seconds on the wire, so the sensor must report seconds not minutes."""
+    coord = _make_coord({"lastCleanDurationSec": 60})
+    desc = next(s for s in SENSORS if s.key == "last_clean_duration")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 60
+    assert desc.device_class == SensorDeviceClass.DURATION
+    assert desc.native_unit_of_measurement == UnitOfTime.SECONDS
+
+
+def test_total_mow_time_sensor_reports_seconds() -> None:
+    """total_clean_time is seconds on the wire, so the sensor must report seconds not minutes."""
+    coord = _make_coord({"totalCleanTimeSec": 254700})
+    desc = next(s for s in SENSORS if s.key == "total_clean_time")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 254700
+    assert desc.device_class == SensorDeviceClass.DURATION
+    assert desc.native_unit_of_measurement == UnitOfTime.SECONDS
+
+
 def test_heated_lens_times_sensor_reads_counter_state() -> None:
     """PbOutput.f37 → heatedLensTimes; sensor surfaces the live counter."""
     coord = _make_coord({"heatedLensTimes": 17})

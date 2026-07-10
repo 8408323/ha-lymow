@@ -484,8 +484,8 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
     LymowSensorDescription(
         key="last_clean_duration",
         name="Last mow duration",
-        value_key="lastCleanDurationMin",
-        native_unit_of_measurement=UnitOfTime.MINUTES,
+        value_key="lastCleanDurationSec",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:timer-outline",
@@ -518,8 +518,8 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
     LymowSensorDescription(
         key="total_clean_time",
         name="Total mow time",
-        value_key="totalCleanTimeMin",
-        native_unit_of_measurement=UnitOfTime.MINUTES,
+        value_key="totalCleanTimeSec",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.TOTAL_INCREASING,
         icon="mdi:timer-sand",
