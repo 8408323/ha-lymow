@@ -1988,6 +1988,19 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self._publish_device_patch(thing_name, {"otaJobId": None})
         return result
 
+    async def async_set_voice_language(self, thing_name: str, language: str) -> str | None:
+        """Switch the mower's voice pack to ``language`` (a display name).
+
+        A voice pack is delivered as an OTA job (create-ota-job with
+        type=ChangeLanguage) that downloads and applies it — the same endpoint
+        and Cognito auth as a firmware install. Returns the created jobId, if any.
+        There is no cloud/robot read-back of the current language our identity can
+        reach (the get-musics list endpoint is IAM/SigV4-only), so the select
+        tracks the choice write-optimistically.
+        """
+        result = await self._client.create_voice_pack_job(thing_name, language)
+        return result.get("jobId") if isinstance(result, dict) else None
+
     def _publish_device_patch(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Merge ``patch`` into self.data[thing_name] and publish a fresh snapshot.
 
