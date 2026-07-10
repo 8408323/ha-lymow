@@ -518,10 +518,13 @@ async def test_async_setup_entry_creates_entities() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
+    from lymow.sensor import LymowRtspUrlSensor
+
     assert any(isinstance(e, LymowSensor) for e in added)
     assert any(isinstance(e, LymowErrorSensor) for e in added)
     assert any(isinstance(e, LymowRtkSensor) for e in added)
     assert any(isinstance(e, LymowMapSensor) for e in added)
+    assert any(isinstance(e, LymowRtspUrlSensor) for e in added)
 
 
 async def test_async_setup_entry_multiple_devices() -> None:
@@ -1582,3 +1585,34 @@ async def test_async_setup_entry_registers_headlight_window_sensor() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
     assert any(isinstance(e, LymowHeadlightWindowSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# LymowRtspUrlSensor — local LAN RTSP URL (diagnostic)
+# ---------------------------------------------------------------------------
+
+
+def test_rtsp_url_sensor_builds_url_from_ip() -> None:
+    from lymow.const import RTSP_PATH, RTSP_PORT
+    from lymow.sensor import LymowRtspUrlSensor
+
+    e = LymowRtspUrlSensor(_make_coord({"ipAddress": "192.168.30.85"}), DEVICE)
+    assert e.native_value == f"rtsp://192.168.30.85:{RTSP_PORT}/{RTSP_PATH}"
+
+
+def test_rtsp_url_sensor_none_without_ip() -> None:
+    from lymow.sensor import LymowRtspUrlSensor
+
+    assert LymowRtspUrlSensor(_make_coord({}), DEVICE).native_value is None
+    assert LymowRtspUrlSensor(_make_coord({"ipAddress": "  "}), DEVICE).native_value is None  # blank
+    assert LymowRtspUrlSensor(_make_coord({"ipAddress": 123}), DEVICE).native_value is None  # non-string
+
+
+def test_rtsp_url_sensor_is_diagnostic_and_disabled_by_default() -> None:
+    from homeassistant.const import EntityCategory
+    from lymow.sensor import LymowRtspUrlSensor
+
+    e = LymowRtspUrlSensor(_make_coord({}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_rtsp_url"
+    assert e.entity_category == EntityCategory.DIAGNOSTIC
+    assert e._attr_entity_registry_enabled_default is False

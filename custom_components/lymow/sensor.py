@@ -18,7 +18,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ERROR_DESCRIPTIONS, ERROR_REMEDIATION, MOW_END_TYPES, WARNING_DESCRIPTIONS
+from .const import (
+    DOMAIN,
+    ERROR_DESCRIPTIONS,
+    ERROR_REMEDIATION,
+    MOW_END_TYPES,
+    RTSP_PATH,
+    RTSP_PORT,
+    WARNING_DESCRIPTIONS,
+)
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
@@ -628,6 +636,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowLastCleanSensor(coordinator, device))
         entities.append(LymowRobotTimezoneSensor(coordinator, device))
         entities.append(LymowHeadlightWindowSensor(coordinator, device))
+        entities.append(LymowRtspUrlSensor(coordinator, device))
     async_add_entities(entities)
 
 
@@ -989,6 +998,34 @@ class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], Sensor
             if val is not None:
                 attrs[attr] = val
         return attrs
+
+
+class LymowRtspUrlSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Local LAN RTSP stream URL for the robot's camera (for go2rtc / VLC / a card).
+
+    The camera entity already streams this locally; this exposes the raw
+    ``rtsp://<ip>:10022/<path>`` URL so it can be plugged into external viewers.
+    Diagnostic, disabled by default; None until the robot's IP is known.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:video-input-component"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_rtsp_url"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Local RTSP URL"
+
+    @property
+    def native_value(self) -> str | None:
+        ip = (self.coordinator.data.get(self._thing_name) or {}).get("ipAddress")
+        if not isinstance(ip, str) or not ip.strip():
+            return None
+        return f"rtsp://{ip.strip()}:{RTSP_PORT}/{RTSP_PATH}"
 
 
 class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
