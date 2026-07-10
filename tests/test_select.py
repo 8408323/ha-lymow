@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
 from tests.conftest import _load_lymow_module
 
 _load_lymow_module("select")
@@ -129,7 +131,7 @@ async def test_async_setup_entry_adds_all_selects_per_device() -> None:
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     types = {type(e).__name__ for e in added}
-    assert types == {"ChargingModeSelect", "ZoneOrderSelect", "CameraLightSelect"}
+    assert types == {"ChargingModeSelect", "ZoneOrderSelect", "CameraLightSelect", "BackupMapRestoreSelect"}
 
 
 async def test_async_setup_entry_skips_when_no_devices() -> None:
@@ -197,3 +199,75 @@ async def test_camera_light_select_each_option_publishes_matching_signal() -> No
         await e.async_select_option(label)
         coord.async_set_robot_config.assert_awaited_once_with(THING, signal=signal)
         assert e.current_option == label  # last choice sticks
+
+
+# ---------------------------------------------------------------------------
+# BackupMapRestoreSelect — action select: options are backups, pick to restore
+# ---------------------------------------------------------------------------
+
+
+def _make_backup_coord(backup_list: list | None = None) -> MagicMock:
+    coord = MagicMock()
+    state: dict = {}
+    if backup_list is not None:
+        state["backupMapList"] = backup_list
+    coord.data = {THING: state}
+    coord.devices = [DEVICE]
+    coord.async_restore_backup_map = AsyncMock()
+    return coord
+
+
+def test_backup_restore_metadata_and_empty_options() -> None:
+    from lymow.select import BackupMapRestoreSelect
+
+    e = BackupMapRestoreSelect(_make_backup_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_restore_backup_map"
+    assert e._attr_name == "Restore backup map"
+    assert e._attr_entity_registry_enabled_default is False
+    assert e.options == []  # no backups yet
+    assert e.current_option is None  # action select — never a persistent value
+
+
+def test_backup_restore_options_label_priority_and_uniqueness() -> None:
+    from lymow.select import BackupMapRestoreSelect
+
+    entries = [
+        {"file": "dev/map/a.pb", "name": "Spring", "backupTime": 1_700_000_000},
+        {"file": "dev/map/b.pb", "name": "", "backupTime": 1_700_000_000},  # -> timestamp label
+        {"file": "dev/map/c.pb", "name": "Spring", "backupTime": 1_700_100_000},  # dup name -> " (2)"
+        {"file": "", "name": "ignored"},  # no file -> skipped
+    ]
+    e = BackupMapRestoreSelect(_make_backup_coord(entries), DEVICE)
+    opts = e.options
+    assert "Spring" in opts and "Spring (2)" in opts  # duplicate name disambiguated
+    assert any("UTC" in o for o in opts)  # blank-name entry falls back to its timestamp
+    assert len(opts) == 3  # the file-less entry is skipped
+
+
+async def test_backup_restore_select_restores_matching_file() -> None:
+    from lymow.select import BackupMapRestoreSelect
+
+    entries = [{"file": "dev/map/a.pb", "name": "Spring", "backupTime": 1}]
+    coord = _make_backup_coord(entries)
+    e = BackupMapRestoreSelect(coord, DEVICE)
+    await e.async_select_option("Spring")
+    coord.async_restore_backup_map.assert_awaited_once_with(THING, "dev/map/a.pb")
+
+
+async def test_backup_restore_select_unknown_label_raises() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+    from lymow.select import BackupMapRestoreSelect
+
+    coord = _make_backup_coord([{"file": "dev/map/a.pb", "name": "Spring"}])
+    e = BackupMapRestoreSelect(coord, DEVICE)
+    with pytest.raises(HomeAssistantError):
+        await e.async_select_option("Gone")
+    coord.async_restore_backup_map.assert_not_called()
+
+
+def test_backup_label_falls_back_to_file_basename() -> None:
+    from lymow.select import _backup_label
+
+    # No name, no timestamp -> the file's basename; nothing at all -> "Backup <n>".
+    assert _backup_label({"file": "dev/map/summer.pb"}, 0) == "summer.pb"
+    assert _backup_label({}, 4) == "Backup 5"

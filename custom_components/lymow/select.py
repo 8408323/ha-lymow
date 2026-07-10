@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+from typing import Any
+
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -42,6 +46,7 @@ async def async_setup_entry(
         entities.append(ChargingModeSelect(coordinator, device))
         entities.append(ZoneOrderSelect(coordinator, device))
         entities.append(CameraLightSelect(coordinator, device))
+        entities.append(BackupMapRestoreSelect(coordinator, device))
     if entities:
         async_add_entities(entities)
 
@@ -170,3 +175,68 @@ class CameraLightSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
         await self.coordinator.async_set_robot_config(self._thing_name, signal=signal_code)
         self._last_choice = option
         self.async_write_ha_state()
+
+
+def _backup_label(entry: dict[str, Any], index: int) -> str:
+    """Human label for a backup-map entry: its name, else its timestamp, else the file key."""
+    name = (entry.get("name") or "").strip()
+    if name:
+        return name
+    ts = entry.get("backupTime")
+    if ts is not None:
+        try:
+            return datetime.fromtimestamp(int(ts), tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
+        except (TypeError, ValueError, OSError):
+            pass
+    file_key = entry.get("file") or ""
+    return file_key.rsplit("/", 1)[-1] or f"Backup {index + 1}"
+
+
+class BackupMapRestoreSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
+    """One-click restore of a saved map backup.
+
+    An action select: the options are the available backups (from the decoded
+    ``backupMapList``); picking one restores that backup onto the robot. There
+    is no persistent "current" selection, so ``current_option`` is always None.
+    Disabled by default — restoring overwrites the live map — matching the rest
+    of the backup-map surface.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:map-clock"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Restore backup map"
+        self._attr_unique_id = f"{self._thing_name}_restore_backup_map"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    def _label_to_file(self) -> dict[str, str]:
+        entries = (self.coordinator.data or {}).get(self._thing_name, {}).get("backupMapList") or []
+        out: dict[str, str] = {}
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict) or not entry.get("file"):
+                continue
+            label = base = _backup_label(entry, index)
+            suffix = 2
+            while label in out:  # keep labels unique so each maps to one file
+                label = f"{base} ({suffix})"
+                suffix += 1
+            out[label] = entry["file"]
+        return out
+
+    @property
+    def options(self) -> list[str]:
+        return list(self._label_to_file())
+
+    @property
+    def current_option(self) -> str | None:
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        file_key = self._label_to_file().get(option)
+        if file_key is None:
+            raise HomeAssistantError(f"Backup {option!r} is no longer available")
+        await self.coordinator.async_restore_backup_map(self._thing_name, file_key)
