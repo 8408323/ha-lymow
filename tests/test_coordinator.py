@@ -91,13 +91,16 @@ _load("coordinator")
 
 from lymow.const import (  # noqa: E402
     USER_CTRL_CLEAN,
+    USER_CTRL_DOCK,
     USER_CTRL_PAUSE,
     USER_CTRL_PAUSE_DOCK,
     USER_CTRL_RECHARGE_DOCK,
     USER_CTRL_RESUME,
     USER_CTRL_RESUME_DOCK,
     WORK_STATUS_DOCKING,
+    WORK_STATUS_NONE,
     WORK_STATUS_PAUSE_DOCKING,
+    WORK_STATUS_WAITING,
 )
 from lymow.coordinator import LymowCoordinator  # noqa: E402
 
@@ -1122,6 +1125,22 @@ async def test_async_dock_sends_recharge_dock_when_not_pause_docking() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ws", [WORK_STATUS_WAITING, WORK_STATUS_NONE])
+async def test_async_dock_sends_dock_when_idle(ws: int) -> None:
+    """RECHARGE_DOCK no-ops from idle; the dock service must send USER_CTRL_DOCK instead."""
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": ws}}
+    await coord.async_dock(THING)
+
+    _, pb_bytes = mqtt.async_publish_command.call_args[0]
+    from lymow.protocol import _decode_fields
+
+    fields = _decode_fields(pb_bytes)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert by_field[5] == USER_CTRL_DOCK
+
+
+@pytest.mark.asyncio
 async def test_async_resume_sends_resume_dock_when_pause_docking() -> None:
     coord, mqtt, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": WORK_STATUS_PAUSE_DOCKING}}
@@ -1894,12 +1913,12 @@ async def test_fetch_last_clean_merges_real_shape() -> None:
     }
     result = await coord._async_update_data()
     assert result[THING]["lastCleanAreaM2"] == 345
-    assert result[THING]["lastCleanDurationMin"] == 60
+    assert result[THING]["lastCleanDurationSec"] == 60
     assert result[THING]["lastCleanAt"] == datetime.fromtimestamp(1779184292, tz=UTC)
     assert result[THING]["lastCleanPercent"] == 100.0
     assert result[THING]["lastCleanBatteryUsed"] == 49
     assert result[THING]["cleanHistoryCount"] == 14  # cumulative, from total_records
-    assert result[THING]["totalCleanTimeMin"] == 829
+    assert result[THING]["totalCleanTimeSec"] == 829
     assert result[THING]["totalCleanHistoryAreaM2"] == 4243
 
 
@@ -2040,7 +2059,7 @@ async def test_fetch_last_clean_handles_non_dict_entry() -> None:
     result = await coord._async_update_data()
     # Aggregates still surface
     assert result[THING]["cleanHistoryCount"] == 7
-    assert result[THING]["totalCleanTimeMin"] == 100
+    assert result[THING]["totalCleanTimeSec"] == 100
     assert result[THING]["totalCleanHistoryAreaM2"] == 50
     # No per-entry fields extracted because entries[0] isn't a dict
     assert "lastCleanAreaM2" not in result[THING]

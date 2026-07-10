@@ -518,10 +518,13 @@ async def test_async_setup_entry_creates_entities() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
+    from lymow.sensor import LymowTotalMappedAreaSensor
+
     assert any(isinstance(e, LymowSensor) for e in added)
     assert any(isinstance(e, LymowErrorSensor) for e in added)
     assert any(isinstance(e, LymowRtkSensor) for e in added)
     assert any(isinstance(e, LymowMapSensor) for e in added)
+    assert any(isinstance(e, LymowTotalMappedAreaSensor) for e in added)
 
 
 async def test_async_setup_entry_multiple_devices() -> None:
@@ -576,6 +579,26 @@ def test_mission_time_sensor_is_duration_minutes() -> None:
     desc = next(s for s in SENSORS if s.key == "mission_time")
     assert desc.device_class == SensorDeviceClass.DURATION
     assert desc.native_unit_of_measurement == UnitOfTime.MINUTES
+
+
+def test_last_mow_duration_sensor_reports_seconds() -> None:
+    """clean_time is seconds on the wire, so the sensor must report seconds not minutes."""
+    coord = _make_coord({"lastCleanDurationSec": 60})
+    desc = next(s for s in SENSORS if s.key == "last_clean_duration")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 60
+    assert desc.device_class == SensorDeviceClass.DURATION
+    assert desc.native_unit_of_measurement == UnitOfTime.SECONDS
+
+
+def test_total_mow_time_sensor_reports_seconds() -> None:
+    """total_clean_time is seconds on the wire, so the sensor must report seconds not minutes."""
+    coord = _make_coord({"totalCleanTimeSec": 254700})
+    desc = next(s for s in SENSORS if s.key == "total_clean_time")
+    sensor = LymowSensor(coord, DEVICE, desc)
+    assert sensor.native_value == 254700
+    assert desc.device_class == SensorDeviceClass.DURATION
+    assert desc.native_unit_of_measurement == UnitOfTime.SECONDS
 
 
 def test_heated_lens_times_sensor_reads_counter_state() -> None:
@@ -1592,3 +1615,60 @@ async def test_async_setup_entry_registers_headlight_window_sensor() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
     assert any(isinstance(e, LymowHeadlightWindowSensor) for e in added)
+
+
+# ---------------------------------------------------------------------------
+# LymowTotalMappedAreaSensor — sum of go-zone polygon areas (diagnostic)
+# ---------------------------------------------------------------------------
+
+
+def _square(size: float, hash_id: str) -> dict:
+    return {
+        "hashId": hash_id,
+        "polygon": [{"x": 0.0, "y": 0.0}, {"x": size, "y": 0.0}, {"x": size, "y": size}, {"x": 0.0, "y": size}],
+    }
+
+
+def test_total_mapped_area_sums_go_zone_polygons() -> None:
+    from lymow.sensor import LymowTotalMappedAreaSensor
+
+    coord = _make_coord({"mapData": {"goZones": [_square(1.0, "a"), _square(1.0, "b")]}})
+    sensor = LymowTotalMappedAreaSensor(coord, DEVICE)
+    assert sensor.native_value == 2.0  # two 1 m² squares
+
+
+def test_total_mapped_area_none_when_map_absent() -> None:
+    from lymow.sensor import LymowTotalMappedAreaSensor
+
+    assert LymowTotalMappedAreaSensor(_make_coord(), DEVICE).native_value is None
+    assert LymowTotalMappedAreaSensor(_make_coord({"mapData": {}}), DEVICE).native_value is None
+    # mapData present (default taskConfig) but no go-zones yet -> unknown, not 0.
+    assert LymowTotalMappedAreaSensor(_make_coord({"mapData": {"taskConfig": {}}}), DEVICE).native_value is None
+    assert LymowTotalMappedAreaSensor(_make_coord({"mapData": {"goZones": []}}), DEVICE).native_value is None
+
+
+def test_total_mapped_area_ignores_zones_without_hashid_or_polygon() -> None:
+    from lymow.sensor import LymowTotalMappedAreaSensor
+
+    coord = _make_coord(
+        {
+            "mapData": {
+                "goZones": [
+                    _square(2.0, "real"),  # 4 m²
+                    {"polygon": [{"x": 0.0, "y": 0.0}, {"x": 9.0, "y": 0.0}, {"x": 9.0, "y": 9.0}]},  # no hashId
+                    {"hashId": "nopoly"},  # no polygon
+                ]
+            }
+        }
+    )
+    assert LymowTotalMappedAreaSensor(coord, DEVICE).native_value == 4.0
+
+
+def test_total_mapped_area_is_diagnostic_and_disabled_by_default() -> None:
+    from homeassistant.const import EntityCategory
+    from lymow.sensor import LymowTotalMappedAreaSensor
+
+    e = LymowTotalMappedAreaSensor(_make_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_total_mapped_area"
+    assert e.entity_category == EntityCategory.DIAGNOSTIC
+    assert e._attr_entity_registry_enabled_default is False
