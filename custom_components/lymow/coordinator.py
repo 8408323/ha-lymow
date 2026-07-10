@@ -23,6 +23,7 @@ from .const import (
     POLLING_INTERVAL,
     RTK_DIAGNOSTIC_POLL_SECONDS,
     USER_CTRL_CLEAN,
+    USER_CTRL_DOCK,
     USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_PAUSE,
     USER_CTRL_PAUSE_DOCK,
@@ -41,9 +42,11 @@ from .const import (
     WORK_STATUS_DOCKING,
     WORK_STATUS_ERROR_GROUP,
     WORK_STATUS_MOWING_GROUP,
+    WORK_STATUS_NONE,
     WORK_STATUS_PAUSE_DOCKING,
     WORK_STATUS_PAUSED_GROUP,
     WORK_STATUS_RETURNING_GROUP,
+    WORK_STATUS_WAITING,
 )
 from .mqtt import LymowMqttClient
 from .protocol import (
@@ -754,11 +757,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         Response envelope:
             {"clean_history": [
-                {"clean_area": <num>, "clean_time": <int min>, "date": <epoch>,
+                {"clean_area": <num>, "clean_time": <int sec>, "date": <epoch>,
                  "used_battery": <int>, "percent": <0..1>, ...},
                 ...],
              "total_records": <int>,
-             "clean_summary": {"total_clean_time": <int min>, "total_clean_area": <num>}}
+             "clean_summary": {"total_clean_time": <int sec>, "total_clean_area": <num>}}
         """
         from datetime import UTC, datetime
 
@@ -780,7 +783,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         summary = history.get("clean_summary")
         if isinstance(summary, dict):
             if (t := summary.get("total_clean_time")) is not None:
-                out["totalCleanTimeMin"] = t
+                out["totalCleanTimeSec"] = t
             if (a := summary.get("total_clean_area")) is not None:
                 out["totalCleanHistoryAreaM2"] = a
 
@@ -798,7 +801,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if (area := last.get("clean_area")) is not None:
             out["lastCleanAreaM2"] = area
         if (t := last.get("clean_time")) is not None:
-            out["lastCleanDurationMin"] = t
+            out["lastCleanDurationSec"] = t
         if (epoch := last.get("date")) is not None:
             try:
                 out["lastCleanAt"] = datetime.fromtimestamp(int(epoch), tz=UTC)
@@ -952,7 +955,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_dock(self, thing_name: str) -> None:
         ws = self._current_work_status(thing_name)
-        ctrl = USER_CTRL_RESUME_DOCK if ws == WORK_STATUS_PAUSE_DOCKING else USER_CTRL_RECHARGE_DOCK
+        if ws == WORK_STATUS_PAUSE_DOCKING:
+            ctrl = USER_CTRL_RESUME_DOCK
+        elif ws in (WORK_STATUS_NONE, WORK_STATUS_WAITING):
+            # RECHARGE_DOCK (33) no-ops when idle with no active task; DOCK (2) sends it home.
+            ctrl = USER_CTRL_DOCK
+        else:
+            ctrl = USER_CTRL_RECHARGE_DOCK
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
 
     async def async_resume(self, thing_name: str) -> None:
