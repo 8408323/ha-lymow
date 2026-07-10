@@ -53,15 +53,18 @@ class LymowScheduleCard extends HTMLElement {
   }
 
   _zones() {
-    // Collect zone switch entities for this device to offer zone selection
+    // Full zone hash IDs + names come from the map sensor's go_zones attribute
+    // (the zone switches only carry a truncated 4-char name, not the real hash).
     if (!this._hass) return [];
     const base = this._config.mower_entity.split(".")[1];
-    return Object.entries(this._hass.states)
-      .filter(([id]) => id.startsWith("switch.") && id.includes(base) && id.endsWith("_enabled"))
-      .map(([id, st]) => ({
-        id: st.attributes?.zone_hash_id || id.split("_").slice(-2, -1)[0],
-        name: st.attributes?.friendly_name || id,
-      }));
+    const mapId = Object.keys(this._hass.states).find(
+      id => id.startsWith("sensor.") && id.includes(base) &&
+            Array.isArray(this._hass.states[id].attributes?.go_zones)
+    );
+    const zones = mapId ? this._hass.states[mapId].attributes.go_zones : [];
+    return zones
+      .filter(z => z && z.hashId)
+      .map(z => ({ id: z.hashId, name: z.name || `Zone ${z.hashId.slice(0, 4)}` }));
   }
 
   _build() {
