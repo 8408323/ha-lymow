@@ -42,6 +42,7 @@ async def async_setup_entry(
         entities.append(ChargingModeSelect(coordinator, device))
         entities.append(ZoneOrderSelect(coordinator, device))
         entities.append(CameraLightSelect(coordinator, device))
+        entities.append(VoiceLanguageSelect(coordinator, device))
     if entities:
         async_add_entities(entities)
 
@@ -168,5 +169,46 @@ class CameraLightSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
     async def async_select_option(self, option: str) -> None:
         signal_code = _CAMERA_LIGHT_OPTIONS[option]
         await self.coordinator.async_set_robot_config(self._thing_name, signal=signal_code)
+        self._last_choice = option
+        self.async_write_ha_state()
+
+
+# Voice-pack languages the mower offers (server-confirmed 2026-07-10 from the
+# app's GET /get-musics response). Stable set; the app lists exactly these.
+_VOICE_LANGUAGES = ["English", "French-Canadian", "French-France", "German", "Italian", "Spanish"]
+
+
+class VoiceLanguageSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
+    """Mower voice-pack language (app Settings → Voice Pack).
+
+    Selecting a language reuses the OTA-job endpoint (create-ota-job with the
+    language name as the object key) to download and apply the voice pack — the
+    same infrastructure as a firmware OTA, and it works with our Cognito token.
+
+    Write-optimistic, like ``CameraLightSelect``: the mower exposes no decoded
+    current-voice field, and the cloud list endpoint (get-musics) is IAM/SigV4-
+    authorized beyond our identity's permissions, so there's no read-back. The
+    chosen value is cached in memory only and resets to unknown on restart or if
+    the language was changed out-of-band via the app — re-select to re-state.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:account-voice"
+    _attr_options = list(_VOICE_LANGUAGES)
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Voice language"
+        self._attr_unique_id = f"{self._thing_name}_voice_language"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._last_choice: str | None = None
+
+    @property
+    def current_option(self) -> str | None:
+        return self._last_choice
+
+    async def async_select_option(self, option: str) -> None:
+        await self.coordinator.async_set_voice_language(self._thing_name, option)
         self._last_choice = option
         self.async_write_ha_state()

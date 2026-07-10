@@ -1552,8 +1552,11 @@ _ROBOT_CONFIG_FIELDS: dict[str, tuple[int, str]] = {
     "audioVolume": (6, "int"),  # mower beep/voice volume 0-100
     "signal": (8, "int"),  # one-shot action signals (e.g. SIGNAL_TURN_ON_VEHICLE_LIGHT=10, _OFF=11)
     "metric_4g": (11, "bool"),  # true = 4G preferred, false = WiFi preferred
-    "timezoneOffset": (21, "int"),  # seconds east of UTC; matches what the app's setTimezone (#9036) writes
-    "dockOnError": (22, "bool"),  # auto-dock when the mower errors out
+    "timezoneOffset": (21, "int"),  # seconds east of UTC; live-confirmed 2026-07-10 (setTimezone → f13.f21=7200)
+    "dockOnError": (
+        22,
+        "bool",
+    ),  # auto-dock when the mower errors out; live-confirmed 2026-07-10 (setReturnToDock → f13.f22)
 }
 
 # SocSignal codes used by the codec itself. The broader SocSignal enum lives
