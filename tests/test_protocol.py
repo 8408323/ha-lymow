@@ -1041,6 +1041,27 @@ def test_decode_map_response_global_zone_and_channel_config() -> None:
     assert result["globalChannelConfig"] == {"detectMode": 2, "cutHeight": 60}
 
 
+def test_decode_run_time_config_round_trips_fields() -> None:
+    """PbRunTimeConfig: cutHeight(f1)/moveSpeed(f4,float)/cutSpeed(f6)."""
+    from lymow.protocol import _field_f32, _field_i32, decode_run_time_config
+
+    raw = _field_i32(1, 55) + _field_f32(4, 0.6) + _field_i32(6, 90)
+    out = decode_run_time_config(raw)
+    assert out["cutHeight"] == 55
+    assert out["cutSpeed"] == 90
+    assert pytest.approx(out["moveSpeed"], abs=1e-4) == 0.6
+
+
+def test_decode_map_response_run_time_config() -> None:
+    """decode_map_response surfaces PbMap.f13 runTimeConfig (the QUERY_RUN_TIME_CONFIG readback)."""
+    extra = _field_bytes(13, _field_i32(1, 45) + _field_f32(4, 0.4) + _field_i32(6, 80))
+    result = decode_map_response(_build_map_response_with_raw_extra(extra))
+    rtc = result["runTimeConfig"]
+    assert rtc["cutHeight"] == 45
+    assert rtc["cutSpeed"] == 80
+    assert pytest.approx(rtc["moveSpeed"], abs=1e-4) == 0.4
+
+
 def test_decode_map_response_charging_station_with_z_and_enu_altitude() -> None:
     """PbPose.f4 = z (altitude) and PbRobotLLACoords.f3 = altitude both surface."""
     extra = _field_bytes(

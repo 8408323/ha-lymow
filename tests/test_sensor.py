@@ -496,6 +496,16 @@ def test_map_sensor_extra_attrs_mowing_settings_absent_when_not_decoded() -> Non
     assert "mowing_settings" not in sensor.extra_state_attributes
 
 
+def test_map_sensor_extra_attrs_has_run_time_config() -> None:
+    rtc = {"cutHeight": 45, "moveSpeed": 0.4, "cutSpeed": 80}
+    coord = _make_coord({"mapData": {"runTimeConfig": rtc}})
+    sensor = LymowMapSensor(coord, DEVICE)
+    assert sensor.extra_state_attributes["run_time_config"] == rtc
+    # Absent when the map response didn't carry it.
+    bare = LymowMapSensor(_make_coord({"mapData": {"goZones": []}}), DEVICE)
+    assert "run_time_config" not in bare.extra_state_attributes
+
+
 # ---------------------------------------------------------------------------
 # async_setup_entry
 # ---------------------------------------------------------------------------

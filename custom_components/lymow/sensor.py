@@ -834,6 +834,8 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["mowing_settings"] = map_data["globalZoneConfig"]
         if "globalChannelConfig" in map_data:
             attrs["channel_config"] = map_data["globalChannelConfig"]
+        if "runTimeConfig" in map_data:
+            attrs["run_time_config"] = map_data["runTimeConfig"]
 
         path_data = (self.coordinator.data.get(self._thing_name) or {}).get("pathData")
         if path_data:
