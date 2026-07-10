@@ -2,6 +2,10 @@ from __future__ import annotations
 
 DOMAIN = "lymow"
 
+# Bus event fired once when a mow session finishes (mowing/returning -> docked),
+# carrying the session summary. Mirrored by the Last-mow-session event entity.
+EVENT_SESSION_COMPLETED = f"{DOMAIN}_session_completed"
+
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_REGION = "region"
