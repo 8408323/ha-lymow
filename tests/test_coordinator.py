@@ -91,13 +91,16 @@ _load("coordinator")
 
 from lymow.const import (  # noqa: E402
     USER_CTRL_CLEAN,
+    USER_CTRL_DOCK,
     USER_CTRL_PAUSE,
     USER_CTRL_PAUSE_DOCK,
     USER_CTRL_RECHARGE_DOCK,
     USER_CTRL_RESUME,
     USER_CTRL_RESUME_DOCK,
     WORK_STATUS_DOCKING,
+    WORK_STATUS_NONE,
     WORK_STATUS_PAUSE_DOCKING,
+    WORK_STATUS_WAITING,
 )
 from lymow.coordinator import LymowCoordinator  # noqa: E402
 
@@ -546,6 +549,54 @@ async def test_async_set_task_config_publishes_encoded_command() -> None:
     pb_map = _decode_fields(_first(f, 12))
     cfg = _decode_fields(_first(pb_map, 11))  # PbMap.globalZoneConfig
     assert _first(cfg, 9) == 250  # pathSpacing — confirmed PbZoneConfig field f9 (2026-05-30)
+
+
+@pytest.mark.asyncio
+async def test_async_set_task_config_optimistically_updates_global_zone_config() -> None:
+    """globalZoneConfig only re-echoes on a map query, so the write mirrors it into data."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"globalZoneConfig": {"cutHeight": 60}}}}
+    await coord.async_set_task_config(THING, cleanMode=3)
+    gzc = coord.data[THING]["mapData"]["globalZoneConfig"]
+    assert gzc == {"cutHeight": 60, "cleanMode": 3}  # merge preserves existing keys
+    # And the published payload really carries cleanMode=3 (PbZoneConfig field 7).
+    _thing, pb = mqtt.async_publish_command.await_args.args
+    cfg = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 12)), 11))
+    assert _first(cfg, 7) == 3
+
+
+@pytest.mark.asyncio
+async def test_async_set_task_config_no_optimism_when_data_absent() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = None
+    await coord.async_set_task_config(THING, cleanMode=2)  # must not raise
+    mqtt.async_publish_command.assert_awaited_once()
+    assert coord.data is None
+
+
+@pytest.mark.asyncio
+async def test_async_set_task_config_optimism_survives_next_poll() -> None:
+    """The optimistic value is mirrored into the MQTT-state cache the poll rebuilds from."""
+    coord, _, _ = _make_coordinator()
+    full_map = {"globalZoneConfig": {"cutHeight": 60}, "goZones": [{"hashId": "z"}]}
+    coord.data = {THING: {"mapData": {**full_map}}}
+    coord._mqtt_state[THING] = {"mapData": {**full_map}}
+    await coord.async_set_task_config(THING, cleanMode=3)
+    cached_map = coord._mqtt_state[THING]["mapData"]
+    assert cached_map["globalZoneConfig"] == {"cutHeight": 60, "cleanMode": 3}
+    assert cached_map["goZones"] == [{"hashId": "z"}]  # partial patch must not wipe zones
+
+
+@pytest.mark.asyncio
+async def test_async_set_task_config_optimism_tolerates_non_dict_cache() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": "corrupt"}}
+    coord._mqtt_state[THING] = {"mapData": ["corrupt"]}
+    await coord.async_set_task_config(THING, cleanMode=2)  # must not raise
+    mqtt.async_publish_command.assert_awaited_once()
+    assert coord.data[THING]["mapData"]["globalZoneConfig"]["cleanMode"] == 2
 
 
 @pytest.mark.asyncio
@@ -1119,6 +1170,22 @@ async def test_async_dock_sends_recharge_dock_when_not_pause_docking() -> None:
     fields = _decode_fields(pb_bytes)
     by_field = {fn: val for fn, _wt, val in fields}
     assert by_field[5] == USER_CTRL_RECHARGE_DOCK
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ws", [WORK_STATUS_WAITING, WORK_STATUS_NONE])
+async def test_async_dock_sends_dock_when_idle(ws: int) -> None:
+    """RECHARGE_DOCK no-ops from idle; the dock service must send USER_CTRL_DOCK instead."""
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": ws}}
+    await coord.async_dock(THING)
+
+    _, pb_bytes = mqtt.async_publish_command.call_args[0]
+    from lymow.protocol import _decode_fields
+
+    fields = _decode_fields(pb_bytes)
+    by_field = {fn: val for fn, _wt, val in fields}
+    assert by_field[5] == USER_CTRL_DOCK
 
 
 @pytest.mark.asyncio
@@ -1894,12 +1961,12 @@ async def test_fetch_last_clean_merges_real_shape() -> None:
     }
     result = await coord._async_update_data()
     assert result[THING]["lastCleanAreaM2"] == 345
-    assert result[THING]["lastCleanDurationMin"] == 60
+    assert result[THING]["lastCleanDurationSec"] == 60
     assert result[THING]["lastCleanAt"] == datetime.fromtimestamp(1779184292, tz=UTC)
     assert result[THING]["lastCleanPercent"] == 100.0
     assert result[THING]["lastCleanBatteryUsed"] == 49
     assert result[THING]["cleanHistoryCount"] == 14  # cumulative, from total_records
-    assert result[THING]["totalCleanTimeMin"] == 829
+    assert result[THING]["totalCleanTimeSec"] == 829
     assert result[THING]["totalCleanHistoryAreaM2"] == 4243
 
 
@@ -2040,7 +2107,7 @@ async def test_fetch_last_clean_handles_non_dict_entry() -> None:
     result = await coord._async_update_data()
     # Aggregates still surface
     assert result[THING]["cleanHistoryCount"] == 7
-    assert result[THING]["totalCleanTimeMin"] == 100
+    assert result[THING]["totalCleanTimeSec"] == 100
     assert result[THING]["totalCleanHistoryAreaM2"] == 50
     # No per-entry fields extracted because entries[0] isn't a dict
     assert "lastCleanAreaM2" not in result[THING]
