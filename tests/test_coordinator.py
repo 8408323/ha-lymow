@@ -3197,6 +3197,28 @@ async def test_async_check_firmware_update_no_patch_when_response_empty() -> Non
 
 
 # ---------------------------------------------------------------------------
+# Voice pack — switch reuses create-ota-job (no cloud read-back)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_set_voice_language_creates_voice_pack_job() -> None:
+    coord, _, api = _make_coordinator()
+    api.create_voice_pack_job = AsyncMock(return_value={"jobId": "VOICE-1"})
+    job_id = await coord.async_set_voice_language(THING, "German")
+    assert job_id == "VOICE-1"
+    # A voice pack is an OTA job keyed by the language display name (type=ChangeLanguage).
+    api.create_voice_pack_job.assert_awaited_once_with(THING, "German")
+
+
+@pytest.mark.asyncio
+async def test_async_set_voice_language_handles_missing_job_id() -> None:
+    coord, _, api = _make_coordinator()
+    api.create_voice_pack_job = AsyncMock(return_value={})
+    assert await coord.async_set_voice_language(THING, "Spanish") is None
+
+
+# ---------------------------------------------------------------------------
 # BLE manual drive
 # ---------------------------------------------------------------------------
 
