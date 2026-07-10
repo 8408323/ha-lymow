@@ -39,6 +39,7 @@ class LymowSessionCompletedEvent(EventEntity):
         self._attr_device_info = lymow_device_info(coordinator, device)
 
     async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
         self.async_on_remove(self.hass.bus.async_listen(EVENT_SESSION_COMPLETED, self._handle_bus_event))
 
     @callback

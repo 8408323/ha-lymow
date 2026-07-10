@@ -61,7 +61,6 @@ try:
     import homeassistant.components.binary_sensor  # noqa: F401
     import homeassistant.components.button  # noqa: F401
     import homeassistant.components.device_tracker  # noqa: F401
-    import homeassistant.components.event  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
     import homeassistant.components.select  # noqa: F401
@@ -481,6 +480,9 @@ except ImportError:
     _ha_event = types.ModuleType("homeassistant.components.event")
 
     class _EventEntity:
+        async def async_added_to_hass(self):  # base hook the entity awaits via super()
+            pass
+
         def _trigger_event(self, event_type, event_attributes=None):
             self._last_event_type = event_type
             self._last_event_attributes = event_attributes
