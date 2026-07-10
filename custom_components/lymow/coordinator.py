@@ -1170,9 +1170,20 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         Only the provided globalZoneConfig fields are sent; see
         :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
         """
-        from .protocol import encode_set_task_config
+        from .protocol import _TASK_CONFIG_FIELDS, encode_set_task_config
 
         await self._mqtt.async_publish_command(thing_name, encode_set_task_config(**fields))
+        # Optimistic update: globalZoneConfig is only re-echoed on a full map
+        # query, not on pboutput, so mirror the written fields into coordinator
+        # data immediately so entities (e.g. the mow-pattern select) reflect the
+        # change instead of staying stale until the next map refresh.
+        if self.data and thing_name in self.data:
+            updates = {k: v for k, v in fields.items() if v is not None and k in _TASK_CONFIG_FIELDS}
+            if updates:
+                existing = self.data[thing_name]
+                map_data = {**existing.get("mapData", {})}
+                map_data["globalZoneConfig"] = {**map_data.get("globalZoneConfig", {}), **updates}
+                self.async_set_updated_data({**self.data, thing_name: {**existing, "mapData": map_data}})
 
     async def async_set_recharge_resume(
         self,

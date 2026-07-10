@@ -549,6 +549,31 @@ async def test_async_set_task_config_publishes_encoded_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_set_task_config_optimistically_updates_global_zone_config() -> None:
+    """globalZoneConfig only re-echoes on a map query, so the write mirrors it into data."""
+    from lymow.protocol import _decode_fields, _first
+
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"globalZoneConfig": {"cutHeight": 60}}}}
+    await coord.async_set_task_config(THING, cleanMode=3)
+    gzc = coord.data[THING]["mapData"]["globalZoneConfig"]
+    assert gzc == {"cutHeight": 60, "cleanMode": 3}  # merge preserves existing keys
+    # And the published payload really carries cleanMode=3 (PbZoneConfig field 7).
+    _thing, pb = mqtt.async_publish_command.await_args.args
+    cfg = _decode_fields(_first(_decode_fields(_first(_decode_fields(pb), 12)), 11))
+    assert _first(cfg, 7) == 3
+
+
+@pytest.mark.asyncio
+async def test_async_set_task_config_no_optimism_when_data_absent() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = None
+    await coord.async_set_task_config(THING, cleanMode=2)  # must not raise
+    mqtt.async_publish_command.assert_awaited_once()
+    assert coord.data is None
+
+
+@pytest.mark.asyncio
 async def test_async_set_run_time_config_publishes_encoded_command() -> None:
     from lymow.protocol import _decode_fields, _first
 
