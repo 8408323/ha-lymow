@@ -518,13 +518,14 @@ async def test_async_setup_entry_creates_entities() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    from lymow.sensor import LymowTotalMappedAreaSensor
+    from lymow.sensor import LymowRtspUrlSensor, LymowTotalMappedAreaSensor
 
     assert any(isinstance(e, LymowSensor) for e in added)
     assert any(isinstance(e, LymowErrorSensor) for e in added)
     assert any(isinstance(e, LymowRtkSensor) for e in added)
     assert any(isinstance(e, LymowMapSensor) for e in added)
     assert any(isinstance(e, LymowTotalMappedAreaSensor) for e in added)
+    assert any(isinstance(e, LymowRtspUrlSensor) for e in added)
 
 
 async def test_async_setup_entry_multiple_devices() -> None:
@@ -1670,5 +1671,49 @@ def test_total_mapped_area_is_diagnostic_and_disabled_by_default() -> None:
 
     e = LymowTotalMappedAreaSensor(_make_coord(), DEVICE)
     assert e._attr_unique_id == f"{THING}_total_mapped_area"
+    assert e.entity_category == EntityCategory.DIAGNOSTIC
+    assert e._attr_entity_registry_enabled_default is False
+
+
+# ---------------------------------------------------------------------------
+# LymowRtspUrlSensor — local LAN RTSP URL (diagnostic)
+# ---------------------------------------------------------------------------
+
+
+def test_rtsp_url_sensor_builds_url_from_ip() -> None:
+    from lymow.const import RTSP_PATH, RTSP_PORT
+    from lymow.sensor import LymowRtspUrlSensor
+
+    e = LymowRtspUrlSensor(_make_coord({"ipAddress": "192.168.30.85"}), DEVICE)
+    assert e.native_value == f"rtsp://192.168.30.85:{RTSP_PORT}/{RTSP_PATH}"
+
+
+def test_rtsp_url_sensor_falls_back_to_camera_ip_keys() -> None:
+    from lymow.const import RTSP_PATH, RTSP_PORT
+    from lymow.sensor import LymowRtspUrlSensor
+
+    # Same key priority the camera uses: ipAddress -> wifiIp -> ip_address.
+    for state in ({"wifiIp": "10.0.0.5"}, {"ip_address": "10.0.0.5"}):
+        e = LymowRtspUrlSensor(_make_coord(state), DEVICE)
+        assert e.native_value == f"rtsp://10.0.0.5:{RTSP_PORT}/{RTSP_PATH}"
+    # ipAddress wins over the fallbacks when present.
+    e = LymowRtspUrlSensor(_make_coord({"ipAddress": "1.1.1.1", "wifiIp": "2.2.2.2"}), DEVICE)
+    assert e.native_value == f"rtsp://1.1.1.1:{RTSP_PORT}/{RTSP_PATH}"
+
+
+def test_rtsp_url_sensor_none_without_ip() -> None:
+    from lymow.sensor import LymowRtspUrlSensor
+
+    assert LymowRtspUrlSensor(_make_coord({}), DEVICE).native_value is None
+    assert LymowRtspUrlSensor(_make_coord({"ipAddress": "  "}), DEVICE).native_value is None  # blank
+    assert LymowRtspUrlSensor(_make_coord({"ipAddress": 123}), DEVICE).native_value is None  # non-string
+
+
+def test_rtsp_url_sensor_is_diagnostic_and_disabled_by_default() -> None:
+    from homeassistant.const import EntityCategory
+    from lymow.sensor import LymowRtspUrlSensor
+
+    e = LymowRtspUrlSensor(_make_coord({}), DEVICE)
+    assert e._attr_unique_id == f"{THING}_rtsp_url"
     assert e.entity_category == EntityCategory.DIAGNOSTIC
     assert e._attr_entity_registry_enabled_default is False
