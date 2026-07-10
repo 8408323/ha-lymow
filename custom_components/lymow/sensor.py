@@ -850,12 +850,24 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         return attrs
 
 
+def _schedule_to_local(sched: dict[str, Any]) -> dict[str, Any]:
+    """Copy a decoded schedule with hour/minute/dayOfWeek shifted from stored UTC to local (via timeZone)."""
+    out = dict(sched)
+    offset = int(sched.get("timeZone", 0) or 0)
+    day_delta, out["hour"] = divmod(int(sched.get("hour", 0)) + offset, 24)
+    days = sched.get("dayOfWeek")
+    if days:
+        out["dayOfWeek"] = [(int(d) + day_delta) % 7 for d in days]
+    return out
+
+
 class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     """Mowing schedules reported by the robot (USER_CTRL_QUERY_SCHEDULES).
 
-    State is the number of schedules. Each schedule's days, UTC time, target
+    State is the number of schedules. Each schedule's days, local time, target
     zones, repeat/disabled flags and id are exposed in the ``schedules``
-    attribute. None until the first reply arrives.
+    attribute (times converted from the stored UTC using ``timeZone``). None
+    until the first reply arrives.
     """
 
     _attr_has_entity_name = True
@@ -876,7 +888,7 @@ class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         schedules = (self.coordinator.data.get(self._thing_name) or {}).get("schedules") or []
-        return {"schedules": schedules}
+        return {"schedules": [_schedule_to_local(s) for s in schedules]}
 
 
 class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):

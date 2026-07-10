@@ -1135,6 +1135,36 @@ def test_schedules_sensor_counts_and_exposes_entries() -> None:
     assert sensor._attr_name == "Mow schedules"
 
 
+def test_schedules_sensor_converts_utc_to_local_for_display() -> None:
+    """Stored UTC hour + timeZone offset is shown in local time (like the app)."""
+    entries = [{"dayOfWeek": [2], "hour": 9, "minute": 45, "timeZone": 2, "zones": ["z1"], "id": 1}]
+    sensor = LymowSchedulesSensor(_make_coord({"schedules": entries}), DEVICE)
+    shown = sensor.extra_state_attributes["schedules"][0]
+    assert (shown["hour"], shown["minute"], shown["dayOfWeek"]) == (11, 45, [2])
+
+
+def test_schedules_sensor_local_conversion_shifts_day_across_midnight() -> None:
+    """A UTC time that lands on the next/previous local day shifts dayOfWeek too."""
+    entries = [
+        {"dayOfWeek": [6], "hour": 23, "minute": 0, "timeZone": 2, "zones": ["z1"]},  # +2h -> Sun 01:00
+        {"dayOfWeek": [0], "hour": 1, "minute": 0, "timeZone": -3, "zones": ["z2"]},  # -3h -> Sat 22:00
+    ]
+    sensor = LymowSchedulesSensor(_make_coord({"schedules": entries}), DEVICE)
+    shown = sensor.extra_state_attributes["schedules"]
+    assert (shown[0]["hour"], shown[0]["dayOfWeek"]) == (1, [0])
+    assert (shown[1]["hour"], shown[1]["dayOfWeek"]) == (22, [6])
+
+
+def test_schedules_sensor_display_does_not_mutate_cached_utc() -> None:
+    """Display conversion must not touch the cached UTC values the write path reads."""
+    entries = [{"dayOfWeek": [2], "hour": 9, "minute": 45, "timeZone": 2, "zones": ["z1"]}]
+    coord = _make_coord({"schedules": entries})
+    sensor = LymowSchedulesSensor(coord, DEVICE)
+    _ = sensor.extra_state_attributes
+    cached = coord.data[THING]["schedules"][0]
+    assert (cached["hour"], cached["dayOfWeek"]) == (9, [2])
+
+
 def test_schedules_sensor_empty_list_is_zero() -> None:
     sensor = LymowSchedulesSensor(_make_coord({"schedules": []}), DEVICE)
     assert sensor.native_value == 0
