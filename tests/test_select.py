@@ -239,9 +239,42 @@ def test_backup_restore_options_label_priority_and_uniqueness() -> None:
     ]
     e = BackupMapRestoreSelect(_make_backup_coord(entries), DEVICE)
     opts = e.options
-    assert "Spring" in opts and "Spring (2)" in opts  # duplicate name disambiguated
+    # Duplicate "Spring" disambiguated by a STABLE file-basename discriminator, not an ordinal.
+    assert "Spring · a.pb" in opts and "Spring · c.pb" in opts
     assert any("UTC" in o for o in opts)  # blank-name entry falls back to its timestamp
     assert len(opts) == 3  # the file-less entry is skipped
+
+
+async def test_backup_restore_duplicate_label_resolves_to_correct_file() -> None:
+    from lymow.select import BackupMapRestoreSelect
+
+    entries = [{"file": "dev/map/a.pb", "name": "Spring"}, {"file": "dev/map/c.pb", "name": "Spring"}]
+    coord = _make_backup_coord(entries)
+    await BackupMapRestoreSelect(coord, DEVICE).async_select_option("Spring · c.pb")
+    coord.async_restore_backup_map.assert_awaited_once_with(THING, "dev/map/c.pb")
+
+
+def test_backup_restore_tolerates_malformed_name_and_file() -> None:
+    from lymow.select import BackupMapRestoreSelect
+
+    entries = [
+        {"file": "dev/map/a.pb", "name": 123},  # non-string name -> basename fallback, still listed
+        {"file": 999, "name": "bad-file"},  # non-string file -> skipped
+        {"file": "   ", "name": "blank-file"},  # blank file -> skipped
+    ]
+    assert BackupMapRestoreSelect(_make_backup_coord(entries), DEVICE).options == ["a.pb"]
+
+
+async def test_backup_restore_blocks_select_navigation() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+    from lymow.select import BackupMapRestoreSelect
+
+    coord = _make_backup_coord([{"file": "dev/map/a.pb", "name": "Spring"}])
+    e = BackupMapRestoreSelect(coord, DEVICE)
+    for nav in (e.async_first, e.async_last, e.async_next, e.async_previous):
+        with pytest.raises(HomeAssistantError):
+            await nav()
+    coord.async_restore_backup_map.assert_not_called()
 
 
 async def test_backup_restore_select_restores_matching_file() -> None:
@@ -268,8 +301,9 @@ async def test_backup_restore_select_unknown_label_raises() -> None:
 def test_backup_label_falls_back_to_file_basename() -> None:
     from lymow.select import _backup_label
 
-    # No name, no timestamp -> the file's basename; nothing at all -> "Backup <n>".
+    # No (usable) name, no timestamp -> the file's basename; nothing at all -> "Backup <n>".
     assert _backup_label({"file": "dev/map/summer.pb"}, 0) == "summer.pb"
+    assert _backup_label({"name": 5, "file": "dev/map/summer.pb"}, 0) == "summer.pb"  # non-string name ignored
     assert _backup_label({}, 4) == "Backup 5"
     # Unparseable backupTime (bad type/value) -> fall through to file basename.
     assert _backup_label({"file": "dev/map/bad.pb", "backupTime": "not-a-number"}, 0) == "bad.pb"
