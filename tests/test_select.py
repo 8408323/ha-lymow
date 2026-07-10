@@ -244,6 +244,18 @@ def test_mow_pattern_unknown_when_absent_zero_or_invalid() -> None:
     assert MowPatternSelect(_make_pattern_coord({"cleanMode": "x"}), DEVICE).current_option is None  # non-int
 
 
+def test_mow_pattern_current_option_tolerates_non_dict_config() -> None:
+    # Malformed decode (non-dict mapData / globalZoneConfig / cleanMode) -> unknown, no raise.
+    for bad_state in (
+        {"mapData": "x"},
+        {"mapData": {"globalZoneConfig": ["y"]}},
+        {"mapData": {"globalZoneConfig": None}},
+    ):
+        coord = MagicMock()
+        coord.data = {THING: bad_state}
+        assert MowPatternSelect(coord, DEVICE).current_option is None
+
+
 async def test_mow_pattern_select_option_calls_coordinator() -> None:
     coord = _make_pattern_coord()
     e = MowPatternSelect(coord, DEVICE)

@@ -204,8 +204,9 @@ class MowPatternSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
 
     @property
     def current_option(self) -> str | None:
-        gzc = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData", {}).get("globalZoneConfig") or {}
-        value = gzc.get("cleanMode")
+        map_data = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData")
+        gzc = map_data.get("globalZoneConfig") if isinstance(map_data, dict) else None
+        value = gzc.get("cleanMode") if isinstance(gzc, dict) else None
         if not isinstance(value, int):
             return None
         return self._value_to_label.get(value)
