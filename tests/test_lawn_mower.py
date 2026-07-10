@@ -2339,6 +2339,49 @@ async def test_handle_add_schedule_forwards_kwargs() -> None:
     )
 
 
+async def test_handle_add_schedule_rejects_empty_zones() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"hour": 8, "minute": 5, "day_of_week": [1], "zones": [], "repeated": True, "disabled": False},
+    )
+    with pytest.raises(ServiceValidationError):
+        await handlers["add_schedule"](call)
+    coord.async_add_schedule.assert_not_called()
+
+
+async def test_handle_set_schedules_rejects_entry_without_zones() -> None:
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(
+        ["lawn_mower.mower_1"],
+        {"schedules": [_validated_schedule(), _validated_schedule(zones=[])]},
+    )
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_schedules"](call)
+    coord.async_set_schedules.assert_not_called()
+
+
+def test_require_schedule_zones_passes_and_rejects() -> None:
+    from lymow.lawn_mower import _require_schedule_zones
+
+    _require_schedule_zones(["abc"])  # no raise
+    _require_schedule_zones(["abc", "def"])  # no raise
+    # Empty list, or any blank/whitespace zone (even mixed with a real one) -> reject.
+    for bad in ([], [""], ["  "], ["abc", ""], ["abc", " "]):
+        with pytest.raises(ServiceValidationError):
+            _require_schedule_zones(bad)
+
+
 async def test_handle_delete_schedule_forwards_id() -> None:
     coord = _make_coord()
     entry = MagicMock()
@@ -2373,7 +2416,7 @@ async def test_handle_granular_schedule_unknown_entity_skips() -> None:
     await handlers["add_schedule"](
         _make_call(
             ["lawn_mower.other"],
-            {"hour": 8, "minute": 0, "day_of_week": [], "zones": [], "repeated": True, "disabled": False},
+            {"hour": 8, "minute": 0, "day_of_week": [], "zones": ["abc"], "repeated": True, "disabled": False},
         )
     )
     coord.async_delete_schedule.assert_not_called()

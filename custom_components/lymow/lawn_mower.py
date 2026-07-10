@@ -575,6 +575,18 @@ _ADD_SCHEDULE_SCHEMA = vol.Schema(
         vol.Optional("disabled", default=False): cv.boolean,
     }
 )
+
+
+def _require_schedule_zones(zones: list[str]) -> None:
+    """A schedule needs >=1 zone and every zone ID must be non-blank (else the app hides it)."""
+    if not zones or any(not str(z).strip() for z in zones):
+        raise ServiceValidationError(
+            "A mowing schedule must target at least one zone, and every zone ID must be non-empty. "
+            "A zone-less (or blank-zone) schedule is stored by the mower but does not appear in the "
+            "app and would mow nothing."
+        )
+
+
 _DELETE_SCHEDULE_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
@@ -960,6 +972,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_set_schedules(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
+        raw_schedules = call.data[_ATTR_SCHEDULES]
+        for s in raw_schedules:
+            _require_schedule_zones(s["zones"])
         entries = [
             {
                 "hour": s["hour"],
@@ -969,7 +984,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "isRepeated": s["repeated"],
                 "isDisabled": s["disabled"],
             }
-            for s in call.data[_ATTR_SCHEDULES]
+            for s in raw_schedules
         ]
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
         for eid in entity_ids:
@@ -980,6 +995,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_add_schedule(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
+        _require_schedule_zones(call.data["zones"])
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
         for eid in entity_ids:
             entity = entity_map.get(eid)
