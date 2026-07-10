@@ -271,3 +271,5 @@ def test_backup_label_falls_back_to_file_basename() -> None:
     # No name, no timestamp -> the file's basename; nothing at all -> "Backup <n>".
     assert _backup_label({"file": "dev/map/summer.pb"}, 0) == "summer.pb"
     assert _backup_label({}, 4) == "Backup 5"
+    # Unparseable backupTime (bad type/value) -> fall through to file basename.
+    assert _backup_label({"file": "dev/map/bad.pb", "backupTime": "not-a-number"}, 0) == "bad.pb"
