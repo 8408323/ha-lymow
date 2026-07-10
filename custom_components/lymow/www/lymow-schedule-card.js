@@ -11,8 +11,9 @@
  * Writes: lymow.add_schedule, toggle_schedule, delete_schedule, clear_schedules
  */
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+// Indexed by the wire dayOfWeek code (0=Sun .. 6=Sat), matching the service's
+// day numbering, so DAYS[d] labels a schedule and a chip's index IS the code.
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 class LymowScheduleCard extends HTMLElement {
   setConfig(config) {
@@ -52,15 +53,18 @@ class LymowScheduleCard extends HTMLElement {
   }
 
   _zones() {
-    // Collect zone switch entities for this device to offer zone selection
+    // Full zone hash IDs + names come from the map sensor's go_zones attribute
+    // (the zone switches only carry a truncated 4-char name, not the real hash).
     if (!this._hass) return [];
     const base = this._config.mower_entity.split(".")[1];
-    return Object.entries(this._hass.states)
-      .filter(([id]) => id.startsWith("switch.") && id.includes(base) && id.endsWith("_enabled"))
-      .map(([id, st]) => ({
-        id: st.attributes?.zone_hash_id || id.split("_").slice(-2, -1)[0],
-        name: st.attributes?.friendly_name || id,
-      }));
+    const mapId = Object.keys(this._hass.states).find(
+      id => id.startsWith("sensor.") && id.includes(base) &&
+            Array.isArray(this._hass.states[id].attributes?.go_zones)
+    );
+    const zones = mapId ? this._hass.states[mapId].attributes.go_zones : [];
+    return zones
+      .filter(z => z && z.hashId)
+      .map(z => ({ id: z.hashId, name: z.name || `Zone ${z.hashId.slice(0, 4)}` }));
   }
 
   _build() {
@@ -171,14 +175,10 @@ class LymowScheduleCard extends HTMLElement {
       const row = document.createElement("div");
       row.className = "row";
 
+      // The mow_schedules sensor already exposes hour/minute/dayOfWeek in local time.
       const days = (s.dayOfWeek || []).map(d => DAYS[d] ?? `d${d}`).join(" ");
-      const utcH = s.hour ?? 0;
-      const utcM = s.minute ?? 0;
-      // Robot stores UTC time; timeZone field is hours offset (e.g. 2 = UTC+2)
-      const tzOffset = (s.timeZone ?? 0) * 60; // minutes
-      const localMins = utcH * 60 + utcM + tzOffset;
-      const lh = ((localMins / 60) % 24 + 24) % 24 | 0;
-      const lm = ((localMins % 60) + 60) % 60;
+      const lh = s.hour ?? 0;
+      const lm = s.minute ?? 0;
       const timeStr = `${String(lh).padStart(2, "0")}:${String(lm).padStart(2, "0")}`;
       const zoneStr = (s.zones && s.zones.length) ? `Zones: ${s.zones.join(", ")}` : "All zones";
 
@@ -253,21 +253,17 @@ class LymowScheduleCard extends HTMLElement {
 
     if (!timeVal) { this._setStatus("Please set a time.", true); return; }
 
-    // Collect selected zone IDs (empty = all zones)
+    // A zone-less schedule is hidden by the app and mows nothing, so "All zones"
+    // sends every available zone explicitly (the service requires at least one).
     const allOn = this._root.querySelector(".zone-chip[data-zone-id='__all__']")?.classList.contains("on");
     const zoneChips = [...this._root.querySelectorAll(".zone-chip.on")].filter(c => c.dataset.zoneId !== "__all__");
-    const zones = (allOn || !zoneChips.length) ? [] : zoneChips.map(c => c.dataset.zoneId);
+    const zones = (allOn || !zoneChips.length) ? this._zones().map(z => z.id) : zoneChips.map(c => c.dataset.zoneId);
 
-    // Convert local time to UTC
+    // The add_schedule service takes local time and converts to UTC itself.
     const [lh, lm] = timeVal.split(":").map(Number);
-    const d = new Date();
-    d.setHours(lh, lm, 0, 0);
-    const utcH = d.getUTCHours();
-    const utcM = d.getUTCMinutes();
-
     const payload = {
-      hour: utcH,
-      minute: utcM,
+      hour: lh,
+      minute: lm,
       day_of_week: days.length ? days : [0, 1, 2, 3, 4, 5, 6],
       repeated: repeat,
       disabled: false,
