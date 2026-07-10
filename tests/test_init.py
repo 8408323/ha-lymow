@@ -64,6 +64,7 @@ def _make_ha_stubs() -> None:
             BUTTON = "button"
             CAMERA = "camera"
             DEVICE_TRACKER = "device_tracker"
+            EVENT = "event"
             LAWN_MOWER = "lawn_mower"
             NUMBER = "number"
             SELECT = "select"

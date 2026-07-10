@@ -20,6 +20,7 @@ from .bluetooth import LymowBleController
 from .const import (
     AUTH_REFRESH_MARGIN_SECONDS,
     DOMAIN,
+    EVENT_SESSION_COMPLETED,
     POLLING_INTERVAL,
     RTK_DIAGNOSTIC_POLL_SECONDS,
     USER_CTRL_CLEAN,
@@ -465,6 +466,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 notification_id=f"{DOMAIN}_{thing_name}_error",
             )
         elif prev_ws in WORK_STATUS_MOWING_GROUP | WORK_STATUS_RETURNING_GROUP and new_ws in WORK_STATUS_DOCKED_GROUP:
+            self.hass.bus.async_fire(
+                EVENT_SESSION_COMPLETED, {"device_name": device_label, **self._session_summary(thing_name)}
+            )
             self.hass.components.persistent_notification.async_create(
                 message=f"{device_label} has finished mowing and returned to the dock.",
                 title=f"Lymow — {device_label} done",
@@ -486,6 +490,35 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if new_ws in WORK_STATUS_MOWING_GROUP and not self._path_poll_pending.get(thing_name):
             self._path_poll_pending[thing_name] = True
             self.hass.async_create_task(self._async_poll_path(thing_name))
+
+    def _session_summary(self, thing_name: str) -> dict[str, Any]:
+        """Build the session-completed payload from the merged state at docking time.
+
+        End battery comes from the live ``battery`` (reliably current at docking);
+        area/duration prefer the end-of-mow ``cleanReport`` and fall back to the
+        REST last-clean / live mission-time fields, since the report may not land
+        in the same MQTT patch as the docked transition. A per-session covered-zone
+        list is not decoded yet, so it is intentionally omitted.
+        """
+        data = (self.data or {}).get(thing_name) or {}
+        report = data.get("cleanReport")
+        report = report if isinstance(report, dict) else {}
+        summary: dict[str, Any] = {"thing_name": thing_name}
+        area = report.get("cleanAreaM2")
+        if area is None:
+            area = data.get("lastCleanAreaM2")
+        if area is not None:
+            summary["area_m2"] = area
+        duration = report.get("cleanTimeMin")
+        if duration is None:
+            duration = data.get("missionTimeMin")
+        if duration is not None:
+            summary["duration_min"] = duration
+        if report.get("percent") is not None:
+            summary["percent"] = report["percent"]
+        if data.get("battery") is not None:
+            summary["end_battery_pct"] = data["battery"]
+        return summary
 
     def _check_rtk_guard(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Auto-pause when RTK falls below user-configured threshold; auto-resume when it recovers.

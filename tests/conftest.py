@@ -61,6 +61,7 @@ try:
     import homeassistant.components.binary_sensor  # noqa: F401
     import homeassistant.components.button  # noqa: F401
     import homeassistant.components.device_tracker  # noqa: F401
+    import homeassistant.components.event  # noqa: F401
     import homeassistant.components.lawn_mower  # noqa: F401
     import homeassistant.components.number  # noqa: F401
     import homeassistant.components.select  # noqa: F401
@@ -135,6 +136,9 @@ except ImportError:
     class _HomeAssistant:
         pass
 
+    class _Event:
+        pass
+
     class _ServiceCall:
         pass
 
@@ -147,6 +151,7 @@ except ImportError:
         ONLY = "only"
 
     _ha_core.HomeAssistant = _HomeAssistant  # type: ignore[attr-defined]
+    _ha_core.Event = _Event  # type: ignore[attr-defined]
     _ha_core.ServiceCall = _ServiceCall  # type: ignore[attr-defined]
     _ha_core.callback = _callback  # type: ignore[attr-defined]
     _ha_core.SupportsResponse = _SupportsResponse  # type: ignore[attr-defined]
@@ -471,6 +476,17 @@ except ImportError:
 
     _ha_select.SelectEntity = _SelectEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.select", _ha_select)
+
+    # ── homeassistant.components.event ────────────────────────────────────────
+    _ha_event = types.ModuleType("homeassistant.components.event")
+
+    class _EventEntity:
+        def _trigger_event(self, event_type, event_attributes=None):
+            self._last_event_type = event_type
+            self._last_event_attributes = event_attributes
+
+    _ha_event.EventEntity = _EventEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.event", _ha_event)
 
     # ── homeassistant.components.text ─────────────────────────────────────────
     _ha_text = types.ModuleType("homeassistant.components.text")
