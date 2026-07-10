@@ -29,6 +29,14 @@ _ZONE_ORDER_OPTIONS: dict[str, int] = {
     "Optimize": 0,
     "Custom": 1,
 }
+# Mowing pattern (globalZoneConfig.cleanMode, field 7). Values pinned to the
+# user-selectable codes in const.CLEAN_MODES (0=NONE is not offered).
+_MOW_PATTERN_OPTIONS: dict[str, int] = {
+    "Zigzag": 1,
+    "Adaptive zigzag": 2,
+    "Chessboard": 3,
+    "Perimeter laps only": 4,
+}
 
 
 async def async_setup_entry(
@@ -42,6 +50,7 @@ async def async_setup_entry(
         entities.append(ChargingModeSelect(coordinator, device))
         entities.append(ZoneOrderSelect(coordinator, device))
         entities.append(CameraLightSelect(coordinator, device))
+        entities.append(MowPatternSelect(coordinator, device))
     if entities:
         async_add_entities(entities)
 
@@ -170,3 +179,37 @@ class CameraLightSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
         await self.coordinator.async_set_robot_config(self._thing_name, signal=signal_code)
         self._last_choice = option
         self.async_write_ha_state()
+
+
+class MowPatternSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
+    """Mowing pattern — globalZoneConfig.cleanMode (Mowing Settings → Global).
+
+    Reads the current pattern from decoded map data
+    (``mapData.globalZoneConfig.cleanMode``) and writes via the global
+    mowing-settings path (``async_set_task_config``, userCtrl=49). 0=NONE and
+    any unknown/future code show as unknown rather than a made-up label.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:sine-wave"
+    _attr_options = list(_MOW_PATTERN_OPTIONS)
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Mowing pattern"
+        self._attr_unique_id = f"{self._thing_name}_mow_pattern"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._value_to_label = {v: k for k, v in _MOW_PATTERN_OPTIONS.items()}
+
+    @property
+    def current_option(self) -> str | None:
+        map_data = (self.coordinator.data or {}).get(self._thing_name, {}).get("mapData")
+        gzc = map_data.get("globalZoneConfig") if isinstance(map_data, dict) else None
+        value = gzc.get("cleanMode") if isinstance(gzc, dict) else None
+        if not isinstance(value, int):
+            return None
+        return self._value_to_label.get(value)
+
+    async def async_select_option(self, option: str) -> None:
+        await self.coordinator.async_set_task_config(self._thing_name, cleanMode=_MOW_PATTERN_OPTIONS[option])

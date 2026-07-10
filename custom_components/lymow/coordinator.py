@@ -1179,9 +1179,36 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         Only the provided globalZoneConfig fields are sent; see
         :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
         """
-        from .protocol import encode_set_task_config
+        from .protocol import _TASK_CONFIG_FIELDS, encode_set_task_config
 
         await self._mqtt.async_publish_command(thing_name, encode_set_task_config(**fields))
+        updates = {k: v for k, v in fields.items() if v is not None and k in _TASK_CONFIG_FIELDS}
+        if updates:
+            self._optimistic_global_zone_config(thing_name, updates)
+
+    def _optimistic_global_zone_config(self, thing_name: str, updates: dict[str, Any]) -> None:
+        """Mirror written globalZoneConfig fields into cached state (immediate + poll-durable).
+
+        globalZoneConfig is only re-echoed on a full map query, so patch both the
+        live data (instant UI) and the MQTT-state cache the next REST poll rebuilds
+        from, so the value survives until the robot echoes it. Cached structures are
+        coerced to dicts first — a malformed decode must not turn a successful publish
+        into a failed service call.
+        """
+        # Poll-durable: only merge when a map already exists in the MQTT cache, so a
+        # partial mapData never wipes goZones on the next poll rebuild.
+        cached = self._mqtt_state.get(thing_name)
+        if isinstance(cached, dict) and isinstance(cached.get("mapData"), dict):
+            gzc = cached["mapData"].get("globalZoneConfig")
+            cached["mapData"]["globalZoneConfig"] = {**(gzc if isinstance(gzc, dict) else {}), **updates}
+        # Immediate: patch the live data so entities update now.
+        if self.data and thing_name in self.data:
+            existing = self.data[thing_name]
+            map_data = existing.get("mapData")
+            map_data = {**map_data} if isinstance(map_data, dict) else {}
+            gzc = map_data.get("globalZoneConfig")
+            map_data["globalZoneConfig"] = {**(gzc if isinstance(gzc, dict) else {}), **updates}
+            self.async_set_updated_data({**self.data, thing_name: {**existing, "mapData": map_data}})
 
     async def async_set_recharge_resume(
         self,

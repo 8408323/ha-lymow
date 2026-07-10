@@ -8,11 +8,14 @@ from tests.conftest import _load_lymow_module
 
 _load_lymow_module("select")
 
-from lymow.const import CHARGING_MODES, DOMAIN, ZONE_ORDERS  # noqa: E402
+from lymow.const import CHARGING_MODES, CLEAN_MODES, DOMAIN, ZONE_ORDERS  # noqa: E402
+from lymow.protocol import _encode_zone_config_submessage, decode_zone_config  # noqa: E402
 from lymow.select import (  # noqa: E402
     _CHARGING_MODE_OPTIONS,
+    _MOW_PATTERN_OPTIONS,
     _ZONE_ORDER_OPTIONS,
     ChargingModeSelect,
+    MowPatternSelect,
     ZoneOrderSelect,
     async_setup_entry,
 )
@@ -129,7 +132,7 @@ async def test_async_setup_entry_adds_all_selects_per_device() -> None:
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     types = {type(e).__name__ for e in added}
-    assert types == {"ChargingModeSelect", "ZoneOrderSelect", "CameraLightSelect"}
+    assert types == {"ChargingModeSelect", "ZoneOrderSelect", "CameraLightSelect", "MowPatternSelect"}
 
 
 async def test_async_setup_entry_skips_when_no_devices() -> None:
@@ -197,3 +200,71 @@ async def test_camera_light_select_each_option_publishes_matching_signal() -> No
         await e.async_select_option(label)
         coord.async_set_robot_config.assert_awaited_once_with(THING, signal=signal)
         assert e.current_option == label  # last choice sticks
+
+
+# ---------------------------------------------------------------------------
+# MowPatternSelect — globalZoneConfig.cleanMode read + async_set_task_config write
+# ---------------------------------------------------------------------------
+
+
+def _make_pattern_coord(global_zone_config: dict | None = None) -> MagicMock:
+    coord = MagicMock()
+    state: dict = {"mapData": {}}
+    if global_zone_config is not None:
+        state["mapData"]["globalZoneConfig"] = global_zone_config
+    coord.data = {THING: state}
+    coord.devices = [DEVICE]
+    coord.async_set_task_config = AsyncMock()
+    return coord
+
+
+def _decoded_gzc(clean_mode: int) -> dict:
+    """Build a globalZoneConfig dict through the real codec (no hand-rolled dict)."""
+    return decode_zone_config(_encode_zone_config_submessage({"cleanMode": clean_mode}))
+
+
+def test_mow_pattern_unique_id_and_options() -> None:
+    e = MowPatternSelect(_make_pattern_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_mow_pattern"
+    assert e._attr_name == "Mowing pattern"
+    assert e._attr_options == ["Zigzag", "Adaptive zigzag", "Chessboard", "Perimeter laps only"]
+
+
+def test_mow_pattern_reads_current_value() -> None:
+    for code, label in ((1, "Zigzag"), (2, "Adaptive zigzag"), (3, "Chessboard"), (4, "Perimeter laps only")):
+        e = MowPatternSelect(_make_pattern_coord(_decoded_gzc(code)), DEVICE)
+        assert e.current_option == label
+
+
+def test_mow_pattern_unknown_when_absent_zero_or_invalid() -> None:
+    assert MowPatternSelect(_make_pattern_coord(), DEVICE).current_option is None  # no globalZoneConfig
+    assert MowPatternSelect(_make_pattern_coord({}), DEVICE).current_option is None  # empty
+    assert MowPatternSelect(_make_pattern_coord(_decoded_gzc(0)), DEVICE).current_option is None  # NONE
+    assert MowPatternSelect(_make_pattern_coord({"cleanMode": 99}), DEVICE).current_option is None  # future code
+    assert MowPatternSelect(_make_pattern_coord({"cleanMode": "x"}), DEVICE).current_option is None  # non-int
+
+
+def test_mow_pattern_current_option_tolerates_non_dict_config() -> None:
+    # Malformed decode (non-dict mapData / globalZoneConfig / cleanMode) -> unknown, no raise.
+    for bad_state in (
+        {"mapData": "x"},
+        {"mapData": {"globalZoneConfig": ["y"]}},
+        {"mapData": {"globalZoneConfig": None}},
+    ):
+        coord = MagicMock()
+        coord.data = {THING: bad_state}
+        assert MowPatternSelect(coord, DEVICE).current_option is None
+
+
+async def test_mow_pattern_select_option_calls_coordinator() -> None:
+    coord = _make_pattern_coord()
+    e = MowPatternSelect(coord, DEVICE)
+    await e.async_select_option("Adaptive zigzag")
+    coord.async_set_task_config.assert_awaited_once_with(THING, cleanMode=2)
+
+
+def test_mow_pattern_option_values_match_const_table() -> None:
+    # Labels map to the canonical CLEAN_MODES codes; 0=NONE is intentionally not offered.
+    assert set(_MOW_PATTERN_OPTIONS.values()) == {1, 2, 3, 4}
+    for value in _MOW_PATTERN_OPTIONS.values():
+        assert value in CLEAN_MODES
