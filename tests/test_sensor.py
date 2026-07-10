@@ -1600,6 +1600,19 @@ def test_rtsp_url_sensor_builds_url_from_ip() -> None:
     assert e.native_value == f"rtsp://192.168.30.85:{RTSP_PORT}/{RTSP_PATH}"
 
 
+def test_rtsp_url_sensor_falls_back_to_camera_ip_keys() -> None:
+    from lymow.const import RTSP_PATH, RTSP_PORT
+    from lymow.sensor import LymowRtspUrlSensor
+
+    # Same key priority the camera uses: ipAddress -> wifiIp -> ip_address.
+    for state in ({"wifiIp": "10.0.0.5"}, {"ip_address": "10.0.0.5"}):
+        e = LymowRtspUrlSensor(_make_coord(state), DEVICE)
+        assert e.native_value == f"rtsp://10.0.0.5:{RTSP_PORT}/{RTSP_PATH}"
+    # ipAddress wins over the fallbacks when present.
+    e = LymowRtspUrlSensor(_make_coord({"ipAddress": "1.1.1.1", "wifiIp": "2.2.2.2"}), DEVICE)
+    assert e.native_value == f"rtsp://1.1.1.1:{RTSP_PORT}/{RTSP_PATH}"
+
+
 def test_rtsp_url_sensor_none_without_ip() -> None:
     from lymow.sensor import LymowRtspUrlSensor
 

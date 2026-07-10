@@ -1022,10 +1022,14 @@ class LymowRtspUrlSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
     @property
     def native_value(self) -> str | None:
-        ip = (self.coordinator.data.get(self._thing_name) or {}).get("ipAddress")
-        if not isinstance(ip, str) or not ip.strip():
-            return None
-        return f"rtsp://{ip.strip()}:{RTSP_PORT}/{RTSP_PATH}"
+        data = self.coordinator.data.get(self._thing_name) or {}
+        # Mirror the camera's IP resolution (camera._IP_KEYS) so this URL points at
+        # whatever address the camera actually streams from.
+        for key in ("ipAddress", "wifiIp", "ip_address"):
+            ip = data.get(key)
+            if isinstance(ip, str) and ip.strip():
+                return f"rtsp://{ip.strip()}:{RTSP_PORT}/{RTSP_PATH}"
+        return None
 
 
 class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
