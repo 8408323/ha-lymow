@@ -103,6 +103,7 @@ async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
         for js in (
             "lymow-map-card.js",
             "lymow-camera-card.js",
+            "lymow-control-card.js",
             "lymow-drive-card.js",
             "lymow-schedule-card.js",
             "lymow-backup-card.js",

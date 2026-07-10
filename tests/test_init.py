@@ -686,8 +686,9 @@ async def test_ensure_lovelace_resources_updates_and_creates() -> None:
 
     # Stale map card → updated in-place to the current version.
     resources.async_update_item.assert_awaited_once_with("res-map", {"res_type": "module", "url": current_map_url})
-    # The four cards with no existing entry are created (camera already current).
+    # The cards with no existing entry are created (camera already current).
     created_urls = {call.args[0]["url"] for call in resources.async_create_item.await_args_list}
+    assert _lymow._card_url("lymow-control-card.js") in created_urls
     assert _lymow._card_url("lymow-drive-card.js") in created_urls
     assert _lymow._card_url("lymow-schedule-card.js") in created_urls
     assert _lymow._card_url("lymow-backup-card.js") in created_urls
