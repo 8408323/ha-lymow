@@ -455,6 +455,13 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
     if isinstance(gcc_raw, bytes) and len(gcc_raw) > 0:
         result["globalChannelConfig"] = decode_channel_config(gcc_raw)
 
+    # ---- Run-time config (f13) — PbRunTimeConfig, the robot's live mowing
+    # overrides (cut height / move speed / cut speed); the readback the
+    # QUERY_RUN_TIME_CONFIG reply (and map responses) carry.
+    rtc_raw = _first(content, _MAP_CONTENT_RUN_TIME_CONFIG)
+    if isinstance(rtc_raw, bytes) and len(rtc_raw) > 0:
+        result["runTimeConfig"] = decode_run_time_config(rtc_raw)
+
     return result
 
 
@@ -582,6 +589,23 @@ def decode_zone_config(data: bytes) -> dict[str, Any]:
             continue
         if fn in _ZONE_CONFIG_INT_NAMES and isinstance(val, int):
             out[_ZONE_CONFIG_INT_NAMES[fn]] = val
+    return out
+
+
+def decode_run_time_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbRunTimeConfig sub-message (PbMap.f13).
+
+    Mirrors ``encode_set_run_time_config``: cutHeight (f1, int), moveSpeed
+    (f4, float32), cutSpeed (f6, int). Missing fields are simply absent.
+    """
+    out: dict[str, Any] = {}
+    for fn, _wt, val in _decode_fields(data):
+        if fn == 4:
+            out["moveSpeed"] = _decode_f32(val)
+        elif fn == 1 and isinstance(val, int):
+            out["cutHeight"] = val
+        elif fn == 6 and isinstance(val, int):
+            out["cutSpeed"] = val
     return out
 
 
