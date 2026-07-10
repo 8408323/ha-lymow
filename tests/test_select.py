@@ -338,8 +338,24 @@ def test_backup_restore_tolerates_malformed_name_and_file() -> None:
         {"file": "dev/map/a.pb", "name": 123},  # non-string name -> basename fallback, still listed
         {"file": 999, "name": "bad-file"},  # non-string file -> skipped
         {"file": "   ", "name": "blank-file"},  # blank file -> skipped
+        "not-a-dict",  # non-dict entry -> skipped
     ]
     assert BackupMapRestoreSelect(_make_backup_coord(entries), DEVICE).options == ["a.pb"]
+
+
+def test_backup_restore_last_resort_suffix_when_name_and_basename_both_collide() -> None:
+    """Collision loop (lines 244-245): same display-name AND same file basename in two dirs."""
+    from lymow.select import BackupMapRestoreSelect
+
+    entries = [
+        {"file": "dir1/map.pb", "name": "Spring"},
+        {"file": "dir2/map.pb", "name": "Spring"},  # same name + same basename -> fallback ordinal
+    ]
+    opts = BackupMapRestoreSelect(_make_backup_coord(entries), DEVICE).options
+    # Both must appear; the second gets an ordinal suffix since the basename discriminator also collides.
+    assert "Spring · map.pb" in opts
+    assert "Spring · map.pb (2)" in opts
+    assert len(opts) == 2
 
 
 async def test_backup_restore_blocks_select_navigation() -> None:
