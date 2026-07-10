@@ -64,6 +64,23 @@ def merge_zone_polygons(*polygons: list[dict[str, float]]) -> list[dict[str, flo
     return convex_hull(all_points)
 
 
+def polygon_area(polygon: list[dict[str, float]]) -> float:
+    """Area of a simple polygon (shoelace), in the same squared units as its coordinates.
+
+    Winding-independent (returns the absolute area). Degenerate input (fewer than
+    3 vertices) is 0.0. Missing x/y on a point count as 0 rather than raising.
+    """
+    n = len(polygon)
+    if n < 3:
+        return 0.0
+    total = 0.0
+    for i in range(n):
+        a = polygon[i]
+        b = polygon[(i + 1) % n]
+        total += a.get("x", 0.0) * b.get("y", 0.0) - b.get("x", 0.0) * a.get("y", 0.0)
+    return abs(total) / 2.0
+
+
 def _line_side(line_p1: dict[str, float], line_p2: dict[str, float], pt: dict[str, float]) -> float:
     """Signed side: > 0 if pt is left of the line p1→p2, < 0 if right, 0 on line."""
     return (line_p2["x"] - line_p1["x"]) * (pt["y"] - line_p1["y"]) - (line_p2["y"] - line_p1["y"]) * (
