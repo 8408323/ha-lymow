@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
+from datetime import UTC, datetime
+from typing import Any
+
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -51,6 +56,7 @@ async def async_setup_entry(
         entities.append(ZoneOrderSelect(coordinator, device))
         entities.append(CameraLightSelect(coordinator, device))
         entities.append(MowPatternSelect(coordinator, device))
+        entities.append(BackupMapRestoreSelect(coordinator, device))
     if entities:
         async_add_entities(entities)
 
@@ -213,3 +219,104 @@ class MowPatternSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         await self.coordinator.async_set_task_config(self._thing_name, cleanMode=_MOW_PATTERN_OPTIONS[option])
+
+
+def _backup_label(entry: dict[str, Any], index: int) -> str:
+    """Human label for a backup-map entry: its name, else its timestamp, else the file basename."""
+    name = entry.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    ts = entry.get("backupTime")
+    if ts is not None:
+        try:
+            return datetime.fromtimestamp(int(ts), tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
+        except (TypeError, ValueError, OSError):
+            pass
+    file_key = entry.get("file")
+    if isinstance(file_key, str) and file_key.strip():
+        return file_key.rsplit("/", 1)[-1]
+    return f"Backup {index + 1}"
+
+
+class BackupMapRestoreSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
+    """One-click restore of a saved map backup.
+
+    An action select: the options are the available backups (from the decoded
+    ``backupMapList``); picking one restores that backup onto the robot. There
+    is no persistent "current" selection, so ``current_option`` is always None,
+    and the select-navigation services (next/previous/first/last) are blocked so
+    a generic automation can't trigger a restore without naming a backup.
+
+    Disabled by default — restoring overwrites the live map. Note: restore-map-v2
+    does not reliably re-create a zone's child no-go zones (#111), so a restored
+    map may be missing no-go areas until the next full re-map.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:map-clock"
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name: str = device["deviceThingName"]
+        self._attr_name = "Restore backup map"
+        self._attr_unique_id = f"{self._thing_name}_restore_backup_map"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+
+    def _label_to_file(self) -> dict[str, str]:
+        entries = (self.coordinator.data or {}).get(self._thing_name, {}).get("backupMapList") or []
+        # Only entries whose file key is a non-empty string are restorable.
+        valid: list[tuple[str, str]] = []
+        for index, entry in enumerate(entries):
+            if not isinstance(entry, dict):
+                continue
+            file_key = entry.get("file")
+            if not isinstance(file_key, str) or not file_key.strip():
+                continue
+            valid.append((_backup_label(entry, index), file_key))
+        base_counts = Counter(base for base, _ in valid)
+        out: dict[str, str] = {}
+        for base, file_key in valid:
+            # Duplicate display names get a STABLE discriminator (the file basename)
+            # rather than an order-dependent ordinal, so a label always resolves to
+            # the same backup even if the list refreshes between render and click.
+            label = base if base_counts[base] == 1 else f"{base} · {file_key.rsplit('/', 1)[-1]}"
+            unique = label
+            suffix = 2
+            while unique in out:  # last resort if basenames also collide
+                unique = f"{label} ({suffix})"
+                suffix += 1
+            out[unique] = file_key
+        return out
+
+    @property
+    def options(self) -> list[str]:
+        return list(self._label_to_file())
+
+    @property
+    def current_option(self) -> str | None:
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        file_key = self._label_to_file().get(option)
+        if file_key is None:
+            raise HomeAssistantError(f"Backup {option!r} is no longer available")
+        await self.coordinator.async_restore_backup_map(self._thing_name, file_key)
+
+    async def _blocked_navigation(self) -> None:
+        raise HomeAssistantError(
+            "Pick a specific backup to restore — select navigation is disabled for this "
+            "destructive action so it can't overwrite the live map unintentionally."
+        )
+
+    async def async_first(self, *_args: Any, **_kwargs: Any) -> None:
+        await self._blocked_navigation()
+
+    async def async_last(self, *_args: Any, **_kwargs: Any) -> None:
+        await self._blocked_navigation()
+
+    async def async_next(self, *_args: Any, **_kwargs: Any) -> None:
+        await self._blocked_navigation()
+
+    async def async_previous(self, *_args: Any, **_kwargs: Any) -> None:
+        await self._blocked_navigation()
