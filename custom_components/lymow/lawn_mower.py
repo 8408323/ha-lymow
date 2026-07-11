@@ -1520,6 +1520,11 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
         if robot_state in WORK_STATUS_PAUSED_GROUP:
             return LawnMowerActivity.PAUSED
 
+        # Charging means it's home, even though the robot keeps workStatus=DOCKING(4)
+        # (which is in the RETURNING group) while it tops up (#271).
+        if self._device_data.get("isCharging"):
+            return LawnMowerActivity.DOCKED
+
         ws = self._device_data.get("workStatus", WORK_STATUS_OFFLINE)
 
         if ws in WORK_STATUS_MOWING_GROUP:
