@@ -22,6 +22,7 @@ from .const import (
     REGION_AUTO,
     REGION_CHOICES,
     RTSP_PORT,
+    normalize_rtsp_path,
 )
 
 STEP_USER_SCHEMA = vol.Schema(
@@ -93,7 +94,7 @@ class LymowOptionsFlow(OptionsFlow):
             return self.async_create_entry(
                 data={
                     CONF_BLE_ADDRESS: user_input.get(CONF_BLE_ADDRESS, "").strip(),
-                    CONF_RTSP_PATH: user_input.get(CONF_RTSP_PATH, "").strip().lstrip("/"),
+                    CONF_RTSP_PATH: normalize_rtsp_path(user_input.get(CONF_RTSP_PATH)),
                     CONF_RTSP_PORT: user_input.get(CONF_RTSP_PORT, RTSP_PORT),
                 }
             )

@@ -32,6 +32,10 @@ AUTH_REFRESH_MARGIN_SECONDS = 600
 RTSP_PORT = 10022
 RTSP_PATH = "h264ESVideoTest"
 
+
+def normalize_rtsp_path(value: str | None) -> str:
+    return (value or "").strip().lstrip("/")
+
 # Per-region AWS configuration — all values extracted from traffic capture and APK analysis
 REGION_CONFIG: dict[str, dict[str, str | None]] = {
     "eu-west-1": {

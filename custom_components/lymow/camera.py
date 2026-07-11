@@ -28,7 +28,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_RTSP_PATH, CONF_RTSP_PORT, DOMAIN, RTSP_PATH, RTSP_PORT
+from .const import CONF_RTSP_PATH, CONF_RTSP_PORT, DOMAIN, RTSP_PATH, RTSP_PORT, normalize_rtsp_path
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
@@ -44,7 +44,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    rtsp_path = (entry.options.get(CONF_RTSP_PATH) or "").strip().lstrip("/") or RTSP_PATH
+    rtsp_path = normalize_rtsp_path(entry.options.get(CONF_RTSP_PATH)) or RTSP_PATH
     rtsp_port = entry.options.get(CONF_RTSP_PORT) or RTSP_PORT
     entities = [
         LymowCamera(coordinator, device, rtsp_path=rtsp_path, rtsp_port=rtsp_port) for device in coordinator.devices
