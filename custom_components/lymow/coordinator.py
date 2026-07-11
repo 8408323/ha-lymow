@@ -1210,7 +1210,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Set global mowing settings (userCtrl=49 GLOBAL_SETTING, "Keep Custom").
 
         Only the provided globalZoneConfig fields are sent; see
-        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
+        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names. Pass
+        ``overwrite_existing=True`` for the "Overwrite Custom" variant (userCtrl=48),
+        which also resets per-zone customs to the new global values.
         """
         from .protocol import _TASK_CONFIG_FIELDS, encode_set_task_config
 

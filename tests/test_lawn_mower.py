@@ -1825,6 +1825,33 @@ async def test_handle_set_task_config_new_fields_forwarded_deprecated_ignored() 
     coord.async_set_task_config.assert_awaited_once_with("mower-001", safeMarginMode=True, turnOffOuterMotor=False)
 
 
+async def test_handle_set_task_config_forwards_overwrite_existing() -> None:
+    """overwrite_existing rides through to the coordinator alongside the real settings."""
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"perimeter_mow_laps": 2, "overwrite_existing": True})
+    await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_awaited_once_with("mower-001", perimeterMowLaps=2, overwrite_existing=True)
+
+
+async def test_handle_set_task_config_overwrite_alone_raises() -> None:
+    """overwrite_existing with no actual setting is nothing to write — must raise."""
+    coord = _make_coord()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.options = {}
+    handlers = await _setup_with_entity(coord, entry)
+
+    call = _make_call(["lawn_mower.mower_1"], {"overwrite_existing": True})
+    with pytest.raises(ServiceValidationError):
+        await handlers["set_task_config"](call)
+    coord.async_set_task_config.assert_not_called()
+
+
 async def test_handle_set_task_config_no_params_raises() -> None:
     coord = _make_coord()
     entry = MagicMock()
