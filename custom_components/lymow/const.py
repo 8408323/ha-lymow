@@ -619,6 +619,11 @@ BLE_DRIVE_MAX_DURATION_S = 5.0
 # Config-entry option holding the robot's BLE MAC (manual-drive transport).
 CONF_BLE_ADDRESS = "ble_address"
 
+# Config-entry options overriding the LAN camera RTSP path/port (default to the
+# 640×480 test stream above; lets a higher-res path be used without a code change).
+CONF_RTSP_PATH = "rtsp_path"
+CONF_RTSP_PORT = "rtsp_port"
+
 # Services
 SERVICE_BLE_DRIVE = "ble_drive"
 ATTR_LINEAR = "linear"
