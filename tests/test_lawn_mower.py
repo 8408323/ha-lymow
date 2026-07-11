@@ -142,6 +142,12 @@ def test_activity_docked_when_charging_despite_docking_status() -> None:
     assert m.activity == LawnMowerActivity.DOCKED
 
 
+def test_activity_error_not_masked_by_charging() -> None:
+    """A real workStatus error must still show ERROR even while charging (#271 review)."""
+    m = _make_mower({"isOnline": True, "workStatus": WORK_STATUS_ERROR, "isCharging": True})
+    assert m.activity == LawnMowerActivity.ERROR
+
+
 def test_activity_docked() -> None:
     m = _make_mower({"isOnline": True, "workStatus": WORK_STATUS_CHARGING})
     assert m.activity == LawnMowerActivity.DOCKED
