@@ -34,6 +34,7 @@ RTSP_PATH = "h264ESVideoTest"
 
 
 def normalize_rtsp_path(value: str | None) -> str:
+    """Strip whitespace and leading slashes from an RTSP path."""
     return (value or "").strip().lstrip("/")
 
 # Per-region AWS configuration — all values extracted from traffic capture and APK analysis

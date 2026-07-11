@@ -31,7 +31,7 @@
         },
         "data_description": {
           "ble_address": "MAC of the robot's Bluetooth radio, used for local manual drive. Leave blank to auto-discover by name.",
-          "rtsp_path": "LAN camera stream path. Leave blank for the default 640×480 stream (h264ESVideoTest); set a higher-resolution path here once known.",
+          "rtsp_path": "LAN camera stream path. Leave blank for the default 640x480 stream (h264ESVideoTest); set a higher-resolution path here once known.",
           "rtsp_port": "TCP port of the robot's on-board RTSP server (default 10022)."
         }
       }
