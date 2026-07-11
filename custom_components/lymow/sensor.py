@@ -19,6 +19,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    CONF_RTSP_PATH,
+    CONF_RTSP_PORT,
     DOMAIN,
     ERROR_DESCRIPTIONS,
     ERROR_REMEDIATION,
@@ -26,6 +28,7 @@ from .const import (
     RTSP_PATH,
     RTSP_PORT,
     WARNING_DESCRIPTIONS,
+    normalize_rtsp_path,
 )
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
@@ -620,6 +623,10 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    # Resolve the camera RTSP path/port the same way the camera platform does, so
+    # the Local RTSP URL sensor advertises the endpoint actually in use.
+    rtsp_path = normalize_rtsp_path(entry.options.get(CONF_RTSP_PATH)) or RTSP_PATH
+    rtsp_port = entry.options.get(CONF_RTSP_PORT) or RTSP_PORT
     entities: list[SensorEntity] = []
     for device in coordinator.devices:
         for description in SENSORS:
@@ -638,7 +645,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowRobotTimezoneSensor(coordinator, device))
         entities.append(LymowHeadlightWindowSensor(coordinator, device))
         entities.append(LymowTotalMappedAreaSensor(coordinator, device))
-        entities.append(LymowRtspUrlSensor(coordinator, device))
+        entities.append(LymowRtspUrlSensor(coordinator, device, rtsp_path=rtsp_path, rtsp_port=rtsp_port))
     async_add_entities(entities)
 
 
@@ -1065,9 +1072,17 @@ class LymowRtspUrlSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = False
 
-    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+    def __init__(
+        self,
+        coordinator: LymowCoordinator,
+        device: dict,
+        rtsp_path: str = RTSP_PATH,
+        rtsp_port: int = RTSP_PORT,
+    ) -> None:
         super().__init__(coordinator)
         self._thing_name = device["deviceThingName"]
+        self._rtsp_path = rtsp_path
+        self._rtsp_port = rtsp_port
         self._attr_unique_id = f"{self._thing_name}_rtsp_url"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
         self._attr_name = "Local RTSP URL"
@@ -1080,7 +1095,7 @@ class LymowRtspUrlSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         for key in ("ipAddress", "wifiIp", "ip_address"):
             ip = data.get(key)
             if isinstance(ip, str) and ip.strip():
-                return f"rtsp://{ip.strip()}:{RTSP_PORT}/{RTSP_PATH}"
+                return f"rtsp://{ip.strip()}:{self._rtsp_port}/{self._rtsp_path}"
         return None
 
 
