@@ -28,7 +28,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, RTSP_PATH, RTSP_PORT
+from .const import CONF_RTSP_PATH, CONF_RTSP_PORT, DOMAIN, RTSP_PATH, RTSP_PORT, normalize_rtsp_path
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
@@ -44,7 +44,11 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities = [LymowCamera(coordinator, device) for device in coordinator.devices]
+    rtsp_path = normalize_rtsp_path(entry.options.get(CONF_RTSP_PATH)) or RTSP_PATH
+    rtsp_port = entry.options.get(CONF_RTSP_PORT) or RTSP_PORT
+    entities = [
+        LymowCamera(coordinator, device, rtsp_path=rtsp_path, rtsp_port=rtsp_port) for device in coordinator.devices
+    ]
     if entities:
         async_add_entities(entities)
 
@@ -78,10 +82,18 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
     _attr_icon = "mdi:cctv"
     _attr_frontend_stream_type = StreamType.HLS
 
-    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+    def __init__(
+        self,
+        coordinator: LymowCoordinator,
+        device: dict,
+        rtsp_path: str = RTSP_PATH,
+        rtsp_port: int = RTSP_PORT,
+    ) -> None:
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
         self._thing_name: str = device["deviceThingName"]
+        self._rtsp_path = rtsp_path
+        self._rtsp_port = rtsp_port
         self._attr_name = "Camera"
         self._attr_unique_id = f"{self._thing_name}_camera"
         self._attr_device_info = lymow_device_info(self.coordinator, device)
@@ -262,7 +274,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
     def _stream_url(self) -> str | None:
         data = (self.coordinator.data or {}).get(self._thing_name) or {}
         ip = _robot_ip(data)
-        return f"rtsp://{ip}:{RTSP_PORT}/{RTSP_PATH}" if ip else None
+        return f"rtsp://{ip}:{self._rtsp_port}/{self._rtsp_path}" if ip else None
 
     async def stream_source(self) -> str | None:
         """MPEG-TS proxy URL when available, raw RTSP as fallback."""

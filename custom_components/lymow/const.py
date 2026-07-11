@@ -32,6 +32,12 @@ AUTH_REFRESH_MARGIN_SECONDS = 600
 RTSP_PORT = 10022
 RTSP_PATH = "h264ESVideoTest"
 
+
+def normalize_rtsp_path(value: str | None) -> str:
+    """Strip whitespace and leading slashes from an RTSP path."""
+    return (value or "").strip().lstrip("/")
+
+
 # Per-region AWS configuration — all values extracted from traffic capture and APK analysis
 REGION_CONFIG: dict[str, dict[str, str | None]] = {
     "eu-west-1": {
@@ -618,6 +624,11 @@ BLE_DRIVE_MAX_DURATION_S = 5.0
 
 # Config-entry option holding the robot's BLE MAC (manual-drive transport).
 CONF_BLE_ADDRESS = "ble_address"
+
+# Config-entry options overriding the LAN camera RTSP path/port (default to the
+# 640×480 test stream above; lets a higher-res path be used without a code change).
+CONF_RTSP_PATH = "rtsp_path"
+CONF_RTSP_PORT = "rtsp_port"
 
 # Services
 SERVICE_BLE_DRIVE = "ble_drive"

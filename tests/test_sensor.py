@@ -520,6 +520,7 @@ async def test_async_setup_entry_creates_entities() -> None:
 
     entry = MagicMock()
     entry.entry_id = "entry-1"
+    entry.options = {}
 
     from lymow.const import DOMAIN
 
@@ -1716,6 +1717,22 @@ def test_rtsp_url_sensor_none_without_ip() -> None:
 
     assert LymowRtspUrlSensor(_make_coord({}), DEVICE).native_value is None
     assert LymowRtspUrlSensor(_make_coord({"ipAddress": "  "}), DEVICE).native_value is None  # blank
+
+
+async def test_rtsp_url_sensor_uses_configured_options() -> None:
+    """The Local RTSP URL sensor advertises the configured path/port, not the defaults."""
+    from lymow.sensor import LymowRtspUrlSensor
+
+    coord = _make_coord({"ipAddress": "192.168.30.85"})
+    coord.devices = [DEVICE]
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry-1": coord}}
+    entry = MagicMock(entry_id="entry-1")
+    entry.options = {"rtsp_path": "/h264ESVideoMain", "rtsp_port": 8554}
+    added: list = []
+    await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
+    sensor = next(e for e in added if isinstance(e, LymowRtspUrlSensor))
+    assert sensor.native_value == "rtsp://192.168.30.85:8554/h264ESVideoMain"
     assert LymowRtspUrlSensor(_make_coord({"ipAddress": 123}), DEVICE).native_value is None  # non-string
 
 

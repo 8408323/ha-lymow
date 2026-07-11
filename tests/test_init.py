@@ -410,6 +410,15 @@ async def test_async_unload_entry_does_not_shutdown_on_failure() -> None:
     assert "eid-1" in hass.data[DOMAIN]
 
 
+async def test_reload_entry_reloads_config_entry() -> None:
+    """The options-update listener reloads the entry so option edits take effect."""
+    hass = MagicMock()
+    hass.config_entries.async_reload = AsyncMock()
+    entry = _make_entry(entry_id="eid-9")
+    await _lymow._async_reload_entry(hass, entry)
+    hass.config_entries.async_reload.assert_awaited_once_with("eid-9")
+
+
 async def test_async_unload_entry_keeps_panel_when_entries_remain() -> None:
     """Unloading one of several entries must not remove the shared sidebar panel."""
     hass = _make_hass()
