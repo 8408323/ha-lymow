@@ -140,6 +140,26 @@ class TestSetupEntry:
         await camera.async_setup_entry(hass, entry, lambda e: added.extend(e))
         assert await added[0].stream_source() == "rtsp://192.168.1.85:8554/h264ESVideoMain"
 
+    async def test_setup_strips_multiple_leading_slashes_from_rtsp_path(self):
+        coord = _Coord({THING: {"ipAddress": "192.168.1.85"}}, devices=[{"deviceThingName": THING}])
+        hass = MagicMock()
+        hass.data = {camera.DOMAIN: {"e1": coord}}
+        entry = MagicMock(entry_id="e1")
+        entry.options = {"rtsp_path": "///h264ESVideoMain", "rtsp_port": 8554}
+        added = []
+        await camera.async_setup_entry(hass, entry, lambda e: added.extend(e))
+        assert await added[0].stream_source() == "rtsp://192.168.1.85:8554/h264ESVideoMain"
+
+    async def test_setup_uses_default_path_when_rtsp_path_is_whitespace(self):
+        coord = _Coord({THING: {"ipAddress": "192.168.1.85"}}, devices=[{"deviceThingName": THING}])
+        hass = MagicMock()
+        hass.data = {camera.DOMAIN: {"e1": coord}}
+        entry = MagicMock(entry_id="e1")
+        entry.options = {"rtsp_path": "   ", "rtsp_port": 8554}
+        added = []
+        await camera.async_setup_entry(hass, entry, lambda e: added.extend(e))
+        assert await added[0].stream_source() == "rtsp://192.168.1.85:8554/h264ESVideoTest"
+
 
 class TestFreePort:
     def test_returns_bound_port(self):
