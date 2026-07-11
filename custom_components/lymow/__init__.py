@@ -20,6 +20,7 @@ from .mqtt import LymowMqttClient
 
 _LOGGER = logging.getLogger(__name__)
 _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
+_WWW_SERVED_KEY = f"{DOMAIN}_www_served"
 _PANEL_REGISTERED_KEY = f"{DOMAIN}_panel_registered"
 _PANEL_URL_PATH = "lymow"
 
@@ -113,9 +114,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # add_extra_js_url + Lovelace resources both fire on every page load,
             # causing duplicate customElements.define() calls → config errors.
             await _ensure_lovelace_resources(hass)
-            # Register the full-page panel only now that its JS is actually served,
-            # so a setup that skips static paths never leaves a broken sidebar entry.
-            await _async_register_panel(hass)
+            # Remember that the panel's JS is actually being served this run, so we
+            # only ever register the panel when its module_url resolves.
+            hass.data[_WWW_SERVED_KEY] = True
         hass.data[_WWW_REGISTERED_KEY] = True
 
     session = async_get_clientsession(hass)
@@ -184,11 +185,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Register the sidebar panel here — only once setup has succeeded (so a failed
+    # setup leaves no orphan panel) and only when the JS is served. Running on every
+    # successful setup means a reload re-registers the panel unload removed.
+    if hass.data.get(_WWW_SERVED_KEY):
+        await _async_register_panel(hass)
+
     return True
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
-    """Register the full-page Lymow custom panel in the sidebar (once per HA run)."""
+    """Register the full-page Lymow custom panel in the sidebar if not already registered."""
     if hass.data.get(_PANEL_REGISTERED_KEY):
         return
     try:

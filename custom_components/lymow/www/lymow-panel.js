@@ -69,12 +69,11 @@ class LymowPanel extends HTMLElement {
 
   _lymowEntities() {
     // entity_id → registry entry ({platform, device_id, …}); modern HA always
-    // provides hass.entities. Fall back to state-key scanning on older cores.
+    // provides hass.entities. Without it we can't tell which entities are Lymow's,
+    // so fail closed (empty) rather than adopting some other integration's mower.
     const reg = this._hass && this._hass.entities;
-    if (reg) {
-      return Object.keys(reg).filter((eid) => reg[eid] && reg[eid].platform === "lymow");
-    }
-    return Object.keys((this._hass && this._hass.states) || {});
+    if (!reg) return [];
+    return Object.keys(reg).filter((eid) => reg[eid] && reg[eid].platform === "lymow");
   }
 
   _discover() {

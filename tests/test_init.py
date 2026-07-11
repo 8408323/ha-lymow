@@ -353,6 +353,9 @@ async def test_async_setup_entry_raises_on_missing_iot_host() -> None:
     ):
         await async_setup_entry(hass, entry)
 
+    # Setup failed before completing, so no orphan sidebar panel was registered.
+    assert _PANEL_REGISTERED_KEY not in hass.data
+
 
 async def test_async_setup_entry_passes_session_token_to_mqtt() -> None:
     """SessionToken from AWS creds is forwarded to mqtt_client.connect."""
@@ -560,6 +563,29 @@ async def test_async_setup_entry_registers_panel() -> None:
     """Setup registers the full-page sidebar panel once the www assets are served."""
     _stub_panel_custom()
     hass = _make_hass(www_registered=False)
+    entry = _make_entry()
+    auth = _make_auth(_make_tokens(), _make_creds())
+    client = _make_client()
+    mqtt = _make_mqtt()
+    coord = _make_coordinator()
+
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=mqtt),
+        patch("lymow.LymowCoordinator", return_value=coord),
+    ):
+        await async_setup_entry(hass, entry)
+
+    assert hass.data[_PANEL_REGISTERED_KEY] is True
+
+
+async def test_async_setup_entry_reregisters_panel_after_reload() -> None:
+    """A reload (www block skipped, panel key cleared by unload) must re-register the panel."""
+    _stub_panel_custom()
+    hass = _make_hass(www_registered=True)
+    hass.data[_lymow._WWW_SERVED_KEY] = True  # JS was served earlier this HA run
     entry = _make_entry()
     auth = _make_auth(_make_tokens(), _make_creds())
     client = _make_client()
