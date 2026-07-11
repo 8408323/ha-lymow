@@ -423,7 +423,7 @@ async def test_async_unload_entry_keeps_panel_when_entries_remain() -> None:
 # ── sidebar panel registration ────────────────────────────────────────────────
 
 _async_register_panel = _lymow._async_register_panel
-_async_remove_panel = _lymow._async_remove_panel
+_remove_panel = _lymow._remove_panel
 _PANEL_REGISTERED_KEY = _lymow._PANEL_REGISTERED_KEY
 _PANEL_URL_PATH = _lymow._PANEL_URL_PATH
 
@@ -473,12 +473,13 @@ async def test_register_panel_skips_when_already_registered() -> None:
     mod.async_register_panel.assert_not_awaited()
 
 
-async def test_register_panel_treats_valueerror_as_registered() -> None:
-    _stub_panel_custom(register=AsyncMock(side_effect=ValueError("duplicate url_path")))
+async def test_register_panel_ignores_foreign_url_conflict() -> None:
+    """A url_path owned by someone else raises ValueError — don't claim it, so unload won't remove it."""
+    _stub_panel_custom(register=AsyncMock(side_effect=ValueError("url_path in use")))
     hass = MagicMock()
     hass.data = {}
     await _async_register_panel(hass)
-    assert hass.data[_PANEL_REGISTERED_KEY] is True
+    assert _PANEL_REGISTERED_KEY not in hass.data
 
 
 async def test_register_panel_swallows_unexpected_errors() -> None:
@@ -493,7 +494,7 @@ async def test_remove_panel_removes_and_clears_key() -> None:
     mod = _stub_frontend()
     hass = MagicMock()
     hass.data = {_PANEL_REGISTERED_KEY: True}
-    _async_remove_panel(hass)
+    _remove_panel(hass)
     mod.async_remove_panel.assert_called_once_with(hass, _PANEL_URL_PATH)
     assert _PANEL_REGISTERED_KEY not in hass.data
 
@@ -502,7 +503,7 @@ async def test_remove_panel_skips_when_not_registered() -> None:
     mod = _stub_frontend()
     hass = MagicMock()
     hass.data = {}
-    _async_remove_panel(hass)
+    _remove_panel(hass)
     mod.async_remove_panel.assert_not_called()
 
 
@@ -510,7 +511,7 @@ async def test_remove_panel_swallows_errors_but_clears_key() -> None:
     _stub_frontend(remove=MagicMock(side_effect=RuntimeError("boom")))
     hass = MagicMock()
     hass.data = {_PANEL_REGISTERED_KEY: True}
-    _async_remove_panel(hass)  # must not raise
+    _remove_panel(hass)  # must not raise
     assert _PANEL_REGISTERED_KEY not in hass.data
 
 
@@ -551,12 +552,14 @@ async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> No
     hass.http.async_register_static_paths.assert_not_awaited()
     # The www-registered key is still set so we don't re-check the dir each setup.
     assert hass.data[_WWW_REGISTERED_KEY] is True
+    # No JS served → no panel registered (would be a broken sidebar entry).
+    assert _PANEL_REGISTERED_KEY not in hass.data
 
 
 async def test_async_setup_entry_registers_panel() -> None:
-    """Setup registers the full-page sidebar panel."""
+    """Setup registers the full-page sidebar panel once the www assets are served."""
     _stub_panel_custom()
-    hass = _make_hass(www_registered=True)
+    hass = _make_hass(www_registered=False)
     entry = _make_entry()
     auth = _make_auth(_make_tokens(), _make_creds())
     client = _make_client()

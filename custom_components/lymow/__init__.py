@@ -113,6 +113,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # add_extra_js_url + Lovelace resources both fire on every page load,
             # causing duplicate customElements.define() calls → config errors.
             await _ensure_lovelace_resources(hass)
+            # Register the full-page panel only now that its JS is actually served,
+            # so a setup that skips static paths never leaves a broken sidebar entry.
+            await _async_register_panel(hass)
         hass.data[_WWW_REGISTERED_KEY] = True
 
     session = async_get_clientsession(hass)
@@ -181,10 +184,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register the full-page Lymow panel (sidebar) once per HA run so the mower's
-    # controls are immediately available without any manual Lovelace setup.
-    await _async_register_panel(hass)
-
     return True
 
 
@@ -207,13 +206,14 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
         )
         hass.data[_PANEL_REGISTERED_KEY] = True
     except ValueError:
-        # Already registered (e.g. a previous entry in this run) — treat as done.
-        hass.data[_PANEL_REGISTERED_KEY] = True
+        # The url_path is already taken by a panel we didn't register (e.g. user
+        # YAML). Don't claim ownership — otherwise unload would remove it.
+        _LOGGER.debug("Lymow panel url_path %s already in use; not registering", _PANEL_URL_PATH)
     except Exception:  # noqa: BLE001
         _LOGGER.debug("Could not register Lymow panel (non-fatal)", exc_info=True)
 
 
-def _async_remove_panel(hass: HomeAssistant) -> None:
+def _remove_panel(hass: HomeAssistant) -> None:
     """Remove the Lymow sidebar panel when the last config entry unloads."""
     if not hass.data.get(_PANEL_REGISTERED_KEY):
         return
@@ -233,5 +233,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_shutdown()
         # Drop the sidebar panel only when the last Lymow entry is gone.
         if not hass.data.get(DOMAIN):
-            _async_remove_panel(hass)
+            _remove_panel(hass)
     return unload_ok

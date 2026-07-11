@@ -11,6 +11,10 @@
  */
 
 const BASE = new URL(".", import.meta.url);
+// The panel is served at a cache-busted URL (…/lymow-panel.js?v=<version>). Import
+// the sibling cards with the SAME query so we reuse the module HA already loaded
+// as a Lovelace resource, instead of registering a second copy (double-define).
+const VERSION_QS = new URL(import.meta.url).search;
 
 const CARD_FILE = {
   control: "lymow-control-card.js",
@@ -36,12 +40,11 @@ const STATE_LABEL = {
   unavailable: "Unavailable",
 };
 
-// Entities to hide from the Diagnostics grid: the map sensor (huge JSON) and the
-// primary status entities already shown in the header / Overview.
+// Entities to hide from the Diagnostics grid: the map sensor (a huge JSON blob).
 const DIAG_EXCLUDE_SUFFIX = ["_map"];
 
 async function loadCard(file) {
-  await import(new URL(file, BASE).href);
+  await import(new URL(file, BASE).href + VERSION_QS);
 }
 
 class LymowPanel extends HTMLElement {
@@ -50,6 +53,7 @@ class LymowPanel extends HTMLElement {
     this._tab = "overview";
     this._cards = {};
     this._built = false;
+    this._mowerId = undefined;
   }
 
   set hass(hass) {
@@ -76,20 +80,28 @@ class LymowPanel extends HTMLElement {
   _discover() {
     if (!this._hass) return null;
     const ents = this._lymowEntities();
-    const mower = ents.find((e) => e.startsWith("lawn_mower."));
+    // Prefer a mower with a live state; fall back to any registry entry (so the
+    // header can still show "unavailable" rather than nothing) but skip picking a
+    // stale registry-only entry over a loaded one.
+    const mowers = ents.filter((e) => e.startsWith("lawn_mower."));
+    const mower = mowers.find((e) => this._hass.states[e]) || mowers[0];
     if (!mower) return null;
     const reg = this._hass.entities;
     const deviceId = reg && reg[mower] ? reg[mower].device_id : undefined;
     const scope = deviceId && reg ? ents.filter((e) => reg[e].device_id === deviceId) : ents;
-    const find = (domain, suffix) =>
-      scope.find((e) => e.startsWith(`${domain}.`) && e.endsWith(suffix));
+    const st = (e) => this._hass.states[e];
+    const attr = (e, k) => st(e) && st(e).attributes && st(e).attributes[k] !== undefined;
+    const findSensor = (predicate, suffix) =>
+      scope.find((e) => e.startsWith("sensor.") && predicate(e)) ||
+      scope.find((e) => e.startsWith("sensor.") && e.endsWith(suffix));
     return {
       mower,
       scope,
-      map: find("sensor", "_map"),
-      battery: find("sensor", "_battery"),
-      progress: find("sensor", "_mow_progress"),
-      error: find("sensor", "_error_code"),
+      // Identify by signature (attributes / device_class) first so renamed
+      // entity_ids still resolve; fall back to the unique_id-derived suffix.
+      // (Battery drives the header; the control card finds progress/error itself.)
+      map: findSensor((e) => attr(e, "go_zones") || attr(e, "gps_origin"), "_map"),
+      battery: findSensor((e) => st(e) && st(e).attributes.device_class === "battery", "_battery"),
     };
   }
 
@@ -174,10 +186,15 @@ class LymowPanel extends HTMLElement {
   _refresh() {
     if (!this._root || !this._hass) return;
     this._renderHeader();
-    // Keep the active section's live parts (diagnostics) current; cards get hass
-    // pushed directly in _pushHass.
-    if (this._tab === "diagnostics") this._render();
+    // _render is idempotent: it (re)builds the active section only when it isn't
+    // already a mounted card, so a panel opened before discovery — or a section
+    // that fell back to a placeholder — recovers once the entities appear.
+    this._render();
     this._pushHass();
+  }
+
+  _hasCard(section) {
+    return !!section.querySelector("lymow-control-card, lymow-map-card, lymow-schedule-card, lymow-settings-card");
   }
 
   _renderHeader() {
@@ -207,18 +224,30 @@ class LymowPanel extends HTMLElement {
     const d = this._discover();
     if (!d) {
       content.innerHTML = `<div class="empty">No Lymow mower found. Once the integration finishes setting up, its controls appear here.</div>`;
+      this._mowerId = null;
       return;
     }
-    // Build each section container once; show only the active one.
+    // If the discovered mower changed (or we're rendering for the first time
+    // after the empty state), rebuild from scratch so cards bind to the right
+    // entity ids.
+    if (d.mower !== this._mowerId) {
+      content.innerHTML = "";
+      this._cards = {};
+      this._mowerId = d.mower;
+    }
     let section = content.querySelector(`.section[data-tab="${this._tab}"]`);
     if (!section) {
       section = document.createElement("div");
       section.className = "section";
       section.dataset.tab = this._tab;
       content.appendChild(section);
+    }
+    // Diagnostics is data-only (refresh live); card sections build once and only
+    // rebuild while they're still a placeholder (no card, not mid-mount).
+    if (this._tab === "diagnostics") {
+      this._fillDiagnostics(section, d);
+    } else if (!this._hasCard(section) && section.dataset.mounting !== "1") {
       this._fillSection(section, this._tab, d);
-    } else if (this._tab === "diagnostics") {
-      this._fillDiagnostics(section, d); // live-refresh values
     }
     content.querySelectorAll(".section").forEach((s) =>
       s.classList.toggle("active", s.dataset.tab === this._tab)
@@ -252,6 +281,8 @@ class LymowPanel extends HTMLElement {
   }
 
   async _mountCard(section, kind, config) {
+    if (section.dataset.mounting === "1") return; // a load is already in flight
+    section.dataset.mounting = "1";
     section.innerHTML = `<div class="note">Loading…</div>`;
     try {
       await loadCard(CARD_FILE[kind]);
@@ -263,6 +294,8 @@ class LymowPanel extends HTMLElement {
       this._cards[kind] = el;
     } catch (err) {
       section.innerHTML = `<div class="note">Could not load the ${kind} view.</div>`;
+    } finally {
+      delete section.dataset.mounting;
     }
   }
 
@@ -309,4 +342,8 @@ class LymowPanel extends HTMLElement {
   }
 }
 
-customElements.define("lymow-panel", LymowPanel);
+// Guard against a double define: an HA reload / HACS update reloads this module
+// at a new ?v= URL while the previous lymow-panel element is still registered.
+if (!customElements.get("lymow-panel")) {
+  customElements.define("lymow-panel", LymowPanel);
+}
