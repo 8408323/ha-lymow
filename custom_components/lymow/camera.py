@@ -92,7 +92,7 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
         self._thing_name: str = device["deviceThingName"]
-        self._rtsp_path = rtsp_path.strip().lstrip("/") or RTSP_PATH
+        self._rtsp_path = rtsp_path
         self._rtsp_port = rtsp_port
         self._attr_name = "Camera"
         self._attr_unique_id = f"{self._thing_name}_camera"
