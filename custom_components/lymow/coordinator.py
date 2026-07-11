@@ -1207,10 +1207,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self.async_query_schedules(thing_name)
 
     async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:
-        """Set global mowing settings (userCtrl=49 GLOBAL_SETTING, "Keep Custom").
+        """Set global mowing settings (GLOBAL_SETTING; userCtrl=49 "Keep Custom" / 48 "Overwrite Custom").
 
         Only the provided globalZoneConfig fields are sent; see
-        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
+        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names. Pass
+        ``overwrite_existing=True`` for the "Overwrite Custom" variant (userCtrl=48),
+        which also resets per-zone customs to the new global values.
         """
         from .protocol import _TASK_CONFIG_FIELDS, encode_set_task_config
 
@@ -1218,6 +1220,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         updates = {k: v for k, v in fields.items() if v is not None and k in _TASK_CONFIG_FIELDS}
         if updates:
             self._optimistic_global_zone_config(thing_name, updates)
+        if fields.get("overwrite_existing"):
+            # "Overwrite Custom" also rewrites every zone's per-zone config; the
+            # optimistic patch above only covers the global defaults, so re-query
+            # the map to refresh the per-zone values the robot just reset.
+            self.hass.async_create_task(self.async_query_map(thing_name))
 
     def _optimistic_global_zone_config(self, thing_name: str, updates: dict[str, Any]) -> None:
         """Mirror written globalZoneConfig fields into cached state (immediate + poll-durable).

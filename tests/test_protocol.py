@@ -3168,6 +3168,26 @@ def test_encode_set_task_config_wraps_in_pbinput() -> None:
     assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.5, rel=1e-5)
 
 
+def test_encode_set_task_config_overwrite_existing_uses_uc48() -> None:
+    """overwrite_existing=True selects userCtrl=48 (GLOBAL_SETTING_Y, "Overwrite Custom")."""
+    from lymow.protocol import encode_set_task_config
+
+    pb = encode_set_task_config(perimeterMowLaps=2, overwrite_existing=True)
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 48  # USER_CTRL_GLOBAL_SETTING_Y
+    # The flag itself must not leak into the config submessage.
+    cfg = _decode_fields(_first(_decode_fields(_first(f, 12)), 11))
+    assert _first(cfg, 10) == 2  # perimeterMowLaps still written
+
+
+def test_encode_set_task_config_defaults_to_keep_custom_uc49() -> None:
+    """Without overwrite_existing the "Keep Custom" userCtrl=49 is used."""
+    from lymow.protocol import encode_set_task_config
+
+    assert _first(_decode_fields(encode_set_task_config(perimeterMowLaps=2)), 5) == 49
+    assert _first(_decode_fields(encode_set_task_config(perimeterMowLaps=2, overwrite_existing=False)), 5) == 49
+
+
 def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     from lymow.protocol import encode_set_task_config
 

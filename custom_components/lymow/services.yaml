@@ -344,6 +344,15 @@ set_task_config:
       example: false
       selector:
         boolean:
+    overwrite_existing:
+      name: Overwrite per-zone customs
+      description: >
+        Also push these settings onto every zone's custom overrides, discarding
+        them (the app's "Overwrite Custom", userCtrl=48). Default false keeps
+        per-zone customs ("Keep Custom", userCtrl=49).
+      example: false
+      selector:
+        boolean:
 
 set_device_settings:
   name: Set Device Settings
