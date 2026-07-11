@@ -250,6 +250,12 @@ async def test_options_flow_saves_rtsp_path_and_port():
     assert data["rtsp_port"] == 10023
 
 
+async def test_options_flow_strips_leading_slash_from_rtsp_path():
+    flow = _make_options_flow()
+    await flow.async_step_init({"rtsp_path": "  /h264ESVideoMain  "})
+    assert flow.async_create_entry.call_args.kwargs["data"]["rtsp_path"] == "h264ESVideoMain"
+
+
 async def test_options_flow_rtsp_defaults_when_omitted():
     from lymow.const import RTSP_PORT
 

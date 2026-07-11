@@ -93,7 +93,7 @@ class LymowOptionsFlow(OptionsFlow):
             return self.async_create_entry(
                 data={
                     CONF_BLE_ADDRESS: user_input.get(CONF_BLE_ADDRESS, "").strip(),
-                    CONF_RTSP_PATH: user_input.get(CONF_RTSP_PATH, "").strip(),
+                    CONF_RTSP_PATH: user_input.get(CONF_RTSP_PATH, "").strip().lstrip("/"),
                     CONF_RTSP_PORT: user_input.get(CONF_RTSP_PORT, RTSP_PORT),
                 }
             )
