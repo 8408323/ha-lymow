@@ -482,6 +482,7 @@ _SET_TASK_CONFIG_SCHEMA = vol.Schema(
             for k in _TASK_CONFIG_SERVICE_FIELDS
         },
         **{vol.Optional(k): v for k, v in _TASK_CONFIG_IGNORED_FIELDS.items()},
+        vol.Optional("overwrite_existing"): cv.boolean,
     }
 )
 _SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
@@ -1094,6 +1095,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         fields = {proto: call.data[svc] for svc, proto in _TASK_CONFIG_SERVICE_FIELDS.items() if svc in call.data}
         if not fields:
             raise ServiceValidationError("set_task_config: provide at least one parameter to set.")
+        if "overwrite_existing" in call.data:
+            fields["overwrite_existing"] = call.data["overwrite_existing"]
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
         for eid in entity_ids:
             entity = entity_map.get(eid)

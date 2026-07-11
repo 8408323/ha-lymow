@@ -600,6 +600,22 @@ async def test_async_set_task_config_optimism_tolerates_non_dict_cache() -> None
 
 
 @pytest.mark.asyncio
+async def test_async_set_task_config_overwrite_requeries_map() -> None:
+    """Overwrite Custom resets each zone's per-zone config, so the map is re-queried; Keep Custom is not."""
+    coord, _, _ = _make_coordinator()
+    coord.data = None
+    coord.hass = MagicMock()
+    coord.async_query_map = MagicMock(return_value=None)
+
+    await coord.async_set_task_config(THING, cleanMode=3)
+    coord.async_query_map.assert_not_called()  # Keep Custom → no requery
+
+    await coord.async_set_task_config(THING, cleanMode=3, overwrite_existing=True)
+    coord.async_query_map.assert_called_once_with(THING)
+    coord.hass.async_create_task.assert_called_once()
+
+
+@pytest.mark.asyncio
 async def test_async_set_run_time_config_publishes_encoded_command() -> None:
     from lymow.protocol import _decode_fields, _first
 

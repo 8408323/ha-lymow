@@ -1527,7 +1527,13 @@ def encode_set_task_config(**fields: Any) -> bytes:
     userCtrl=9 path). Channel fields (``_CHANNEL_CONFIG_FIELDS``) ride alongside
     in the sibling PbMap.f12 globalChannelConfig — exactly as the app's Save sends
     both snapshots together.
+
+    ``overwrite_existing`` selects the app's "Overwrite Custom" variant instead
+    (userCtrl **48**, GLOBAL_SETTING_Y): the global settings are also pushed down
+    onto every per-zone custom, discarding zone overrides. Same envelope shape,
+    only the userCtrl differs.
     """
+    overwrite_existing = bool(fields.pop("overwrite_existing", False))
 
     def _encode(field_no: int, kind: str, value: Any) -> bytes:
         if kind == "bool":
@@ -1549,15 +1555,16 @@ def encode_set_task_config(**fields: Any) -> bytes:
             chan_cfg += _encode(field_no, kind, value)
         else:
             raise ValueError(f"unknown task-config field: {name}")
-    from .const import USER_CTRL_GLOBAL_SETTING_N
+    from .const import USER_CTRL_GLOBAL_SETTING_N, USER_CTRL_GLOBAL_SETTING_Y
 
     pb_map = b""
     if zone_cfg:
         pb_map += _field_bytes(11, zone_cfg)  # PbMap.globalZoneConfig
     if chan_cfg:
         pb_map += _field_bytes(12, chan_cfg)  # PbMap.globalChannelConfig
+    user_ctrl = USER_CTRL_GLOBAL_SETTING_Y if overwrite_existing else USER_CTRL_GLOBAL_SETTING_N
     pb = _field_i32(2, PB_VERSION)
-    pb += _field_i32(5, USER_CTRL_GLOBAL_SETTING_N)
+    pb += _field_i32(5, user_ctrl)
     pb += _field_bytes(12, pb_map)  # PbInput.map (f12)
     return pb
 
