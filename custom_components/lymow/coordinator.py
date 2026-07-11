@@ -987,6 +987,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
 
     async def async_dock(self, thing_name: str) -> None:
+        # Already charging → the mower is home; issuing RESUME_DOCK from a lingering
+        # PAUSE_DOCKING task would otherwise drive it back off the dock (#270).
+        if (self.data or {}).get(thing_name, {}).get("isCharging"):
+            return
         ws = self._current_work_status(thing_name)
         if ws == WORK_STATUS_PAUSE_DOCKING:
             ctrl = USER_CTRL_RESUME_DOCK

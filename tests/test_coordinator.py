@@ -1205,6 +1205,15 @@ async def test_async_dock_sends_dock_when_idle(ws: int) -> None:
 
 
 @pytest.mark.asyncio
+async def test_async_dock_noop_when_charging() -> None:
+    """Already charging → dock is a no-op (RESUME_DOCK would drive it off the dock, #270)."""
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"workStatus": WORK_STATUS_PAUSE_DOCKING, "isCharging": True}}
+    await coord.async_dock(THING)
+    mqtt.async_publish_command.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_async_resume_sends_resume_dock_when_pause_docking() -> None:
     coord, mqtt, _ = _make_coordinator()
     coord.data = {THING: {"workStatus": WORK_STATUS_PAUSE_DOCKING}}

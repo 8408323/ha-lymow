@@ -27,6 +27,7 @@ from .const import (
     DOMAIN,
     SERVICE_BLE_DRIVE,
     WORK_STATUS_DOCKED_GROUP,
+    WORK_STATUS_DOCKING,
     WORK_STATUS_ERROR_GROUP,
     WORK_STATUS_MOWING_GROUP,
     WORK_STATUS_OFFLINE,
@@ -1525,6 +1526,11 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
         if ws in WORK_STATUS_MOWING_GROUP:
             return LawnMowerActivity.MOWING
         if ws in WORK_STATUS_RETURNING_GROUP:
+            # The robot keeps workStatus=DOCKING(4) while it tops up; charging means
+            # it's home, not returning (#271). A real error status isn't in this group,
+            # so error handling below is unaffected.
+            if ws == WORK_STATUS_DOCKING and self._device_data.get("isCharging"):
+                return LawnMowerActivity.DOCKED
             return LawnMowerActivity.RETURNING
         if ws in WORK_STATUS_DOCKED_GROUP:
             return LawnMowerActivity.DOCKED
