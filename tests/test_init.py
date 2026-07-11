@@ -353,6 +353,9 @@ async def test_async_setup_entry_raises_on_missing_iot_host() -> None:
     ):
         await async_setup_entry(hass, entry)
 
+    # Setup failed before completing, so no orphan sidebar panel was registered.
+    assert _PANEL_REGISTERED_KEY not in hass.data
+
 
 async def test_async_setup_entry_passes_session_token_to_mqtt() -> None:
     """SessionToken from AWS creds is forwarded to mqtt_client.connect."""
@@ -407,177 +410,118 @@ async def test_async_unload_entry_does_not_shutdown_on_failure() -> None:
     assert "eid-1" in hass.data[DOMAIN]
 
 
-# ── dashboard auto-creation ──────────────────────────────────────────────────
+async def test_async_unload_entry_keeps_panel_when_entries_remain() -> None:
+    """Unloading one of several entries must not remove the shared sidebar panel."""
+    hass = _make_hass()
+    hass.data = {DOMAIN: {"eid-1": _make_coordinator(), "eid-2": _make_coordinator()}, _PANEL_REGISTERED_KEY: True}
+    entry = _make_entry(entry_id="eid-1")
 
-_build_dashboard_config = _lymow._build_dashboard_config
-_resolve_dashboard_entities = _lymow._resolve_dashboard_entities
-_async_create_dashboard = _lymow._async_create_dashboard
-_DASHBOARD_URL_PATH = _lymow._DASHBOARD_URL_PATH
-_DASHBOARD_CREATED_KEY = _lymow._DASHBOARD_CREATED_KEY
+    result = await async_unload_entry(hass, entry)
 
-
-class _FakeRegistry:
-    def __init__(self, ids: dict, disabled: set | None = None) -> None:
-        self._ids = ids  # unique_id -> entity_id
-        self._disabled = disabled or set()  # disabled entity_ids
-
-    def async_get_entity_id(self, domain, platform, unique_id):
-        return self._ids.get(unique_id)
-
-    def async_get(self, entity_id):
-        if entity_id not in self._ids.values():
-            return None
-        e = MagicMock()
-        e.disabled_by = "user" if entity_id in self._disabled else None
-        return e
+    assert result is True
+    assert "eid-2" in hass.data[DOMAIN]
+    assert hass.data[_PANEL_REGISTERED_KEY] is True  # panel left in place
 
 
-def test_build_dashboard_config_full() -> None:
-    ents = {k: f"x.{k}" for k in _lymow._DASHBOARD_ENTITY_KEYS}
-    cfg = _build_dashboard_config(ents)
-    titles = [v["title"] for v in cfg["views"]]
-    assert titles == ["Map", "Drive", "Schedules", "Backups", "Advanced", "Sensors"]
-    map_card = cfg["views"][0]["cards"][0]
-    assert map_card["type"] == "custom:lymow-map-card"
-    assert map_card["entity"] == "x.map"
-    assert map_card["mower_entity"] == "x.mower"
+# ── sidebar panel registration ────────────────────────────────────────────────
+
+_async_register_panel = _lymow._async_register_panel
+_remove_panel = _lymow._remove_panel
+_PANEL_REGISTERED_KEY = _lymow._PANEL_REGISTERED_KEY
+_PANEL_URL_PATH = _lymow._PANEL_URL_PATH
 
 
-def test_build_dashboard_config_map_only_no_mower_entity() -> None:
-    cfg = _build_dashboard_config({"map": "sensor.m"})
-    assert [v["title"] for v in cfg["views"]] == ["Map"]
-    card = cfg["views"][0]["cards"][0]
-    assert "mower_entity" not in card  # mower unresolved → omitted
+def _stub_panel_custom(register=None):
+    """Inject a stub homeassistant.components.panel_custom with async_register_panel."""
+    import homeassistant.components as _hc
+
+    mod = types.ModuleType("homeassistant.components.panel_custom")
+    mod.async_register_panel = register or AsyncMock()
+    _hc.panel_custom = mod
+    sys.modules["homeassistant.components.panel_custom"] = mod
+    return mod
 
 
-def test_build_dashboard_config_drops_empty_views() -> None:
-    # Only history sensors → no Map view, only Sensors view with one card.
-    cfg = _build_dashboard_config({"last_mow": "sensor.lm"})
-    assert [v["title"] for v in cfg["views"]] == ["Sensors"]
-    assert len(cfg["views"][0]["cards"]) == 1
+def _stub_frontend(remove=None):
+    """Inject a stub homeassistant.components.frontend with async_remove_panel."""
+    import homeassistant.components as _hc
+
+    mod = types.ModuleType("homeassistant.components.frontend")
+    mod.async_remove_panel = remove or MagicMock()
+    _hc.frontend = mod
+    sys.modules["homeassistant.components.frontend"] = mod
+    return mod
 
 
-def test_build_dashboard_config_empty() -> None:
-    assert _build_dashboard_config({}) == {"views": []}
-
-
-def test_resolve_dashboard_entities_filters_disabled_and_missing() -> None:
-    hass = MagicMock()
-    # map + mower registered; mower disabled; battery missing entirely.
-    hass._entity_registry = _FakeRegistry(
-        ids={"thing_map": "sensor.dev_map", "thing": "lawn_mower.dev"},
-        disabled={"lawn_mower.dev"},
-    )
-    resolved = _resolve_dashboard_entities(hass, "thing")
-    assert resolved == {"map": "sensor.dev_map"}  # mower disabled, rest missing
-
-
-def _lovelace_hass(reg, devices=None, existing=False):
+async def test_register_panel_registers_sidebar_entry() -> None:
+    mod = _stub_panel_custom()
     hass = MagicMock()
     hass.data = {}
-    hass._entity_registry = reg
-    store = MagicMock()
-    store.async_save = AsyncMock()
-    dashboards = {_DASHBOARD_URL_PATH: store} if existing else {}
-    collection = MagicMock()
-
-    async def _create(item):
-        dashboards[_DASHBOARD_URL_PATH] = store
-
-    collection.async_create_item = AsyncMock(side_effect=_create)
-    hass.data["lovelace"] = {"dashboards": dashboards, "dashboards_collection": collection}
-    hass._store = store
-    hass._collection = collection
-    return hass
+    await _async_register_panel(hass)
+    mod.async_register_panel.assert_awaited_once()
+    kwargs = mod.async_register_panel.await_args.kwargs
+    assert kwargs["frontend_url_path"] == _PANEL_URL_PATH
+    assert kwargs["webcomponent_name"] == "lymow-panel"
+    assert kwargs["sidebar_title"] == "Lymow"
+    assert kwargs["embed_iframe"] is False
+    assert kwargs["module_url"].startswith(f"/custom_components/{DOMAIN}/lymow-panel.js?v=")
+    assert hass.data[_PANEL_REGISTERED_KEY] is True
 
 
-async def test_async_create_dashboard_happy_path() -> None:
-    reg = _FakeRegistry({"t_map": "sensor.t_map", "t": "lawn_mower.t"})
-    hass = _lovelace_hass(reg)
-    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
-    hass._collection.async_create_item.assert_awaited_once()
-    hass._store.async_save.assert_awaited_once()
-    assert hass.data[_DASHBOARD_CREATED_KEY] is True
+async def test_register_panel_skips_when_already_registered() -> None:
+    mod = _stub_panel_custom()
+    hass = MagicMock()
+    hass.data = {_PANEL_REGISTERED_KEY: True}
+    await _async_register_panel(hass)
+    mod.async_register_panel.assert_not_awaited()
 
 
-async def test_async_create_dashboard_skips_empty_devices() -> None:
-    hass = _lovelace_hass(_FakeRegistry({}))
-    await _async_create_dashboard(hass, [])
-    hass._collection.async_create_item.assert_not_awaited()
-
-
-async def test_async_create_dashboard_skips_without_lovelace() -> None:
+async def test_register_panel_ignores_foreign_url_conflict() -> None:
+    """A url_path owned by someone else raises ValueError — don't claim it, so unload won't remove it."""
+    _stub_panel_custom(register=AsyncMock(side_effect=ValueError("url_path in use")))
     hass = MagicMock()
     hass.data = {}
-    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
-    assert _DASHBOARD_CREATED_KEY not in hass.data
+    await _async_register_panel(hass)
+    assert _PANEL_REGISTERED_KEY not in hass.data
 
 
-async def test_async_create_dashboard_skips_when_exists() -> None:
-    reg = _FakeRegistry({"t_map": "sensor.t_map"})
-    hass = _lovelace_hass(reg, existing=True)
-    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
-    hass._collection.async_create_item.assert_not_awaited()
+async def test_register_panel_swallows_unexpected_errors() -> None:
+    _stub_panel_custom(register=AsyncMock(side_effect=RuntimeError("boom")))
+    hass = MagicMock()
+    hass.data = {}
+    await _async_register_panel(hass)
+    assert _PANEL_REGISTERED_KEY not in hass.data
 
 
-async def test_async_create_dashboard_skips_when_no_map_or_mower() -> None:
-    # Only a disabled-by-default sensor resolves → nothing meaningful to show.
-    reg = _FakeRegistry({"t_battery": "sensor.t_battery"})
-    hass = _lovelace_hass(reg)
-    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
-    hass._collection.async_create_item.assert_not_awaited()
-    assert _DASHBOARD_CREATED_KEY not in hass.data
+async def test_remove_panel_removes_and_clears_key() -> None:
+    mod = _stub_frontend()
+    hass = MagicMock()
+    hass.data = {_PANEL_REGISTERED_KEY: True}
+    _remove_panel(hass)
+    mod.async_remove_panel.assert_called_once_with(hass, _PANEL_URL_PATH)
+    assert _PANEL_REGISTERED_KEY not in hass.data
+
+
+async def test_remove_panel_skips_when_not_registered() -> None:
+    mod = _stub_frontend()
+    hass = MagicMock()
+    hass.data = {}
+    _remove_panel(hass)
+    mod.async_remove_panel.assert_not_called()
+
+
+async def test_remove_panel_swallows_errors_but_clears_key() -> None:
+    _stub_frontend(remove=MagicMock(side_effect=RuntimeError("boom")))
+    hass = MagicMock()
+    hass.data = {_PANEL_REGISTERED_KEY: True}
+    _remove_panel(hass)  # must not raise
+    assert _PANEL_REGISTERED_KEY not in hass.data
 
 
 def test_card_url_falls_back_when_manifest_unreadable() -> None:
     with patch.object(_lymow.json, "loads", side_effect=ValueError("bad")):
         url = _lymow._card_url()
     assert url.endswith("v=0")
-
-
-async def test_async_create_dashboard_skips_when_no_collection() -> None:
-    hass = MagicMock()
-    hass.data = {"lovelace": {"dashboards": {}, "dashboards_collection": None}}
-    hass._entity_registry = _FakeRegistry({"t_map": "sensor.t_map"})
-    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
-    assert _DASHBOARD_CREATED_KEY not in hass.data
-
-
-async def test_async_create_dashboard_swallows_errors() -> None:
-    reg = _FakeRegistry({"t_map": "sensor.t_map", "t": "lawn_mower.t"})
-    hass = _lovelace_hass(reg)
-    hass._collection.async_create_item = AsyncMock(side_effect=RuntimeError("boom"))
-    # Must not raise; flag stays unset so a later setup can retry.
-    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
-    assert _DASHBOARD_CREATED_KEY not in hass.data
-
-
-async def test_async_create_dashboard_skips_save_when_store_has_no_async_save() -> None:
-    """Older Lovelace store without async_save is a no-op; still mark dashboard created."""
-    reg = _FakeRegistry({"t_map": "sensor.t_map", "t": "lawn_mower.t"})
-    hass = MagicMock()
-    hass.data = {}
-    hass._entity_registry = reg
-    # Store object that intentionally lacks async_save (use a plain object — a
-    # MagicMock would auto-vivify async_save and hide the bug we're guarding against).
-
-    class _LegacyStore:
-        pass
-
-    legacy_store = _LegacyStore()
-    collection = MagicMock()
-
-    async def _create(item):
-        # Collection inserts the legacy-shape store after creation.
-        hass.data["lovelace"]["dashboards"][_DASHBOARD_URL_PATH] = legacy_store
-
-    collection.async_create_item = AsyncMock(side_effect=_create)
-    hass.data["lovelace"] = {"dashboards": {}, "dashboards_collection": collection}
-
-    await _async_create_dashboard(hass, [{"deviceThingName": "t"}])
-    # Creation still happens; save is skipped silently.
-    collection.async_create_item.assert_awaited_once()
-    assert hass.data[_DASHBOARD_CREATED_KEY] is True
 
 
 async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> None:
@@ -611,12 +555,14 @@ async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> No
     hass.http.async_register_static_paths.assert_not_awaited()
     # The www-registered key is still set so we don't re-check the dir each setup.
     assert hass.data[_WWW_REGISTERED_KEY] is True
+    # No JS served → no panel registered (would be a broken sidebar entry).
+    assert _PANEL_REGISTERED_KEY not in hass.data
 
 
-async def test_async_setup_entry_skips_dashboard_task_when_already_created() -> None:
-    """Already-set _DASHBOARD_CREATED_KEY must skip spawning the dashboard task."""
-    hass = _make_hass(www_registered=True)
-    hass.data[_lymow._DASHBOARD_CREATED_KEY] = True
+async def test_async_setup_entry_registers_panel() -> None:
+    """Setup registers the full-page sidebar panel once the www assets are served."""
+    _stub_panel_custom()
+    hass = _make_hass(www_registered=False)
     entry = _make_entry()
     auth = _make_auth(_make_tokens(), _make_creds())
     client = _make_client()
@@ -632,7 +578,30 @@ async def test_async_setup_entry_skips_dashboard_task_when_already_created() -> 
     ):
         await async_setup_entry(hass, entry)
 
-    hass.async_create_task.assert_not_called()
+    assert hass.data[_PANEL_REGISTERED_KEY] is True
+
+
+async def test_async_setup_entry_reregisters_panel_after_reload() -> None:
+    """A reload (www block skipped, panel key cleared by unload) must re-register the panel."""
+    _stub_panel_custom()
+    hass = _make_hass(www_registered=True)
+    hass.data[_lymow._WWW_SERVED_KEY] = True  # JS was served earlier this HA run
+    entry = _make_entry()
+    auth = _make_auth(_make_tokens(), _make_creds())
+    client = _make_client()
+    mqtt = _make_mqtt()
+    coord = _make_coordinator()
+
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=mqtt),
+        patch("lymow.LymowCoordinator", return_value=coord),
+    ):
+        await async_setup_entry(hass, entry)
+
+    assert hass.data[_PANEL_REGISTERED_KEY] is True
 
 
 def test_card_url_uses_manifest_version_when_readable() -> None:

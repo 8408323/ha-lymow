@@ -10,9 +10,7 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.typing import ConfigType
 
 from .api import LymowApiClient
 from .auth import LymowAuth
@@ -22,7 +20,9 @@ from .mqtt import LymowMqttClient
 
 _LOGGER = logging.getLogger(__name__)
 _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
-_DASHBOARD_CREATED_KEY = f"{DOMAIN}_dashboard_created"
+_WWW_SERVED_KEY = f"{DOMAIN}_www_served"
+_PANEL_REGISTERED_KEY = f"{DOMAIN}_panel_registered"
+_PANEL_URL_PATH = "lymow"
 
 
 def _card_url(name: str = "lymow-map-card.js") -> str:
@@ -33,28 +33,6 @@ def _card_url(name: str = "lymow-map-card.js") -> str:
     except Exception:
         version = "0"
     return f"/custom_components/{DOMAIN}/{name}?v={version}"
-
-
-_DASHBOARD_URL_PATH = "lymow-mower"
-
-# Dashboard entities, keyed by a logical name → (HA platform domain, unique_id
-# suffix appended to the device thing-name). Resolved to real entity_ids via the
-# entity registry at dashboard-build time, since HA slugifies entity_ids from the
-# device name (not the thing-name) and several keys differ from their slug.
-_DASHBOARD_ENTITY_KEYS: dict[str, tuple[str, str]] = {
-    "map": ("sensor", "_map"),
-    "mower": ("lawn_mower", ""),
-    "battery": ("sensor", "_battery"),
-    "mow_progress": ("sensor", "_mow_progress"),
-    "connectivity": ("sensor", "_connectivity"),
-    "firmware": ("sensor", "_firmware"),
-    "last_mow": ("sensor", "_last_clean_at"),
-    "last_mow_area": ("sensor", "_last_clean_area"),
-    "last_mow_duration": ("sensor", "_last_clean_duration"),
-    "total_mow_sessions": ("sensor", "_clean_history_count"),
-    "total_mowed_area": ("sensor", "_total_area_m2"),
-    "camera": ("camera", "_camera"),
-}
 
 
 PLATFORMS = [
@@ -136,6 +114,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # add_extra_js_url + Lovelace resources both fire on every page load,
             # causing duplicate customElements.define() calls → config errors.
             await _ensure_lovelace_resources(hass)
+            # Remember that the panel's JS is actually being served this run, so we
+            # only ever register the panel when its module_url resolves.
+            hass.data[_WWW_SERVED_KEY] = True
         hass.data[_WWW_REGISTERED_KEY] = True
 
     session = async_get_clientsession(hass)
@@ -204,145 +185,60 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Create the Lymow dashboard on first setup so the map card is immediately
-    # visible without any manual Lovelace configuration.
-    if not hass.data.get(_DASHBOARD_CREATED_KEY):
-        hass.async_create_task(
-            _async_create_dashboard(hass, devices),
-            eager_start=False,
-        )
+    # Register the sidebar panel here — only once setup has succeeded (so a failed
+    # setup leaves no orphan panel) and only when the JS is served. Running on every
+    # successful setup means a reload re-registers the panel unload removed.
+    if hass.data.get(_WWW_SERVED_KEY):
+        await _async_register_panel(hass)
 
     return True
 
 
-def _resolve_dashboard_entities(hass: HomeAssistant, thing_name: str) -> dict[str, str]:
-    """Map each logical dashboard entity to its real, enabled entity_id.
-
-    Resolves via the entity registry (entity_ids are slugified from the device
-    name, not the thing-name, and some keys differ from their slug). Disabled or
-    unregistered entities are omitted so the dashboard never points at them.
-    """
-    ent_reg = er.async_get(hass)
-    resolved: dict[str, str] = {}
-    for logical, (domain, suffix) in _DASHBOARD_ENTITY_KEYS.items():
-        entity_id = ent_reg.async_get_entity_id(domain, DOMAIN, f"{thing_name}{suffix}")
-        if entity_id is None:
-            continue
-        registry_entry = ent_reg.async_get(entity_id)
-        if registry_entry is None or registry_entry.disabled_by is not None:
-            continue
-        resolved[logical] = entity_id
-    return resolved
-
-
-async def _async_create_dashboard(hass: HomeAssistant, devices: list[dict]) -> None:
-    """Create a Lymow sidebar dashboard with the map card if it doesn't exist yet."""
+async def _async_register_panel(hass: HomeAssistant) -> None:
+    """Register the full-page Lymow custom panel in the sidebar if not already registered."""
+    if hass.data.get(_PANEL_REGISTERED_KEY):
+        return
     try:
-        if not devices:
-            return
-        lovelace = hass.data.get("lovelace")
-        if lovelace is None:
-            return
-        if _DASHBOARD_URL_PATH in lovelace.get("dashboards", {}):
-            return  # Already exists (e.g. after a reload)
-        collection = lovelace.get("dashboards_collection")
-        if collection is None:
-            return
+        from homeassistant.components import panel_custom
 
-        entities = _resolve_dashboard_entities(hass, devices[0]["deviceThingName"])
-        if "map" not in entities and "mower" not in entities:
-            return  # Nothing meaningful to show yet (entities not registered).
-        config = _build_dashboard_config(entities)
-
-        await collection.async_create_item(
-            {
-                "url_path": _DASHBOARD_URL_PATH,
-                "mode": "storage",
-                "title": "Lymow",
-                "icon": "mdi:robot-mower",
-                "show_in_sidebar": True,
-                "require_admin": False,
-            }
+        await panel_custom.async_register_panel(
+            hass,
+            frontend_url_path=_PANEL_URL_PATH,
+            webcomponent_name="lymow-panel",
+            module_url=_card_url("lymow-panel.js"),
+            sidebar_title="Lymow",
+            sidebar_icon="mdi:robot-mower",
+            require_admin=False,
+            embed_iframe=False,
         )
-        dashboard_store = lovelace.get("dashboards", {}).get(_DASHBOARD_URL_PATH)
-        if dashboard_store and hasattr(dashboard_store, "async_save"):
-            await dashboard_store.async_save(config)
-        # Mark created only after success, so a transient failure (e.g. Lovelace
-        # not loaded yet) doesn't permanently block a later retry.
-        hass.data[_DASHBOARD_CREATED_KEY] = True
+        hass.data[_PANEL_REGISTERED_KEY] = True
+    except ValueError:
+        # The url_path is already taken by a panel we didn't register (e.g. user
+        # YAML). Don't claim ownership — otherwise unload would remove it.
+        _LOGGER.debug("Lymow panel url_path %s already in use; not registering", _PANEL_URL_PATH)
     except Exception:  # noqa: BLE001
-        _LOGGER.debug("Could not auto-create Lymow dashboard (non-fatal)", exc_info=True)
+        _LOGGER.debug("Could not register Lymow panel (non-fatal)", exc_info=True)
 
 
-def _build_dashboard_config(entities: dict[str, str]) -> ConfigType:
-    """Return a Lovelace config for the Lymow dashboard from resolved entity_ids.
+def _remove_panel(hass: HomeAssistant) -> None:
+    """Remove the Lymow sidebar panel when the last config entry unloads."""
+    if not hass.data.get(_PANEL_REGISTERED_KEY):
+        return
+    try:
+        from homeassistant.components import frontend
 
-    ``entities`` maps logical names (see ``_DASHBOARD_ENTITY_KEYS``) to real
-    entity_ids; missing/disabled ones are simply absent. Cards with no available
-    entities are dropped, and so are views left with no cards.
-    """
-
-    def pick(*names: str) -> list[str]:
-        return [entities[n] for n in names if n in entities]
-
-    map_cards: list[ConfigType] = []
-    if "map" in entities:
-        card: ConfigType = {"type": "custom:lymow-map-card", "entity": entities["map"], "title": "Lymow Map"}
-        if "mower" in entities:
-            card["mower_entity"] = entities["mower"]
-        map_cards.append(card)
-    if status := pick("mower", "battery", "mow_progress", "connectivity"):
-        map_cards.append({"type": "entities", "title": "Mower status", "entities": status})
-
-    sensor_cards: list[ConfigType] = []
-    if history := pick(
-        "last_mow", "last_mow_area", "last_mow_duration", "mow_progress", "total_mow_sessions", "total_mowed_area"
-    ):
-        sensor_cards.append({"type": "entities", "title": "Mow history", "entities": history})
-    if conn := pick("connectivity", "firmware", "battery"):
-        sensor_cards.append({"type": "entities", "title": "Connectivity", "entities": conn})
-
-    drive_cards: list[ConfigType] = []
-    if "mower" in entities:
-        drive_card: ConfigType = {
-            "type": "custom:lymow-drive-card",
-            "mower_entity": entities["mower"],
-            "title": "Drive",
-        }
-        if "camera" in entities:
-            drive_card["camera_entity"] = entities["camera"]
-        drive_cards.append(drive_card)
-
-    schedule_cards: list[ConfigType] = []
-    if "mower" in entities:
-        schedule_cards.append({"type": "custom:lymow-schedule-card", "mower_entity": entities["mower"]})
-
-    backup_cards: list[ConfigType] = []
-    if "mower" in entities:
-        backup_cards.append({"type": "custom:lymow-backup-card", "mower_entity": entities["mower"]})
-
-    advanced_cards: list[ConfigType] = []
-    if "mower" in entities:
-        advanced_cards.append({"type": "custom:lymow-settings-card", "mower_entity": entities["mower"]})
-
-    views: list[ConfigType] = []
-    if map_cards:
-        views.append({"title": "Map", "path": "map", "icon": "mdi:map", "cards": map_cards})
-    if drive_cards:
-        views.append({"title": "Drive", "path": "drive", "icon": "mdi:gamepad-variant", "cards": drive_cards})
-    if schedule_cards:
-        views.append({"title": "Schedules", "path": "schedules", "icon": "mdi:clock-outline", "cards": schedule_cards})
-    if backup_cards:
-        views.append({"title": "Backups", "path": "backups", "icon": "mdi:database-arrow-up", "cards": backup_cards})
-    if advanced_cards:
-        views.append({"title": "Advanced", "path": "advanced", "icon": "mdi:cog-outline", "cards": advanced_cards})
-    if sensor_cards:
-        views.append({"title": "Sensors", "path": "sensors", "icon": "mdi:gauge", "cards": sensor_cards})
-    return {"views": views}
+        frontend.async_remove_panel(hass, _PANEL_URL_PATH)
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("Could not remove Lymow panel (non-fatal)", exc_info=True)
+    finally:
+        hass.data.pop(_PANEL_REGISTERED_KEY, None)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         coordinator: LymowCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_shutdown()
+        # Drop the sidebar panel only when the last Lymow entry is gone.
+        if not hass.data.get(DOMAIN):
+            _remove_panel(hass)
     return unload_ok

@@ -137,7 +137,9 @@ class LymowControlCard extends HTMLElement {
   }
 }
 
-customElements.define("lymow-control-card", LymowControlCard);
+if (!customElements.get("lymow-control-card")) {
+  customElements.define("lymow-control-card", LymowControlCard);
+}
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "lymow-control-card",
