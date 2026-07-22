@@ -348,9 +348,26 @@ except ImportError:
         def __call__(self, value):
             return value
 
+    class _TextSelectorType(str, enum.Enum):
+        URL = "url"
+
+    class _TextSelectorConfig(dict):
+        def __init__(self, **kwargs):
+            super().__init__(kwargs)
+
+    class _TextSelector:
+        def __init__(self, config=None):
+            self.config = config or {}
+
+        def __call__(self, value):
+            return value
+
     _ha_sel.SelectSelector = _SelectSelector  # type: ignore[attr-defined]
     _ha_sel.SelectSelectorConfig = _SelectSelectorConfig  # type: ignore[attr-defined]
     _ha_sel.SelectSelectorMode = _SelectSelectorMode  # type: ignore[attr-defined]
+    _ha_sel.TextSelector = _TextSelector  # type: ignore[attr-defined]
+    _ha_sel.TextSelectorConfig = _TextSelectorConfig  # type: ignore[attr-defined]
+    _ha_sel.TextSelectorType = _TextSelectorType  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.selector", _ha_sel)
 
     # ── homeassistant.helpers.config_validation ───────────────────────────────
@@ -365,6 +382,22 @@ except ImportError:
     _ha_comp = types.ModuleType("homeassistant.components")
     sys.modules.setdefault("homeassistant.components", _ha_comp)
     _ha_comp.persistent_notification = _ha_pn  # type: ignore[attr-defined]
+
+    # ── homeassistant.components.http ─────────────────────────────────────────
+    _ha_http = types.ModuleType("homeassistant.components.http")
+
+    class _HomeAssistantView:
+        pass
+
+    class _StaticPathConfig:
+        def __init__(self, url_path, path, cache_headers=True):  # type: ignore[no-untyped-def]
+            self.url_path = url_path
+            self.path = path
+            self.cache_headers = cache_headers
+
+    _ha_http.HomeAssistantView = _HomeAssistantView  # type: ignore[attr-defined]
+    _ha_http.StaticPathConfig = _StaticPathConfig  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.http", _ha_http)
 
     # ── homeassistant.components.lawn_mower ───────────────────────────────────
     _ha_lm = types.ModuleType("homeassistant.components.lawn_mower")

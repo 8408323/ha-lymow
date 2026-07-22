@@ -9,10 +9,11 @@ import logging
 import os
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlencode
 
 import aiohttp
 
-from .const import REGION_CONFIG
+from .const import COGNITO_DOMAINS, REGION_CONFIG
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +38,11 @@ N_HEX = (
 )
 G_HEX = "2"
 INFO_BITS = b"Caldera Derived Key"
+OAUTH_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+
+class LymowAuthError(ValueError):
+    """Raised when Cognito authentication fails."""
 
 
 def _pad_hex(n: int) -> str:
@@ -129,6 +135,104 @@ class LymowAuth:
 
     def __init__(self, session: aiohttp.ClientSession) -> None:
         self._session = session
+
+    def get_oauth_authorize_url(
+        self,
+        *,
+        region: str,
+        redirect_uri: str,
+        provider: str = "Google",
+        state: str | None = None,
+        code_challenge: str | None = None,
+    ) -> str:
+        """Build a Cognito Hosted UI authorization URL."""
+        domain, client_id = self._oauth_config(region)
+        params = {
+            "client_id": client_id,
+            "response_type": "code",
+            "scope": "openid aws.cognito.signin.user.admin",
+            "redirect_uri": redirect_uri,
+            "identity_provider": provider,
+        }
+        if state:
+            params["state"] = state
+        if code_challenge:
+            params["code_challenge"] = code_challenge
+            params["code_challenge_method"] = "S256"
+        return f"https://{domain}/oauth2/authorize?{urlencode(params)}"
+
+    async def exchange_oauth_code(
+        self,
+        *,
+        region: str,
+        code: str,
+        redirect_uri: str,
+        code_verifier: str,
+    ) -> dict[str, Any]:
+        """Exchange an OAuth authorization code for Cognito tokens."""
+        return await self._request_oauth_tokens(
+            region,
+            {
+                "grant_type": "authorization_code",
+                "client_id": self._oauth_config(region)[1],
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "code_verifier": code_verifier,
+            },
+        )
+
+    async def refresh_oauth_tokens(self, *, refresh_token: str, region: str) -> dict[str, Any]:
+        """Refresh Cognito tokens through the Hosted UI token endpoint."""
+        result = await self._request_oauth_tokens(
+            region,
+            {
+                "grant_type": "refresh_token",
+                "client_id": self._oauth_config(region)[1],
+                "refresh_token": refresh_token,
+            },
+        )
+        result["RefreshToken"] = result.get("RefreshToken") or refresh_token
+        return result
+
+    async def _request_oauth_tokens(self, region: str, payload: dict[str, str]) -> dict[str, Any]:
+        domain, _ = self._oauth_config(region)
+        try:
+            async with self._session.post(
+                f"https://{domain}/oauth2/token",
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=OAUTH_REQUEST_TIMEOUT,
+            ) as resp:
+                if not resp.ok:
+                    await resp.read()
+                    raise LymowAuthError(f"OAuth token request failed with HTTP {resp.status}")
+                try:
+                    data = await resp.json(content_type=None)
+                except (aiohttp.ContentTypeError, UnicodeDecodeError, ValueError) as exc:
+                    raise LymowAuthError("OAuth token response was not valid JSON") from exc
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise LymowAuthError("OAuth token request could not be completed") from exc
+
+        access_token = data.get("access_token") if isinstance(data, dict) else None
+        id_token = data.get("id_token") if isinstance(data, dict) else None
+        if not isinstance(access_token, str) or not access_token or not isinstance(id_token, str) or not id_token:
+            raise LymowAuthError("OAuth token response was missing required fields")
+        return {
+            "AccessToken": access_token,
+            "IdToken": id_token,
+            "RefreshToken": data.get("refresh_token"),
+            "ExpiresIn": data.get("expires_in", 3600),
+            "TokenType": data.get("token_type", "Bearer"),
+        }
+
+    @staticmethod
+    def _oauth_config(region: str) -> tuple[str, str]:
+        domain = COGNITO_DOMAINS.get(region)
+        config = REGION_CONFIG.get(region)
+        client_id = config.get("client_id") if config else None
+        if not domain or not client_id:
+            raise LymowAuthError("OAuth is not configured for the selected region")
+        return domain, client_id
 
     async def login(self, username: str, password: str) -> dict[str, Any]:
         """Attempt login against all known regions, return tokens + region."""

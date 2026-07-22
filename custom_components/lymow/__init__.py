@@ -5,16 +5,28 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import LymowApiClient
-from .auth import LymowAuth
-from .const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME, DOMAIN, REGION_CONFIG
+from .auth import LymowAuth, LymowAuthError
+from .const import (
+    AUTH_METHOD_GOOGLE,
+    AUTH_METHOD_PASSWORD,
+    CONF_AUTH_METHOD,
+    CONF_PASSWORD,
+    CONF_REGION,
+    CONF_USERNAME,
+    DOMAIN,
+    REGION_AUTO,
+    REGION_CONFIG,
+)
 from .coordinator import LymowCoordinator
 from .mqtt import LymowMqttClient
 
@@ -121,15 +133,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     session = async_get_clientsession(hass)
     auth = LymowAuth(session)
+    auth_method = entry.data.get(CONF_AUTH_METHOD, AUTH_METHOD_PASSWORD)
+    tokens, region = await _async_authenticate_entry(auth, entry, auth_method)
 
-    # Use stored region if available (set during config flow), else auto-detect.
-    stored_region: str | None = entry.data.get(CONF_REGION)
-    if stored_region:
-        tokens = await auth.login_region(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD], stored_region)
-    else:
-        tokens = await auth.login(entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD])
-
-    region = tokens["region"]
+    refresh_token = tokens.get("RefreshToken")
+    if isinstance(refresh_token, str):
+        _update_refresh_token(hass, entry, refresh_token)
 
     creds = await auth.get_aws_credentials(tokens["IdToken"], region)
     aws = creds["credentials"]
@@ -162,7 +171,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = LymowCoordinator(hass, client, mqtt_client, devices)
     # Give the coordinator what it needs to refresh tokens + AWS creds before they
     # expire — otherwise the access token lapses (~24 h) and every poll 401s.
-    coordinator.set_auth_context(auth, entry.data[CONF_USERNAME], entry.data[CONF_PASSWORD], region, tokens, creds)
+    coordinator.set_auth_context(
+        auth,
+        auth_method,
+        entry.data.get(CONF_USERNAME),
+        entry.data.get(CONF_PASSWORD),
+        region,
+        tokens,
+        creds,
+        lambda token: _update_refresh_token(hass, entry, token),
+    )
     await coordinator.async_config_entry_first_refresh()
 
     await mqtt_client.connect(
@@ -196,6 +214,53 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await _async_register_panel(hass)
 
     return True
+
+
+async def _async_authenticate_entry(
+    auth: LymowAuth,
+    entry: ConfigEntry,
+    auth_method: str,
+) -> tuple[dict[str, Any], str]:
+    """Restore a config entry's Cognito session using its configured method."""
+    stored_region = entry.data.get(CONF_REGION)
+    refresh_token = entry.data.get("refresh_token")
+
+    if auth_method == AUTH_METHOD_GOOGLE:
+        if not isinstance(stored_region, str) or stored_region == REGION_AUTO:
+            raise ConfigEntryAuthFailed("Google OAuth region is missing")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise ConfigEntryAuthFailed("Google OAuth refresh token is missing")
+        try:
+            tokens = await auth.refresh_oauth_tokens(refresh_token=refresh_token, region=stored_region)
+        except LymowAuthError as exc:
+            raise ConfigEntryAuthFailed("Google OAuth credentials require reauthentication") from exc
+        return tokens, stored_region
+
+    username = entry.data.get(CONF_USERNAME)
+    password = entry.data.get(CONF_PASSWORD)
+    if not isinstance(username, str) or not isinstance(password, str):
+        raise ConfigEntryAuthFailed("Lymow password credentials are missing")
+
+    if isinstance(stored_region, str) and stored_region != REGION_AUTO:
+        if isinstance(refresh_token, str) and refresh_token:
+            try:
+                tokens = await auth.refresh_tokens(refresh_token, stored_region)
+            except Exception:  # noqa: BLE001
+                tokens = await auth.login_region(username, password, stored_region)
+            else:
+                tokens["RefreshToken"] = tokens.get("RefreshToken") or refresh_token
+                tokens["region"] = stored_region
+        else:
+            tokens = await auth.login_region(username, password, stored_region)
+    else:
+        tokens = await auth.login(username, password)
+    return tokens, tokens["region"]
+
+
+def _update_refresh_token(hass: HomeAssistant, entry: ConfigEntry, refresh_token: str) -> None:
+    """Persist a rotated refresh token without changing other entry data."""
+    if refresh_token != entry.data.get("refresh_token"):
+        hass.config_entries.async_update_entry(entry, data={**entry.data, "refresh_token": refresh_token})
 
 
 async def _async_register_panel(hass: HomeAssistant) -> None:

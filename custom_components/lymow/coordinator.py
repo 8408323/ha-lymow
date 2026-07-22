@@ -6,6 +6,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -16,8 +17,11 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
+from .auth import LymowAuthError
 from .bluetooth import LymowBleController
 from .const import (
+    AUTH_METHOD_GOOGLE,
+    AUTH_METHOD_PASSWORD,
     AUTH_REFRESH_MARGIN_SECONDS,
     DOMAIN,
     EVENT_SESSION_COMPLETED,
@@ -323,6 +327,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # tokens and the derived AWS credentials both expire; without refreshing
         # them every REST poll eventually 401s and all entities go unavailable.
         self._auth: Any | None = None
+        self._auth_method = AUTH_METHOD_PASSWORD
         self._username: str | None = None
         self._password: str | None = None
         self._region: str | None = None
@@ -330,6 +335,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._id_token: str | None = None
         self._token_expiry: datetime | None = None
         self._aws_creds_expiry: datetime | None = None
+        self._refresh_token_updated: Callable[[str], None] | None = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -625,11 +631,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     def set_auth_context(
         self,
         auth: Any,
-        username: str,
-        password: str,
+        auth_method: str,
+        username: str | None,
+        password: str | None,
         region: str,
         tokens: dict[str, Any],
         creds: dict[str, Any],
+        refresh_token_updated: Callable[[str], None] | None = None,
     ) -> None:
         """Hand the coordinator everything it needs to keep credentials fresh.
 
@@ -637,6 +645,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         RefreshToken / ExpiresIn); ``creds`` is the get_aws_credentials() result
         (its ``credentials.Expiration`` dates the temporary AWS keys)."""
         self._auth = auth
+        self._auth_method = auth_method
         self._username = username
         self._password = password
         self._region = region
@@ -644,6 +653,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._id_token = tokens.get("IdToken")
         self._token_expiry = self._expiry_from_expires_in(tokens.get("ExpiresIn"))
         self._aws_creds_expiry = self._expiry_from_timestamp(creds.get("credentials", {}).get("Expiration"))
+        self._refresh_token_updated = refresh_token_updated
 
     @staticmethod
     def _expiry_from_expires_in(expires_in: Any) -> datetime:
@@ -682,15 +692,30 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             await self._async_refresh_aws_credentials()
 
     async def _async_refresh_tokens(self, now: datetime) -> None:
-        try:
-            result = await self._auth.refresh_tokens(self._refresh_token, self._region)
-        except Exception as refresh_err:  # noqa: BLE001
-            _LOGGER.debug("Lymow token refresh failed, falling back to re-login: %s", refresh_err)
+        if self._auth_method == AUTH_METHOD_GOOGLE:
             try:
-                result = await self._auth.login_region(self._username, self._password, self._region)
-            except Exception as login_err:
-                raise ConfigEntryAuthFailed("Lymow re-authentication failed") from login_err
-            self._refresh_token = result.get("RefreshToken") or self._refresh_token
+                result = await self._auth.refresh_oauth_tokens(
+                    refresh_token=self._refresh_token,
+                    region=self._region,
+                )
+            except LymowAuthError as refresh_err:
+                raise ConfigEntryAuthFailed("Google OAuth credentials require reauthentication") from refresh_err
+        else:
+            try:
+                result = await self._auth.refresh_tokens(self._refresh_token, self._region)
+            except Exception:  # noqa: BLE001
+                if self._username is None or self._password is None:
+                    raise ConfigEntryAuthFailed("Lymow password credentials are missing")
+                try:
+                    result = await self._auth.login_region(self._username, self._password, self._region)
+                except Exception as login_err:
+                    raise ConfigEntryAuthFailed("Lymow re-authentication failed") from login_err
+
+        new_refresh_token = result.get("RefreshToken") or self._refresh_token
+        if new_refresh_token != self._refresh_token:
+            self._refresh_token = new_refresh_token
+            if self._refresh_token_updated is not None:
+                self._refresh_token_updated(new_refresh_token)
         self._client.update_tokens(result["AccessToken"])
         self._id_token = result.get("IdToken", self._id_token)
         self._token_expiry = self._expiry_from_expires_in(result.get("ExpiresIn"))

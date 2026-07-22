@@ -9,9 +9,20 @@ EVENT_SESSION_COMPLETED = f"{DOMAIN}_session_completed"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_REGION = "region"
+CONF_AUTH_METHOD = "auth_method"
+
+AUTH_METHOD_PASSWORD = "password"
+AUTH_METHOD_GOOGLE = "google"
 
 REGION_AUTO = "auto"
 REGION_CHOICES = [REGION_AUTO, "eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]
+
+COGNITO_DOMAINS: dict[str, str] = {
+    "eu-west-1": "eu-auth.lymow.com",
+    "ap-southeast-2": "ap-auth.lymow.com",
+    "us-east-2": "us-auth.lymow.com",
+    "ap-east-1": "lymow.auth.ap-east-1.amazoncognito.com",
+}
 
 # How often to poll REST device state (MQTT keeps live state between polls)
 POLLING_INTERVAL = 30  # seconds
