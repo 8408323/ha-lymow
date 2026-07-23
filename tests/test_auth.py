@@ -5,14 +5,17 @@ from __future__ import annotations
 import base64
 import hashlib
 from unittest.mock import AsyncMock, patch
+from urllib.parse import parse_qs, urlparse
 
 import aiohttp
 import pytest
 from aioresponses import aioresponses
-from lymow.auth import N_HEX, LymowAuth, SRPClient, _hash_sha256, _hex_hash, _hex_to_long, _pad_hex
+from lymow.auth import N_HEX, LymowAuth, LymowAuthError, SRPClient, _hash_sha256, _hex_hash, _hex_to_long, _pad_hex
+from lymow.const import REGION_CONFIG
 
 _COGNITO_IDP_EU = "https://cognito-idp.eu-west-1.amazonaws.com/"
 _COGNITO_IDENTITY_EU = "https://cognito-identity.eu-west-1.amazonaws.com/"
+_COGNITO_OAUTH_EU = "https://eu-auth.lymow.com/oauth2/token"
 _SRP_B_HEX = _pad_hex(2)  # B=2 is non-zero mod N (large prime)
 _FAKE_CHALLENGE = {
     "ChallengeParameters": {
@@ -146,7 +149,7 @@ class TestLymowAuthLogin:
         assert result["region"] == "eu-west-1"
         assert result["AccessToken"] == "tok"
 
-    async def test_login_skips_region_without_pool_id(self, auth_client):
+    async def test_login_stops_after_first_configured_region_succeeds(self, auth_client):
         tried_regions: list[str] = []
 
         async def _fake_srp(username, password, region, pool_id, client_id):
@@ -155,7 +158,21 @@ class TestLymowAuthLogin:
 
         auth_client._srp_login = _fake_srp
         await auth_client.login("user", "pass")
-        assert "us-east-2" not in tried_regions
+        assert tried_regions == ["eu-west-1"]
+
+    async def test_login_skips_region_with_missing_pool_configuration(self, auth_client):
+        tried_regions: list[str] = []
+
+        async def _fake_srp(username, password, region, pool_id, client_id):
+            tried_regions.append(region)
+            return {"AccessToken": "tok", "IdToken": "id", "RefreshToken": "ref"}
+
+        config = {**REGION_CONFIG["eu-west-1"], "user_pool_id": None}
+        auth_client._srp_login = _fake_srp
+        with patch.dict(REGION_CONFIG, {"eu-west-1": config}):
+            result = await auth_client.login("user", "pass")
+        assert result["region"] == "us-east-2"
+        assert tried_regions == ["us-east-2"]
 
     async def test_login_falls_back_on_first_region_failure(self, auth_client):
         calls: list[str] = []
@@ -168,7 +185,7 @@ class TestLymowAuthLogin:
 
         auth_client._srp_login = _fake_srp
         result = await auth_client.login("user", "pass")
-        assert result["region"] == "ap-southeast-2"
+        assert result["region"] == "us-east-2"
         assert "eu-west-1" in calls
 
     async def test_login_raises_when_all_regions_fail(self, auth_client):
@@ -185,7 +202,8 @@ class TestLymowAuthLoginRegion:
         assert result["AccessToken"] == "tok"
 
     async def test_login_region_raises_when_no_pool_id(self, auth_client):
-        with pytest.raises(ValueError, match="no user_pool_id"):
+        config = {**REGION_CONFIG["us-east-2"], "user_pool_id": None}
+        with patch.dict(REGION_CONFIG, {"us-east-2": config}), pytest.raises(ValueError, match="no user_pool_id"):
             await auth_client.login_region("user", "pass", "us-east-2")
 
 
@@ -241,6 +259,146 @@ class TestLymowAuthRefreshTokens:
             m.post(_COGNITO_IDP_EU, status=401, body="Unauthorized")
             with pytest.raises(ValueError, match="Token refresh failed HTTP 401"):
                 await auth_client.refresh_tokens("refresh-token", "eu-west-1")
+
+
+class TestLymowAuthOAuth:
+    async def test_authorize_url_contains_pkce_and_provider_parameters(self, auth_client):
+        url = auth_client.get_oauth_authorize_url(
+            region="eu-west-1",
+            redirect_uri="myapp://callback/",
+            state="state-value",
+            code_challenge="challenge-value",
+        )
+        parsed = urlparse(url)
+        query = parse_qs(parsed.query)
+        assert parsed.netloc == "eu-auth.lymow.com"
+        assert parsed.path == "/oauth2/authorize"
+        assert query == {
+            "client_id": ["3h1sqv3hishjiofbv8giskjgb0"],
+            "response_type": ["code"],
+            "scope": ["openid aws.cognito.signin.user.admin"],
+            "redirect_uri": ["myapp://callback/"],
+            "identity_provider": ["Google"],
+            "state": ["state-value"],
+            "code_challenge": ["challenge-value"],
+            "code_challenge_method": ["S256"],
+        }
+
+    async def test_authorize_url_omits_optional_parameters(self, auth_client):
+        url = auth_client.get_oauth_authorize_url(region="eu-west-1", redirect_uri="myapp://callback/")
+        query = parse_qs(urlparse(url).query)
+        assert "state" not in query
+        assert "code_challenge" not in query
+        assert "code_challenge_method" not in query
+
+    async def test_authorize_url_rejects_unknown_region(self, auth_client):
+        with pytest.raises(LymowAuthError, match="not configured"):
+            auth_client.get_oauth_authorize_url(region="invalid", redirect_uri="myapp://callback/")
+
+    async def test_exchange_code_sends_verifier_and_normalizes_response(self, auth_client):
+        captured: dict = {}
+
+        def callback(_url, **kwargs):
+            from aioresponses import CallbackResult
+
+            captured.update(kwargs)
+            return CallbackResult(
+                payload={
+                    "access_token": "access",
+                    "id_token": "id-token",
+                    "refresh_token": "refresh",
+                    "expires_in": 1800,
+                    "token_type": "Bearer",
+                }
+            )
+
+        with aioresponses() as mocked:
+            mocked.post(_COGNITO_OAUTH_EU, callback=callback)
+            result = await auth_client.exchange_oauth_code(
+                region="eu-west-1",
+                code="authorization-code",
+                redirect_uri="myapp://callback/",
+                code_verifier="verifier-value",
+            )
+
+        assert captured["data"] == {
+            "grant_type": "authorization_code",
+            "client_id": "3h1sqv3hishjiofbv8giskjgb0",
+            "code": "authorization-code",
+            "redirect_uri": "myapp://callback/",
+            "code_verifier": "verifier-value",
+        }
+        assert result == {
+            "AccessToken": "access",
+            "IdToken": "id-token",
+            "RefreshToken": "refresh",
+            "ExpiresIn": 1800,
+            "TokenType": "Bearer",
+        }
+
+    async def test_refresh_uses_oauth_endpoint_and_keeps_refresh_token(self, auth_client):
+        captured: dict = {}
+
+        def callback(_url, **kwargs):
+            from aioresponses import CallbackResult
+
+            captured.update(kwargs)
+            return CallbackResult(payload={"access_token": "new-access", "id_token": "new-id"})
+
+        with aioresponses() as mocked:
+            mocked.post(_COGNITO_OAUTH_EU, callback=callback)
+            result = await auth_client.refresh_oauth_tokens(refresh_token="original-refresh", region="eu-west-1")
+
+        assert captured["data"]["grant_type"] == "refresh_token"
+        assert captured["data"]["refresh_token"] == "original-refresh"
+        assert result["RefreshToken"] == "original-refresh"
+        assert result["ExpiresIn"] == 3600
+        assert result["TokenType"] == "Bearer"
+
+    async def test_http_error_is_secret_safe(self, auth_client, caplog):
+        secret = "secret-response-token"
+        with aioresponses() as mocked:
+            mocked.post(_COGNITO_OAUTH_EU, status=401, body=secret)
+            with pytest.raises(LymowAuthError, match="HTTP 401") as exc_info:
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh-secret", region="eu-west-1")
+        assert secret not in str(exc_info.value)
+        assert "refresh-secret" not in caplog.text
+        assert secret not in caplog.text
+
+    async def test_invalid_json_raises_auth_error(self, auth_client):
+        with aioresponses() as mocked:
+            mocked.post(_COGNITO_OAUTH_EU, status=200, body="not-json")
+            with pytest.raises(LymowAuthError, match="not valid JSON"):
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            [],
+            {},
+            {"access_token": "access"},
+            {"id_token": "id"},
+            {"access_token": "", "id_token": "id"},
+            {"access_token": "access", "id_token": ""},
+        ],
+    )
+    async def test_malformed_response_raises_auth_error(self, auth_client, payload):
+        with aioresponses() as mocked:
+            mocked.post(_COGNITO_OAUTH_EU, payload=payload)
+            with pytest.raises(LymowAuthError, match="missing required fields"):
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
+
+    async def test_connection_error_raises_auth_error(self, auth_client):
+        with aioresponses() as mocked:
+            mocked.post(_COGNITO_OAUTH_EU, exception=aiohttp.ClientConnectionError())
+            with pytest.raises(LymowAuthError, match="could not be completed"):
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
+
+    async def test_invalid_utf8_raises_auth_error(self, auth_client):
+        with aioresponses() as mocked:
+            mocked.post(_COGNITO_OAUTH_EU, status=200, body=b"\xff")
+            with pytest.raises(LymowAuthError, match="not valid JSON"):
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
 
 
 class TestLymowAuthGetAwsCredentials:

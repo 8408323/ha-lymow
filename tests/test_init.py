@@ -38,8 +38,11 @@ def _make_ha_stubs() -> None:
     ha_frontend.add_extra_js_url = MagicMock()
     sys.modules.setdefault("homeassistant.components.frontend", ha_frontend)
 
-    # homeassistant.components.http — only needs StaticPathConfig
+    # homeassistant.components.http
     ha_http = types.ModuleType("homeassistant.components.http")
+
+    class _HomeAssistantView:
+        pass
 
     class _StaticPathConfig:
         def __init__(self, url_path, path, cache_headers=True):
@@ -48,6 +51,7 @@ def _make_ha_stubs() -> None:
             self.cache_headers = cache_headers
 
     ha_http.StaticPathConfig = _StaticPathConfig
+    ha_http.HomeAssistantView = _HomeAssistantView
     sys.modules.setdefault("homeassistant.components.http", ha_http)
 
     # homeassistant.config_entries
@@ -128,7 +132,17 @@ async_unload_entry = _lymow.async_unload_entry  # noqa: E402
 _WWW_REGISTERED_KEY = _lymow._WWW_REGISTERED_KEY  # noqa: E402
 
 # Const values loaded by the conftest  # noqa: E402
-from lymow.const import CONF_PASSWORD, CONF_REGION, CONF_USERNAME, DOMAIN  # noqa: E402
+from homeassistant.exceptions import ConfigEntryAuthFailed  # noqa: E402
+from lymow.auth import LymowAuthError  # noqa: E402
+from lymow.const import (  # noqa: E402
+    AUTH_METHOD_GOOGLE,
+    AUTH_METHOD_PASSWORD,
+    CONF_AUTH_METHOD,
+    CONF_PASSWORD,
+    CONF_REGION,
+    CONF_USERNAME,
+    DOMAIN,
+)
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -138,18 +152,30 @@ def _make_entry(
     password: str = "secret",
     region: str | None = "eu-west-1",
     entry_id: str = "eid-1",
+    auth_method: str | None = None,
+    refresh_token: str | None = None,
 ) -> MagicMock:
     entry = MagicMock()
     entry.entry_id = entry_id
     data = {CONF_USERNAME: username, CONF_PASSWORD: password}
     if region is not None:
         data[CONF_REGION] = region
+    if auth_method is not None:
+        data[CONF_AUTH_METHOD] = auth_method
+    if refresh_token is not None:
+        data["refresh_token"] = refresh_token
     entry.data = data
     return entry
 
 
 def _make_tokens(region: str = "eu-west-1") -> dict:
-    return {"region": region, "IdToken": "id-tok", "AccessToken": "access-tok"}
+    return {
+        "region": region,
+        "IdToken": "id-tok",
+        "AccessToken": "access-tok",
+        "RefreshToken": "refresh-tok",
+        "ExpiresIn": 3600,
+    }
 
 
 def _make_creds() -> dict:
@@ -191,6 +217,8 @@ def _make_auth(tokens: dict, creds: dict) -> MagicMock:
     auth = MagicMock()
     auth.login_region = AsyncMock(return_value=tokens)
     auth.login = AsyncMock(return_value=tokens)
+    auth.refresh_tokens = AsyncMock(return_value=tokens)
+    auth.refresh_oauth_tokens = AsyncMock(return_value=tokens)
     auth.get_aws_credentials = AsyncMock(return_value=creds)
     return auth
 
@@ -237,6 +265,138 @@ async def test_async_setup_entry_returns_true_with_stored_region() -> None:
     coord.async_query_all_schedules.assert_awaited_once()
     coord.async_query_all_robot_configs.assert_awaited_once()
     mqtt.connect.assert_awaited_once()
+
+
+async def test_async_setup_entry_password_prefers_stored_refresh_token() -> None:
+    hass = _make_hass()
+    entry = _make_entry(
+        region="eu-west-1",
+        auth_method=AUTH_METHOD_PASSWORD,
+        refresh_token="stored-refresh",
+    )
+    auth = _make_auth(_make_tokens(), _make_creds())
+    client = _make_client()
+    mqtt = _make_mqtt()
+    coord = _make_coordinator()
+
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=mqtt),
+        patch("lymow.LymowCoordinator", return_value=coord),
+    ):
+        await async_setup_entry(hass, entry)
+
+    auth.refresh_tokens.assert_awaited_once_with("stored-refresh", "eu-west-1")
+    auth.login_region.assert_not_awaited()
+
+
+async def test_async_setup_entry_password_refresh_falls_back_to_srp() -> None:
+    hass = _make_hass()
+    entry = _make_entry(region="eu-west-1", refresh_token="stored-refresh")
+    auth = _make_auth(_make_tokens(), _make_creds())
+    auth.refresh_tokens.side_effect = ValueError("expired")
+    client = _make_client()
+    mqtt = _make_mqtt()
+    coord = _make_coordinator()
+
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=mqtt),
+        patch("lymow.LymowCoordinator", return_value=coord),
+    ):
+        await async_setup_entry(hass, entry)
+
+    auth.login_region.assert_awaited_once_with("user@example.com", "secret", "eu-west-1")
+
+
+async def test_async_setup_entry_google_uses_only_stored_refresh_token() -> None:
+    hass = _make_hass()
+    entry = _make_entry(
+        region="eu-west-1",
+        auth_method=AUTH_METHOD_GOOGLE,
+        refresh_token="google-refresh",
+    )
+    entry.data.pop(CONF_USERNAME)
+    entry.data.pop(CONF_PASSWORD)
+    tokens = {**_make_tokens(), "RefreshToken": "rotated-refresh"}
+    auth = _make_auth(tokens, _make_creds())
+    client = _make_client()
+    mqtt = _make_mqtt()
+    coord = _make_coordinator()
+
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=mqtt),
+        patch("lymow.LymowCoordinator", return_value=coord),
+    ):
+        await async_setup_entry(hass, entry)
+
+    auth.refresh_oauth_tokens.assert_awaited_once_with(refresh_token="google-refresh", region="eu-west-1")
+    auth.refresh_tokens.assert_not_awaited()
+    auth.login.assert_not_awaited()
+    auth.login_region.assert_not_awaited()
+    update = hass.config_entries.async_update_entry.call_args_list[0]
+    assert update.kwargs["data"]["refresh_token"] == "rotated-refresh"
+    context_args = coord.set_auth_context.call_args.args
+    assert context_args[1] == AUTH_METHOD_GOOGLE
+    assert context_args[2] is None and context_args[3] is None
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        _make_entry(region="eu-west-1", auth_method=AUTH_METHOD_GOOGLE),
+        _make_entry(region=None, auth_method=AUTH_METHOD_GOOGLE, refresh_token="google-refresh"),
+    ],
+)
+async def test_async_setup_entry_google_requires_refresh_token_and_region(entry: MagicMock) -> None:
+    hass = _make_hass()
+    auth = _make_auth(_make_tokens(), _make_creds())
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        pytest.raises(ConfigEntryAuthFailed),
+    ):
+        await async_setup_entry(hass, entry)
+    auth.login.assert_not_awaited()
+    auth.login_region.assert_not_awaited()
+
+
+async def test_async_setup_entry_revoked_google_token_raises_auth_failed() -> None:
+    hass = _make_hass()
+    entry = _make_entry(
+        region="eu-west-1",
+        auth_method=AUTH_METHOD_GOOGLE,
+        refresh_token="revoked-refresh",
+    )
+    auth = _make_auth(_make_tokens(), _make_creds())
+    auth.refresh_oauth_tokens.side_effect = LymowAuthError("revoked")
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        pytest.raises(ConfigEntryAuthFailed, match="reauthentication"),
+    ):
+        await async_setup_entry(hass, entry)
+    auth.login_region.assert_not_awaited()
+
+
+async def test_async_setup_entry_missing_password_credentials_raise_auth_failed() -> None:
+    hass = _make_hass()
+    entry = _make_entry(region="eu-west-1")
+    entry.data.pop(CONF_PASSWORD)
+    auth = _make_auth(_make_tokens(), _make_creds())
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        pytest.raises(ConfigEntryAuthFailed, match="password credentials"),
+    ):
+        await async_setup_entry(hass, entry)
 
 
 async def test_async_setup_entry_uses_login_when_no_stored_region() -> None:

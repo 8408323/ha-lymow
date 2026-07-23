@@ -89,7 +89,10 @@ def _load(name: str) -> None:
 
 _load("coordinator")
 
+from lymow.auth import LymowAuthError  # noqa: E402
 from lymow.const import (  # noqa: E402
+    AUTH_METHOD_GOOGLE,
+    AUTH_METHOD_PASSWORD,
     USER_CTRL_CLEAN,
     USER_CTRL_DOCK,
     USER_CTRL_PAUSE,
@@ -195,7 +198,15 @@ async def test_async_update_data_raises_update_failed_on_exception() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _setup_auth(coord, *, refresh_ok=True, login_ok=True):
+def _setup_auth(
+    coord,
+    *,
+    auth_method=AUTH_METHOD_PASSWORD,
+    refresh_ok=True,
+    login_ok=True,
+    oauth_ok=True,
+    refresh_token_updated=None,
+):
     auth = MagicMock()
     auth.refresh_tokens = (
         AsyncMock(return_value={"AccessToken": "at2", "IdToken": "it2", "ExpiresIn": 3600})
@@ -207,6 +218,18 @@ def _setup_auth(coord, *, refresh_ok=True, login_ok=True):
         if login_ok
         else AsyncMock(side_effect=ValueError("bad creds"))
     )
+    auth.refresh_oauth_tokens = (
+        AsyncMock(
+            return_value={
+                "AccessToken": "oauth-at2",
+                "IdToken": "oauth-it2",
+                "RefreshToken": "oauth-rt2",
+                "ExpiresIn": 3600,
+            }
+        )
+        if oauth_ok
+        else AsyncMock(side_effect=LymowAuthError("revoked"))
+    )
     auth.get_aws_credentials = AsyncMock(
         return_value={
             "credentials": {"AccessKeyId": "ak", "SecretKey": "sk", "SessionToken": "st", "Expiration": 9999999999}
@@ -214,11 +237,13 @@ def _setup_auth(coord, *, refresh_ok=True, login_ok=True):
     )
     coord.set_auth_context(
         auth,
+        auth_method,
         "user",
         "pass",
         "eu-west-1",
         {"AccessToken": "at1", "IdToken": "it1", "RefreshToken": "rt1", "ExpiresIn": 3600},
         {"credentials": {"AccessKeyId": "ak0", "SecretKey": "sk0", "SessionToken": "st0", "Expiration": 9999999999}},
+        refresh_token_updated,
     )
     return auth
 
@@ -271,6 +296,49 @@ async def test_ensure_auth_falls_back_to_relogin_when_refresh_fails() -> None:
     auth.login_region.assert_awaited_once_with("user", "pass", "eu-west-1")
     api.update_tokens.assert_called_once_with("at3")
     assert coord._refresh_token == "rt3"  # re-login rotates the refresh token
+
+
+@pytest.mark.asyncio
+async def test_google_refresh_uses_oauth_and_never_calls_password_auth() -> None:
+    coord, _, api = _make_coordinator()
+    token_updated = MagicMock()
+    auth = _setup_auth(
+        coord,
+        auth_method=AUTH_METHOD_GOOGLE,
+        refresh_token_updated=token_updated,
+    )
+    coord._token_expiry = datetime.now(UTC)
+    await coord._async_ensure_auth()
+    auth.refresh_oauth_tokens.assert_awaited_once_with(refresh_token="rt1", region="eu-west-1")
+    auth.refresh_tokens.assert_not_awaited()
+    auth.login_region.assert_not_awaited()
+    auth.get_aws_credentials.assert_awaited_once_with("oauth-it2", "eu-west-1")
+    api.update_tokens.assert_called_once_with("oauth-at2")
+    assert coord._refresh_token == "oauth-rt2"
+    token_updated.assert_called_once_with("oauth-rt2")
+
+
+@pytest.mark.asyncio
+async def test_google_refresh_failure_raises_auth_failed_without_srp_fallback() -> None:
+    coord, _, _ = _make_coordinator()
+    auth = _setup_auth(coord, auth_method=AUTH_METHOD_GOOGLE, oauth_ok=False)
+    coord._token_expiry = datetime.now(UTC)
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coord._async_ensure_auth()
+    auth.refresh_tokens.assert_not_awaited()
+    auth.login_region.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_password_relogin_requires_stored_credentials() -> None:
+    coord, _, _ = _make_coordinator()
+    auth = _setup_auth(coord, refresh_ok=False)
+    coord._username = None
+    coord._password = None
+    coord._token_expiry = datetime.now(UTC)
+    with pytest.raises(ConfigEntryAuthFailed, match="credentials are missing"):
+        await coord._async_ensure_auth()
+    auth.login_region.assert_not_awaited()
 
 
 @pytest.mark.asyncio
