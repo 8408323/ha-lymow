@@ -421,3 +421,29 @@ def test_snapshot_drops_malformed_schedules() -> None:
     out = ws.snapshot(coord, THING)["schedules"]
     assert out[0]["hour"] == 0 and out[0]["dayOfWeek"] == [2] and out[0]["zones"] == ["z1"]  # 22:30 UTC+2 → Tue 00:30
     assert len(out) == 2 and out[1]["zones"] == [] and out[1]["dayOfWeek"] == []
+
+
+def test_stream_hides_parts_the_user_cannot_read() -> None:
+    coord = _coordinator(
+        {
+            "mapData": {"goZones": [{"hashId": "z", "polygon": [{"x": 1.0, "y": 2.0}]}], "gpsOrigin": {"lat": 59.0}},
+            "schedules": [{"hour": 1, "minute": 0}],
+            "backupMapList": [{"file": "b"}],
+        }
+    )
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": coord}}
+    ids = {"lawn_mower": "lawn_mower.lawn"}
+    lookup = lambda domain, _d, uid: ids.get(domain) or f"{domain}.{uid}"  # noqa: E731
+    conn = _connection(admin=False, readable={"lawn_mower.lawn", f"sensor.{THING}_schedules"})
+    with patch.object(ws.er, "async_get", create=True) as er_get:
+        er_get.return_value.async_get_entity_id.side_effect = lookup
+        ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
+    event = conn.send_message.call_args.args[0]["event"]
+    assert event["map"] == {} and event["backups"] == []
+    assert event["schedules"][0]["minute"] == 0
+
+
+def test_snapshot_omits_gps_origin() -> None:
+    coord = _coordinator({"mapData": {"gpsOrigin": {"lat": 59.0, "lon": 16.0}}})
+    assert "gps_origin" not in ws.snapshot(coord, THING)["map"]

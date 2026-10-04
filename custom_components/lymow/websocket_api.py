@@ -163,13 +163,31 @@ def _schedule(sched: Any) -> dict[str, Any] | None:
     )
 
 
+# Snapshot parts and the sensor whose read permission guards each (unique-id suffix),
+# so the stream never shows a non-admin more than their entity access allows.
+_GUARDED = (("map", "map", {}), ("schedules", "schedules", None), ("backups", "backup_maps", []))
+
+
+def _redact(hass: HomeAssistant, connection: websocket_api.ActiveConnection, thing: str, snap: dict) -> dict:
+    if connection.user.is_admin:
+        return snap
+    reg = er.async_get(hass)
+    out = dict(snap)
+    for key, suffix, empty in _GUARDED:
+        if not _can_read(connection, reg.async_get_entity_id("sensor", DOMAIN, f"{thing}_{suffix}")):
+            out[key] = empty
+    return out
+
+
 def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     """Everything the panel needs for one mower that isn't an entity state."""
     data = (coordinator.data or {}).get(thing) or {}
     schedules = data.get("schedules")
     return {
         "thing": thing,
-        "map": _finite(map_payload(data)),
+        # gps_origin pins the lawn to real-world coordinates; the panel works in
+        # dock-relative metres and never needs it.
+        "map": _finite({k: v for k, v in map_payload(data).items() if k != "gps_origin"}),
         # Live run-time overrides: the map reply's copy, overlaid by the values the
         # coordinator mirrors after a successful set_run_time_config.
         "run_time_config": _finite(
@@ -249,7 +267,7 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
         if not _can_read(connection, _mower_entity(hass, thing)):
             _end("unauthorized")
             return
-        snap = snapshot(state["coordinator"], thing)
+        snap = _redact(hass, connection, thing, snapshot(state["coordinator"], thing))
         # Only forward real changes.
         if snap != state.get("snap"):
             state["snap"] = snap
