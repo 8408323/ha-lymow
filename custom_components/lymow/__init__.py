@@ -117,17 +117,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Once per HA run: serve www/ (the panel bundle), register the panel's
     # websocket commands, and remove resources left by the old Lovelace cards.
     if not hass.data.get(_WWW_REGISTERED_KEY):
-        websocket_api.async_register(hass)
-        www_path = Path(__file__).parent / "www"
-        if www_path.is_dir():
-            await hass.http.async_register_static_paths(
-                [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
-            )
-            await _remove_legacy_lovelace(hass)
-            # Remember that the panel's JS is actually being served this run, so we
-            # only ever register the panel when its module_url resolves.
-            hass.data[_WWW_SERVED_KEY] = True
+        # Claim this before the first await: entries are set up concurrently at
+        # startup, and registering the static path twice would fail the second.
         hass.data[_WWW_REGISTERED_KEY] = True
+        try:
+            websocket_api.async_register(hass)
+            www_path = Path(__file__).parent / "www"
+            if www_path.is_dir():
+                await hass.http.async_register_static_paths(
+                    [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
+                )
+                await _remove_legacy_lovelace(hass)
+                # Remember that the panel's JS is actually being served this run, so we
+                # only ever register the panel when its module_url resolves.
+                hass.data[_WWW_SERVED_KEY] = True
+        except Exception:
+            hass.data.pop(_WWW_REGISTERED_KEY, None)  # let the next setup retry
+            raise
 
     session = async_get_clientsession(hass)
     auth = LymowAuth(session)

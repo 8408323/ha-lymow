@@ -175,14 +175,23 @@ function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
         }
       };
       ws.onmessage = async (m) => {
+        let kind: string | undefined;
+        let payload: any;
         try {
           const msg = JSON.parse(m.data);
-          const payload = JSON.parse(atob(msg.messagePayload));
-          const kind = msg.messageType ?? msg.action;
-          if (kind === "SDP_ANSWER") await pc!.setRemoteDescription({ type: "answer", sdp: payload.sdp });
-          else if (kind === "ICE_CANDIDATE") await pc!.addIceCandidate(payload).catch(() => undefined);
+          payload = JSON.parse(atob(msg.messagePayload));
+          kind = msg.messageType ?? msg.action;
         } catch {
-          // non-JSON keepalives from the signalling channel
+          return; // non-JSON keepalives from the signalling channel
+        }
+        if (kind === "SDP_ANSWER") {
+          try {
+            await pc!.setRemoteDescription({ type: "answer", sdp: payload.sdp });
+          } catch {
+            if (alive) onStatus(t("The cloud connection failed. Try again."));
+          }
+        } else if (kind === "ICE_CANDIDATE") {
+          await pc!.addIceCandidate(payload).catch(() => undefined);
         }
       };
       ws.onerror = () => alive && onStatus(t("The signalling connection failed."));

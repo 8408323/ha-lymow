@@ -280,3 +280,9 @@ def test_snapshot_survives_malformed_map_points() -> None:
     assert m["nogo_zones"] == [{"hashId": "n", "polygon": []}]
     assert m["channels"] == []
     assert m["mow_path"] == {"segments": [[{"x": 1, "y": 1}]]}
+
+
+def test_backup_time_must_be_a_sane_epoch() -> None:
+    assert ws._backup({"file": "a", "backupTime": float("inf")})["backupTime"] is None
+    assert ws._backup({"file": "a", "backupTime": -5})["backupTime"] is None
+    assert ws._backup({"file": "a", "backupTime": 1_784_475_670})["backupTime"] == 1_784_475_670

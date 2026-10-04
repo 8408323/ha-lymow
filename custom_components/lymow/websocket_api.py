@@ -126,7 +126,10 @@ def _backup(entry: Any) -> dict[str, Any] | None:
     return {
         "file": entry["file"],
         "name": name if isinstance(name, str) else "",
-        "backupTime": when if isinstance(when, (int, float)) and not isinstance(when, bool) else None,
+        # Epoch seconds; anything non-finite or outside 1970–2100 is dropped.
+        "backupTime": when
+        if isinstance(when, (int, float)) and not isinstance(when, bool) and 0 <= when < 4_102_444_800
+        else None,
         "preview": _preview(preview),
     }
 

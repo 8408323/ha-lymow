@@ -869,3 +869,13 @@ async def test_remove_legacy_lovelace_swallows_errors() -> None:
     hass = MagicMock()
     hass.data = {"lovelace": {"resources": resources}}
     await _lymow._remove_legacy_lovelace(hass)  # must not raise
+
+
+async def test_www_registration_rolls_back_on_failure() -> None:
+    """A failing static-path registration releases the once-per-run claim so a later setup retries."""
+    hass = _make_hass(www_registered=False)
+    hass.http.async_register_static_paths = AsyncMock(side_effect=RuntimeError("boom"))
+    entry = _make_entry()
+    with pytest.raises(RuntimeError):
+        await async_setup_entry(hass, entry)
+    assert _lymow._WWW_REGISTERED_KEY not in hass.data
