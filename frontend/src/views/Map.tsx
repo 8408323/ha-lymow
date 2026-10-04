@@ -423,6 +423,7 @@ function BrowsePanel(p: {
           <Button
             icon="mdi:vector-union"
             block
+            disabled={!online}
             onClick={async () => {
               const ok = await ui.confirm({
                 title: t("Merge {n} zones?", { n: sel.length }),

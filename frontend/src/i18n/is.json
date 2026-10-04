@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "Radíusinn er stilltur með „Geofence radius“ undir Eiginleikar sláttuvélar.",
  "The signalling connection failed.": "Merkjatenging mistókst.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Svæðið er fjarlægt af korti sláttuvélarinnar. Endurheimt afrits af korti getur skilað því, en bannsvæði þess koma hugsanlega ekki aftur.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Svæðin sem þú valdir eru ekki lengur á kortinu. Veldu svæði aftur.",
  "Theft detection": "Þjófaskynjun",
  "Theft lock": "Þjófalás",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "Þau verða eitt svæði sem heldur auðkenni og stillingum fyrsta svæðisins. Uppfæra þarf áætlanir sem vísuðu á hin svæðin.",

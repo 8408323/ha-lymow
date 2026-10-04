@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "Promień ustawia się suwakiem „Geofence radius” w Funkcjach kosiarki.",
  "The signalling connection failed.": "Połączenie sygnalizacyjne nie powiodło się.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Strefa zostanie usunięta z mapy kosiarki. Przywrócenie kopii mapy może ją odzyskać, ale jej strefy zakazane mogą nie wrócić.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Wybranych stref nie ma już na mapie. Wybierz strefy ponownie.",
  "Theft detection": "Wykrywanie kradzieży",
  "Theft lock": "Blokada antykradzieżowa",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "Staną się jedną strefą, która zachowa ID i ustawienia pierwszej. Harmonogramy wskazujące na pozostałe strefy trzeba zaktualizować.",

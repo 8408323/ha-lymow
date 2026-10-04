@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "Il raggio si imposta con «Geofence radius» in Funzioni del robot.",
  "The signalling connection failed.": "La connessione di segnalazione non è riuscita.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "La zona viene rimossa dalla mappa del robot. Il ripristino di un backup può recuperarla, ma le sue zone vietate potrebbero non tornare.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Le zone scelte non sono più sulla mappa. Scegli di nuovo le zone.",
  "Theft detection": "Rilevamento furto",
  "Theft lock": "Blocco antifurto",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "Diventano un'unica zona che mantiene ID e impostazioni della prima. I programmi che puntavano alle altre zone vanno aggiornati.",

@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "半径在“割草机功能”中的“Geofence radius”设置。",
  "The signalling connection failed.": "信令连接失败。",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "该区域将从割草机地图中移除。恢复地图备份可以找回它，但其中的禁区可能无法恢复。",
+ "The zones you picked are no longer on the map. Pick the zones again.": "你选择的区域已不在地图上。请重新选择区域。",
  "Theft detection": "防盗检测",
  "Theft lock": "防盗锁",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "它们将合并为一个区域，保留第一个区域的 ID 和设置。指向其他区域的计划需要更新。",

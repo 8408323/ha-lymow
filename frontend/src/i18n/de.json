@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "Der Radius wird mit „Geofence radius“ unter Mäherfunktionen eingestellt.",
  "The signalling connection failed.": "Die Signalisierungsverbindung ist fehlgeschlagen.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Die Zone wird von der Karte des Mähers entfernt. Eine Kartensicherung kann sie zurückbringen, ihre Sperrzonen aber möglicherweise nicht.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Die gewählten Zonen sind nicht mehr auf der Karte. Wähle die Zonen erneut.",
  "Theft detection": "Diebstahlerkennung",
  "Theft lock": "Diebstahlsperre",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "Sie werden zu einer Zone, die ID und Einstellungen der ersten Zone behält. Zeitpläne, die auf die anderen Zonen zeigten, müssen angepasst werden.",

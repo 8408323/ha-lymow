@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "El radio se ajusta con «Geofence radius» en Funciones del cortacésped.",
  "The signalling connection failed.": "La conexión de señalización ha fallado.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "La zona se elimina del mapa del cortacésped. Restaurar una copia del mapa puede recuperarla, pero sus zonas prohibidas quizá no vuelvan.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Las zonas elegidas ya no están en el mapa. Vuelve a elegir las zonas.",
  "Theft detection": "Detección de robo",
  "Theft lock": "Bloqueo antirrobo",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "Se convierten en una zona que conserva el ID y los ajustes de la primera. Hay que actualizar los programas que apuntaban a las otras zonas.",

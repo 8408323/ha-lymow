@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "Polmer nastavite z »Geofence radius« pod Funkcije kosilnice.",
  "The signalling connection failed.": "Signalizacijska povezava ni uspela.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Območje bo odstranjeno z zemljevida kosilnice. Obnova varnostne kopije zemljevida ga lahko vrne, njegova prepovedana območja pa morda ne.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Izbranih območij ni več na zemljevidu. Znova izberite območja.",
  "Theft detection": "Zaznavanje kraje",
  "Theft lock": "Zaklep proti kraji",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "Postanejo eno območje, ki ohrani ID in nastavitve prvega. Urnike, ki so kazali na druga območja, je treba posodobiti.",

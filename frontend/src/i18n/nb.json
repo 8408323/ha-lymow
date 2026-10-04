@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "Radiusen stilles inn med «Geofence radius» under Klipperens funksjoner.",
  "The signalling connection failed.": "Signaleringstilkoblingen mislyktes.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Sonen fjernes fra klipperens kart. En gjenopprettet kartsikkerhetskopi kan få den tilbake, men de forbudte områdene i den kommer kanskje ikke tilbake.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Sonene du valgte finnes ikke lenger på kartet. Velg soner på nytt.",
  "Theft detection": "Tyverideteksjon",
  "Theft lock": "Tyverilås",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "De blir én sone som beholder den første sonens ID og innstillinger. Planer som pekte på de andre sonene må oppdateres.",

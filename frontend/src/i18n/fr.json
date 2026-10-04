@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "Le rayon se règle avec « Geofence radius » dans Fonctions de la tondeuse.",
  "The signalling connection failed.": "La connexion de signalisation a échoué.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "La zone est retirée de la carte de la tondeuse. Restaurer une sauvegarde peut la ramener, mais pas forcément ses zones interdites.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Les zones choisies ne sont plus sur la carte. Choisissez à nouveau les zones.",
  "Theft detection": "Détection de vol",
  "Theft lock": "Verrou antivol",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "Elles deviennent une seule zone qui garde l'ID et les réglages de la première. Les plannings qui visaient les autres zones doivent être mis à jour.",

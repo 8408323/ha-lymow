@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n, useT, type T } from "../i18n";
 import { useMower, zoneLabel } from "../mower";
 import { pad2, weekday } from "../status";
@@ -19,9 +19,11 @@ function daysText(days: number[] | undefined, t: T, locale: string): string {
 export function SchedulesView() {
   const t = useT();
   const { locale } = useI18n();
-  const { snap, call, zoneName } = useMower();
+  const { snap, call, zoneName, device } = useMower();
   const ui = useUi();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(() => scheduleDrafts.has(device.thing));
+  const snapRef = useRef(snap);
+  snapRef.current = snap;
   // Editing before the mower has reported its schedules would overwrite them
   // (add_schedule writes the whole list), so everything waits for the reply.
   const loading = !snap || snap.schedules === null;
@@ -42,7 +44,7 @@ export function SchedulesView() {
     // Never lock forever: if the confirming reply was lost, ask the mower again.
     const t = window.setTimeout(() => {
       setAwaitingAfter(undefined);
-      if (snap?.schedules === null) call("lymow", "query_schedules");
+      if (snapRef.current?.schedules === null) call("lymow", "query_schedules"); // latest, not the armed render's
     }, 30000);
     return () => window.clearTimeout(t);
   }, [awaitingAfter]);
@@ -135,20 +137,35 @@ export function SchedulesView() {
   );
 }
 
+// A half-filled add form outlives the view per mower (tab switch, HA sidebar, other mower).
+type ScheduleDraft = { days: number[]; time: string; picked: string[]; repeat: boolean };
+const scheduleDrafts = new Map<string, ScheduleDraft>();
+
 function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (fn: () => Promise<boolean>) => Promise<void>; locked: boolean }) {
   const t = useT();
   const { locale } = useI18n();
-  const { snap, call } = useMower();
+  const { snap, call, device } = useMower();
   const zones = snap?.map.go_zones ?? [];
-  const [days, setDays] = useState<number[]>([1, 3, 5]);
-  const [time, setTime] = useState("09:00");
-  const [picked, setPicked] = useState<string[]>([]);
-  const [repeat, setRepeat] = useState(true);
+  const kept = scheduleDrafts.get(device.thing);
+  const [days, setDays] = useState<number[]>(kept?.days ?? [1, 3, 5]);
+  const [time, setTime] = useState(kept?.time ?? "09:00");
+  const [picked, setPicked] = useState<string[]>(kept?.picked ?? []);
+  const [repeat, setRepeat] = useState(kept?.repeat ?? true);
+  useEffect(() => {
+    scheduleDrafts.set(device.thing, { days, time, picked, repeat });
+  }, [days, time, picked, repeat]);
+  const done = () => {
+    scheduleDrafts.delete(device.thing);
+    onDone();
+  };
   const toggleDay = (d: number) => setDays(days.includes(d) ? days.filter((x) => x !== d) : [...days, d]);
   const toggleZone = (id: string) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
   // Zones removed from the map since they were picked are dropped, not sent.
   const live = picked.filter((id) => zones.some((z) => z.hashId === id));
-  const allZones = live.length === 0;
+  // "All zones" is an explicit choice (nothing picked). Picked zones that all vanished
+  // must not silently widen the schedule to the whole lawn.
+  const allZones = picked.length === 0;
+  const lostZones = !allZones && live.length === 0;
   return (
     <div className="ly-form">
       <Field label={t("Days")}>
@@ -179,11 +196,12 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
         <span>{t("Repeat every week")}</span>
         <Toggle checked={repeat} onChange={setRepeat} label={t("Repeat every week")} />
       </div>
+      {lostZones && <p className="ly-muted">{t("The zones you picked are no longer on the map. Pick the zones again.")}</p>}
       <div className="ly-btnrow">
         <Button
           variant="primary"
           icon="mdi:check"
-          disabled={locked || !days.length || !time || !zones.length}
+          disabled={locked || !days.length || !time || !zones.length || lostZones}
           onClick={async () => {
             const [hour, minute] = time.split(":").map(Number);
             let ok = false;
@@ -196,12 +214,12 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
               );
               return ok;
             });
-            if (ok) onDone();
+            if (ok) done();
           }}
         >
           {t("Save schedule")}
         </Button>
-        <Button variant="ghost" onClick={onDone}>
+        <Button variant="ghost" onClick={done}>
           {t("Cancel")}
         </Button>
       </div>

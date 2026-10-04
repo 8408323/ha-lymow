@@ -407,6 +407,7 @@
  "The radius is the “Geofence radius” control under Mower features.": "Säde asetetaan ”Geofence radius” -säätimellä kohdassa Leikkurin toiminnot.",
  "The signalling connection failed.": "Signalointiyhteys epäonnistui.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Alue poistetaan leikkurin kartalta. Kartan varmuuskopion palautus voi tuoda sen takaisin, mutta sen kieltoalueet eivät välttämättä palaa.",
+ "The zones you picked are no longer on the map. Pick the zones again.": "Valitsemiasi alueita ei enää ole kartalla. Valitse alueet uudelleen.",
  "Theft detection": "Varkauden tunnistus",
  "Theft lock": "Varkauslukko",
  "They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated.": "Niistä tulee yksi alue, joka säilyttää ensimmäisen alueen tunnuksen ja asetukset. Muihin alueisiin viittaavat aikataulut on päivitettävä.",
