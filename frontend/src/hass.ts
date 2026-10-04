@@ -156,6 +156,8 @@ export interface Snapshot {
   online: boolean;
 }
 
+const EMPTY_GRACE_MS = 60000;
+
 export function useDevices(): [LymowDevice[] | undefined, () => void] {
   const getHass = useHassRef();
   const [devices, setDevices] = useState<LymowDevice[]>();
@@ -163,6 +165,7 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
   useEffect(() => {
     let alive = true;
     let t = 0;
+    let emptySince: number | undefined;
     // Entities register a moment after the entry loads, and a reload can leave the
     // list empty for a while: refresh once shortly after, then keep polling while empty.
     const load = (): Promise<void> =>
@@ -179,7 +182,11 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
             setDevices((prev) => prev ?? []);
             return;
           }
-          setDevices(d);
+          // A config-entry reload briefly reports no mowers; keep the current list (and
+          // with it every open view and draft) for a grace period instead of unmounting.
+          emptySince = d.length ? undefined : (emptySince ?? Date.now());
+          if (emptySince === undefined || Date.now() - emptySince > EMPTY_GRACE_MS) setDevices(d);
+          else setDevices((prev) => (prev?.length ? prev : d));
           // Keep polling until every mower's own entity is registered (setup
           // publishes the coordinator before the platforms finish).
           if (!d.length || d.some((x) => !x.entities.mower)) t = window.setTimeout(load, 5000);

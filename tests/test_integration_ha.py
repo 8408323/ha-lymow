@@ -56,7 +56,9 @@ def _stub_heavy_ha_dependencies(hass):
     # the hass.http.async_register_static_paths call — http isn't loaded in
     # this minimal env and the static-path side effect doesn't affect the
     # state transitions / entity creation we're verifying.
-    hass.data["lymow_www_registered"] = True
+    done = hass.loop.create_future()
+    done.set_result(None)
+    hass.data["lymow_www_registered"] = done
     # Same for the dashboard auto-create — depends on the lovelace component
     # which isn't loaded here.
     hass.data["lymow_dashboard_created"] = True

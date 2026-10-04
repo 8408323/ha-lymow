@@ -179,7 +179,7 @@ export function MapView() {
 
   const onPick = (kind: Kind, id: string) => {
     if (mode === "edit") {
-      if (dirty && focus && focus.id !== id) return ui.toast(t("Save or discard the current shape first"), "bad");
+      if (guarded && focus && focus.id !== id) return ui.toast(t("Save or discard the current shape first"), "bad");
       startEditShape({ kind, id });
       return;
     }
@@ -205,7 +205,7 @@ export function MapView() {
           setDirty(true);
         }}
         onPick={onPick}
-        onBackground={() => (mode === "edit" ? !dirty && leaveFocus() : setSelected(new Set()))}
+        onBackground={() => (mode === "edit" ? !guarded && leaveFocus() : setSelected(new Set()))}
         stationMovable={mode === "edit" && !focus}
         onStationMoved={async (p) => {
           const ok = await ui.confirm({
