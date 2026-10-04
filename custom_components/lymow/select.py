@@ -325,7 +325,7 @@ class BackupMapRestoreSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):
 
 # Voice-pack languages the mower offers (server-confirmed 2026-07-10 from the
 # app's GET /get-musics response). Stable set; the app lists exactly these.
-_VOICE_LANGUAGES = ["English", "French-Canadian", "French-France", "German", "Italian", "Spanish"]
+_VOICE_LANGUAGES: tuple[str, ...] = ("English", "French-Canadian", "French-France", "German", "Italian", "Spanish")
 
 
 class VoiceLanguageSelect(CoordinatorEntity[LymowCoordinator], SelectEntity):

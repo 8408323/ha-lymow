@@ -422,7 +422,7 @@ def test_voice_language_select_metadata_and_static_options() -> None:
     e = VoiceLanguageSelect(_make_voice_coord(), DEVICE)
     assert e._attr_unique_id == f"{THING}_voice_language"
     assert e._attr_name == "Voice language"
-    assert e._attr_options == _VOICE_LANGUAGES
+    assert e._attr_options == list(_VOICE_LANGUAGES)
     # Write-optimistic: no cloud/robot read-back → unknown until first selection.
     assert e.current_option is None
 
