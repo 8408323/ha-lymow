@@ -57,6 +57,12 @@ export function MowerProvider({ device, snap, reloadDevices, children }: { devic
     reloadDevices,
     ent: (key) => device.entities[key],
     async call(domain, service, data = {}, success) {
+      // While the mower's entry reloads its entity is gone: HA would accept the call
+      // and silently skip it, so don't pretend it worked.
+      if (device.held) {
+        ui.toast(t("The mower is reconnecting. Try again in a moment."), "bad");
+        return false;
+      }
       try {
         await getHass().callService(domain, service, { entity_id: mower, ...data });
         if (success) ui.toast(t(success));
@@ -67,6 +73,7 @@ export function MowerProvider({ device, snap, reloadDevices, children }: { devic
       }
     },
     async callWithResponse<T>(domain: string, service: string, data: Record<string, unknown> = {}) {
+      if (device.held) throw new Error(t("The mower is reconnecting. Try again in a moment."));
       const res = await getHass().callService(domain, service, { entity_id: [mower], ...data }, undefined, false, true);
       return (res?.response ?? res) as T;
     },

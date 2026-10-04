@@ -87,6 +87,8 @@ export interface LymowDevice {
   device_id: string | null;
   name: string;
   entities: Record<string, string>;
+  /** Missing from the latest discovery (entry reloading): kept on screen, but not controllable. */
+  held?: boolean;
 }
 
 export interface Point {
@@ -195,7 +197,7 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
             if (!missingSince.has(x.thing)) missingSince.set(x.thing, now);
             return now - missingSince.get(x.thing)! <= EMPTY_GRACE_MS;
           });
-          known.current = [...d, ...kept];
+          known.current = [...d, ...kept.map((x) => ({ ...x, held: true }))];
           setDevices(known.current);
           // Also keep polling until every mower's own entity is registered (setup
           // publishes the coordinator before the platforms finish).

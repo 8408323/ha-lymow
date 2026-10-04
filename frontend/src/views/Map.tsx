@@ -114,7 +114,7 @@ export function MapView() {
   };
 
   const deleteVertex = () => {
-    if (editPts && vertex !== null && editPts.length > 3) {
+    if (awaitShape === null && editPts && vertex !== null && editPts.length > 3) {
       setEditPts(editPts.filter((_, i) => i !== vertex));
       setVertex(null);
       setDirty(true);
@@ -132,7 +132,7 @@ export function MapView() {
       setAwaitShape(null);
       startEditShape(focus);
     }
-  }, [reportedShape]);
+  }, [reportedShape, awaitShape]); // also when armed: the reply can beat the service call
   useEffect(() => {
     if (awaitShape === null) return;
     const id = window.setTimeout(() => {
@@ -198,7 +198,8 @@ export function MapView() {
         map={map}
         selected={mode === "browse" ? selected : undefined}
         focused={focus?.id}
-        edit={editPts}
+        // Read-only while a save awaits the mower: a new edit would be replaced by its reply.
+        edit={awaitShape === null ? editPts : null}
         editOutline={outline}
         activeVertex={vertex}
         onVertex={setVertex}
@@ -488,7 +489,7 @@ function EditPanel(p: {
             <Button
               variant="primary"
               icon="mdi:content-save-outline"
-              disabled={!p.dirty}
+              disabled={!p.dirty || p.awaiting}
               onClick={async () => {
                 const polygon = p.outline!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
                 const ok = await call("lymow", focus.kind === "go" ? "update_zone_polygon" : "update_nogo_polygon", { [key]: zone.hashId, polygon }, t("Shape saved"));

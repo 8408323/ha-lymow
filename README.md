@@ -181,12 +181,14 @@ for your mower, no dashboard setup needed:
 | Section | What you can do |
 |---|---|
 | **Overview** | Live status with the one action that makes sense right now (start, pause, resume, dock), battery, progress, last mow, positioning, a lawn preview and the next scheduled mow. |
-| **Map** | Zoom, pan and rotate your lawn; tap zones to mow them, merge them or switch them on and off. In **Edit map**, drag points to reshape zones and no-go areas, rename or delete them, tune per-zone mowing settings and move the charging station. |
+| **Map** | Zoom, pan and rotate your lawn; tap zones to mow them or merge them. In **Edit map**, drag points to reshape zones, rename or delete zones, no-go areas and channels, and tune per-zone mowing settings. No-go area and channel names are kept in Home Assistant. |
 | **Schedules** | Add weekly mowing schedules (days, time, zones), pause or delete them. |
 | **Camera & drive** | Live LAN stream, low-bandwidth snapshots or the cloud (WebRTC) stream, plus Bluetooth joysticks to drive the mower by hand. |
 | **Map backups** | Back up the map to the Lymow cloud, preview, restore, rename and delete backups. |
 | **Settings** | Mowing defaults, live adjustments during a mow, headlight schedule, every mower switch/option, maintenance actions and setup (name, PIN, RTK base, Wi-Fi, geofence). |
 | **Diagnostics** | Every sensor, grouped and searchable; tap one for its history. |
+
+Known limitations: the mower ignores no-go area reshapes ([#290](https://github.com/8408323/ha-lymow/issues/290)) and map edits sent as a whole map, such as adding zones, switching zones on/off or moving the dock ([#291](https://github.com/8408323/ha-lymow/issues/291)), so the panel doesn't offer them.
 
 The panel follows your Home Assistant language and is available in every language the Lymow app supports — English, German, French, Italian, Spanish, Polish, Slovenian and Simplified Chinese — plus Swedish, Norwegian, Danish, Finnish and Icelandic. You can override it under **Settings → Language** (saved per browser).
 

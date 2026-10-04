@@ -8,7 +8,7 @@ The **Lymow** sidebar panel (see the README for what each section does).
 
 ## Map
 
-Tap zones to mow, merge or switch them on/off; **Edit map** reshapes zones and no-go areas and moves the dock.
+Tap zones to mow or merge them; **Edit map** reshapes zones and renames or deletes zones, no-go areas and channels.
 
 ![Map](screenshots/panel-map.png)
 
