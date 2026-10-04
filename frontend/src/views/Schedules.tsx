@@ -39,7 +39,11 @@ export function SchedulesView() {
   }, [snap?.schedules, awaitingAfter]);
   useEffect(() => {
     if (awaitingAfter === undefined) return;
-    const t = window.setTimeout(() => setAwaitingAfter(undefined), 30000); // never lock forever
+    // Never lock forever: if the confirming reply was lost, ask the mower again.
+    const t = window.setTimeout(() => {
+      setAwaitingAfter(undefined);
+      if (snap?.schedules === null) call("lymow", "query_schedules");
+    }, 30000);
     return () => window.clearTimeout(t);
   }, [awaitingAfter]);
   // Offline: the write would be queued at the broker and the confirming query never answered.

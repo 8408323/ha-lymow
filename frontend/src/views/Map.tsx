@@ -530,6 +530,7 @@ function EditPanel(p: {
         <Button
           variant="danger"
           icon="mdi:delete-outline"
+          disabled={snap?.online === false}
           onClick={async () => {
             const ok = await ui.confirm({
               title: t("Delete {name}?", { name: title }),
@@ -557,7 +558,7 @@ function EditPanel(p: {
             <Button
               variant="primary"
               icon="mdi:content-save-outline"
-              disabled={!p.dirty || p.awaiting}
+              disabled={!p.dirty || p.awaiting || snap?.online === false}
               onClick={async () => {
                 const polygon = p.outline!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
                 p.onSaving(true); // read-only from here: later drags would not be in this save
@@ -611,7 +612,7 @@ function dropZoneDrafts(thing: string, zoneId: string | undefined) {
 function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<string, any> | undefined; onDraft: (pending: boolean) => void }) {
   const t = useT();
   const ui = useUi();
-  const { call, device } = useMower();
+  const { call, device, snap } = useMower();
   const draftKey = `${device.thing}:${zone.hashId}`;
   const kept = zoneDrafts.get(draftKey);
   // Effective value: the zone's own config, else the global default the mower uses.
@@ -686,7 +687,7 @@ function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<st
       <Button
         variant="primary"
         icon="mdi:check"
-        disabled={!changed || saved}
+        disabled={!changed || saved || snap?.online === false}
         onClick={async () => {
           if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) {
             zoneDrafts.set(draftKey, { draft, saved: true }); // recorded even if the view is gone by now

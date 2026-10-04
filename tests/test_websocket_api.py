@@ -50,7 +50,7 @@ def test_register_adds_both_commands() -> None:
 
 
 def test_snapshot_contents() -> None:
-    sched = {"hour": 6, "minute": 0, "timeZone": 2, "dayOfWeek": [1]}
+    sched = {"id": 1, "hour": 6, "minute": 0, "timeZone": 2, "dayOfWeek": [1]}
     coord = _coordinator(
         {
             "schedules": [sched],
@@ -416,7 +416,7 @@ def test_gone_cancels_a_pending_trailing_send() -> None:
 
 
 def test_snapshot_drops_malformed_schedules() -> None:
-    good = {"dayOfWeek": [1], "hour": 22, "minute": 30, "timeZone": 2, "zones": ["z1", 5], "isRepeated": True}
+    good = {"id": 7, "dayOfWeek": [1], "hour": 22, "minute": 30, "timeZone": 2, "zones": ["z1", 5], "isRepeated": True}
     coord = _coordinator(
         {
             "schedules": [
@@ -424,9 +424,10 @@ def test_snapshot_drops_malformed_schedules() -> None:
                 "junk",
                 {"hour": "x", "minute": 0},
                 {"hour": 1, "minute": 0, "timeZone": 99},
-                {"hour": 1, "minute": 0, "dayOfWeek": [9]},
-                {"hour": 1, "minute": 0, "dayOfWeek": "mon"},
-                {"hour": 1, "minute": 0, "zones": "z1"},
+                {"id": 2, "hour": 1, "minute": 0, "dayOfWeek": [9]},
+                {"id": 3, "hour": 1, "minute": 0, "dayOfWeek": "mon"},
+                {"id": 8, "hour": 1, "minute": 0, "zones": "z1"},
+                {"hour": 1, "minute": 0},  # no id
             ]
         }
     )
@@ -439,7 +440,7 @@ def test_stream_hides_parts_the_user_cannot_read() -> None:
     coord = _coordinator(
         {
             "mapData": {"goZones": [{"hashId": "z", "polygon": [{"x": 1.0, "y": 2.0}]}], "gpsOrigin": {"lat": 59.0}},
-            "schedules": [{"hour": 1, "minute": 0}],
+            "schedules": [{"id": 1, "hour": 1, "minute": 0}],
             "backupMapList": [{"file": "b"}],
             "runTimeConfig": {"cutHeight": 50},
             "mapReceivedAt": 123.0,

@@ -151,7 +151,8 @@ def _schedule(sched: Any) -> dict[str, Any] | None:
     hour, minute = _int_in(sched.get("hour"), 0, 23), _int_in(sched.get("minute"), 0, 59)
     days = sched.get("dayOfWeek") or []
     tz = sched.get("timeZone") or 0
-    if hour is None or minute is None or _int_in(tz, -24, 24) is None:
+    # Without an id the panel's pause/delete would always be rejected.
+    if hour is None or minute is None or _int_in(tz, -24, 24) is None or _int_in(sched.get("id"), 0, 2**63) is None:
         return None
     if not isinstance(days, list) or any(_int_in(d, 0, 6) is None for d in days):
         return None
