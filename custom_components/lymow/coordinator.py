@@ -26,6 +26,7 @@ from .const import (
     DOMAIN,
     EVENT_SESSION_COMPLETED,
     POLLING_INTERVAL,
+    REGION_CONFIG,
     RTK_DIAGNOSTIC_POLL_SECONDS,
     USER_CTRL_CLEAN,
     USER_CTRL_DOCK,
@@ -2095,6 +2096,28 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self._ota_state.get(thing_name, {}).pop("otaJobId", None)
             self._publish_device_patch(thing_name, {"otaJobId": None})
         return result
+
+    async def async_set_voice_language(self, thing_name: str, language: str) -> str | None:
+        """Switch the mower's voice pack to ``language`` (a display name).
+
+        A voice pack is delivered as an OTA job (create-ota-job with
+        type=ChangeLanguage) that downloads and applies it — the same endpoint
+        and Cognito auth as a firmware install. Returns the created jobId; raises if no job was created.
+        There is no cloud/robot read-back of the current language our identity can
+        reach (the get-musics list endpoint is IAM/SigV4-only), so the select
+        tracks the choice write-optimistically.
+        """
+        if not REGION_CONFIG.get(self._region or "", {}).get("api_ota_job"):
+            raise HomeAssistantError(f"Voice packs are not supported in region {self._region}")
+        try:
+            result = await self._client.create_voice_pack_job(thing_name, language)
+        except Exception as err:  # noqa: BLE001
+            raise HomeAssistantError(f"Voice pack switch to {language} failed: {err}") from err
+        job_id = result.get("jobId") if isinstance(result, dict) else None
+        if not isinstance(job_id, str) or not job_id.strip():
+            # No job means nothing will be applied — don't let the select claim it was.
+            raise HomeAssistantError(f"Voice pack switch to {language} was not accepted (no OTA job created)")
+        return job_id
 
     def _publish_device_patch(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Merge ``patch`` into self.data[thing_name] and publish a fresh snapshot.

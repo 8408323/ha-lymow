@@ -140,6 +140,7 @@ async def test_async_setup_entry_adds_all_selects_per_device() -> None:
         "CameraLightSelect",
         "MowPatternSelect",
         "BackupMapRestoreSelect",
+        "VoiceLanguageSelect",
     }
 
 
@@ -400,3 +401,38 @@ def test_backup_label_falls_back_to_file_basename() -> None:
     assert _backup_label({}, 4) == "Backup 5"
     # Unparseable backupTime (bad type/value) -> fall through to file basename.
     assert _backup_label({"file": "dev/map/bad.pb", "backupTime": "not-a-number"}, 0) == "bad.pb"
+
+
+# ---------------------------------------------------------------------------
+# VoiceLanguageSelect — write-optimistic, switch via the OTA-job endpoint
+# ---------------------------------------------------------------------------
+
+
+def _make_voice_coord() -> MagicMock:
+    coord = MagicMock()
+    coord.data = {THING: {}}
+    coord.devices = [DEVICE]
+    coord.async_set_voice_language = AsyncMock()
+    return coord
+
+
+def test_voice_language_select_metadata_and_static_options() -> None:
+    from lymow.select import _VOICE_LANGUAGES, VoiceLanguageSelect
+
+    e = VoiceLanguageSelect(_make_voice_coord(), DEVICE)
+    assert e._attr_unique_id == f"{THING}_voice_language"
+    assert e._attr_name == "Voice language"
+    assert e._attr_options == list(_VOICE_LANGUAGES)
+    # Write-optimistic: no cloud/robot read-back → unknown until first selection.
+    assert e.current_option is None
+
+
+async def test_voice_language_select_switch_calls_coordinator_and_tracks_choice() -> None:
+    from lymow.select import VoiceLanguageSelect
+
+    coord = _make_voice_coord()
+    e = VoiceLanguageSelect(coord, DEVICE)
+    e.async_write_ha_state = MagicMock()
+    await e.async_select_option("German")
+    coord.async_set_voice_language.assert_awaited_once_with(THING, "German")
+    assert e.current_option == "German"  # optimistic choice sticks

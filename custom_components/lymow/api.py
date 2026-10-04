@@ -383,6 +383,22 @@ class LymowApiClient:
             resp.raise_for_status()
             return await resp.json(content_type=None)
 
+    async def create_voice_pack_job(self, thing_name: str, language: str) -> dict[str, Any]:
+        """GET /prod/create-ota-job with type=ChangeLanguage — switch the voice pack.
+
+        A voice pack rides the same create-ota-job endpoint as a firmware install
+        (and the same Cognito auth), but the ``type=ChangeLanguage`` discriminator
+        plus the language display name as ``objectKey`` tell the backend to build a
+        voice-pack job. Omitting ``type`` makes the backend treat the language as a
+        firmware object key and 500 with "UnknownError" — live-confirmed 2026-07-10.
+        Returns ``{"jobId": "<id>"}``.
+        """
+        url = _api_url(self._region, "api_ota_job", "/prod/create-ota-job")
+        params = {"deviceThingName": thing_name, "objectKey": language, "type": "ChangeLanguage"}
+        async with self._session.get(url, headers=self._headers, params=params) as resp:
+            resp.raise_for_status()
+            return await resp.json(content_type=None)
+
     async def get_clean_history(self, thing_name: str, page: int = 1, page_size: int = 10) -> Any:
         url = _api_url(self._region, "api_map", "/prod/get-clean-history-collect")
         params = {"deviceThingName": thing_name, "page": page, "pageSize": page_size}
