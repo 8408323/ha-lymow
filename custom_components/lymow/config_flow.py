@@ -30,7 +30,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .api import LymowApiClient
-from .auth import LymowAuth, LymowAuthError
+from .auth import LymowAuth, LymowAuthConnectionError, LymowAuthError
 from .const import (
     AUTH_METHOD_GOOGLE,
     AUTH_METHOD_PASSWORD,
@@ -271,10 +271,10 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
                 identity_id=identity_id,
             )
             devices = await client.get_devices()
+        except (LymowAuthConnectionError, aiohttp.ClientError, TimeoutError):
+            return "cannot_connect"
         except LymowAuthError:
             return "invalid_oauth_code"
-        except (aiohttp.ClientError, TimeoutError):
-            return "cannot_connect"
         except (KeyError, TypeError, ValueError):
             return "invalid_oauth_code"
 
@@ -290,13 +290,17 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_REGION: self._region,
             "refresh_token": refresh_token,
         }
-        if self._reauth_entry is not None:
-            return await self._async_update_reauth_entry({**self._reauth_entry.data, **data})
-
         email = _jwt_claim(tokens["IdToken"], "email")
         has_email = isinstance(email, str) and bool(email)
         # Key on the email like the password path so one account can't be added twice.
-        await self.async_set_unique_id(email.lower() if has_email else identity_id)
+        unique_id = email.lower() if has_email else identity_id
+        if self._reauth_entry is not None:
+            # Signing in with a different Google account must not hijack this entry.
+            if self._reauth_entry.unique_id != unique_id:
+                return self.async_abort(reason="wrong_account")
+            return await self._async_update_reauth_entry({**self._reauth_entry.data, **data})
+
+        await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
         title = email if has_email else f"Lymow Google ({self._region})"
         return self.async_create_entry(title=title, data=data)
@@ -350,7 +354,8 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
     def _oauth_start_url(self) -> str:
         if self._oauth_state is None or self._pkce_challenge is None:
             raise RuntimeError("OAuth state is missing")
-        base_url = get_url(self.hass)
+        # Prefer external: the link opens in the user's browser, which may be off-LAN.
+        base_url = get_url(self.hass, prefer_external=True)
         query = urlencode(
             {
                 "region": self._region,

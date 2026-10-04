@@ -487,6 +487,7 @@ async def test_google_reauth_replaces_token_without_creating_duplicate() -> None
     flow = _make_flow()
     entry = MagicMock()
     entry.entry_id = "entry-1"
+    entry.unique_id = "eu-west-1:stable-identity"  # default tokens carry no email claim
     entry.data = {
         CONF_AUTH_METHOD: AUTH_METHOD_GOOGLE,
         CONF_REGION: "eu-west-1",
@@ -510,6 +511,31 @@ async def test_google_reauth_replaces_token_without_creating_duplicate() -> None
     assert updated["refresh_token"] == "google-refresh"
     flow.async_create_entry.assert_not_called()
     flow.async_set_unique_id.assert_not_awaited()
+
+
+async def test_google_reauth_with_other_account_aborts() -> None:
+    flow = _make_flow()
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.unique_id = "someone-else@example.com"
+    entry.data = {
+        CONF_AUTH_METHOD: AUTH_METHOD_GOOGLE,
+        CONF_REGION: "eu-west-1",
+        "refresh_token": "old-refresh",
+    }
+    flow.context = {"entry_id": entry.entry_id}
+    flow.hass.config_entries.async_get_entry.return_value = entry
+    await flow.async_step_reauth(entry.data)
+    auth, client = _oauth_dependencies()
+    with (
+        patch.object(_config_flow_mod, "async_get_clientsession", return_value=MagicMock()),
+        patch.object(_config_flow_mod, "LymowAuth", return_value=auth),
+        patch.object(_config_flow_mod, "LymowApiClient", return_value=client),
+    ):
+        result = await flow.async_step_google({OAUTH_RESULT: _callback(flow)})
+
+    assert result == {"type": "abort", "reason": "wrong_account"}
+    flow.async_update_reload_and_abort.assert_not_called()
 
 
 async def test_reauth_missing_entry_and_invalid_google_region_abort() -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -203,7 +204,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Reload the entry when options change so edits (e.g. the camera RTSP
     # path/port) take effect without a manual reload.
-    entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
+    entry.async_on_unload(entry.add_update_listener(partial(_async_reload_entry, options=dict(entry.options))))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
@@ -305,8 +306,13 @@ def _remove_panel(hass: HomeAssistant) -> None:
         hass.data.pop(_PANEL_REGISTERED_KEY, None)
 
 
-async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the config entry when its options change."""
+async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry, options: dict[str, Any] | None = None) -> None:
+    """Reload the config entry when its options change.
+
+    Data-only updates (a rotated refresh token being persisted) also fire this
+    listener; those must not tear down MQTT and every platform."""
+    if entry.options == options:
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

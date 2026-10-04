@@ -592,6 +592,16 @@ async def test_reload_entry_reloads_config_entry() -> None:
     hass.config_entries.async_reload.assert_awaited_once_with("eid-9")
 
 
+async def test_reload_entry_skips_data_only_update() -> None:
+    """Persisting a rotated refresh token (data, not options) must not reload."""
+    hass = MagicMock()
+    hass.config_entries.async_reload = AsyncMock()
+    entry = _make_entry(entry_id="eid-9")
+    entry.options = {"rtsp_port": 10022}
+    await _lymow._async_reload_entry(hass, entry, options={"rtsp_port": 10022})
+    hass.config_entries.async_reload.assert_not_awaited()
+
+
 async def test_async_unload_entry_keeps_panel_when_entries_remain() -> None:
     """Unloading one of several entries must not remove the shared sidebar panel."""
     hass = _make_hass()

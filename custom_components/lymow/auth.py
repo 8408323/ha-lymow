@@ -209,8 +209,9 @@ class LymowAuth:
             ) as resp:
                 if not resp.ok:
                     await resp.read()
-                    # 5xx is a Cognito outage; 4xx (e.g. invalid_grant) means the token is bad.
-                    error_cls = LymowAuthConnectionError if resp.status >= 500 else LymowAuthError
+                    # 5xx/429 are outages or throttling; other 4xx (e.g. invalid_grant) mean the token is bad.
+                    transient = resp.status >= 500 or resp.status == 429
+                    error_cls = LymowAuthConnectionError if transient else LymowAuthError
                     raise error_cls(f"OAuth token request failed with HTTP {resp.status}")
                 try:
                     data = await resp.json(content_type=None)

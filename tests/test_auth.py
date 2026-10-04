@@ -390,8 +390,11 @@ class TestLymowAuthOAuth:
     async def test_server_error_is_transient_but_4xx_is_not(self, auth_client):
         with aioresponses() as mocked:
             mocked.post(_COGNITO_OAUTH_EU, status=503)
+            mocked.post(_COGNITO_OAUTH_EU, status=429)
             mocked.post(_COGNITO_OAUTH_EU, status=400)
             with pytest.raises(LymowAuthConnectionError, match="HTTP 503"):
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
+            with pytest.raises(LymowAuthConnectionError, match="HTTP 429"):
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
             with pytest.raises(LymowAuthError, match="HTTP 400") as exc_info:
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")

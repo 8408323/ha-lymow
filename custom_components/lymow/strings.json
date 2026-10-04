@@ -52,6 +52,7 @@
       "reauth_successful": "Reauthentication was successful",
       "reauth_entry_missing": "The config entry to reauthenticate no longer exists",
       "region_required": "The existing Google entry does not have a valid region",
+      "wrong_account": "You signed in with a different Lymow account than the one this entry belongs to.",
       "no_url_available": "Home Assistant has no reachable URL configured. Set one under Settings → System → Network and try again."
     }
   },
