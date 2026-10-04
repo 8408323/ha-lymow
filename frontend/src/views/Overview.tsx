@@ -99,12 +99,12 @@ function Hero() {
           </Button>
         )}
         {(state === "mowing" || state === "returning") && (
-          <Button variant="secondary" size="lg" icon="mdi:pause" onClick={pause}>
+          <Button variant="secondary" size="lg" icon="mdi:pause" onClick={pause} disabled={off}>
             {t("Pause")}
           </Button>
         )}
         {state === "paused" && (
-          <Button variant="primary" size="lg" icon="mdi:play" onClick={resume}>
+          <Button variant="primary" size="lg" icon="mdi:play" onClick={resume} disabled={off}>
             {t("Resume")}
           </Button>
         )}

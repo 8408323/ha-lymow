@@ -277,7 +277,7 @@ function MowingDefaults() {
         </div>
       </div>
       <div className="ly-btnrow">
-        <Button variant="primary" icon="mdi:check" disabled={!Object.keys(changed).length || (pending !== null && !pending.matched)} onClick={save}>
+        <Button variant="primary" icon="mdi:check" disabled={!Object.keys(changed).length || (pending !== null && !pending.matched) || snap?.online === false} onClick={save}>
           {t("Save changes")}
         </Button>
         <Button variant="ghost" icon="mdi:undo" disabled={!Object.keys(changed).length} onClick={() => setEdits({})}>
