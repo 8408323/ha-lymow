@@ -2086,7 +2086,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         except Exception as err:  # noqa: BLE001
             raise HomeAssistantError(f"Voice pack switch to {language} failed: {err}") from err
         job_id = result.get("jobId") if isinstance(result, dict) else None
-        if not isinstance(job_id, str) or not job_id:
+        if not isinstance(job_id, str) or not job_id.strip():
             # No job means nothing will be applied — don't let the select claim it was.
             raise HomeAssistantError(f"Voice pack switch to {language} was not accepted (no OTA job created)")
         return job_id

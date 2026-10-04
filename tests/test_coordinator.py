@@ -3305,7 +3305,7 @@ async def test_async_set_voice_language_creates_voice_pack_job() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("response", [{}, {"jobId": ""}, {"jobId": ["x"]}, None])
+@pytest.mark.parametrize("response", [{}, {"jobId": ""}, {"jobId": "   "}, {"jobId": ["x"]}, None])
 async def test_async_set_voice_language_raises_without_valid_job_id(response) -> None:
     coord, _, api = _make_coordinator()
     coord._region = "eu-west-1"
