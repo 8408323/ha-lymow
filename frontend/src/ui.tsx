@@ -329,7 +329,7 @@ function DialogView({ req, close }: { req: DialogReq; close: (v: string | boolea
             {t("Cancel")}
           </Button>
           <button ref={okRef} type="button" className={cx("ly-btn", req.danger ? "ly-btn--danger" : "ly-btn--primary")} onClick={ok}>
-            {req.confirm ?? t(req.input ? "Save" : "Confirm")}
+            {req.confirm ?? (req.input ? t("Save") : t("Confirm"))}
           </button>
         </div>
       </div>

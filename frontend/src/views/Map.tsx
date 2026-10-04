@@ -219,7 +219,7 @@ export function MapView() {
         ) : (
           <div className="ly-sheet__body">
             <h2 className="ly-sheet__title">
-              <Icon name="mdi:pencil-ruler" /> Edit map
+              <Icon name="mdi:pencil-ruler" /> {t("Edit map")}
             </h2>
             <ol className="ly-steps">
               <li>{t("Tap a zone, no-go area or channel to edit it.")}</li>
@@ -284,7 +284,7 @@ function BrowsePanel(p: {
   return (
     <div className="ly-sheet__body">
       <h2 className="ly-sheet__title">
-        <Icon name="mdi:texture-box" /> Zones
+        <Icon name="mdi:texture-box" /> {t("Zones")}
         <span className="ly-muted">{zones.length}</span>
       </h2>
       <p className="ly-muted">{t("Tap zones on the map or in the list to choose what to mow.")}</p>
@@ -358,19 +358,19 @@ function BrowsePanel(p: {
         </div>
         <ul className="ly-legend">
           <li>
-            <i className="lg-go" /> Zone
+            <i className="lg-go" /> {t("Zone")}
           </li>
           <li>
-            <i className="lg-off" /> Disabled zone
+            <i className="lg-off" /> {t("Disabled zone")}
           </li>
           <li>
-            <i className="lg-nogo" /> No-go area
+            <i className="lg-nogo" /> {t("No-go area")}
           </li>
           <li>
-            <i className="lg-ch" /> Channel
+            <i className="lg-ch" /> {t("Channel")}
           </li>
           <li>
-            <i className="lg-mowed" /> Mowed
+            <i className="lg-mowed" /> {t("Mowed")}
           </li>
         </ul>
       </details>
@@ -400,7 +400,7 @@ function EditPanel(p: {
     nogo: { rename: t("Rename no-go area"), removed: t("The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.") },
     ch: { rename: t("Rename channel"), removed: t("The channel is removed from the mower's map. You can bring it back by restoring a map backup.") },
   }[focus.kind];
-  const title = focus.kind === "go" ? zoneLabel(zone, p.index, t) : zone.name?.trim() || t(focus.kind === "nogo" ? t("No-go area") : t("Channel"));
+  const title = focus.kind === "go" ? zoneLabel(zone, p.index, t) : zone.name?.trim() || (focus.kind === "nogo" ? t("No-go area") : t("Channel"));
   const key = focus.kind === "go" ? "zone_hash_id" : focus.kind === "nogo" ? "nogo_hash_id" : "channel_hash_id";
   const svc = focus.kind === "go" ? "zone" : focus.kind === "nogo" ? "nogo_zone" : "channel";
 

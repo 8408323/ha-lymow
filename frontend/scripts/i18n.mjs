@@ -25,6 +25,14 @@ for (const f of files) {
 const sorted = [...keys].sort();
 if (process.argv.includes("--check")) {
   let bad = 0;
+  // t(cond ? "A" : "B") hides "A"/"B" from extraction — write cond ? t("A") : t("B").
+  for (const f of files) {
+    const src = readFileSync(f, "utf8");
+    for (const m of src.matchAll(/\bt\((?!\s*")[^()]*"[^()]*\)/g)) {
+      bad++;
+      console.error(`${f}: string literal inside a computed t() argument: ${m[0]}`);
+    }
+  }
   for (const f of readdirSync("src/i18n").filter((x) => x.endsWith(".json"))) {
     const dict = JSON.parse(readFileSync(join("src/i18n", f), "utf8"));
     const missing = sorted.filter((k) => !(k in dict));

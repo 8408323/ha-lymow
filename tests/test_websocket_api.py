@@ -241,3 +241,21 @@ def test_devices_prefers_live_name_after_rename() -> None:
         dr_get.return_value.async_get_device.return_value = SimpleNamespace(id="d", name="Old", name_by_user=None)
         ws.ws_devices(hass, conn, {"id": 1})
     assert conn.send_result.call_args.args[1][0]["name"] == "Renamed"
+
+
+def test_snapshot_drops_non_finite_map_values() -> None:
+    nan, inf = float("nan"), float("inf")
+    coord = _coordinator(
+        {
+            "mapData": {
+                "goZones": [{"hashId": "z", "polygon": [{"x": 1.0, "y": 2.0}, {"x": nan, "y": 0.0}]}],
+                "chargingStation": {"x": inf, "y": 0.0},
+            },
+            "poseEastM": nan,
+            "poseNorthM": 1.5,
+        }
+    )
+    m = ws.snapshot(coord, THING)["map"]
+    assert m["go_zones"][0]["polygon"] == [{"x": 1.0, "y": 2.0}]
+    assert "charging_station" not in m
+    assert "poseEastM" not in m and m["poseNorthM"] == 1.5

@@ -20,6 +20,7 @@ export interface Hass {
   entities?: Record<string, { entity_id: string; device_id?: string; platform: string; entity_category?: string | null; hidden?: boolean }>;
   themes?: { darkMode?: boolean };
   language: string;
+  config: { time_zone: string };
   user?: { is_admin: boolean };
   callService(domain: string, service: string, data?: Record<string, unknown>, target?: unknown, notifyOnError?: boolean, returnResponse?: boolean): Promise<any>;
   callWS<T>(msg: Record<string, unknown>): Promise<T>;
@@ -177,24 +178,39 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
 export function useSnapshot(thing: string | undefined): Snapshot | undefined {
   const getHass = useHassRef();
   const [snap, setSnap] = useState<Snapshot>();
+  // Bumped to resubscribe: after the mower's entry reloads (the old stream ends
+  // with `gone`) or while it isn't set up yet (subscribe fails with not_found).
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    // Never show (or act on) the previous mower's map/backups while switching.
-    setSnap(undefined);
     if (!thing) return;
     let unsub: (() => Promise<void>) | undefined;
     let alive = true;
+    let retry = 0;
+    const again = () => {
+      if (alive) retry = window.setTimeout(() => setAttempt((a) => a + 1), Math.min(30000, 2000 * 2 ** Math.min(attempt, 4)) /* capped backoff */);
+    };
     getHass()
-      .connection.subscribeMessage<Snapshot>((s) => alive && setSnap(s), { type: "lymow/subscribe", thing })
+      .connection.subscribeMessage<Snapshot>(
+        (s) => {
+          if (!alive) return;
+          setSnap(s);
+          if (s.gone) again();
+        },
+        { type: "lymow/subscribe", thing },
+      )
       .then((u) => {
         if (alive) unsub = u;
         else u();
       })
-      .catch(() => undefined);
+      .catch(again);
     return () => {
       alive = false;
+      window.clearTimeout(retry);
       unsub?.();
     };
-  }, [thing]);
+  }, [thing, attempt]);
+  // Never show (or act on) the previous mower's map/backups while switching.
+  useEffect(() => setSnap(undefined), [thing]);
   return snap;
 }
 

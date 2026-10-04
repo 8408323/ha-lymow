@@ -69,6 +69,26 @@ def _coord(v: Any) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and abs(v) < 1e5
 
 
+_DROP = object()
+
+
+def _finite(obj: Any) -> Any:
+    """Drop non-finite/absurd floats (and points left without x/y) from decoded data.
+
+    Map geometry comes straight from protobuf float32s; a corrupt value (NaN, inf)
+    would break JSON serialisation or the panel's rendering."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) and abs(obj) < 1e7 else _DROP
+    if isinstance(obj, dict):
+        out = {k: c for k, v in obj.items() if (c := _finite(v)) is not _DROP}
+        if ("x" in obj or "y" in obj) and not ("x" in out and "y" in out):
+            return _DROP
+        return out
+    if isinstance(obj, list):
+        return [c for v in obj if (c := _finite(v)) is not _DROP]
+    return obj
+
+
 def _polygon(points: Any) -> list[dict[str, float]]:
     if not isinstance(points, list):
         return []
@@ -117,7 +137,7 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     schedules = data.get("schedules")
     return {
         "thing": thing,
-        "map": map_payload(data),
+        "map": _finite(map_payload(data)),
         # None = not received yet (a query is in flight). The panel must not edit
         # schedules then: add_schedule writes the full list and would drop the rest.
         "schedules": None if schedules is None else [_schedule_to_local(s) for s in schedules],

@@ -131,7 +131,7 @@ export function MapCanvas(props: Props) {
     setVb((cur) => {
       const v = base ?? cur;
       if (!v) return v;
-      const full = Math.max(...[bbox(allSvg)].map((b) => (b ? b.maxX - b.minX + b.maxY - b.minY : 20)), 10);
+      const full = Math.max(...[bbox(staticSvg)].map((b) => (b ? b.maxX - b.minX + b.maxY - b.minY : 20)), 10);
       const w = Math.min(Math.max(v.w * factor, full / 40), full * 3);
       const f = w / v.w;
       return { x: pt.x - (pt.x - v.x) * f, y: pt.y - (pt.y - v.y) * f, w, h: v.h * f };
@@ -244,7 +244,7 @@ export function MapCanvas(props: Props) {
 
   const label = (z: Zone, i: number, kind: Kind): string | null => {
     if (labels === "none") return null;
-    const name = kind === "go" ? zoneLabel(z, i, t) : z.name?.trim() || t(kind === "nogo" ? "No-go" : z.isDockingChannel ? t("Dock channel") : t("Channel"));
+    const name = kind === "go" ? zoneLabel(z, i, t) : z.name?.trim() || (kind === "nogo" ? t("No-go") : z.isDockingChannel ? t("Dock channel") : t("Channel"));
     const poly = z.polygon ?? [];
     const metric = kind === "ch" ? `${polylineLength(poly).toFixed(0)} m` : `${Math.round(z.area ?? area(poly))} m²`;
     if (labels === "area") return metric;

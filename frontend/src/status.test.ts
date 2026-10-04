@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { HassEntity } from "./hass";
 import { translate } from "./i18n";
-import { formatState as fs, weekday } from "./status";
+import { formatState as fs, shiftClock, tzOffsetMinutes, weekday } from "./status";
 
 const formatState = (x: HassEntity) => fs(x, (k, v) => translate("en", k, v), "en");
 
@@ -29,5 +29,16 @@ describe("formatState", () => {
     expect(formatState(e("unavailable"))).toBe("—");
     const now = new Date();
     expect(formatState(e(now.toISOString(), { device_class: "timestamp" }))).toMatch(/^Today /);
+  });
+});
+
+describe("time zones", () => {
+  it("computes the zone offset and shifts clock times", () => {
+    expect(tzOffsetMinutes("UTC")).toBe(0);
+    expect(tzOffsetMinutes("Europe/Stockholm", new Date(Date.UTC(2026, 6, 1, 12)))).toBe(120);
+    expect(tzOffsetMinutes("Europe/Stockholm", new Date(Date.UTC(2026, 0, 1, 12)))).toBe(60);
+    expect(shiftClock("21:00", -120)).toBe("19:00");
+    expect(shiftClock("00:30", -120)).toBe("22:30");
+    expect(shiftClock("23:30", 60)).toBe("00:30");
   });
 });

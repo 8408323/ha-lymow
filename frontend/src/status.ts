@@ -87,3 +87,19 @@ export function formatState(e: HassEntity, t: T, locale: string): string {
   }
   return e.state;
 }
+
+/** Minutes the given IANA timezone is ahead of UTC right now (e.g. 120 for CEST). */
+export function tzOffsetMinutes(timeZone: string, at: Date = new Date()): number {
+  const parts = new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    .formatToParts(at)
+    .reduce<Record<string, number>>((acc, p) => (p.type === "literal" ? acc : { ...acc, [p.type]: Number(p.value) }), {});
+  const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+  return Math.round((asUtc - Math.floor(at.getTime() / 60000) * 60000) / 60000);
+}
+
+/** Shift an "HH:MM" clock time by `minutes`, wrapping around midnight. */
+export function shiftClock(hhmm: string, minutes: number): string {
+  const [h, m] = hhmm.split(":").map(Number);
+  const total = (((h * 60 + m + minutes) % 1440) + 1440) % 1440;
+  return `${pad2(Math.floor(total / 60))}:${pad2(total % 60)}`;
+}

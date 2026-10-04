@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { useEntity, useHass, type HassEntity } from "../hass";
+import { useEntity, useHass, useHassRef, type HassEntity } from "../hass";
 import { LANGUAGES, useI18n, useT } from "../i18n";
+import { shiftClock, tzOffsetMinutes } from "../status";
 import { useMower, useMowerEntity } from "../mower";
 import { Button, Card, Field, Segmented, Select, Slider, TextInput, Toggle, useUi } from "../ui";
 
@@ -203,7 +204,13 @@ function Headlight() {
   // the headlight window). Until the user edits, the form mirrors the mower, and
   // Save needs an explicit edit, so opening the page never writes defaults.
   const known = typeof a.headlight_enabled === "boolean";
-  const live = { on: Boolean(a.headlight_enabled), start: (a.headlight_start as string) ?? "21:00", end: (a.headlight_end as string) ?? "23:00" };
+  // The mower stores the window in UTC; show and edit it in Home Assistant's timezone.
+  const offset = tzOffsetMinutes(useHassRef()().config.time_zone);
+  const live = {
+    on: Boolean(a.headlight_enabled),
+    start: a.headlight_start ? shiftClock(a.headlight_start as string, offset) : "21:00",
+    end: a.headlight_end ? shiftClock(a.headlight_end as string, offset) : "23:00",
+  };
   const [draft, setDraft] = useState<typeof live | null>(null);
   const v = draft ?? live;
   const edit = (part: Partial<typeof live>) => setDraft({ ...v, ...part });
@@ -229,7 +236,7 @@ function Headlight() {
         icon="mdi:check"
         disabled={!draft}
         onClick={async () => {
-          if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: v.start, end: v.end } : { enable: false }, t("Headlight schedule saved"))) setDraft(null);
+          if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) setDraft(null);
         }}
       >
         {t("Save")}
@@ -310,8 +317,8 @@ function EntityControl({ id }: { id: string }) {
             icon="mdi:check"
             title={t("Apply")}
             onClick={async () => {
-              await call("number", "set_value", { entity_id: id, value: pending }, t("{name} set to {value}", { name, value: pending }));
-              setPending(null);
+              // Keep the draft if the call failed, so the user doesn't have to redo it.
+              if (await call("number", "set_value", { entity_id: id, value: pending }, t("{name} set to {value}", { name, value: pending }))) setPending(null);
             }}
           />
         )}
