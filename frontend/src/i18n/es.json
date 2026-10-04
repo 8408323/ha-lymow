@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "El cortacésped deja de cortar automáticamente hasta que añadas una nueva programación.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "El mapa actual del cortacésped se sustituye por esta copia. Las zonas prohibidas no siempre se restauran — revísalas en el mapa antes de cortar.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "La zona prohibida se elimina del mapa del cortacésped. Restaurar una copia del mapa no siempre recupera las zonas prohibidas, así que elimínala solo si estás seguro.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "El contorno se cruza o no tiene área. Mueve los puntos para que los bordes no se crucen.",
  "The radius is the “Geofence radius” control under Mower features.": "El radio se ajusta con «Geofence radius» en Funciones del cortacésped.",
  "The signalling connection failed.": "La conexión de señalización ha fallado.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "La zona se elimina del mapa del cortacésped. Restaurar una copia del mapa puede recuperarla, pero sus zonas prohibidas quizá no vuelvan.",

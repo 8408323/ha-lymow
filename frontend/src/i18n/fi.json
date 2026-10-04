@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "Leikkuri lopettaa automaattisen leikkuun, kunnes lisäät uuden aikataulun.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Leikkurin nykyinen kartta korvataan tällä varmuuskopiolla. Kieltoalueet eivät aina palaudu — tarkista ne kartalta ennen leikkuuta.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Kieltoalue poistetaan leikkurin kartalta. Kartan varmuuskopion palautus ei aina tuo kieltoalueita takaisin, joten poista se vain, jos olet varma.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "Ääriviiva leikkaa itseään tai sillä ei ole pinta-alaa. Siirrä pisteitä niin, etteivät reunat leikkaa.",
  "The radius is the “Geofence radius” control under Mower features.": "Säde asetetaan ”Geofence radius” -säätimellä kohdassa Leikkurin toiminnot.",
  "The signalling connection failed.": "Signalointiyhteys epäonnistui.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Alue poistetaan leikkurin kartalta. Kartan varmuuskopion palautus voi tuoda sen takaisin, mutta sen kieltoalueet eivät välttämättä palaa.",

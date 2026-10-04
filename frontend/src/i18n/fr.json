@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "La tondeuse cesse de tondre automatiquement jusqu'à ce que vous ajoutiez une nouvelle planification.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "La carte actuelle de la tondeuse est remplacée par cette sauvegarde. Les zones interdites ne sont pas toujours restaurées — vérifiez-les sur la carte avant de tondre.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "La zone interdite est retirée de la carte de la tondeuse. Restaurer une sauvegarde ne ramène pas toujours les zones interdites : ne la supprimez que si vous en êtes sûr.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "Le contour se croise ou n'a pas de surface. Déplacez les points pour que les bords ne se croisent pas.",
  "The radius is the “Geofence radius” control under Mower features.": "Le rayon se règle avec « Geofence radius » dans Fonctions de la tondeuse.",
  "The signalling connection failed.": "La connexion de signalisation a échoué.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "La zone est retirée de la carte de la tondeuse. Restaurer une sauvegarde peut la ramener, mais pas forcément ses zones interdites.",

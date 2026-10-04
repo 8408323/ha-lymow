@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "Kosiarka przestanie kosić automatycznie, dopóki nie dodasz nowego harmonogramu.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Obecna mapa kosiarki zostanie zastąpiona tą kopią. Strefy zakazane nie zawsze są przywracane — sprawdź je na mapie przed koszeniem.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Strefa zakazana zostanie usunięta z mapy kosiarki. Przywrócenie kopii mapy nie zawsze przywraca strefy zakazane, więc usuń ją tylko, jeśli masz pewność.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "Kontur przecina się lub nie ma powierzchni. Przesuń punkty tak, aby krawędzie się nie przecinały.",
  "The radius is the “Geofence radius” control under Mower features.": "Promień ustawia się suwakiem „Geofence radius” w Funkcjach kosiarki.",
  "The signalling connection failed.": "Połączenie sygnalizacyjne nie powiodło się.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Strefa zostanie usunięta z mapy kosiarki. Przywrócenie kopii mapy może ją odzyskać, ale jej strefy zakazane mogą nie wrócić.",

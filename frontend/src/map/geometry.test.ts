@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { area, expand, labelPoint, niceLength, pathD, pointInPolygon, polylineLength, rotate, simplify } from "./geometry";
+import { area, expand, isSimplePolygon, labelPoint, niceLength, pathD, pointInPolygon, polylineLength, rotate, simplify } from "./geometry";
 
 const square = [
   { x: 0, y: 0 },
@@ -60,5 +60,12 @@ describe("geometry", () => {
     // Deleting a handle leaves the straight edge the editor showed.
     const del = handles.filter((_, i) => i !== 1);
     expect(expand(del, dense, handles).length).toBeLessThan(dense.length - 1);
+  });
+
+  it("isSimplePolygon rejects self-intersections and zero area", () => {
+    expect(isSimplePolygon(square)).toBe(true);
+    expect(isSimplePolygon([{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 0 }, { x: 0, y: 10 }])).toBe(false); // bow tie
+    expect(isSimplePolygon([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 0 }])).toBe(false); // collinear
+    expect(isSimplePolygon([{ x: 0, y: 0 }, { x: 1, y: 1 }])).toBe(false);
   });
 });

@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "Kosilnica preneha samodejno kositi, dokler ne dodate novega urnika.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Trenutni zemljevid kosilnice bo nadomeščen s to varnostno kopijo. Prepovedana območja se ne obnovijo vedno — pred košnjo jih preverite na zemljevidu.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Prepovedano območje bo odstranjeno z zemljevida kosilnice. Obnova varnostne kopije zemljevida ne vrne vedno prepovedanih območij, zato ga izbrišite le, če ste prepričani.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "Obris seka samega sebe ali nima površine. Premaknite točke, da se robovi ne sekajo.",
  "The radius is the “Geofence radius” control under Mower features.": "Polmer nastavite z »Geofence radius« pod Funkcije kosilnice.",
  "The signalling connection failed.": "Signalizacijska povezava ni uspela.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Območje bo odstranjeno z zemljevida kosilnice. Obnova varnostne kopije zemljevida ga lahko vrne, njegova prepovedana območja pa morda ne.",

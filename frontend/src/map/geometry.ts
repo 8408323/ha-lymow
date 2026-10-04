@@ -54,6 +54,22 @@ export function centre(poly: Point[]): Point {
   return { x: poly.reduce((s, p) => s + p.x, 0) / poly.length, y: poly.reduce((s, p) => s + p.y, 0) / poly.length };
 }
 
+/** A usable boundary: non-zero area and no edge crossing a non-adjacent edge. */
+export function isSimplePolygon(poly: Point[]): boolean {
+  const n = poly.length;
+  if (n < 3 || area(poly) < 0.01) return false;
+  const cross = (o: Point, a: Point, b: Point) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  for (let i = 0; i < n; i++) {
+    const a = poly[i], b = poly[(i + 1) % n];
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // shares a vertex with edge i
+      const c = poly[j], d = poly[(j + 1) % n];
+      if (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) return false;
+    }
+  }
+  return true;
+}
+
 export function polylineLength(pts: Point[]): number {
   let l = 0;
   for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);

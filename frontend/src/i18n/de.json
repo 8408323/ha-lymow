@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "Der Mäher mäht nicht mehr automatisch, bis du einen neuen Zeitplan hinzufügst.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Die aktuelle Karte des Mähers wird durch diese Sicherung ersetzt. Sperrzonen werden nicht immer wiederhergestellt — prüfe sie vor dem Mähen auf der Karte.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Die Sperrzone wird von der Karte des Mähers entfernt. Eine Kartensicherung bringt Sperrzonen nicht immer zurück — lösche sie nur, wenn du sicher bist.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "Der Umriss kreuzt sich selbst oder hat keine Fläche. Verschiebe die Punkte, damit sich die Kanten nicht kreuzen.",
  "The radius is the “Geofence radius” control under Mower features.": "Der Radius wird mit „Geofence radius“ unter Mäherfunktionen eingestellt.",
  "The signalling connection failed.": "Die Signalisierungsverbindung ist fehlgeschlagen.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Die Zone wird von der Karte des Mähers entfernt. Eine Kartensicherung kann sie zurückbringen, ihre Sperrzonen aber möglicherweise nicht.",

@@ -22,6 +22,14 @@ export function SchedulesView() {
   const { snap, call, zoneName, device } = useMower();
   const ui = useUi();
   const [adding, setAdding] = useState(() => scheduleDrafts.has(device.thing));
+  // A kept draft whose schedule the mower now reports is done.
+  useEffect(() => {
+    const d = scheduleDrafts.get(device.thing);
+    if (!d || adding || !snap?.schedules) return;
+    const [h, m] = d.time.split(":").map(Number);
+    if (snap.schedules.some((s) => s.hour === h && s.minute === m && JSON.stringify([...(s.dayOfWeek ?? [])].sort()) === JSON.stringify([...d.days].sort())))
+      scheduleDrafts.delete(device.thing);
+  }, [snap?.schedules, adding]);
   const snapRef = useRef(snap);
   snapRef.current = snap;
   // Editing before the mower has reported its schedules would overwrite them
@@ -218,7 +226,9 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
               );
               return ok;
             });
-            if (ok) done();
+            // Close the form, but keep the draft until the mower's list shows the new
+            // schedule; if it never does, the next Add starts from these values.
+            if (ok) onDone();
           }}
         >
           {t("Save schedule")}

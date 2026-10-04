@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "在你添加新计划之前，割草机将不再自动割草。",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "割草机当前的地图将被此备份替换。禁区不一定会被恢复 — 割草前请在地图上检查。",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "该禁区将从割草机地图中移除。恢复地图备份不一定能找回禁区，请确认后再删除。",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "轮廓自相交或面积为零。请移动点，使边不交叉。",
  "The radius is the “Geofence radius” control under Mower features.": "半径在“割草机功能”中的“Geofence radius”设置。",
  "The signalling connection failed.": "信令连接失败。",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "该区域将从割草机地图中移除。恢复地图备份可以找回它，但其中的禁区可能无法恢复。",

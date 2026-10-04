@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { setLeaveGuard } from "../App";
 import type { MapData, Point, Zone } from "../hass";
-import { area, centre, distToSegment, expand, simplify, type Handle } from "../map/geometry";
+import { area, centre, distToSegment, expand, isSimplePolygon, simplify, type Handle } from "../map/geometry";
 import { MapCanvas, type Kind, type LabelMode } from "../map/MapCanvas";
 import { useT } from "../i18n";
 import { useMower, useMowerEntity, zoneLabel } from "../mower";
@@ -511,6 +511,7 @@ function EditPanel(p: {
   const svc = focus.kind === "go" ? "zone" : focus.kind === "nogo" ? "nogo_zone" : "channel";
   // No-go and channel names live in Home Assistant, so they can also be cleared.
   const haName = focus.kind !== "go";
+  const valid = !p.outline || isSimplePolygon(p.outline);
 
   return (
     <div className="ly-sheet__body">
@@ -550,6 +551,7 @@ function EditPanel(p: {
       {focus.kind === "nogo" && (
         <p className="ly-muted">{t("The mower doesn't accept changes to a no-go area's shape yet. Its name is kept in Home Assistant.")}</p>
       )}
+      {p.editPts && !valid && <p className="ly-muted">{t("The outline crosses itself or has no area. Move the points so the edges don't cross.")}</p>}
       {p.editPts && (
         <section className="ly-subsection">
           <h3>{t("Shape")}</h3>
@@ -560,7 +562,7 @@ function EditPanel(p: {
             <Button
               variant="primary"
               icon="mdi:content-save-outline"
-              disabled={!p.dirty || p.awaiting || snap?.online === false}
+              disabled={!p.dirty || p.awaiting || snap?.online === false || !valid}
               onClick={async () => {
                 const polygon = p.outline!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
                 p.onSaving(true); // read-only from here: later drags would not be in this save
@@ -694,8 +696,10 @@ function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<st
           if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) {
             // Recorded even if the view is gone by now, unless a newer draft replaced it.
             const cur = zoneDrafts.get(draftKey);
-            if (!cur || JSON.stringify(cur.draft) === JSON.stringify(draft)) zoneDrafts.set(draftKey, { draft, saved: true });
-            setSaved(true);
+            if (!cur || JSON.stringify(cur.draft) === JSON.stringify(draft)) {
+              zoneDrafts.set(draftKey, { draft, saved: true });
+              setSaved(true);
+            }
           }
         }}
       >

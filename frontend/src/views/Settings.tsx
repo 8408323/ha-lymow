@@ -285,8 +285,8 @@ function MowingDefaults() {
         </Button>
         <span className="ly-spacer" />
         <span className="ly-muted">{t("Cutting height")}</span>
-        <Button icon="mdi:arrow-up-bold" title={t("Raise cutting height")} onClick={() => call("lymow", "set_task_config", { raise_cut_height: true }, t("Raising cutting height"))} />
-        <Button icon="mdi:arrow-down-bold" title={t("Lower cutting height")} onClick={() => call("lymow", "set_task_config", { lower_cut_height: true }, t("Lowering cutting height"))} />
+        <Button icon="mdi:arrow-up-bold" title={t("Raise cutting height")} disabled={snap?.online === false} onClick={() => call("lymow", "set_task_config", { raise_cut_height: true }, t("Raising cutting height"))} />
+        <Button icon="mdi:arrow-down-bold" title={t("Lower cutting height")} disabled={snap?.online === false} onClick={() => call("lymow", "set_task_config", { lower_cut_height: true }, t("Lowering cutting height"))} />
       </div>
     </Card>
   );
@@ -330,7 +330,7 @@ function LiveAdjust() {
 
 // A headlight save the mower hasn't echoed yet outlives the view (per mower), so
 // leaving Settings doesn't lose what was sent.
-const pendingHeadlight = new Map<string, { draft: { on: boolean; start: string; end: string }; saved: boolean }>();
+const pendingHeadlight = new Map<string, { draft: { on: boolean; start: string; end: string }; saved: boolean; until?: number }>();
 
 function Headlight() {
   const t = useT();
@@ -355,7 +355,7 @@ function Headlight() {
   // keep showing what was sent, and drop the draft once the mower reports it.
   const [saved, setSaved] = useState(() => pendingHeadlight.get(device.thing)?.saved ?? false);
   useEffect(() => {
-    if (draft) pendingHeadlight.set(device.thing, { draft, saved });
+    if (draft) pendingHeadlight.set(device.thing, { draft, saved, until: pendingHeadlight.get(device.thing)?.until });
     else pendingHeadlight.delete(device.thing);
   }, [saved, draft]);
   const v = draft ?? live;
@@ -373,7 +373,9 @@ function Headlight() {
   // Firmware that never echoes: keep the draft but let the user save it again.
   useEffect(() => {
     if (!saved) return;
-    const id = window.setTimeout(() => setSaved(false), 20000);
+    // Absolute deadline kept with the draft, so time spent away from Settings counts.
+    const until = pendingHeadlight.get(device.thing)?.until ?? Date.now() + 20000;
+    const id = window.setTimeout(() => setSaved(false), Math.max(0, until - Date.now()));
     return () => window.clearTimeout(id);
   }, [saved]);
   return (
@@ -402,7 +404,7 @@ function Headlight() {
             // Recorded even if the view is gone by now, unless a newer edit replaced it.
             const cur = pendingHeadlight.get(device.thing);
             if (!cur || JSON.stringify(cur.draft) === JSON.stringify(v)) {
-              pendingHeadlight.set(device.thing, { draft: v, saved: true });
+              pendingHeadlight.set(device.thing, { draft: v, saved: true, until: Date.now() + 20000 });
               setSaved(true);
             }
           }

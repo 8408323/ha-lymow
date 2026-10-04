@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "Sláttuvélin hættir að slá sjálfvirkt þar til þú bætir við nýrri tímaáætlun.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Núverandi korti sláttuvélarinnar er skipt út fyrir þetta afrit. Bannsvæði eru ekki alltaf endurheimt — athugaðu þau á kortinu áður en þú slærð.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Bannsvæðið er fjarlægt af korti sláttuvélarinnar. Endurheimt afrits af korti skilar bannsvæðum ekki alltaf aftur, svo eyddu því aðeins ef þú ert viss.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "Útlínan sker sjálfa sig eða hefur ekkert flatarmál. Færðu punktana svo brúnirnar skerist ekki.",
  "The radius is the “Geofence radius” control under Mower features.": "Radíusinn er stilltur með „Geofence radius“ undir Eiginleikar sláttuvélar.",
  "The signalling connection failed.": "Merkjatenging mistókst.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Svæðið er fjarlægt af korti sláttuvélarinnar. Endurheimt afrits af korti getur skilað því, en bannsvæði þess koma hugsanlega ekki aftur.",

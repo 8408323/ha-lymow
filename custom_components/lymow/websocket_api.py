@@ -70,6 +70,10 @@ def _find(hass: HomeAssistant, thing: str) -> Any | None:
     return None
 
 
+def _list(v: Any) -> list:
+    return v if isinstance(v, list) else []
+
+
 def _coord(v: Any) -> bool:
     """A usable map coordinate: finite and within a few km of the dock (ENU metres)."""
     return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and abs(v) < 1e5
@@ -87,8 +91,8 @@ def _finite(obj: Any) -> Any:
         return obj if math.isfinite(obj) and abs(obj) < 1e7 else _DROP
     if isinstance(obj, dict):
         out = {k: c for k, v in obj.items() if (c := _finite(v)) is not _DROP}
-        if ("x" in obj or "y" in obj) and not ("x" in out and "y" in out):
-            return _DROP
+        if ("x" in obj or "y" in obj) and not (_coord(out.get("x")) and _coord(out.get("y"))):
+            return _DROP  # points must be usable map coordinates, not just finite
         return out
     if isinstance(obj, list):
         return [c for v in obj if (c := _finite(v)) is not _DROP]
@@ -204,8 +208,10 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
         ),
         # None = not received yet (a query is in flight). The panel must not edit
         # schedules then: add_schedule writes the full list and would drop the rest.
-        "schedules": None if schedules is None else [row for s in schedules if (row := _schedule(s))],
-        "backups": [row for b in data.get("backupMapList") or [] if (row := _backup(b))],
+        "schedules": None
+        if schedules is None
+        else [row for s in (schedules if isinstance(schedules, list) else []) if (row := _schedule(s))],
+        "backups": [row for b in _list(data.get("backupMapList")) if (row := _backup(b))],
         # Same positive signals the coordinator uses; unknown counts as offline.
         "online": _is_device_online(data),
         # When the mower last sent a map reply (epoch s), for confirming edits.

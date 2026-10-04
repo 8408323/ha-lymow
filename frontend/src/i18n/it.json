@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "Il robot smette di tagliare in automatico finché non aggiungi una nuova programmazione.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "La mappa attuale del robot viene sostituita da questo backup. Le zone vietate non sempre vengono ripristinate — controllale sulla mappa prima di tagliare.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "La zona vietata viene rimossa dalla mappa del robot. Il ripristino di un backup non sempre recupera le zone vietate, quindi eliminala solo se sei sicuro.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "Il contorno si interseca o non ha area. Sposta i punti in modo che i bordi non si incrocino.",
  "The radius is the “Geofence radius” control under Mower features.": "Il raggio si imposta con «Geofence radius» in Funzioni del robot.",
  "The signalling connection failed.": "La connessione di segnalazione non è riuscita.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "La zona viene rimossa dalla mappa del robot. Il ripristino di un backup può recuperarla, ma le sue zone vietate potrebbero non tornare.",

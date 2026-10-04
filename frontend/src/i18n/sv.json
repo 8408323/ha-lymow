@@ -404,6 +404,7 @@
  "The mower stops mowing automatically until you add a new schedule.": "Klipparen slutar klippa automatiskt tills du lägger till ett nytt schema.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Klipparens nuvarande karta ersätts av den här säkerhetskopian. Förbjudna områden återställs inte alltid — kontrollera dem på kartan innan du klipper.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Det förbjudna området tas bort från klipparens karta. En återställd kartsäkerhetskopia får inte alltid tillbaka förbjudna områden, så radera det bara om du är säker.",
+ "The outline crosses itself or has no area. Move the points so the edges don't cross.": "Konturen korsar sig själv eller saknar yta. Flytta punkterna så att kanterna inte korsas.",
  "The radius is the “Geofence radius” control under Mower features.": "Radien ställs in med ”Geofence radius” under Klipparens funktioner.",
  "The signalling connection failed.": "Signaleringsanslutningen misslyckades.",
  "The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.": "Zonen tas bort från klipparens karta. En återställd kartsäkerhetskopia kan få tillbaka den, men dess förbjudna områden kanske inte kommer tillbaka.",

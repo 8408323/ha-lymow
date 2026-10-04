@@ -494,3 +494,16 @@ def test_devices_longest_thing_prefix_owns_the_entity() -> None:
     a, b = conn.send_result.call_args.args[1]
     assert a["entities"] == {"mower": "lawn_mower.a", "battery": "sensor.a_battery"}
     assert b["entities"] == {"mower": "lawn_mower.b", "battery": "sensor.b_battery"}
+
+
+def test_snapshot_survives_non_list_sections_and_far_points() -> None:
+    coord = _coordinator(
+        {
+            "schedules": 1,
+            "backupMapList": 1,
+            "mapData": {"goZones": [{"hashId": "z", "polygon": [{"x": 1.0, "y": 2.0}, {"x": 1e6, "y": 0.0}]}]},
+        }
+    )
+    snap = ws.snapshot(coord, THING)
+    assert snap["schedules"] == [] and snap["backups"] == []
+    assert snap["map"]["go_zones"][0]["polygon"] == [{"x": 1.0, "y": 2.0}]
