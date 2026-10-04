@@ -3,7 +3,7 @@
 // Gestures: wheel / pinch zoom around the pointer, drag to pan, right-drag (or the
 // rotate buttons) to rotate. Taps on zones call onPick; taps on empty ground call
 // onBackground. In edit mode, vertex handles drag, edge "+" handles insert a
-// vertex, and the dock can be dragged when stationMovable.
+// vertex.
 
 import { useT } from "../i18n";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -28,8 +28,6 @@ interface Props {
   editOutline?: Point[] | null;
   onPick?: (kind: Kind, hashId: string) => void;
   onBackground?: () => void;
-  stationMovable?: boolean;
-  onStationMoved?: (p: Point) => void;
   trail?: Point[];
   labels?: LabelMode;
   showTrail?: boolean;
@@ -50,7 +48,6 @@ type Drag =
   | { kind: "pan"; sx: number; sy: number; vb: VB }
   | { kind: "rotate"; sx: number; start: number }
   | { kind: "vertex"; i: number }
-  | { kind: "station" }
   | { kind: "pinch"; d0: number; vb: VB; mid: Point };
 
 const TAP_PX = 5;
@@ -63,7 +60,6 @@ export function MapCanvas(props: Props) {
   const groupRef = useRef<SVGGElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
   const [vb, setVb] = useState<VB | null>(null);
-  const [stationDrag, setStationDrag] = useState<Point | null>(null);
   const drag = useRef<Drag | null>(null);
   const pointers = useRef(new Map<number, Point>());
   const down = useRef<{ x: number; y: number; pick?: { kind: Kind; id: string }; moved: boolean } | null>(null);
@@ -183,10 +179,6 @@ export function MapCanvas(props: Props) {
         return;
       }
     }
-    if (handle?.dataset.handle === "station" && props.stationMovable) {
-      drag.current = { kind: "station" };
-      return;
-    }
     if (!interactive || !vb) return;
     if (pointers.current.size === 2) {
       const [p1, p2] = [...pointers.current.values()];
@@ -208,8 +200,6 @@ export function MapCanvas(props: Props) {
       const next = [...edit];
       next[g.i] = toMap(e.clientX, e.clientY);
       props.onEditChange(next);
-    } else if (g.kind === "station") {
-      setStationDrag(toMap(e.clientX, e.clientY));
     } else if (g.kind === "pan") {
       setVb({ ...g.vb, x: g.vb.x - (e.clientX - g.sx) / k, y: g.vb.y - (e.clientY - g.sy) / k });
     } else if (g.kind === "rotate") {
@@ -227,12 +217,6 @@ export function MapCanvas(props: Props) {
     if (pointers.current.size > 0) return; // still pinching
     drag.current = null;
     down.current = null;
-    if (g?.kind === "station" && stationDrag && d?.moved) {
-      props.onStationMoved?.(stationDrag);
-      setStationDrag(null);
-      return;
-    }
-    setStationDrag(null);
     if (!d || d.moved || g?.kind === "vertex") return;
     if (d.pick) props.onPick?.(d.pick.kind, d.pick.id);
     else props.onBackground?.();
@@ -255,7 +239,6 @@ export function MapCanvas(props: Props) {
 
   const rot = `rotate(${rotation} ${center.x} ${center.y})`;
   const upright = (p: Point) => `rotate(${-rotation} ${p.x} ${-p.y})`;
-  const stationPos = stationDrag ?? station;
   const scaleM = niceLength(80 / k);
 
   return (
@@ -330,13 +313,11 @@ export function MapCanvas(props: Props) {
                 </text>
               );
             })}
-            {stationPos && (
+            {station && (
               <g
-                transform={`translate(${stationPos.x} ${-stationPos.y}) rotate(${-rotation}) scale(${px(1)})`}
-                className={cx("m-station", props.stationMovable && "m-station--movable")}
-                data-handle="station"
+                transform={`translate(${station.x} ${-station.y}) rotate(${-rotation}) scale(${px(1)})`}
+                className="m-station"
               >
-                {props.stationMovable && <circle r={18} className="m-station__ring" />}
                 <circle r={11} />
                 <path d="M1.5,-7 L-4,1 L-0.5,1 L-1.5,7 L4,-1 L0.5,-1 Z" className="m-station__bolt" />
               </g>

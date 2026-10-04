@@ -61,7 +61,7 @@ interface Focus {
 
 export function MapView() {
   const t = useT();
-  const { snap, call } = useMower();
+  const { snap } = useMower();
   const ui = useUi();
   const map = snap?.map;
   const [mode, setMode] = useState<"browse" | "edit">("browse");
@@ -208,15 +208,8 @@ export function MapView() {
         }}
         onPick={onPick}
         onBackground={() => (mode === "edit" ? !guarded && leaveFocus() : setSelected(new Set()))}
-        stationMovable={mode === "edit" && !focus}
-        onStationMoved={async (p) => {
-          const ok = await ui.confirm({
-            title: t("Move the charging station?"),
-            body: t("The mower will use this spot as its dock from now on. Only do this if you physically moved the station."),
-            confirm: t("Move station"),
-          });
-          if (ok) await call("lymow", "move_charging_station", { x: +p.x.toFixed(3), y: +p.y.toFixed(3) }, t("Charging station moved"));
-        }}
+        // Moving the dock (and switching zones on/off) goes through the map-sync
+        // command, which the mower ignores (#291), so the panel doesn't offer it.
         trail={trail}
         labels={labels}
         showTrail={showTrail}
@@ -270,7 +263,6 @@ export function MapView() {
             <ol className="ly-steps">
               <li>{t("Tap a zone, no-go area or channel to edit it.")}</li>
               <li>{t("Drag the white points to reshape, tap the small dots on an edge to add a point.")}</li>
-              <li>{t("Drag the charging station ⚡ to move it.")}</li>
             </ol>
             <p className="ly-muted">{t("New zones are created by driving the mower around them in the Lymow app; the robot can't create them from a drawing.")}</p>
             <Button variant="primary" icon="mdi:check" block onClick={exitEdit}>
@@ -344,11 +336,7 @@ function BrowsePanel(p: {
                 {Math.round(z.area ?? area(z.polygon ?? []))} m² · {z.cutHeight ?? z.zoneConfig?.cutHeight ?? "–"} mm
               </span>
             </button>
-            <Toggle
-              label={`${zoneLabel(z, i, t)} enabled`}
-              checked={z.isEnabled !== false}
-              onChange={(v) => call("lymow", "set_zone_enabled", { zone_hash_id: z.hashId, is_enabled: v }, v ? t("Zone enabled") : t("Zone disabled"))}
-            />
+            {z.isEnabled === false && <span className="ly-muted">{t("Off")}</span>}
           </li>
         ))}
       </ul>

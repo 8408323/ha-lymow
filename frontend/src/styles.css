@@ -1036,7 +1036,7 @@ h3 {
   font-weight: 600;
 }
 
-.m-station circle:not(.m-station__ring) {
+.m-station circle {
   fill: #2f7fd6;
   stroke: #fff;
   stroke-width: 2;
@@ -1044,18 +1044,6 @@ h3 {
 
 .m-station__bolt {
   fill: #fff;
-}
-
-.m-station--movable {
-  cursor: move;
-}
-
-.m-station__ring {
-  fill: none;
-  stroke: #2f7fd6;
-  stroke-width: 2;
-  stroke-dasharray: 4 3;
-  animation: ly-spin 6s linear infinite;
 }
 
 .m-robot circle:last-child {
