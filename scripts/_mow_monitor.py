@@ -85,7 +85,7 @@ def _mow_progress(fields: dict[int, tuple]) -> float | None:
             else:
                 break
     except (IndexError, ValueError, struct.error):
-        pass
+        pass  # best-effort debug decode; skip what does not parse
     return None
 
 

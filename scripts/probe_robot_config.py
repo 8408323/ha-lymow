@@ -83,7 +83,7 @@ def _dump_robot_config(rc_bytes: bytes) -> None:
                 if s.isprintable():
                     extra = f'  str="{s}"'
             except (UnicodeDecodeError, ValueError):
-                pass
+                pass  # best-effort debug decode; skip what does not parse
             # Try to decode as a sub-message
             sub_info = ""
             try:
@@ -150,7 +150,7 @@ async def main() -> None:
                         else:
                             print(f"  [pboutput {len(pb)}B no robotConfig]")
             except asyncio.TimeoutError:
-                pass
+                pass  # listen window elapsed; carry on
 
 
 if __name__ == "__main__":

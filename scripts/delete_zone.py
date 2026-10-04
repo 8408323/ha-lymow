@@ -172,7 +172,7 @@ async def run(target_hash_id: str) -> None:
                         map_data = m
                         break
                 except Exception:
-                    pass
+                    pass  # best-effort debug decode; skip what does not parse
                 if asyncio.get_running_loop().time() > deadline:
                     break
 
@@ -239,7 +239,7 @@ async def run(target_hash_id: str) -> None:
                         confirm_data = m
                         break
                 except Exception:
-                    pass
+                    pass  # best-effort debug decode; skip what does not parse
                 if asyncio.get_running_loop().time() > confirm_deadline:
                     break
 

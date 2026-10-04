@@ -814,7 +814,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             try:
                 out["createdAt"] = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
             except ValueError:
-                pass
+                pass  # best-effort parse; leave the field unset
         return out
 
     async def _fetch_last_clean_fields(self, thing_name: str) -> dict[str, Any]:
@@ -871,7 +871,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             try:
                 out["lastCleanAt"] = datetime.fromtimestamp(int(epoch), tz=UTC)
             except (TypeError, ValueError, OSError):
-                pass
+                pass  # best-effort parse; leave the field unset
         if (pct := last.get("percent")) is not None:
             out["lastCleanPercent"] = round(float(pct) * 100, 1)
         if (batt := last.get("used_battery")) is not None:
@@ -946,7 +946,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             try:
                 out["backupMapLatestAt"] = datetime.fromtimestamp(int(ts), tz=UTC)
             except (TypeError, ValueError, OSError):
-                pass
+                pass  # best-effort parse; leave the field unset
         self._backup_map_cache[thing_name] = (now, out)
         return out
 
@@ -1992,7 +1992,6 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         """Re-poll the backup list shortly after a create so the new entry appears
         without waiting out the 5-min list cache (the backend lists it only once the
         snapshot has uploaded). Each poll forces a fresh fetch and pushes an update."""
-        import asyncio
 
         for delay in _BACKUP_REFRESH_OFFSETS_S:
             await asyncio.sleep(delay)

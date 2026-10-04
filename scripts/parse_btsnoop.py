@@ -15,7 +15,8 @@ SNOOP_EPOCH = datetime(1, 1, 1, tzinfo=timezone.utc)
 
 
 def parse(path: str, after: datetime | None = None, before: datetime | None = None) -> None:
-    data = open(path, "rb").read()
+    with open(path, "rb") as f:
+        data = f.read()
     if not data.startswith(BTSNOOP_HEADER[:8]):
         print(f"unexpected header: {data[:16].hex()}")
     # btsnoop header: 8-byte magic + 4-byte version + 4-byte datalink = 16 total

@@ -99,7 +99,7 @@ def _decode_all(pb: bytes) -> dict:
         hl = decode_pboutput(pb)
         out["_decoded"] = hl
     except Exception:
-        pass
+        pass  # best-effort debug decode; skip what does not parse
 
     return out
 

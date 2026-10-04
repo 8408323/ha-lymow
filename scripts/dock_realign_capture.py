@@ -93,7 +93,7 @@ def _summarize_payload(topic: str, payload: bytes) -> str:
                 obj = json.loads(text_preview)
                 text_preview = json.dumps(obj, separators=(",", ":"))
             except ValueError:
-                pass
+                pass  # best-effort debug decode; skip what does not parse
     except UnicodeDecodeError:
         text_preview = ""
 

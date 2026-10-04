@@ -66,7 +66,7 @@ def _pretty_body(content: bytes, content_type: str) -> str:
                 pb = base64.b64decode(obj[key])
                 return f"  JSON envelope key={key!r}, pb={len(pb)} bytes\n  pb hex: {pb.hex()}"
     except Exception:
-        pass
+        pass  # best-effort debug decode; skip what does not parse
     # Raw
     if len(content) <= 512:
         return f"  raw ({len(content)}B): {content.hex()}"
@@ -147,7 +147,7 @@ def _pretty_mqtt_payload(body: bytes) -> str:
                         pb = base64.b64decode(obj[key])
                         out += f"\n  → {key}: {len(pb)} pb bytes hex: {pb.hex()}"
                     except Exception:
-                        pass
+                        pass  # best-effort debug decode; skip what does not parse
         return out
     except Exception:
         return f"  raw ({len(body)}B): {body.hex()[:512]}"

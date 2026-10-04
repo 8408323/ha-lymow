@@ -42,7 +42,7 @@ async def test_mqtt_push_during_rest_poll_lands_in_final_merged_state() -> None:
 
     pusher = asyncio.create_task(_push_when_ready())
     result = await coord._async_update_data()
-    await pusher
+    await asyncio.wait_for(pusher, timeout=5)
 
     # MQTT values win over REST (the coordinator does **rest first then mqtt last,
     # so mqtt overlays rest).

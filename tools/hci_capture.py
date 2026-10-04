@@ -124,13 +124,9 @@ def parse_ext_advertising_report(data: bytes) -> list[dict]:
 
         addr_type = data[pos + 2]
         addr = mac_bytes_to_str(data[pos + 3 : pos + 9])
-        data[pos + 9]
-        data[pos + 10]
-        data[pos + 11]
-        struct.unpack_from("b", data, pos + 12)[0]
+        # pos+9..11: primary/secondary PHY, SID; pos+12: tx power (unused)
         rssi = struct.unpack_from("b", data, pos + 13)[0]
-        struct.unpack_from("<H", data, pos + 14)[0]
-        data[pos + 16]
+        # pos+14: periodic adv interval, pos+16: direct addr type (unused)
         direct_addr = mac_bytes_to_str(data[pos + 17 : pos + 23])
         data_len = data[pos + 23]
         adv_data = data[pos + 24 : pos + 24 + data_len]
@@ -256,7 +252,7 @@ def main():
                 status = sub_data[0]
                 handle = struct.unpack_from("<H", sub_data, 1)[0]
                 role = sub_data[3]
-                sub_data[4]
+                # sub_data[4]: peer address type (unused)
                 addr = mac_bytes_to_str(sub_data[5:11])
                 status_str = "SUCCESS" if status == 0 else f"ERROR(0x{status:02x})"
                 print(

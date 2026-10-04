@@ -153,7 +153,7 @@ def _pretty_fields(data: bytes, indent: int = 0) -> None:
                         else:
                             print(f"{prefix}      field {sf} ({swt_name}): {sv}")
             except Exception:
-                pass
+                pass  # best-effort debug decode; skip what does not parse
         else:
             print(f"{prefix}  field {field_no} ({wt_name}): {value}")
 
@@ -298,7 +298,7 @@ async def try_mqtt_query_map(
                         elif t.endswith("/notify-app"):
                             print(f"  notify payload: {payload}")
             except asyncio.TimeoutError:
-                pass
+                pass  # listen window elapsed; carry on
 
             # Send userCtrl=19 (query map)
             print(f"\n  Publishing userCtrl=19 to {topic_out}")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import os
 import sys
@@ -58,25 +59,28 @@ _load_lymow_module("bluetooth")
 # that test_coordinator.py's setdefault stubs don't shadow the real package,
 # and load the HA platform modules so their tests can import them.
 try:
-    import homeassistant.components.binary_sensor  # noqa: F401
-    import homeassistant.components.button  # noqa: F401
-    import homeassistant.components.device_tracker  # noqa: F401
-    import homeassistant.components.lawn_mower  # noqa: F401
-    import homeassistant.components.number  # noqa: F401
-    import homeassistant.components.select  # noqa: F401
-    import homeassistant.components.sensor  # noqa: F401
-    import homeassistant.components.switch  # noqa: F401
-    import homeassistant.components.text  # noqa: F401
-    import homeassistant.components.update  # noqa: F401
-    import homeassistant.config_entries  # noqa: F401
-    import homeassistant.core  # noqa: F401
-    import homeassistant.exceptions  # noqa: F401
-    import homeassistant.helpers.aiohttp_client  # noqa: F401
-    import homeassistant.helpers.entity_platform  # noqa: F401
-    import homeassistant.helpers.network  # noqa: F401
-    import homeassistant.helpers.selector  # noqa: F401
-    import homeassistant.helpers.update_coordinator  # noqa: F401
-    from homeassistant.components import camera as _ha_camera  # noqa: F401
+    for _ha_mod in (
+        "homeassistant.components.binary_sensor",
+        "homeassistant.components.button",
+        "homeassistant.components.device_tracker",
+        "homeassistant.components.lawn_mower",
+        "homeassistant.components.number",
+        "homeassistant.components.select",
+        "homeassistant.components.sensor",
+        "homeassistant.components.switch",
+        "homeassistant.components.text",
+        "homeassistant.components.update",
+        "homeassistant.config_entries",
+        "homeassistant.core",
+        "homeassistant.exceptions",
+        "homeassistant.helpers.aiohttp_client",
+        "homeassistant.helpers.entity_platform",
+        "homeassistant.helpers.network",
+        "homeassistant.helpers.selector",
+        "homeassistant.helpers.update_coordinator",
+        "homeassistant.components.camera",
+    ):
+        importlib.import_module(_ha_mod)
 
     _load_lymow_module("coordinator")
     _load_lymow_module("entity")

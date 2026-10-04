@@ -179,7 +179,7 @@ async def run(zone_ids: list[str]) -> None:
                         if m:
                             return m
                     except Exception:
-                        pass
+                        pass  # best-effort debug decode; skip what does not parse
                 return None
 
             try:
@@ -233,7 +233,7 @@ async def run(zone_ids: list[str]) -> None:
                         if state.get("workStatus") is not None:
                             return state
                     except Exception:
-                        pass
+                        pass  # best-effort debug decode; skip what does not parse
                 return None
 
             try:

@@ -95,7 +95,7 @@ def _dump_fields(data: bytes, indent: int = 0, max_depth: int = 4) -> None:
                     if s.isprintable():
                         extra = f'  str="{s}"'
                 except (UnicodeDecodeError, ValueError):
-                    pass
+                    pass  # best-effort debug decode; skip what does not parse
             print(f"{prefix}f{fn}({len(val)}B): {val.hex()[:64]}{extra}")
             if indent < max_depth and len(val) >= 2:
                 try:
@@ -163,7 +163,7 @@ async def main() -> None:
                             received.append(pb)
                             _say(f"  [{label}] recv {len(pb)}B: {pb.hex()[:160]}")
                 except asyncio.TimeoutError:
-                    pass
+                    pass  # listen window elapsed; carry on
                 return received
 
             # Drain heartbeats first

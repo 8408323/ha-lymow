@@ -194,7 +194,7 @@ class LymowMqttClient:
             try:
                 await self._listen_task
             except asyncio.CancelledError:
-                pass
+                pass  # expected when the task is cancelled on shutdown
             self._listen_task = None
         if self._client:
             await self._client.__aexit__(None, None, None)
@@ -236,7 +236,7 @@ class LymowMqttClient:
             async for message in self._client.messages:
                 self._dispatch(message)
         except asyncio.CancelledError:
-            pass
+            pass  # expected when the task is cancelled on shutdown
         except Exception:
             _LOGGER.exception("MQTT listen loop exited unexpectedly")
 

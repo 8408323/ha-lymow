@@ -63,7 +63,7 @@ def _robot_ip(data: dict[str, Any]) -> str | None:
 
 def _free_port() -> int:
     with socket.socket() as s:
-        s.bind(("", 0))
+        s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
 
 
@@ -242,8 +242,9 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
                     break
                 writer.write(chunk)
                 await writer.drain()
-        except (asyncio.TimeoutError, ConnectionError, Exception):
-            pass
+        except Exception as err:  # noqa: BLE001
+            # Client went away or the pipe broke; drop this client only.
+            _LOGGER.debug("MPEG-TS client stream ended: %s", err)
         finally:
             if q in self._ts_clients:
                 self._ts_clients.remove(q)

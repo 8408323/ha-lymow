@@ -618,7 +618,6 @@ class TestViewerClientId:
     async def test_embeds_sub_from_access_token(self):
         import base64
         import json
-        import re
 
         payload = base64.urlsafe_b64encode(json.dumps({"sub": "USER-123"}).encode()).rstrip(b"=").decode()
         async with aiohttp.ClientSession() as session:
