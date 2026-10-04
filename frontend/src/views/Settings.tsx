@@ -123,10 +123,13 @@ function MowingDefaults() {
     return () => window.clearTimeout(id);
   }, [pending?.sent, pending?.matched]);
   const save = async () => {
+    // Recorded before awaiting: the view may be gone (sidebar) by the time the call returns.
+    const record = { sent: changed, matched: false, after: receivedAt, deadline: Date.now() + 30000 };
+    pendingDefaults.set(device.thing, record);
     if (await call("lymow", "set_task_config", changed, t("Mowing defaults saved"))) {
-      setPending({ sent: changed, matched: false, after: receivedAt, deadline: Date.now() + 30000 });
+      setPending(record);
       call("lymow", "query_map"); // ask for the mower's own copy to confirm against
-    }
+    } else pendingDefaults.delete(device.thing);
   };
 
   return (

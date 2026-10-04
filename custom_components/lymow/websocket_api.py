@@ -25,6 +25,7 @@ from .sensor import _schedule_to_local, map_payload
 
 # homeassistant.auth.permissions.const.POLICY_READ
 POLICY_READ = "read"
+POLICY_CONTROL = "control"
 
 
 _REBIND_KEY = f"{DOMAIN}_ws_rebinders"
@@ -249,6 +250,9 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
                     or _text(device.get("deviceName"))
                     or thing,
                     "entities": entities,
+                    # Read-only users get the panel without its actions.
+                    "can_control": connection.user.is_admin
+                    or connection.user.permissions.check_entity(entities["mower"], POLICY_CONTROL),
                 }
             )
     connection.send_result(msg["id"], devices)

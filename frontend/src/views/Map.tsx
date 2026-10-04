@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { setLeaveGuard } from "../App";
 import type { MapData, Point, Zone } from "../hass";
-import { area, expand, simplify, type Handle } from "../map/geometry";
+import { area, centre, expand, simplify, type Handle } from "../map/geometry";
 import { MapCanvas, type Kind, type LabelMode } from "../map/MapCanvas";
 import { useT } from "../i18n";
 import { useMower, useMowerEntity, zoneLabel } from "../mower";
@@ -153,13 +153,18 @@ export function MapView() {
   latest.current = { ...latest.current, dirty, focus, editPts, editBase, pendingSave: awaitShape !== null };
   const reportedShape = JSON.stringify(find(focus)?.polygon ?? null);
   const savedArea = useRef(0);
+  const savedCentre = useRef<Point>({ x: 0, y: 0 });
   useEffect(() => {
     if (awaitShape !== null && focus && reportedShape !== awaitShape) {
       setAwaitShape(null);
       // The mower thins the outline a little, so compare areas, not points. A clearly
       // different shape (normalised or changed elsewhere) keeps the draft for a retry.
-      const got = area(find(focus)?.polygon ?? []);
-      if (Math.abs(got - savedArea.current) <= savedArea.current * 0.03) startEditShape(focus);
+      // Also where it lies: the centre must be within a metre of what was sent.
+      const poly = find(focus)?.polygon ?? [];
+      const got = area(poly);
+      const c = centre(poly);
+      const near = Math.hypot(c.x - savedCentre.current.x, c.y - savedCentre.current.y) <= 1;
+      if (near && Math.abs(got - savedArea.current) <= savedArea.current * 0.03) startEditShape(focus);
       else {
         setDirty(true);
         ui.toast(t("The mower reported a different shape than the one saved. Check it and save again."), "bad");
@@ -292,6 +297,7 @@ export function MapView() {
             awaiting={awaitShape !== null}
             onSaved={() => {
               savedArea.current = area(outline ?? []);
+              savedCentre.current = centre(outline ?? []);
               setAwaitShape(reportedShape);
               setDirty(false);
             }}
@@ -403,7 +409,7 @@ function BrowsePanel(p: {
             onClick={async () => {
               const ok = await ui.confirm({
                 title: t("Merge {n} zones?", { n: sel.length }),
-                body: t("They become one zone with a new ID. Schedules or per-zone settings that pointed at the old zones need to be set up again."),
+                body: t("They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated."),
                 confirm: t("Merge"),
               });
               if (ok && (await call("lymow", "merge_zones", { zone_hash_ids: sel }, t("Zones merged")))) p.setSelected(new Set());

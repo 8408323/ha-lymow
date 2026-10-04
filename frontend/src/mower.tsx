@@ -63,6 +63,10 @@ export function MowerProvider({ device, snap, reloadDevices, children }: { devic
         ui.toast(t("The mower is reconnecting. Try again in a moment."), "bad");
         return false;
       }
+      if (device.can_control === false) {
+        ui.toast(t("You can view this mower but not control it."), "bad");
+        return false;
+      }
       try {
         await getHass().callService(domain, service, { entity_id: mower, ...data });
         if (success) ui.toast(t(success));
@@ -74,6 +78,7 @@ export function MowerProvider({ device, snap, reloadDevices, children }: { devic
     },
     async callWithResponse<T>(domain: string, service: string, data: Record<string, unknown> = {}) {
       if (device.held) throw new Error(t("The mower is reconnecting. Try again in a moment."));
+      if (device.can_control === false) throw new Error(t("You can view this mower but not control it."));
       const res = await getHass().callService(domain, service, { entity_id: [mower], ...data }, undefined, false, true);
       return (res?.response ?? res) as T;
     },

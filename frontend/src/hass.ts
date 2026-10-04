@@ -89,6 +89,8 @@ export interface LymowDevice {
   entities: Record<string, string>;
   /** Missing from the latest discovery (entry reloading): kept on screen, but not controllable. */
   held?: boolean;
+  /** False for users with read but not control access to the mower. */
+  can_control?: boolean;
 }
 
 export interface Point {

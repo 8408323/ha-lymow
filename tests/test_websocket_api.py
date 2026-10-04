@@ -132,6 +132,7 @@ def test_devices_maps_entities_by_unique_id_suffix() -> None:
             "device_id": "dev1",
             "name": "Front lawn",
             "entities": {"mower": "lawn_mower.lawn", "battery": "sensor.lawn_battery"},
+            "can_control": True,
         }
     ]
 
@@ -208,6 +209,17 @@ def test_devices_hidden_from_users_without_read_access() -> None:
         ws.ws_devices(hass, partial, {"id": 2})
     assert hidden.send_result.call_args.args[1] == []
     assert partial.send_result.call_args.args[1][0]["entities"] == {"mower": "lawn_mower.lawn"}
+    # Read-only (the stub grants "read" and "control" alike, so deny control explicitly).
+    viewer = _connection(admin=False, readable={"lawn_mower.lawn"})
+    viewer.user.permissions.check_entity = lambda eid, policy: policy == "read" and eid == "lawn_mower.lawn"
+    with (
+        patch.object(ws.er, "async_get", create=True),
+        patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=reg_entries),
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True, return_value=[]),
+    ):
+        ws.ws_devices(hass, viewer, {"id": 3})
+    assert viewer.send_result.call_args.args[1][0]["can_control"] is False
 
 
 def test_subscribe_rejects_user_without_read_access() -> None:

@@ -48,6 +48,12 @@ export function area(poly: Point[]): number {
   return Math.abs(a) / 2;
 }
 
+/** Vertex average; enough to tell whether two outlines sit in the same place. */
+export function centre(poly: Point[]): Point {
+  if (!poly.length) return { x: 0, y: 0 };
+  return { x: poly.reduce((s, p) => s + p.x, 0) / poly.length, y: poly.reduce((s, p) => s + p.y, 0) / poly.length };
+}
+
 export function polylineLength(pts: Point[]): number {
   let l = 0;
   for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
