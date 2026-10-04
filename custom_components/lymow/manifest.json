@@ -3,7 +3,9 @@
   "name": "Lymow",
   "after_dependencies": [
     "http",
-    "lovelace"
+    "lovelace",
+    "panel_custom",
+    "websocket_api"
   ],
   "codeowners": [
     "@8408323"
@@ -11,9 +13,7 @@
   "config_flow": true,
   "dependencies": [
     "bluetooth",
-    "ffmpeg",
-    "panel_custom",
-    "websocket_api"
+    "ffmpeg"
   ],
   "documentation": "https://github.com/8408323/ha-lymow",
   "iot_class": "cloud_push",
