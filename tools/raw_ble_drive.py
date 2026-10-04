@@ -544,7 +544,7 @@ def main() -> None:
             try:
                 _stop(sock, encode)
             except Exception:
-                pass
+                pass  # best-effort debug decode; skip what does not parse
 
     except Exception as exc:
         print(f"ERROR: {type(exc).__name__}: {exc}", file=sys.stderr)

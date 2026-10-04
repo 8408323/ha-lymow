@@ -194,18 +194,14 @@ _MAP_CONTENT_GO_ZONES = 1
 _MAP_CONTENT_NOGO_ZONES = 2
 _MAP_CONTENT_CHANNELS = 3
 _MAP_CONTENT_CHARGING_STATION = 4  # PbPose: x, y, theta, z
-_MAP_CONTENT_IS_INCOMPLETE = 5
+# f5 isIncomplete — not decoded
 _MAP_CONTENT_DIAGONAL_COORDS = 6  # repeated PbPoint (2 corners of map bbox)
 _MAP_CONTENT_ENU_BASE_POINT = 7  # PbRobotLLACoords: latitude, longitude, altitude
 _MAP_CONTENT_TASK_CONFIG = 8  # PbTaskConfig (4-field: chargingMode, zoneOrder, rainCleaning, disableChargingPark)
-_MAP_CONTENT_MODIFY_HASHS = 9
-_MAP_CONTENT_FLOOR_INFO = 10
+# f9 modifyHashs, f10 floorInfo — not decoded
 _MAP_CONTENT_GLOBAL_ZONE_CONFIG = 11  # PbZoneConfig (19 fields — the real mowing settings)
 _MAP_CONTENT_GLOBAL_CHANNEL_CONFIG = 12  # PbChannelConfig (3 fields)
 _MAP_CONTENT_RUN_TIME_CONFIG = 13
-
-# Back-compat alias — older code/tests refer to f7 as the GPS origin.
-_MAP_CONTENT_GPS_ORIGIN = _MAP_CONTENT_ENU_BASE_POINT
 
 
 def extract_raw_map_content(pb_bytes: bytes) -> bytes | None:
@@ -542,7 +538,7 @@ def decode_task_config(data: bytes) -> dict[str, Any]:
 # startProgress=f15, brushSpeed=f5 exist but we don't surface them (no HA use).
 # raiseCutHeight/lowerCutHeight are momentary +/- commands, kept as-is. All
 # field NUMBERS we DO use are confirmed correct (f8 stripeAngle live-confirmed).
-_ZONE_CONFIG_BOOL_FIELDS = {14, 17, 18}
+# Bool fields: f14, f17, f18.
 _ZONE_CONFIG_INT_NAMES: dict[int, str] = {
     1: "cutHeight",
     6: "cutSpeed",
@@ -855,7 +851,7 @@ def decode_pboutput(pb_bytes: bytes) -> dict[str, Any]:
             try:
                 state["wifiRssiDbm"] = int(rssi_raw.decode("utf-8"))
             except (ValueError, UnicodeDecodeError):
-                pass
+                pass  # best-effort parse; leave the field unset
 
     # Robot pose ENU (field 14): f1=eastM, f2=northM, f3=thetaRad (all float32)
     pose_raw = _first(fields, 14)

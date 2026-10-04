@@ -560,7 +560,6 @@ def test_on_mqtt_state_mowing_start_clears_cache_and_schedules_poll() -> None:
 
 @pytest.mark.asyncio
 async def test_async_poll_path_reschedules_while_mowing() -> None:
-    import asyncio
     from unittest.mock import patch as _patch
 
     from lymow.const import WORK_STATUS_MOWING_GROUP

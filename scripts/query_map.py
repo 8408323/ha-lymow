@@ -94,7 +94,7 @@ def _dump_fields(data: bytes, indent: int = 0, max_depth: int = 4) -> None:
                 if s.isprintable():
                     floats += f'  str="{s}"'
             except Exception:
-                pass
+                pass  # best-effort debug decode; skip what does not parse
             print(f"{prefix}f{fn}({len(val)}B): {val.hex()}{floats}")
             if indent < max_depth and len(val) >= 2:
                 try:
@@ -102,7 +102,7 @@ def _dump_fields(data: bytes, indent: int = 0, max_depth: int = 4) -> None:
                     if sub and all(sfn <= 100 for sfn, _, _ in sub):
                         _dump_fields(val, indent + 1, max_depth)
                 except Exception:
-                    pass
+                    pass  # best-effort debug decode; skip what does not parse
         elif wt == 5:
             f = _float32(val)
             print(f"{prefix}f{fn}(i32): 0x{val:08x} = {f:.6f}f")
@@ -214,7 +214,7 @@ async def main() -> None:
                                 print("  decoded fields:")
                                 _dump_fields(pb, indent=2)
                 except asyncio.TimeoutError:
-                    pass
+                    pass  # listen window elapsed; carry on
                 return received
 
             # Drain initial state push

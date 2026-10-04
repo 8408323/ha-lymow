@@ -194,7 +194,7 @@ async def run(duration: int) -> None:
                         except Exception as e:
                             print(f"[{t}] err: {e}", flush=True)
             except (asyncio.TimeoutError, TimeoutError):
-                pass
+                pass  # listen window elapsed; carry on
 
             print(f"[{datetime.now().isoformat()}] done — {len(rows)} frames captured", flush=True)
             out = f"tools/mow_focus_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"

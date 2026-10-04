@@ -218,7 +218,6 @@ async def test_reconnect_disconnects_and_reconnects(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_publish_command_with_client_schedules_publish():
-    import asyncio
 
     published = []
 

@@ -120,7 +120,7 @@ async def main() -> None:
                                 if found is not None:
                                     return found
                 except asyncio.TimeoutError:
-                    pass
+                    pass  # listen window elapsed; carry on
                 return None
 
             print(f"Step 1: query current name of {HASH}")

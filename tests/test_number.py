@@ -251,7 +251,6 @@ async def test_async_setup_entry_listener_callback_adds_new_zones() -> None:
     entry.entry_id = "entry-1"
 
     captured_callback = None
-    captured_add = None
 
     def _register_listener(cb):
         nonlocal captured_callback
@@ -263,7 +262,6 @@ async def test_async_setup_entry_listener_callback_adds_new_zones() -> None:
     added: list = []
 
     def _add(entities):
-        nonlocal captured_add
         added.extend(entities)
 
     await async_setup_entry(hass, entry, _add)

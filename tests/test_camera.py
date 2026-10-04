@@ -7,6 +7,7 @@ component and grabs stills via ffmpeg; here ffmpeg is stubbed.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
@@ -504,7 +505,7 @@ class TestHandleTsClient:
         assert len(ent._ts_clients) == 1
         ent._ts_clients[0].put_nowait(b"TSCHUNK")
         ent._ts_clients[0].put_nowait(None)
-        await task
+        await asyncio.wait_for(task, timeout=5)
 
         assert any(b == b"TSCHUNK" for b in written)
         assert written[0].startswith(b"HTTP/1.1 200 OK")
@@ -631,7 +632,7 @@ class TestHandleTsClientStreamError:
             if ent._ts_clients:
                 break
         ent._ts_clients[0].put_nowait(b"TSCHUNK")
-        await task
+        await asyncio.wait_for(task, timeout=5)
 
         assert ent._ts_clients == []
         writer.close.assert_called()

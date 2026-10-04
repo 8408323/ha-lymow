@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import voluptuous as vol
@@ -37,8 +36,6 @@ from .const import (
 )
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
-
-_LOGGER = logging.getLogger(__name__)
 
 
 def _discover_ble_address(hass: HomeAssistant, ble_name: str) -> str | None:

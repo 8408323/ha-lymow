@@ -97,7 +97,7 @@ async def _next_map(mqtt) -> dict | None:
             if m:
                 return m
         except Exception:
-            pass
+            pass  # best-effort debug decode; skip what does not parse
     return None
 
 
