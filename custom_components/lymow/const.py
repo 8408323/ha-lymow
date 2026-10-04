@@ -55,8 +55,8 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "us-east-2": {
-        "client_id": None,  # not yet confirmed from capture
-        "user_pool_id": None,
+        "client_id": "3ftv5jumkv375hic8dpdqodj8n",  # from APK bundle
+        "user_pool_id": "us-east-2_GAyiLkZQf",  # from APK bundle
         "identity_pool_id": "us-east-2:037db699-5df0-4ed2-92b8-0dd0f1843918",
         "iot_host": "a3j5zqqo5iuph9-ats.iot.us-east-2.amazonaws.com",
         "api_device_list": "453ahng0z4",
@@ -69,7 +69,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "ap-southeast-2": {
-        "client_id": None,  # not yet confirmed from capture
+        "client_id": "2ch3nqqr0usf5sadvcrj2hp6ll",  # from APK bundle
         "user_pool_id": "ap-southeast-2_vNriuUNeQ",
         "identity_pool_id": "ap-southeast-2:87d0fe24-16af-4189-b02f-984a7ed14ee0",
         "iot_host": "a3j5zqqo5iuph9-ats.iot.ap-southeast-2.amazonaws.com",
@@ -83,7 +83,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "ap-east-1": {
-        "client_id": None,  # not yet confirmed from capture
+        "client_id": "46mirppdlu6mrbjd5bkiil0n20",  # from APK bundle
         "user_pool_id": "ap-east-1_23Lf1WZer",
         "identity_pool_id": "ap-east-1:3e9265aa-f564-4083-8e1e-988e6cfdc446",
         "iot_host": "a3j5zqqo5iuph9-ats.iot.ap-east-1.amazonaws.com",

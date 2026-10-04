@@ -146,16 +146,19 @@ class TestLymowAuthLogin:
         assert result["region"] == "eu-west-1"
         assert result["AccessToken"] == "tok"
 
-    async def test_login_skips_region_without_pool_id(self, auth_client):
-        tried_regions: list[str] = []
+    async def test_login_uses_each_regions_own_pool_and_client(self, auth_client):
+        # #280: us-east-2 was skipped (no pool) and the others borrowed the EU client.
+        tried: dict[str, tuple[str, str]] = {}
 
         async def _fake_srp(username, password, region, pool_id, client_id):
-            tried_regions.append(region)
-            return {"AccessToken": "tok", "IdToken": "id", "RefreshToken": "ref"}
+            tried[region] = (pool_id, client_id)
+            raise ValueError("auth failed")
 
         auth_client._srp_login = _fake_srp
-        await auth_client.login("user", "pass")
-        assert "us-east-2" not in tried_regions
+        with pytest.raises(ValueError):
+            await auth_client.login("user", "pass")
+        assert tried["us-east-2"] == ("us-east-2_GAyiLkZQf", "3ftv5jumkv375hic8dpdqodj8n")
+        assert len({client for _, client in tried.values()}) == 4
 
     async def test_login_falls_back_on_first_region_failure(self, auth_client):
         calls: list[str] = []
@@ -168,7 +171,7 @@ class TestLymowAuthLogin:
 
         auth_client._srp_login = _fake_srp
         result = await auth_client.login("user", "pass")
-        assert result["region"] == "ap-southeast-2"
+        assert result["region"] == "us-east-2"
         assert "eu-west-1" in calls
 
     async def test_login_raises_when_all_regions_fail(self, auth_client):
@@ -183,10 +186,6 @@ class TestLymowAuthLoginRegion:
         result = await auth_client.login_region("user", "pass", "eu-west-1")
         assert result["region"] == "eu-west-1"
         assert result["AccessToken"] == "tok"
-
-    async def test_login_region_raises_when_no_pool_id(self, auth_client):
-        with pytest.raises(ValueError, match="no user_pool_id"):
-            await auth_client.login_region("user", "pass", "us-east-2")
 
 
 class TestLymowAuthSrpLogin:
