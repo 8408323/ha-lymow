@@ -521,6 +521,7 @@ function EditPanel(p: {
       <div className="ly-btnrow">
         <Button
           icon="mdi:rename-outline"
+          disabled={!haName && snap?.online === false}
           onClick={async () => {
             const name = await ui.prompt({ title: texts.rename, label: t("Name"), value: zone.name ?? "", placeholder: title, maxLength: 40, allowEmpty: haName });
             if (name !== null && (name || haName)) await call("lymow", `rename_${svc}`, { [key]: zone.hashId, name }, t("Renamed"));
@@ -691,7 +692,9 @@ function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<st
         disabled={!changed || saved || snap?.online === false}
         onClick={async () => {
           if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) {
-            zoneDrafts.set(draftKey, { draft, saved: true }); // recorded even if the view is gone by now
+            // Recorded even if the view is gone by now, unless a newer draft replaced it.
+            const cur = zoneDrafts.get(draftKey);
+            if (!cur || JSON.stringify(cur.draft) === JSON.stringify(draft)) zoneDrafts.set(draftKey, { draft, saved: true });
             setSaved(true);
           }
         }}

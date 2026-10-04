@@ -27,6 +27,10 @@ export function SchedulesView() {
   // Editing before the mower has reported its schedules would overwrite them
   // (add_schedule writes the whole list), so everything waits for the reply.
   const loading = !snap || snap.schedules === null;
+  // Opened with the list still unknown (e.g. a lost reply while on another tab): ask again.
+  useEffect(() => {
+    if (snap && snap.schedules === null && snap.online) call("lymow", "query_schedules");
+  }, []);
   // One schedule change at a time: each service call rewrites the mower's whole
   // list from the cache, so overlapping edits would undo each other. Controls stay
   // locked until the call returns and the mower has re-reported its schedules.

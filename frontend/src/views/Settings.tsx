@@ -399,8 +399,12 @@ function Headlight() {
         disabled={!draft || saved}
         onClick={async () => {
           if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) {
-            pendingHeadlight.set(device.thing, { draft: v, saved: true }); // recorded even if the view is gone by now
-            setSaved(true);
+            // Recorded even if the view is gone by now, unless a newer edit replaced it.
+            const cur = pendingHeadlight.get(device.thing);
+            if (!cur || JSON.stringify(cur.draft) === JSON.stringify(v)) {
+              pendingHeadlight.set(device.thing, { draft: v, saved: true });
+              setSaved(true);
+            }
           }
         }}
       >

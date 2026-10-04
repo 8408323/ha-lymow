@@ -46,7 +46,7 @@ export function BackupsView() {
         title={t("Map backups")}
         icon="mdi:cloud-sync-outline"
         actions={
-          <Button variant="primary" icon="mdi:cloud-upload-outline" onClick={() => call("lymow", "backup_map", {}, t("Backup requested — it shows up here within a few minutes"))}>
+          <Button variant="primary" icon="mdi:cloud-upload-outline" disabled={snap?.online !== true} onClick={() => call("lymow", "backup_map", {}, t("Backup requested — it shows up here within a few minutes"))}>
             {t("Back up now")}
           </Button>
         }

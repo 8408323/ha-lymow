@@ -248,6 +248,19 @@ function Joystick({ axis, label, onChange }: { axis: "y" | "x"; label: string; o
     setPos(0);
     onChange(0);
   };
+  // An interrupted gesture (window loses focus, tab hidden) must stop the mower too.
+  const releaseRef = useRef(release);
+  releaseRef.current = release;
+  useEffect(() => {
+    const stop = () => active.current !== null && releaseRef.current();
+    const hidden = () => document.hidden && stop();
+    window.addEventListener("blur", stop);
+    document.addEventListener("visibilitychange", hidden);
+    return () => {
+      window.removeEventListener("blur", stop);
+      document.removeEventListener("visibilitychange", hidden);
+    };
+  }, []);
   return (
     <div className="ly-joy">
       <div
@@ -261,6 +274,7 @@ function Joystick({ axis, label, onChange }: { axis: "y" | "x"; label: string; o
         onPointerMove={move}
         onPointerUp={release}
         onPointerCancel={release}
+        onLostPointerCapture={release}
         role="slider"
         aria-label={label}
         aria-valuenow={Math.round((-pos / R) * 100)}
