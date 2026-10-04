@@ -389,8 +389,8 @@ function EditPanel(p: {
   const ui = useUi();
   const { focus, zone } = p;
   const texts = {
-    go: { rename: t("Rename zone"), removed: t("The zone is removed from the mower's map. You can bring it back by restoring a map backup.") },
-    nogo: { rename: t("Rename no-go area"), removed: t("The no-go area is removed from the mower's map. You can bring it back by restoring a map backup.") },
+    go: { rename: t("Rename zone"), removed: t("The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.") },
+    nogo: { rename: t("Rename no-go area"), removed: t("The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.") },
     ch: { rename: t("Rename channel"), removed: t("The channel is removed from the mower's map. You can bring it back by restoring a map backup.") },
   }[focus.kind];
   const title = focus.kind === "go" ? zoneLabel(zone, p.index, t) : zone.name?.trim() || t(focus.kind === "nogo" ? t("No-go area") : t("Channel"));

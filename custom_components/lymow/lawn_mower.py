@@ -8,7 +8,7 @@ import voluptuous as vol
 from homeassistant.components.bluetooth import async_discovered_service_info
 from homeassistant.components.lawn_mower import LawnMowerActivity, LawnMowerEntity, LawnMowerEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -651,7 +651,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     # target across every config entry's mowers, not just this entry's.
     registry = hass.data.setdefault(_MOWERS_KEY, {})
     registry[entry.entry_id] = entities
-    entry.async_on_unload(lambda: registry.pop(entry.entry_id, None))
+
+    @callback
+    def _forget_mowers() -> None:
+        # Must return None: HA schedules a truthy on_unload return value as a job.
+        registry.pop(entry.entry_id, None)
+
+    entry.async_on_unload(_forget_mowers)
 
     def _ble_targets(entity_ids: list[str]) -> list[tuple[LymowMower, str]]:
         """One (mower, BLE address) per owning config entry.

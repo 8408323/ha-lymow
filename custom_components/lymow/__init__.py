@@ -198,6 +198,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.debug("Lymow setup complete: %d device(s) in region %s", len(devices), region)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    websocket_api.notify_coordinators_changed(hass)
 
     # Reload the entry when options change so edits (e.g. the camera RTSP
     # path/port) take effect without a manual reload.

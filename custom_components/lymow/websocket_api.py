@@ -24,6 +24,16 @@ from .sensor import _schedule_to_local, map_payload
 POLICY_READ = "read"
 
 
+_REBIND_KEY = f"{DOMAIN}_ws_rebinders"
+
+
+@callback
+def notify_coordinators_changed(hass: HomeAssistant) -> None:
+    """Called after an entry (re)loads so open subscriptions attach to its new coordinator."""
+    for rebind in list(hass.data.get(_REBIND_KEY, ())):
+        rebind()
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_devices)
@@ -129,16 +139,37 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
         connection.send_error(msg["id"], "not_found", f"Unknown mower {thing}")
         return
 
-    last: dict[str, Any] = {}
+    state: dict[str, Any] = {"coordinator": coordinator}
 
     @callback
     def _push() -> None:
-        snap = snapshot(coordinator, thing)
+        snap = snapshot(state["coordinator"], thing)
         # MQTT pushes arrive several times a second; only forward real changes.
-        if snap != last.get("snap"):
-            last["snap"] = snap
+        if snap != state.get("snap"):
+            state["snap"] = snap
             connection.send_message(websocket_api.event_message(msg["id"], snap))
 
-    connection.subscriptions[msg["id"]] = coordinator.async_add_listener(_push)
+    @callback
+    def _rebind() -> None:
+        # A config-entry reload replaces the coordinator; follow it so an open
+        # panel keeps getting live data instead of freezing on the old one.
+        new = _find(hass, thing)
+        if new is None or new is state["coordinator"]:
+            return
+        state["unlisten"]()
+        state["coordinator"] = new
+        state["unlisten"] = new.async_add_listener(_push)
+        _push()
+
+    state["unlisten"] = coordinator.async_add_listener(_push)
+    rebinders: set = hass.data.setdefault(_REBIND_KEY, set())
+    rebinders.add(_rebind)
+
+    @callback
+    def _unsubscribe() -> None:
+        state["unlisten"]()
+        rebinders.discard(_rebind)
+
+    connection.subscriptions[msg["id"]] = _unsubscribe
     connection.send_result(msg["id"])
     _push()

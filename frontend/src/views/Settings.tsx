@@ -65,7 +65,7 @@ function MowingDefaults() {
       perimeter_mow_laps: ms?.perimeterMowLaps ?? 1,
       nogo_mow_laps: ms?.noGoMowLaps ?? 1,
       perimeter_mow_dir: ms?.perimeterMowDir ?? 2,
-      obs_dec_mode: Math.min(ms?.obsDecMode ?? 2, 3),
+      obs_dec_mode: ms?.obsDecMode ?? 2,
       clean_mode: ms?.cleanMode || 1,
       relative_clean_dir: ms?.relativeCleanDir ?? 90,
       safe_margin_mode: Boolean(ms?.safeMarginMode),
@@ -129,6 +129,7 @@ function MowingDefaults() {
               { value: 1, label: t("Bump only") },
               { value: 2, label: t("Smart avoidance") },
               { value: 3, label: t("Smart, medium sensitivity") },
+              { value: 4, label: t("Smart, low sensitivity") },
             ]}
           />
         </Field>

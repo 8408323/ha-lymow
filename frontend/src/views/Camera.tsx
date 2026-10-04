@@ -30,9 +30,9 @@ export function CameraView() {
                 setSource(s);
               }}
               options={[
-                { value: "lan", label: "Live", icon: "mdi:lan" },
-                { value: "snap", label: "Snapshots", icon: "mdi:camera-burst" },
-                { value: "cloud", label: "Cloud", icon: "mdi:cloud-outline" },
+                { value: "lan", label: t("Live"), icon: "mdi:lan" },
+                { value: "snap", label: t("Snapshots"), icon: "mdi:camera-burst" },
+                { value: "cloud", label: t("Cloud"), icon: "mdi:cloud-outline" },
               ]}
             />
             <Button variant="ghost" icon="mdi:fullscreen" title={t("Full screen")} onClick={() => stageRef.current?.requestFullscreen?.()} />

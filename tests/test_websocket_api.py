@@ -176,3 +176,24 @@ def test_subscribe_rejects_user_without_read_access() -> None:
         ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
     assert conn.send_error.call_args.args[1] == "unauthorized"
     assert conn.subscriptions == {}
+
+
+def test_subscription_follows_coordinator_after_reload() -> None:
+    old = _coordinator({"backupMapList": [{"file": "old"}]})
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": old}}
+    conn = _connection()
+    ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
+    assert conn.send_message.call_args.args[0]["event"]["backups"][0]["file"] == "old"
+
+    new = _coordinator({"backupMapList": [{"file": "new"}]})
+    hass.data["lymow"]["entry1"] = new
+    ws.notify_coordinators_changed(hass)
+    assert old.listeners == [] and len(new.listeners) == 1
+    assert conn.send_message.call_args.args[0]["event"]["backups"][0]["file"] == "new"
+
+    ws.notify_coordinators_changed(hass)  # same coordinator again: no-op
+    hass.data["lymow"] = {}
+    ws.notify_coordinators_changed(hass)  # mower gone: keep the old binding
+    conn.subscriptions[7]()
+    assert new.listeners == [] and hass.data["lymow_ws_rebinders"] == set()
