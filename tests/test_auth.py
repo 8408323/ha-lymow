@@ -361,7 +361,7 @@ class TestLymowAuthOAuth:
     async def test_invalid_json_raises_auth_error(self, auth_client):
         with aioresponses() as mocked:
             mocked.post(_COGNITO_OAUTH_EU, status=200, body="not-json")
-            with pytest.raises(LymowAuthError, match="not valid JSON"):
+            with pytest.raises(LymowAuthConnectionError, match="not valid JSON"):
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
 
     @pytest.mark.parametrize(
@@ -378,7 +378,7 @@ class TestLymowAuthOAuth:
     async def test_malformed_response_raises_auth_error(self, auth_client, payload):
         with aioresponses() as mocked:
             mocked.post(_COGNITO_OAUTH_EU, payload=payload)
-            with pytest.raises(LymowAuthError, match="missing required fields"):
+            with pytest.raises(LymowAuthConnectionError, match="missing required fields"):
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
 
     async def test_connection_error_raises_auth_error(self, auth_client):
@@ -403,7 +403,7 @@ class TestLymowAuthOAuth:
     async def test_invalid_utf8_raises_auth_error(self, auth_client):
         with aioresponses() as mocked:
             mocked.post(_COGNITO_OAUTH_EU, status=200, body=b"\xff")
-            with pytest.raises(LymowAuthError, match="not valid JSON"):
+            with pytest.raises(LymowAuthConnectionError, match="not valid JSON"):
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
 
 

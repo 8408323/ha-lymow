@@ -216,14 +216,15 @@ class LymowAuth:
                 try:
                     data = await resp.json(content_type=None)
                 except (aiohttp.ContentTypeError, UnicodeDecodeError, ValueError) as exc:
-                    raise LymowAuthError("OAuth token response was not valid JSON") from exc
+                    raise LymowAuthConnectionError("OAuth token response was not valid JSON") from exc
         except (aiohttp.ClientError, TimeoutError) as exc:
             raise LymowAuthConnectionError("OAuth token request could not be completed") from exc
 
         access_token = data.get("access_token") if isinstance(data, dict) else None
         id_token = data.get("id_token") if isinstance(data, dict) else None
         if not isinstance(access_token, str) or not access_token or not isinstance(id_token, str) or not id_token:
-            raise LymowAuthError("OAuth token response was missing required fields")
+            # A garbled 200 doesn't prove the token was rejected — retry, don't reauth.
+            raise LymowAuthConnectionError("OAuth token response was missing required fields")
         return {
             "AccessToken": access_token,
             "IdToken": id_token,
