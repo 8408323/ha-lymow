@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import aiohttp
+from homeassistant.components import persistent_notification
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -16,6 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from . import websocket_api
 from .api import LymowApiClient
 from .auth import LymowAuth, LymowAuthConnectionError, LymowAuthError
 from .const import (
@@ -37,6 +39,8 @@ _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
 _WWW_SERVED_KEY = f"{DOMAIN}_www_served"
 _PANEL_REGISTERED_KEY = f"{DOMAIN}_panel_registered"
 _PANEL_URL_PATH = "lymow"
+# Dashboard that versions before the panel auto-created; see _remove_legacy_lovelace.
+_LEGACY_DASHBOARD = "lymow-mower"
 
 
 def _read_version() -> str:
@@ -52,8 +56,8 @@ def _read_version() -> str:
 _VERSION = _read_version()
 
 
-def _card_url(name: str = "lymow-map-card.js") -> str:
-    """Return a card URL with the integration version as cache buster."""
+def _card_url(name: str = "lymow-panel.js") -> str:
+    """Return a www/ asset URL with the integration version as cache buster."""
     return f"/custom_components/{DOMAIN}/{name}?v={_VERSION}"
 
 
@@ -73,69 +77,53 @@ PLATFORMS = [
 ]
 
 
-async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
-    """Register card JS files as Lovelace resources, updating stale version URLs.
+def _lovelace_attr(lovelace: Any, name: str) -> Any:
+    """Read a field from hass.data["lovelace"] (a dataclass on current HA, a dict on older)."""
+    if isinstance(lovelace, dict):
+        return lovelace.get(name)
+    return getattr(lovelace, name, None)
 
-    Checks each expected JS file by base name. If an entry already exists
-    with a different ?v= query string (old version), it is updated in-place
-    so only one copy is registered per card. This prevents double-loading
-    which causes 'custom element already defined' config errors.
-    """
+
+async def _remove_legacy_lovelace(hass: HomeAssistant) -> None:
+    """Clean up after the old Lovelace cards, which the React panel replaced.
+
+    Their resources are deleted (otherwise every dashboard 404s on them). The
+    dashboard older versions auto-created at /lymow-mower can't be removed from
+    here (and may have been customised), so the user gets a one-off notice."""
     try:
-        from homeassistant.components.lovelace.resources import ResourceStorageCollection
-
         lovelace = hass.data.get("lovelace")
         if lovelace is None:
             return
-        resources: ResourceStorageCollection = lovelace.get("resources")
-        if resources is None:
-            return
-        await resources.async_load()
-        # Build a map of base JS filename → (resource_id, current_url)
-        base_to_item: dict[str, tuple[str, str]] = {}
-        for item in resources.async_items():
-            url: str = item.get("url", "")
-            # Strip query string to get base path
-            base = url.split("?")[0]
-            if f"/custom_components/{DOMAIN}/" in base:
-                base_to_item[base] = (item["id"], url)
-
-        for js in (
-            "lymow-map-card.js",
-            "lymow-camera-card.js",
-            "lymow-control-card.js",
-            "lymow-drive-card.js",
-            "lymow-schedule-card.js",
-            "lymow-backup-card.js",
-            "lymow-settings-card.js",
-        ):
-            wanted_url = _card_url(js)
-            base_path = wanted_url.split("?")[0]
-            if base_path in base_to_item:
-                res_id, current_url = base_to_item[base_path]
-                if current_url != wanted_url:
-                    # Version changed — update the existing entry
-                    await resources.async_update_item(res_id, {"res_type": "module", "url": wanted_url})
-            else:
-                await resources.async_create_item({"res_type": "module", "url": wanted_url})
+        resources = _lovelace_attr(lovelace, "resources")
+        if resources is not None:
+            await resources.async_load()
+            for item in list(resources.async_items()):
+                if f"/custom_components/{DOMAIN}/" in item.get("url", ""):
+                    await resources.async_delete_item(item["id"])
+        if _LEGACY_DASHBOARD in (_lovelace_attr(lovelace, "dashboards") or {}):
+            persistent_notification.async_create(
+                hass,
+                "Lymow now has its own **Lymow** page in the sidebar, so the old auto-created "
+                "dashboard is no longer needed and its cards were removed. You can delete it under "
+                "Settings → Dashboards (it's the one at `/lymow-mower`).",
+                title="Lymow: old dashboard can be removed",
+                notification_id=f"{DOMAIN}_legacy_dashboard",
+            )
     except Exception:  # noqa: BLE001
-        pass  # Non-fatal; add_extra_js_url is the fallback
+        _LOGGER.debug("Could not clean up legacy Lymow Lovelace items (non-fatal)", exc_info=True)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    # Register www/ static path and inject the Lovelace card once per HA run.
-    # add_extra_js_url() makes HA load the module on every Lovelace page so
-    # users never need to add the resource manually in the UI.
+    # Once per HA run: serve www/ (the panel bundle), register the panel's
+    # websocket commands, and remove resources left by the old Lovelace cards.
     if not hass.data.get(_WWW_REGISTERED_KEY):
+        websocket_api.async_register(hass)
         www_path = Path(__file__).parent / "www"
         if www_path.is_dir():
             await hass.http.async_register_static_paths(
                 [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
             )
-            # Use Lovelace resources (not add_extra_js_url) as the sole loader.
-            # add_extra_js_url + Lovelace resources both fire on every page load,
-            # causing duplicate customElements.define() calls → config errors.
-            await _ensure_lovelace_resources(hass)
+            await _remove_legacy_lovelace(hass)
             # Remember that the panel's JS is actually being served this run, so we
             # only ever register the panel when its module_url resolves.
             hass.data[_WWW_SERVED_KEY] = True

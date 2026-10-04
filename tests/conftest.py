@@ -70,6 +70,7 @@ try:
         "homeassistant.components.switch",
         "homeassistant.components.text",
         "homeassistant.components.update",
+        "homeassistant.components.websocket_api",
         "homeassistant.config_entries",
         "homeassistant.core",
         "homeassistant.exceptions",
@@ -86,6 +87,7 @@ try:
     _load_lymow_module("entity")
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
+    _load_lymow_module("websocket_api")
     _load_lymow_module("number")
     _load_lymow_module("select")
     _load_lymow_module("switch")
@@ -414,6 +416,23 @@ except ImportError:
     _ha_http.StaticPathConfig = _StaticPathConfig  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.http", _ha_http)
 
+    # ── homeassistant.components.websocket_api ───────────────────────────────
+    _ha_ws = types.ModuleType("homeassistant.components.websocket_api")
+
+    def _websocket_command(schema):  # type: ignore[no-untyped-def]
+        def _wrap(fn):  # type: ignore[no-untyped-def]
+            fn._ws_schema = schema
+            return fn
+
+        return _wrap
+
+    _ha_ws.websocket_command = _websocket_command  # type: ignore[attr-defined]
+    _ha_ws.async_register_command = lambda hass, handler: None  # type: ignore[attr-defined]
+    _ha_ws.event_message = lambda iden, event: {"id": iden, "type": "event", "event": event}  # type: ignore[attr-defined]
+    _ha_ws.ActiveConnection = object  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.websocket_api", _ha_ws)
+    _ha_comp.websocket_api = _ha_ws  # type: ignore[attr-defined]
+
     # ── homeassistant.components.lawn_mower ───────────────────────────────────
     _ha_lm = types.ModuleType("homeassistant.components.lawn_mower")
 
@@ -654,6 +673,7 @@ except ImportError:
     _load_lymow_module("entity")
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
+    _load_lymow_module("websocket_api")
     _load_lymow_module("number")
     _load_lymow_module("switch")
     _load_lymow_module("text")

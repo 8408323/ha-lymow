@@ -173,35 +173,35 @@ data:
 
 Velocities are clamped to the safe range and the duration is capped at 5 s; the robot always stops when the call ends.
 
-## Map card
+## The Lymow panel
 
-A custom Lovelace card renders the mowing map and lets you edit zone boundaries:
+The integration adds a **Lymow** page to the Home Assistant sidebar — a full app
+for your mower, no dashboard setup needed:
 
-```yaml
-type: custom:lymow-map-card
-entity: sensor.lymow_my_mower_map        # the map sensor
-mower_entity: lawn_mower.lymow_my_mower   # required for mowing + editing
-title: My lawn                            # optional
-```
-
-- **View mode** — tap a go-zone to select it, then *Mow selected*.
-- **Edit mode** — tap *Edit map*, tap a go-zone, then drag the vertex handles, tap an edge **+** to insert a vertex or a vertex's **✕** to delete one, and *Save* (writes via `lymow.update_zone_polygon`).
-
-## Screenshots
-
-| Dashboard & map | RTK diagnostics |
+| Section | What you can do |
 |---|---|
-| ![Dashboard overview](docs/screenshots/dashboard-overview-cropped.png) | ![RTK diagnostics](docs/screenshots/rtk-diagnostics-cropped.png) |
+| **Overview** | Live status with the one action that makes sense right now (start, pause, resume, dock), battery, progress, last mow, positioning, a lawn preview and the next scheduled mow. |
+| **Map** | Zoom, pan and rotate your lawn; tap zones to mow them, merge them or switch them on and off. In **Edit map**, drag points to reshape zones and no-go areas, rename or delete them, tune per-zone mowing settings and move the charging station. |
+| **Schedules** | Add weekly mowing schedules (days, time, zones), pause or delete them. |
+| **Camera & drive** | Live LAN stream, low-bandwidth snapshots or the cloud (WebRTC) stream, plus Bluetooth joysticks to drive the mower by hand. |
+| **Map backups** | Back up the map to the Lymow cloud, preview, restore, rename and delete backups. |
+| **Settings** | Mowing defaults, live adjustments during a mow, headlight schedule, every mower switch/option, maintenance actions and setup (name, PIN, RTK base, Wi-Fi, geofence). |
+| **Diagnostics** | Every sensor, grouped and searchable; tap one for its history. |
 
-→ [See all screenshots](docs/SCREENSHOTS.md) (Settings, Backups, Schedules, integration page)
+![The Lymow panel](docs/screenshots/panel-overview.png)
 
-## Example dashboard
+→ [More screenshots](docs/SCREENSHOTS.md)
 
-A complete dashboard — **Overview/map, Camera, Drive, Schedules, Backups, Settings, and Diagnostics** (with the RTK section) — is in [`examples/dashboard.yaml`](examples/dashboard.yaml). Every custom card it uses ships with the integration.
+The panel is a React app (source in [`frontend/`](frontend)) that talks to Home
+Assistant over its websocket API: `lymow/devices` and a live `lymow/subscribe`
+feed for the map, schedules and backups, with all actions going through the
+regular `lymow.*` services — so anything the panel does can also be automated.
 
-To use it: **Settings → Dashboards → Add dashboard**, open the new dashboard, then **⋮ → Edit dashboard → ⋮ → Raw configuration editor**, and paste the file. Replace `your_mower` with your mower's entity-id prefix (check its device page, e.g. `sensor.<prefix>_map`).
-
-Two caveats: a few sensors (Wi-Fi RSSI, the RTK detail metrics, …) are **disabled by default** — enable them on the device page if a row shows *unavailable*; and **per-zone** entities depend on your own map, so they're left out of the example.
+> **Upgrading from 0.6 or older:** the separate Lovelace cards
+> (`custom:lymow-map-card` and friends) were replaced by the panel. Their
+> resources are removed automatically; if you still have the old auto-created
+> dashboard (`/lymow-mower`), Home Assistant shows a notification — you can
+> delete it under **Settings → Dashboards**.
 
 ## Contributing
 

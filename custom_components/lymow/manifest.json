@@ -1,13 +1,25 @@
 {
   "domain": "lymow",
   "name": "Lymow",
-  "after_dependencies": ["http", "lovelace"],
-  "codeowners": ["@8408323"],
+  "after_dependencies": [
+    "http",
+    "lovelace"
+  ],
+  "codeowners": [
+    "@8408323"
+  ],
   "config_flow": true,
-  "dependencies": ["bluetooth", "ffmpeg"],
+  "dependencies": [
+    "bluetooth",
+    "ffmpeg",
+    "panel_custom",
+    "websocket_api"
+  ],
   "documentation": "https://github.com/8408323/ha-lymow",
   "iot_class": "cloud_push",
   "issue_tracker": "https://github.com/8408323/ha-lymow/issues",
-  "requirements": ["aiomqtt>=2.5.1"],
+  "requirements": [
+    "aiomqtt>=2.5.1"
+  ],
   "version": "0.6.0"
 }
