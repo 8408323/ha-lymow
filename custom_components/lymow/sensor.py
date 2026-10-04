@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -760,12 +761,31 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         return attrs
 
 
-def _trim_poly(points: list[dict]) -> list[dict]:
+def _num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _trim_poly(points: Any) -> list[dict]:
     """Round polygon coordinates to 4 decimal places (~1 cm precision in ENU metres).
 
     Keeps the map sensor under HA's 16 kB attribute limit even for large maps.
+    Malformed points (from a corrupt MQTT frame) are skipped rather than raising,
+    so one bad point can't take down the map sensor or the panel's feed.
     """
-    return [{"x": round(p["x"], 4), "y": round(p["y"], 4)} for p in points]
+    if not isinstance(points, list):
+        return []
+    return [
+        {"x": round(p["x"], 4), "y": round(p["y"], 4)}
+        for p in points
+        if isinstance(p, dict) and _num(p.get("x")) and _num(p.get("y"))
+    ]
+
+
+def _zones(items: Any) -> list[dict]:
+    """Zone/channel dicts with trimmed polygons; non-dict entries are dropped."""
+    if not isinstance(items, list):
+        return []
+    return [{**z, "polygon": _trim_poly(z["polygon"])} if "polygon" in z else z for z in items if isinstance(z, dict)]
 
 
 def map_payload(data: dict[str, Any]) -> dict[str, Any]:
@@ -776,16 +796,11 @@ def map_payload(data: dict[str, Any]) -> dict[str, Any]:
     if "goZones" in map_data:
         # Filter out stale empty zone entries (no hashId) that accumulate when
         # MQTT delivers repeated partial map responses without full zone data
-        valid_zones = [z for z in map_data["goZones"] if z.get("hashId")]
-        attrs["go_zones"] = [{**z, "polygon": _trim_poly(z["polygon"])} if "polygon" in z else z for z in valid_zones]
+        attrs["go_zones"] = [z for z in _zones(map_data["goZones"]) if z.get("hashId")]
     if "nogoZones" in map_data:
-        attrs["nogo_zones"] = [
-            {**z, "polygon": _trim_poly(z["polygon"])} if "polygon" in z else z for z in map_data["nogoZones"]
-        ]
+        attrs["nogo_zones"] = _zones(map_data["nogoZones"])
     if "channels" in map_data:
-        attrs["channels"] = [
-            {**ch, "polygon": _trim_poly(ch["polygon"])} if "polygon" in ch else ch for ch in map_data["channels"]
-        ]
+        attrs["channels"] = _zones(map_data["channels"])
     if "gpsOrigin" in map_data:
         attrs["gps_origin"] = map_data["gpsOrigin"]
     # Charging station: map-derived dock (last QUERY_MAP) is the base; a live
@@ -810,7 +825,8 @@ def map_payload(data: dict[str, Any]) -> dict[str, Any]:
     path_data = data.get("pathData")
     if path_data:
         # Trim each mow-path segment's points to 4 dp
-        trimmed_segments = [_trim_poly(seg) for seg in path_data.get("segments", [])]
+        segments = path_data.get("segments") if isinstance(path_data, dict) else None
+        trimmed_segments = [_trim_poly(seg) for seg in segments or [] if isinstance(seg, list)]
         attrs["mow_path"] = {"segments": trimmed_segments}
 
     # Live robot + RTK position and fix quality

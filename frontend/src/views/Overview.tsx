@@ -1,10 +1,10 @@
 import { useRef } from "react";
 import type { TabId } from "../App";
-import { fireHassEvent, useEntity, type Schedule } from "../hass";
+import { fireHassEvent, useEntity, useHassRef, type Schedule } from "../hass";
 import { MapCanvas } from "../map/MapCanvas";
 import { useI18n, useT } from "../i18n";
 import { useMower, useMowerEntity } from "../mower";
-import { RTK, formatState, mowerState, num, pad2, weekday } from "../status";
+import { RTK, formatState, mowerState, num, pad2, tzOffsetMinutes, weekday } from "../status";
 import { Badge, Button, Card, Icon, cx } from "../ui";
 
 export function OverviewView({ go }: { go: (t: TabId) => void }) {
@@ -149,6 +149,12 @@ function RtkTile({ rtk, moreInfo }: { rtk: number | undefined; moreInfo: (k: str
   );
 }
 
+/** Current wall-clock time in `timeZone`, as a Date whose local fields carry it. */
+function wallClock(timeZone: string): Date {
+  const n = new Date();
+  return new Date(n.getTime() + (tzOffsetMinutes(timeZone, n) + n.getTimezoneOffset()) * 60000);
+}
+
 function nextRun(s: Schedule, now: Date): Date | null {
   if (s.isDisabled) return null;
   const days = s.dayOfWeek?.length ? s.dayOfWeek : [0, 1, 2, 3, 4, 5, 6];
@@ -164,7 +170,10 @@ function nextRun(s: Schedule, now: Date): Date | null {
 function NextSchedule({ schedules, go }: { schedules: Schedule[] | null | undefined; go: (t: TabId) => void }) {
   const { t, locale } = useI18n();
   const { zoneName } = useMower();
-  const now = new Date();
+  // Schedule hours are the mower's local time; compare against "now" in Home
+  // Assistant's timezone, not the browser's.
+  const tz = useHassRef()().config.time_zone;
+  const now = wallClock(tz);
   const upcoming = (schedules ?? [])
     .map((s) => ({ s, at: nextRun(s, now) }))
     .filter((x): x is { s: Schedule; at: Date } => x.at !== null)
@@ -186,7 +195,7 @@ function NextSchedule({ schedules, go }: { schedules: Schedule[] | null | undefi
           <strong>
             {weekday(upcoming.at.getDay(), locale)} {pad2(upcoming.s.hour)}:{pad2(upcoming.s.minute)}
           </strong>
-          <span className="ly-muted">{upcoming.s.zones?.length ? upcoming.s.zones.map(zoneName).join(", ") : "All zones"}</span>
+          <span className="ly-muted">{upcoming.s.zones?.length ? upcoming.s.zones.map(zoneName).join(", ") : t("All zones")}</span>
         </div>
       ) : (
         <p className="ly-muted">{t("No active schedule. Add one to mow automatically.")}</p>

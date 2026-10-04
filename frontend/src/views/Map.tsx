@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { setLeaveGuard } from "../App";
 import type { MapData, Point, Zone } from "../hass";
 import { area, simplify } from "../map/geometry";
 import { MapCanvas, type Kind, type LabelMode } from "../map/MapCanvas";
@@ -108,6 +109,12 @@ export function MapView() {
       setDirty(true);
     }
   };
+
+  // Switching tabs would unmount the editor; ask first while a shape is dirty.
+  useEffect(() => {
+    setLeaveGuard(dirty ? () => ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }) : null);
+    return () => setLeaveGuard(null);
+  }, [dirty]);
 
   // Keyboard: Esc steps back, Delete removes the selected vertex, E enters edit mode.
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});

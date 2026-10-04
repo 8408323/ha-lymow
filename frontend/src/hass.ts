@@ -211,7 +211,9 @@ export function useSnapshot(thing: string | undefined): Snapshot | undefined {
   }, [thing, attempt]);
   // Never show (or act on) the previous mower's map/backups while switching.
   useEffect(() => setSnap(undefined), [thing]);
-  return snap;
+  // The reset above runs after the first render for a new mower; never hand that
+  // render the previous mower's snapshot.
+  return snap?.thing === thing ? snap : undefined;
 }
 
 /** Fire an HA frontend event (more-info dialog, sidebar toggle) from inside the shadow DOM. */

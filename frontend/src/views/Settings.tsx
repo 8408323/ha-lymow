@@ -74,9 +74,14 @@ function MowingDefaults() {
     }),
     [JSON.stringify(ms)],
   );
-  const [v, setV] = useState(initial);
-  useEffect(() => setV(initial), [initial]);
-  const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setV({ ...v, [k]: val });
+  // Mirror the mower until the user edits; a late map update must not wipe a draft.
+  const [draft, setDraft] = useState<typeof initial | null>(null);
+  const v = draft ?? initial;
+  // Once the mower reports what was saved, go back to mirroring it.
+  useEffect(() => {
+    if (draft && JSON.stringify(draft) === JSON.stringify(initial)) setDraft(null);
+  }, [initial]);
+  const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setDraft({ ...v, [k]: val });
   const changed = Object.fromEntries(Object.entries(v).filter(([k, val]) => val !== (initial as any)[k]));
 
   return (
@@ -147,7 +152,7 @@ function MowingDefaults() {
         <Button variant="primary" icon="mdi:check" disabled={!Object.keys(changed).length} onClick={() => call("lymow", "set_task_config", changed, t("Mowing defaults saved"))}>
           {t("Save changes")}
         </Button>
-        <Button variant="ghost" icon="mdi:undo" disabled={!Object.keys(changed).length} onClick={() => setV(initial)}>
+        <Button variant="ghost" icon="mdi:undo" disabled={!Object.keys(changed).length} onClick={() => setDraft(null)}>
           {t("Discard")}
         </Button>
         <span className="ly-spacer" />
@@ -371,6 +376,7 @@ function Advanced() {
   const { call, device, reloadDevices } = useMower();
   const ui = useUi();
   const [name, setName] = useState(device.name);
+  useEffect(() => setName(device.name), [device.name]);
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
   const [base, setBase] = useState("");

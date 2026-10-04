@@ -25,7 +25,15 @@ const TABS = [
 
 export type TabId = (typeof TABS)[number]["id"];
 
-export function navigate(route: Route, tab: TabId) {
+// A view with unsaved work (the map's shape editor) can veto leaving it.
+let leaveGuard: (() => Promise<boolean>) | null = null;
+export function setLeaveGuard(guard: (() => Promise<boolean>) | null) {
+  leaveGuard = guard;
+}
+
+export async function navigate(route: Route, tab: TabId) {
+  if (leaveGuard && !(await leaveGuard())) return;
+  leaveGuard = null;
   history.pushState(null, "", `${route.prefix}/${tab}`);
   window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
 }

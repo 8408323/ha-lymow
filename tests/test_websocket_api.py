@@ -259,3 +259,24 @@ def test_snapshot_drops_non_finite_map_values() -> None:
     assert m["go_zones"][0]["polygon"] == [{"x": 1.0, "y": 2.0}]
     assert "charging_station" not in m
     assert "poseEastM" not in m and m["poseNorthM"] == 1.5
+
+
+def test_snapshot_survives_malformed_map_points() -> None:
+    coord = _coordinator(
+        {
+            "mapData": {
+                "goZones": [
+                    {"hashId": "z", "polygon": [{"x": 1, "y": 2}, "junk", {"x": "a", "y": 1}, {"y": 3}]},
+                    "junk",
+                ],
+                "nogoZones": [{"hashId": "n", "polygon": "nope"}],
+                "channels": "nope",
+            },
+            "pathData": {"segments": [[{"x": 1, "y": 1}, None], "bad"]},
+        }
+    )
+    m = ws.snapshot(coord, THING)["map"]
+    assert m["go_zones"] == [{"hashId": "z", "polygon": [{"x": 1, "y": 2}]}]
+    assert m["nogo_zones"] == [{"hashId": "n", "polygon": []}]
+    assert m["channels"] == []
+    assert m["mow_path"] == {"segments": [[{"x": 1, "y": 1}]]}
