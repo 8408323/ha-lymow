@@ -113,7 +113,9 @@ function MowingDefaults() {
   };
   useEffect(() => {
     if (!pending || receivedAt <= pending.after) return;
-    const same = Object.entries(pending.sent).every(([k, val]) => (initial as any)[k] === val);
+    // Numbers within a hair: moveSpeed round-trips through float32 (0.6 → 0.6000000238…).
+    const eq = (a: unknown, b: unknown) => (typeof a === "number" && typeof b === "number" ? Math.abs(a - b) < 1e-4 : a === b);
+    const same = Object.entries(pending.sent).every(([k, val]) => eq((initial as any)[k], val));
     if (same && !pending.matched) setPending({ ...pending, matched: true });
     else if (!same && pending.matched) restore(pending.sent);
   }, [initial, pending, receivedAt]);

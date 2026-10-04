@@ -61,7 +61,7 @@ interface Focus {
 
 // Unsaved shape kept when the panel is torn down (e.g. leaving via HA's sidebar,
 // which a custom panel can't veto); restored when the map opens again.
-let stash: { thing: string; focus: Focus; pts: Handle[]; base: { orig: Point[]; initial: Handle[] } | null } | null = null;
+const stashes = new Map<string, { focus: Focus; pts: Handle[]; base: { orig: Point[]; initial: Handle[] } | null }>();
 
 export function MapView() {
   const t = useT();
@@ -82,9 +82,9 @@ export function MapView() {
   const trail = useLiveTrail(map);
   const latest = useRef({ dirty, focus, editPts, editBase, pendingSave: false, discarded: false });
   useEffect(() => {
-    if (stash?.thing === device.thing) {
-      const s = stash;
-      stash = null;
+    const s = stashes.get(device.thing);
+    if (s) {
+      stashes.delete(device.thing);
       setMode("edit");
       setFocus(s.focus);
       setEditPts(s.pts);
@@ -95,7 +95,7 @@ export function MapView() {
     return () => {
       const l = latest.current;
       // A save still awaiting the mower is the only copy too: keep it for a retry.
-      if ((l.dirty || l.pendingSave) && !l.discarded && l.focus && l.editPts) stash = { thing: device.thing, focus: l.focus, pts: l.editPts, base: l.editBase };
+      if ((l.dirty || l.pendingSave) && !l.discarded && l.focus && l.editPts) stashes.set(device.thing, { focus: l.focus, pts: l.editPts, base: l.editBase });
     };
   }, []);
 
@@ -149,7 +149,9 @@ export function MapView() {
   // refresh the editor from the reported outline, or offer Save again if none comes.
   const [awaitShape, setAwaitShape] = useState<string | null>(null);
   // Until the mower confirms a saved shape the draft is the only copy, so keep it guarded.
-  const guarded = dirty || awaitShape !== null;
+  // Zone settings not yet applied (or awaiting confirmation) count too.
+  const [zoneDraft, setZoneDraft] = useState(false);
+  const guarded = dirty || awaitShape !== null || zoneDraft;
   latest.current = { ...latest.current, dirty, focus, editPts, editBase, pendingSave: awaitShape !== null };
   const reportedShape = JSON.stringify(find(focus)?.polygon ?? null);
   const savedArea = useRef(0);
@@ -303,6 +305,7 @@ export function MapView() {
             }}
             onBack={requestLeave}
             onClose={leaveFocus}
+            onZoneDraft={setZoneDraft}
           />
         ) : (
           <div className="ly-sheet__body">
@@ -476,6 +479,7 @@ function EditPanel(p: {
   awaiting: boolean;
   onBack: () => void;
   onClose: () => void;
+  onZoneDraft: (pending: boolean) => void;
 }) {
   const t = useT();
   const { call, snap } = useMower();
@@ -562,7 +566,7 @@ function EditPanel(p: {
         </section>
       )}
 
-      {focus.kind === "go" && <ZoneSettings key={zone.hashId} zone={zone} global={snap?.map.mowing_settings} />}
+      {focus.kind === "go" && <ZoneSettings key={zone.hashId} zone={zone} global={snap?.map.mowing_settings} onDraft={p.onZoneDraft} />}
     </div>
   );
 }
@@ -579,7 +583,7 @@ const ZONE_TOGGLES = [
   { key: "turn_off_outer_motor", src: "turnOffOuterMotor", label: "Turn off outer blade at edges" },
 ] as const;
 
-function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any> | undefined }) {
+function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<string, any> | undefined; onDraft: (pending: boolean) => void }) {
   const t = useT();
   const ui = useUi();
   const { call } = useMower();
@@ -592,6 +596,10 @@ function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any
   const [draft, setDraft] = useState<Record<string, number | boolean>>({});
   const [saved, setSaved] = useState(false);
   const changed = Object.keys(draft).length > 0;
+  useEffect(() => {
+    onDraft(changed);
+    return () => onDraft(false);
+  }, [changed]);
   // Keep showing what was applied until the map reply carries it, then drop the draft.
   const flag = (src: string): boolean => Boolean(zone.zoneConfig?.[src] ?? global?.[src] ?? false);
   const reported = [...ZONE_FIELDS.map((f) => effective(f.src, f.fallback)), ...ZONE_TOGGLES.map((f) => flag(f.src))].join("|");
