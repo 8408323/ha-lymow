@@ -63,6 +63,32 @@ def _find(hass: HomeAssistant, thing: str) -> Any | None:
     return None
 
 
+def _polygon(points: Any) -> list[dict[str, float]]:
+    if not isinstance(points, list):
+        return []
+    return [
+        {"x": float(p["x"]), "y": float(p["y"])}
+        for p in points
+        if isinstance(p, dict) and all(isinstance(p.get(k), (int, float)) for k in ("x", "y"))
+    ]
+
+
+def _preview(preview: Any) -> dict[str, list[dict[str, Any]]] | None:
+    """Backup thumbnail geometry, reduced to well-formed polygons."""
+    if not isinstance(preview, dict):
+        return None
+    return {
+        kind: [
+            {"polygon": _polygon(z.get("polygon")), "isEnabled": z.get("isEnabled") is not False}
+            for z in preview.get(kind) or []
+            if isinstance(z, dict)
+        ]
+        if isinstance(preview.get(kind), list)
+        else []
+        for kind in ("goZones", "nogoZones", "channels")
+    }
+
+
 def _backup(entry: Any) -> dict[str, Any] | None:
     """A backup row in a fixed shape, or None if it can't be acted on (no object key).
 
@@ -75,7 +101,7 @@ def _backup(entry: Any) -> dict[str, Any] | None:
         "file": entry["file"],
         "name": name if isinstance(name, str) else "",
         "backupTime": when if isinstance(when, (int, float)) and not isinstance(when, bool) else None,
-        "preview": preview if isinstance(preview, dict) else None,
+        "preview": _preview(preview),
     }
 
 

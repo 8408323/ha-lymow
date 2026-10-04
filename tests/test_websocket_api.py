@@ -49,6 +49,18 @@ def test_snapshot_contents() -> None:
                 {"file": None, "name": "broken"},
                 "junk",
                 {"file": "b", "name": 5, "backupTime": "x"},
+                {
+                    "file": "c",
+                    "backupTime": 1,
+                    "preview": {
+                        "goZones": [
+                            {"polygon": [{"x": 1, "y": 2}, {"x": "bad"}], "isEnabled": False},
+                            7,
+                            {"polygon": "x"},
+                        ],
+                        "nogoZones": "x",
+                    },
+                },
             ],
             "deviceState": "offline",
             "mapData": {},
@@ -60,6 +72,19 @@ def test_snapshot_contents() -> None:
     assert snap["backups"] == [
         {"file": "a", "name": "", "backupTime": None, "preview": None},
         {"file": "b", "name": "", "backupTime": None, "preview": None},
+        {
+            "file": "c",
+            "name": "",
+            "backupTime": 1,
+            "preview": {
+                "goZones": [
+                    {"polygon": [{"x": 1.0, "y": 2.0}], "isEnabled": False},
+                    {"polygon": [], "isEnabled": True},
+                ],
+                "nogoZones": [],
+                "channels": [],
+            },
+        },
     ]
     assert snap["online"] is False
     assert snap["map"] == {}

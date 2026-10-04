@@ -89,7 +89,7 @@ export function MapCanvas(props: Props) {
   }, [map.go_zones, map.nogo_zones, map.channels, map.charging_station]);
 
   const fit = () => {
-    const b = bbox(allSvg.map((p) => rotate(p, center, rotation))) ?? { minX: -5, minY: -5, maxX: 5, maxY: 5 };
+    const b = bbox(staticSvg.map((p) => rotate(p, center, rotation))) ?? { minX: -5, minY: -5, maxX: 5, maxY: 5 };
     const w = Math.max(b.maxX - b.minX, 4);
     const h = Math.max(b.maxY - b.minY, 4);
     const pad = Math.max(1.5, (w + h) * 0.05);

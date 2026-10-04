@@ -91,6 +91,11 @@ export function MapView() {
     setVertex(null);
     setDirty(false);
   };
+  // Back / Escape must not silently throw away a reshaped polygon.
+  const requestLeave = async () => {
+    if (dirty && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
+    leaveFocus();
+  };
   const exitEdit = () => {
     leaveFocus();
     setMode("browse");
@@ -109,7 +114,7 @@ export function MapView() {
   keyRef.current = (e: KeyboardEvent) => {
     const t = e.composedPath()[0] as HTMLElement;
     if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) return;
-    if (e.key === "Escape") focus ? leaveFocus() : mode === "edit" ? exitEdit() : setSelected(new Set());
+    if (e.key === "Escape") focus ? requestLeave() : mode === "edit" ? exitEdit() : setSelected(new Set());
     else if ((e.key === "Delete" || e.key === "Backspace") && vertex !== null) deleteVertex();
     else if (e.key === "e" && mode === "browse") setMode("edit");
   };
@@ -208,6 +213,7 @@ export function MapView() {
             onDeleteVertex={deleteVertex}
             onReset={() => startEditShape(focus)}
             onSaved={() => setDirty(false)}
+            onBack={requestLeave}
             onClose={leaveFocus}
           />
         ) : (
@@ -382,6 +388,7 @@ function EditPanel(p: {
   onDeleteVertex: () => void;
   onReset: () => void;
   onSaved: () => void;
+  onBack: () => void;
   onClose: () => void;
 }) {
   const t = useT();
@@ -400,7 +407,7 @@ function EditPanel(p: {
   return (
     <div className="ly-sheet__body">
       <h2 className="ly-sheet__title">
-        <Button variant="ghost" icon="mdi:arrow-left" title={t("Back")} onClick={p.onClose} />
+        <Button variant="ghost" icon="mdi:arrow-left" title={t("Back")} onClick={p.onBack} />
         {title}
       </h2>
       <div className="ly-btnrow">

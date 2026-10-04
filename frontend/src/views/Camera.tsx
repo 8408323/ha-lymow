@@ -166,9 +166,13 @@ function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
       ws = new WebSocket(session.viewerWssUrl);
       pc.onicecandidate = (e) => e.candidate && ws?.readyState === 1 && ws.send(JSON.stringify({ action: "ICE_CANDIDATE", messagePayload: enc(e.candidate) }));
       ws.onopen = async () => {
-        const offer = await pc!.createOffer();
-        await pc!.setLocalDescription(offer);
-        ws!.send(JSON.stringify({ action: "SDP_OFFER", messagePayload: enc({ type: "offer", sdp: offer.sdp }) }));
+        try {
+          const offer = await pc!.createOffer();
+          await pc!.setLocalDescription(offer);
+          ws!.send(JSON.stringify({ action: "SDP_OFFER", messagePayload: enc({ type: "offer", sdp: offer.sdp }) }));
+        } catch {
+          if (alive) onStatus(t("The cloud connection failed. Try again."));
+        }
       };
       ws.onmessage = async (m) => {
         try {
