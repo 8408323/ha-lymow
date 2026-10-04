@@ -32,14 +32,15 @@ the same auth flow but use region-local Cognito endpoints.
 
 ### Cognito Config Per Region
 
-| Region | User Pool ID | Identity Pool ID |
-|--------|-------------|-----------------|
-| `eu-west-1` | `eu-west-1_6qNPbnrrd` | `eu-west-1:c905a69c-0153-401a-a879-0c50b892015b` |
-| `us-east-2` | (not yet extracted) | `us-east-2:037db699-5df0-4ed2-92b8-0dd0f1843918` |
-| `ap-southeast-2` | `ap-southeast-2_vNriuUNeQ` | `ap-southeast-2:87d0fe24-16af-4189-b02f-984a7ed14ee0` |
-| `ap-east-1` | `ap-east-1_23Lf1WZer` | `ap-east-1:3e9265aa-f564-4083-8e1e-988e6cfdc446` |
+| Region | User Pool ID | App Client ID | Identity Pool ID |
+|--------|-------------|---------------|-----------------|
+| `eu-west-1` | `eu-west-1_6qNPbnrrd` | `3h1sqv3hishjiofbv8giskjgb0` | `eu-west-1:c905a69c-0153-401a-a879-0c50b892015b` |
+| `us-east-2` | `us-east-2_GAyiLkZQf` | `3ftv5jumkv375hic8dpdqodj8n` | `us-east-2:037db699-5df0-4ed2-92b8-0dd0f1843918` |
+| `ap-southeast-2` | `ap-southeast-2_vNriuUNeQ` | `2ch3nqqr0usf5sadvcrj2hp6ll` | `ap-southeast-2:87d0fe24-16af-4189-b02f-984a7ed14ee0` |
+| `ap-east-1` | `ap-east-1_23Lf1WZer` | `46mirppdlu6mrbjd5bkiil0n20` | `ap-east-1:3e9265aa-f564-4083-8e1e-988e6cfdc446` |
 
-**App Client ID (same across all regions):** `3h1sqv3hishjiofbv8giskjgb0`
+Each region's pool has its own app client (from the APK bundle) — the EU client ID is
+rejected elsewhere with `ResourceNotFoundException`.
 
 Cognito Auth Domain: `mow.auth.<region>.amazoncognito.com`
 S3 user data bucket pattern: `mow-user-data-<region>`
@@ -314,7 +315,6 @@ Entities (after MQTT)
 ---
 
 ## Open Questions
-- User Pool ID for `us-east-2` (not yet extracted from APK)
 - Token refresh flow (RefreshToken grant — AccessToken expires after 24h)
 - Purpose of unknown API gateways (`l3hazobjk0` (eu-west-1), `xuw7gtx113` (us-east-2 KVS?), `t0da44vtxf` (ap-east-1 KVS?))
 - `cleanSchedules` field format (always empty string in captured traffic — likely populated when schedules are configured)
