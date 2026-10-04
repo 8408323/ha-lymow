@@ -19,7 +19,7 @@ export function DiagnosticsView({ host }: { host: HTMLElement }) {
   const { device } = useMower();
   const [q, setQ] = useState("");
   const rows = Object.entries(device.entities)
-    .filter(([k, id]) => /^(sensor|binary_sensor|device_tracker)\./.test(id) && k !== "map" && hass.states[id])
+    .filter(([k, id]) => /^(sensor|binary_sensor|device_tracker|event)\./.test(id) && k !== "map" && hass.states[id])
     .map(([k, id]) => {
       const e = hass.states[id];
       const name = entityLabel(e, device.name, t);

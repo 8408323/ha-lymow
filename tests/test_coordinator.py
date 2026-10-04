@@ -4278,3 +4278,17 @@ async def test_channel_names_survive_a_poll() -> None:
     coord._channel_name_overrides[THING] = {"c1": "Gate"}
     data = await coord._async_update_data()
     assert data[THING]["mapData"]["channels"] == [{"hashId": "c1", "name": "Gate"}]
+
+
+@pytest.mark.asyncio
+async def test_cleared_channel_name_does_not_return_from_cache() -> None:
+    from homeassistant.helpers import storage
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"channels": [{"hashId": "c1"}]}}}
+    await coord.async_rename_channel(THING, "c1", "Gate")
+    coord.on_mqtt_state(THING, {"mapData": {"channels": [{"hashId": "c1"}, "junk"]}})  # cache now holds the name
+    await coord.async_rename_channel(THING, "c1", "")
+    data = await coord._async_update_data()
+    assert data[THING]["mapData"]["channels"] == [{"hashId": "c1"}]
+    storage.MEMORY.clear()

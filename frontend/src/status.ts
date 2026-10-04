@@ -66,7 +66,8 @@ export function formatState(e: HassEntity, t: T, locale: string): string {
   const dc = e.attributes.device_class;
   if (e.state === "unknown" || e.state === "unavailable") return "—";
   if (e.state === "on" || e.state === "off") return e.state === "on" ? t("On") : t("Off");
-  if (dc === "timestamp") {
+  // Event entities hold the time of their last event.
+  if (dc === "timestamp" || e.entity_id.startsWith("event.")) {
     const d = new Date(e.state);
     if (isNaN(+d)) return e.state;
     const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5);

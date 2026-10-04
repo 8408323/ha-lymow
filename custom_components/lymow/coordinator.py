@@ -454,14 +454,20 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         return {**patch, "mapData": merged}
 
     def _apply_channel_name_overrides(self, thing_name: str, patch: dict[str, Any]) -> dict[str, Any]:
-        """Re-apply HA-side channel name overrides to a mapData patch before storing."""
-        overrides = self._channel_name_overrides.get(thing_name)
-        if not overrides:
-            return patch
+        """Re-apply HA-side channel names to a mapData patch before storing.
+
+        Channels have no name on the mower, so the overrides are the only source:
+        a channel without one gets no name (a cleared name must not come back
+        from an earlier cached copy)."""
+        overrides = self._channel_name_overrides.get(thing_name) or {}
         map_data = patch["mapData"]
         channels = map_data.get("channels", [])
         new_channels = [
-            {**ch, "name": overrides[ch["hashId"]]} if ch.get("hashId") in overrides else ch for ch in channels
+            {**ch, "name": overrides[ch["hashId"]]}
+            if ch.get("hashId") in overrides
+            else {k: v for k, v in ch.items() if k != "name"}
+            for ch in channels
+            if isinstance(ch, dict)
         ]
         return {**patch, "mapData": {**map_data, "channels": new_channels}}
 

@@ -680,7 +680,10 @@ function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<st
         icon="mdi:check"
         disabled={!changed || saved}
         onClick={async () => {
-          if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) setSaved(true);
+          if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) {
+            zoneDrafts.set(draftKey, { draft, saved: true }); // recorded even if the view is gone by now
+            setSaved(true);
+          }
         }}
       >
         {t("Apply zone settings")}
