@@ -1247,9 +1247,9 @@ pin_and_go:
 rename_channel:
   name: Rename channel
   description: >
-    Assign a display name to a channel. Channel names have no protobuf field on
-    the robot, so the name is stored HA-side and re-applied on each map update.
-    The map card also persists names in localStorage for browser-side continuity.
+    Name a channel. Channels have no name on the mower, so the name is stored
+    in Home Assistant (persists across restarts) and re-applied on each map
+    update. An empty name clears it.
   target:
     entity:
       integration: lymow

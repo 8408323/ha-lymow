@@ -169,7 +169,7 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
     let alive = true;
     let t = 0;
     // Entities register a moment after the entry loads, and a reload can leave the
-    // list empty for a while: refresh once shortly after, then keep polling while empty.
+    // list empty for a while: poll fast while settling, slowly otherwise.
     const load = (): Promise<void> =>
       getHass()
         .callWS<LymowDevice[]>({ type: "lymow/devices" })
@@ -199,11 +199,12 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
           setDevices(known.current);
           // Also keep polling until every mower's own entity is registered (setup
           // publishes the coordinator before the platforms finish).
-          if (kept.length || !d.length || d.some((x) => !x.entities.mower)) t = window.setTimeout(load, 5000);
+          // Otherwise keep a slow poll, so a mower removed (or no longer permitted)
+          // without an open stream still leaves the picker.
+          const settling = kept.length || !d.length || d.some((x) => !x.entities.mower);
+          t = window.setTimeout(load, settling ? 5000 : 60000);
         });
-    load().then(() => {
-      if (alive && !t) t = window.setTimeout(load, 4000);
-    });
+    load();
     return () => {
       alive = false;
       window.clearTimeout(t);

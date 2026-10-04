@@ -402,6 +402,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # A QUERY_SCHEDULES reply carries the full schedule list in one message
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
         if "mapData" in patch:
+            patch = self._absorb_edit_echo(thing_name, patch)
             patch = self._apply_channel_name_overrides(thing_name, patch)
         # Cache non-empty pathData so the map card can show last-mow coverage
         # even after the robot docks (robot stops sending path data when docked).
@@ -420,6 +421,33 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             self.async_set_updated_data({**self.data, thing_name: merged})
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
+
+    _MAP_LISTS = ("goZones", "nogoZones", "channels")
+
+    def _absorb_edit_echo(self, thing_name: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Keep the cached map when the mower only echoes an edit.
+
+        After a rename the mower sends a map reply listing just the edited zone,
+        without any outline. Taken as a full map it would wipe every zone until
+        the next query, so a reply that names zones but carries no geometry at
+        all only updates names in the cached map. An empty map (everything
+        deleted) is still taken as is."""
+        new = patch["mapData"]
+        zones = [z for k in self._MAP_LISTS for z in new.get(k) or [] if isinstance(z, dict)]
+        if not zones or any(z.get("polygon") for z in zones):
+            return patch
+        old = ((self.data or {}).get(thing_name) or {}).get("mapData")
+        if not old:
+            return patch
+        names = {z["hashId"]: z["name"] for z in zones if z.get("hashId") and z.get("name")}
+        merged = {
+            **old,
+            **{
+                k: [{**z, "name": names[z["hashId"]]} if z.get("hashId") in names else z for z in old.get(k) or []]
+                for k in self._MAP_LISTS
+            },
+        }
+        return {**patch, "mapData": merged}
 
     def _apply_channel_name_overrides(self, thing_name: str, patch: dict[str, Any]) -> dict[str, Any]:
         """Re-apply HA-side channel name overrides to a mapData patch before storing."""
@@ -1079,36 +1107,48 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             new_device = {**self.data[thing_name], "mapData": new_map}
             self.async_set_updated_data({**self.data, thing_name: new_device})
 
-    def _nogo_store(self, thing_name: str) -> Store:
-        return Store(self.hass, 1, f"{DOMAIN}.nogo_names.{thing_name}")
+    def _names(self, kind: str) -> dict[str, dict[str, str]]:
+        return self._nogo_names if kind == "nogo" else self._channel_name_overrides
 
-    async def async_load_nogo_names(self) -> None:
-        """Load the HA-side no-go zone names for every mower of this entry."""
+    async def async_load_names(self) -> None:
+        """Load the HA-side no-go zone and channel names for every mower of this entry."""
         for device in self.devices:
             thing = device["deviceThingName"]
-            stored = await self._nogo_store(thing).async_load()
-            if isinstance(stored, dict):
-                self._nogo_names[thing] = {str(k): v for k, v in stored.items() if isinstance(v, str) and v}
+            for kind in ("nogo", "channel"):
+                stored = await Store(self.hass, 1, f"{DOMAIN}.{kind}_names.{thing}").async_load()
+                if isinstance(stored, dict):
+                    self._names(kind)[thing] = {str(k): v for k, v in stored.items() if isinstance(v, str) and v}
+
+    async def _async_set_name(self, kind: str, thing_name: str, hash_id: str, name: str) -> str:
+        """Store (or with an empty name, clear) an HA-side name; returns the stored name."""
+        names = self._names(kind).setdefault(thing_name, {})
+        name = name.strip()
+        if name:
+            names[hash_id] = name
+        else:
+            names.pop(hash_id, None)
+        await Store(self.hass, 1, f"{DOMAIN}.{kind}_names.{thing_name}").async_save(dict(names))
+        return name
 
     async def async_rename_nogo_zone(self, thing_name: str, hash_id: str, name: str) -> None:
         """Name a no-go zone. Kept in HA storage: the mower doesn't keep no-go names
         (the app can't name them), so nothing is sent. An empty name clears it."""
-        names = self._nogo_names.setdefault(thing_name, {})
-        if name.strip():
-            names[hash_id] = name.strip()
-        else:
-            names.pop(hash_id, None)
-        await self._nogo_store(thing_name).async_save(dict(names))
+        await self._async_set_name("nogo", thing_name, hash_id, name)
+        names = self._nogo_names[thing_name]
         if self.data and thing_name in self.data:
             self.async_set_updated_data({**self.data, thing_name: {**self.data[thing_name], "nogoNames": dict(names)}})
 
     async def async_rename_channel(self, thing_name: str, hash_id: str, name: str) -> None:
-        """Assign a display name to a channel (HA-side only; no protobuf name field)."""
-        self._channel_name_overrides.setdefault(thing_name, {})[hash_id] = name
+        """Name a channel. HA-side only (channels have no name field on the mower),
+        persisted in HA storage; an empty name clears it."""
+        name = await self._async_set_name("channel", thing_name, hash_id, name)
         if self.data and thing_name in self.data:
             map_data = self.data[thing_name].get("mapData", {})
             new_channels = [
-                {**ch, "name": name} if ch.get("hashId") == hash_id else ch for ch in map_data.get("channels", [])
+                ({**ch, "name": name} if name else {k: v for k, v in ch.items() if k != "name"})
+                if ch.get("hashId") == hash_id
+                else ch
+                for ch in map_data.get("channels", [])
             ]
             new_map = {**map_data, "channels": new_channels}
             new_device = {**self.data[thing_name], "mapData": new_map}

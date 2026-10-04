@@ -3694,7 +3694,7 @@ async def test_nogo_names_are_kept_in_ha_storage_and_survive_restart() -> None:
     # A fresh coordinator (HA restart) loads the names and merges them into polls.
     storage.MEMORY[f"lymow.nogo_names.{THING}"]["bad"] = 5
     again, _, _ = _make_coordinator()
-    await again.async_load_nogo_names()
+    await again.async_load_names()
     assert again._nogo_names == {THING: {"ngabcdef": "Flower bed"}}
     assert (await again._async_update_data())[THING]["nogoNames"] == {"ngabcdef": "Flower bed"}
 
@@ -4197,3 +4197,43 @@ async def test_async_set_zone_config_preserves_disabled_state() -> None:
     sent = enc.call_args.args[0]
     assert sent[0]["isEnabled"] is False  # kept off
     assert sent[1]["isEnabled"] is True  # unknown zone defaults to enabled
+
+
+def test_map_edit_echo_keeps_cached_outlines() -> None:
+    coord, _, _ = _make_coordinator()
+    full = {
+        "goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}, {"hashId": "b", "polygon": [{"x": 1, "y": 1}]}],
+        "nogoZones": [{"hashId": "n", "polygon": [{"x": 2, "y": 2}]}],
+        "channels": [],
+    }
+    coord.data = {THING: {"mapData": full}}
+    # Rename echo: only the edited zone, no outline.
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "a", "name": "Front", "polygon": []}, "junk"]}})
+    m = coord.data[THING]["mapData"]
+    assert [z["hashId"] for z in m["goZones"]] == ["a", "b"] and m["goZones"][0]["name"] == "Front"
+    assert m["goZones"][0]["polygon"] == [{"x": 0, "y": 0}] and len(m["nogoZones"]) == 1
+    # A real map (with geometry) replaces it; an empty map is taken as is.
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "c", "polygon": [{"x": 5, "y": 5}]}]}})
+    assert [z["hashId"] for z in coord.data[THING]["mapData"]["goZones"]] == ["c"]
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": []}})
+    assert coord.data[THING]["mapData"]["goZones"] == []
+    # Nothing cached yet: the echo is stored as received.
+    coord.data = None
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "a", "polygon": []}]}})
+
+
+@pytest.mark.asyncio
+async def test_channel_names_persist_and_can_be_cleared() -> None:
+    from homeassistant.helpers import storage
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"channels": [{"hashId": "c1"}, {"hashId": "c2", "name": "Keep"}]}}}
+    await coord.async_rename_channel(THING, "c1", "Gate")
+    assert storage.MEMORY[f"lymow.channel_names.{THING}"] == {"c1": "Gate"}
+    again, _, _ = _make_coordinator()
+    await again.async_load_names()
+    assert again._channel_name_overrides == {THING: {"c1": "Gate"}}
+    await coord.async_rename_channel(THING, "c1", " ")
+    assert coord.data[THING]["mapData"]["channels"] == [{"hashId": "c1"}, {"hashId": "c2", "name": "Keep"}]
+    assert storage.MEMORY[f"lymow.channel_names.{THING}"] == {}
+    storage.MEMORY.clear()

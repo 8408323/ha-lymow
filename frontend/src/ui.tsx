@@ -232,7 +232,7 @@ interface DialogReq {
   body?: ReactNode;
   confirm?: string;
   danger?: boolean;
-  input?: { label: string; value: string; placeholder?: string; maxLength?: number };
+  input?: { label: string; value: string; placeholder?: string; maxLength?: number; allowEmpty?: boolean };
   resolve: (v: string | boolean | null) => void;
 }
 
@@ -244,7 +244,8 @@ interface Toast {
 
 interface UiApi {
   confirm(opts: { title: string; body?: ReactNode; confirm?: string; danger?: boolean }): Promise<boolean>;
-  prompt(opts: { title: string; label: string; value?: string; placeholder?: string; confirm?: string; maxLength?: number }): Promise<string | null>;
+  /** Resolves null on Cancel; with `allowEmpty` an empty submission resolves "" (e.g. to clear a name). */
+  prompt(opts: { title: string; label: string; value?: string; placeholder?: string; confirm?: string; maxLength?: number; allowEmpty?: boolean }): Promise<string | null>;
   toast(text: string, tone?: "good" | "bad"): void;
 }
 
@@ -271,7 +272,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
     confirm: (o) => new Promise((resolve) => setDialog({ ...o, resolve: (v) => resolve(Boolean(v)) })),
     prompt: (o) =>
       new Promise((resolve) =>
-        setDialog({ title: o.title, confirm: o.confirm, input: { label: o.label, value: o.value ?? "", placeholder: o.placeholder, maxLength: o.maxLength }, resolve: (v) => resolve(typeof v === "string" ? v : null) }),
+        setDialog({ title: o.title, confirm: o.confirm, input: { label: o.label, value: o.value ?? "", placeholder: o.placeholder, maxLength: o.maxLength, allowEmpty: o.allowEmpty }, resolve: (v) => resolve(typeof v === "string" ? v : null) }),
       ),
     toast,
   };
@@ -301,7 +302,7 @@ function DialogView({ req, close }: { req: DialogReq; close: (v: string | boolea
     (inputRef.current ?? okRef.current)?.focus();
     inputRef.current?.select();
   }, []);
-  const ok = () => close(req.input ? text.trim() || null : true);
+  const ok = () => close(req.input ? (req.input.allowEmpty ? text.trim() : text.trim() || null) : true);
   return (
     <div className="ly-scrim" onMouseDown={(e) => e.target === e.currentTarget && close(req.input ? null : false)}>
       <div

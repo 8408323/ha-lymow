@@ -197,7 +197,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         creds,
         lambda token: _update_refresh_token(hass, entry, token),
     )
-    await coordinator.async_load_nogo_names()
+    await coordinator.async_load_names()
     await coordinator.async_config_entry_first_refresh()
 
     await mqtt_client.connect(

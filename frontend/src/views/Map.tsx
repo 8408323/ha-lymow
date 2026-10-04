@@ -451,6 +451,8 @@ function EditPanel(p: {
   const title = focus.kind === "go" ? zoneLabel(zone, p.index, t) : zone.name?.trim() || (focus.kind === "nogo" ? t("No-go area") : t("Channel"));
   const key = focus.kind === "go" ? "zone_hash_id" : focus.kind === "nogo" ? "nogo_hash_id" : "channel_hash_id";
   const svc = focus.kind === "go" ? "zone" : focus.kind === "nogo" ? "nogo_zone" : "channel";
+  // No-go and channel names live in Home Assistant, so they can also be cleared.
+  const haName = focus.kind !== "go";
 
   return (
     <div className="ly-sheet__body">
@@ -462,8 +464,8 @@ function EditPanel(p: {
         <Button
           icon="mdi:rename-outline"
           onClick={async () => {
-            const name = await ui.prompt({ title: texts.rename, label: t("Name"), value: zone.name ?? "", placeholder: title, maxLength: 40 });
-            if (name) await call("lymow", `rename_${svc}`, { [key]: zone.hashId, name }, t("Renamed"));
+            const name = await ui.prompt({ title: texts.rename, label: t("Name"), value: zone.name ?? "", placeholder: title, maxLength: 40, allowEmpty: haName });
+            if (name !== null && (name || haName)) await call("lymow", `rename_${svc}`, { [key]: zone.hashId, name }, t("Renamed"));
           }}
         >
           {t("Rename")}
@@ -562,7 +564,7 @@ function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any
       setDraft({});
       setSaved(false);
     }
-  }, [reported]);
+  }, [reported, saved]); // also when Apply returns after the reply already arrived
   // No matching reply (rejected, normalised or lost): keep the draft but let the user retry.
   useEffect(() => {
     if (!saved) return;

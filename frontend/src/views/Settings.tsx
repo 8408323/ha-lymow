@@ -252,7 +252,13 @@ function Headlight() {
       setDraft(null);
       setSaved(false);
     }
-  }, [liveKey]);
+  }, [liveKey, saved]);
+  // Firmware that never echoes: keep the draft but let the user save it again.
+  useEffect(() => {
+    if (!saved) return;
+    const id = window.setTimeout(() => setSaved(false), 20000);
+    return () => window.clearTimeout(id);
+  }, [saved]);
   return (
     <Card title={t("Headlight")} icon="mdi:car-light-high">
       {!known && <p className="ly-muted">{t("The mower hasn't reported its headlight schedule. Saving here replaces whatever is set in the Lymow app.")}</p>}
