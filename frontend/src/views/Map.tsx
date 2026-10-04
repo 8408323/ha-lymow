@@ -179,7 +179,7 @@ export function MapView() {
 
   const onPick = (kind: Kind, id: string) => {
     if (mode === "edit") {
-      if (guarded && focus && focus.id !== id) return ui.toast(t("Save or discard the current shape first"), "bad");
+      if (guarded && focus) return focus.id === id ? undefined : ui.toast(t("Save or discard the current shape first"), "bad");
       startEditShape({ kind, id });
       return;
     }

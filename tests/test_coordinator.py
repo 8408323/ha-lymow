@@ -4140,7 +4140,7 @@ async def test_async_merge_zones_refuses_zones_that_do_not_touch() -> None:
     ]
     coord, mqtt, _ = _make_coordinator()
     coord.data = {THING: {"mapData": apart}}
-    with pytest.raises(HomeAssistantError, match="don't share an edge"):
+    with pytest.raises(HomeAssistantError, match="add ground outside them"):
         await coord.async_merge_zones(THING, ["alpha", "beta"])
     mqtt.async_publish_command.assert_not_called()
 
@@ -4171,7 +4171,21 @@ async def test_async_merge_zones_refuses_large_zones_with_a_strip_between() -> N
     }
     coord, mqtt, _ = _make_coordinator()
     coord.data = {THING: {"mapData": zones}}
-    with pytest.raises(HomeAssistantError, match="don't share an edge"):
+    with pytest.raises(HomeAssistantError, match="add ground outside them"):
+        await coord.async_merge_zones(THING, ["alpha", "beta"])
+    mqtt.async_publish_command.assert_not_called()
+
+
+async def test_async_merge_zones_refuses_overlapping_zones_whose_hull_adds_ground() -> None:
+    """Diagonally offset squares: summed areas equal the hull, but the union is 25 m² smaller."""
+    sq = lambda x, y: [{"x": x, "y": y}, {"x": x + 10, "y": y}, {"x": x + 10, "y": y + 10}, {"x": x, "y": y + 10}]  # noqa: E731
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {"goZones": [{"hashId": "alpha", "polygon": sq(0, 0)}, {"hashId": "beta", "polygon": sq(5, 5)}]}
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="add ground outside them"):
         await coord.async_merge_zones(THING, ["alpha", "beta"])
     mqtt.async_publish_command.assert_not_called()
 

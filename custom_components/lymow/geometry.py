@@ -103,6 +103,37 @@ def polygons_touch(a: list[dict[str, float]], b: list[dict[str, float]], toleran
     )
 
 
+def union_area(polygons: list[list[dict[str, float]]], rows: int = 400) -> float:
+    """Area covered by any of *polygons* (overlaps counted once).
+
+    Integrates the union's width over ``rows`` horizontal scanlines; each row's
+    width is exact (even-odd crossings, merged across polygons), so the error is
+    only in the row sampling, well under a percent for zone-sized shapes.
+    """
+    ys = [p["y"] for poly in polygons for p in poly]
+    if not ys:
+        return 0.0
+    lo, hi = min(ys), max(ys)
+    dy = (hi - lo) / rows
+    total = 0.0
+    for r in range(rows):
+        y = lo + (r + 0.5) * dy
+        spans: list[tuple[float, float]] = []
+        for poly in polygons:
+            xs = sorted(
+                a["x"] + (y - a["y"]) * (b["x"] - a["x"]) / (b["y"] - a["y"])
+                for a, b in ((poly[i - 1], poly[i]) for i in range(len(poly)))
+                if (a["y"] > y) != (b["y"] > y)
+            )
+            spans.extend(zip(xs[::2], xs[1::2], strict=False))
+        end = -math.inf
+        for x0, x1 in sorted(spans):
+            if x1 > end:
+                total += (x1 - max(x0, end)) * dy
+                end = x1
+    return total
+
+
 def polygon_area(polygon: list[dict[str, float]]) -> float:
     """Area of a simple polygon (shoelace), in the same squared units as its coordinates.
 

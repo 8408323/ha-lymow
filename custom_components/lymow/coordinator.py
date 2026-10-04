@@ -2225,7 +2225,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         Raises ``HomeAssistantError`` if the map isn't loaded, fewer than 2 zones
         are requested, or any requested zone is missing from the cached map.
         """
-        from .geometry import merge_zone_polygons, polygon_area, polygons_touch
+        from .geometry import merge_zone_polygons, polygon_area, polygons_touch, union_area
 
         if len(hash_ids) < 2:
             raise HomeAssistantError(f"async_merge_zones needs at least 2 zones, got {len(hash_ids)}")
@@ -2256,11 +2256,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 if j not in reached and polygons_touch(polygons[i], polygons[j], _MERGE_TOUCH_TOLERANCE_M):
                     reached.add(j)
                     frontier.append(j)
-        inputs_area = sum(polygon_area(p) for p in polygons)
+        # Against the union, not the sum of areas: overlapping zones would otherwise
+        # hide the hull's extra ground behind the double-counted overlap.
+        inputs_area = union_area(polygons)
         if len(reached) < len(polygons) or polygon_area(merged_hull) > inputs_area * (1 + _MERGE_MAX_EXTRA_AREA):
             raise HomeAssistantError(
-                "These zones don't share an edge, so merging them would add the ground between them to the "
-                "mowing area. Merge only zones that touch."
+                "Merging these zones would add ground outside them to the mowing area (the merged outline is "
+                "their convex hull). Merge only zones that share an edge and together form a convex shape."
             )
 
         keeper = hash_ids[0]
