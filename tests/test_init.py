@@ -412,6 +412,24 @@ async def test_async_setup_entry_missing_password_credentials_raise_auth_failed(
         await async_setup_entry(hass, entry)
 
 
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(LymowAuthConnectionError("down"), ConfigEntryNotReady), (LymowAuthError("HTTP 400"), ConfigEntryAuthFailed)],
+)
+async def test_async_setup_entry_password_login_errors_are_classified(error, expected) -> None:
+    hass = _make_hass()
+    entry = _make_entry(region="eu-west-1")
+    entry.data.pop("refresh_token", None)
+    auth = _make_auth(_make_tokens(), _make_creds())
+    auth.login_region.side_effect = error
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        pytest.raises(expected),
+    ):
+        await async_setup_entry(hass, entry)
+
+
 async def test_async_setup_entry_uses_login_when_no_stored_region() -> None:
     """When CONF_REGION is not in entry.data, auth.login() (auto-detect) is called."""
     hass = _make_hass()

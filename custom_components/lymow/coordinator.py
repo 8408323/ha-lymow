@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import aiohttp
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
@@ -712,6 +713,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     raise ConfigEntryAuthFailed("Lymow password credentials are missing")
                 try:
                     result = await self._auth.login_region(self._username, self._password, self._region)
+                except (LymowAuthConnectionError, aiohttp.ClientError, TimeoutError) as login_err:
+                    raise UpdateFailed(f"Lymow re-login failed: {login_err}") from login_err
                 except Exception as login_err:
                     raise ConfigEntryAuthFailed("Lymow re-authentication failed") from login_err
 

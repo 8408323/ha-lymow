@@ -8,6 +8,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -252,19 +253,24 @@ async def _async_authenticate_entry(
     if not isinstance(username, str) or not isinstance(password, str):
         raise ConfigEntryAuthFailed("Lymow password credentials are missing")
 
-    if isinstance(stored_region, str) and stored_region != REGION_AUTO:
-        if isinstance(refresh_token, str) and refresh_token:
-            try:
-                tokens = await auth.refresh_tokens(refresh_token, stored_region)
-            except Exception:  # noqa: BLE001
-                tokens = await auth.login_region(username, password, stored_region)
+    try:
+        if isinstance(stored_region, str) and stored_region != REGION_AUTO:
+            if isinstance(refresh_token, str) and refresh_token:
+                try:
+                    tokens = await auth.refresh_tokens(refresh_token, stored_region)
+                except Exception:  # noqa: BLE001
+                    tokens = await auth.login_region(username, password, stored_region)
+                else:
+                    tokens["RefreshToken"] = tokens.get("RefreshToken") or refresh_token
+                    tokens["region"] = stored_region
             else:
-                tokens["RefreshToken"] = tokens.get("RefreshToken") or refresh_token
-                tokens["region"] = stored_region
+                tokens = await auth.login_region(username, password, stored_region)
         else:
-            tokens = await auth.login_region(username, password, stored_region)
-    else:
-        tokens = await auth.login(username, password)
+            tokens = await auth.login(username, password)
+    except (LymowAuthConnectionError, aiohttp.ClientError, TimeoutError) as exc:
+        raise ConfigEntryNotReady(f"Lymow login failed: {exc}") from exc
+    except LymowAuthError as exc:
+        raise ConfigEntryAuthFailed("Lymow password was rejected") from exc
     return tokens, tokens["region"]
 
 

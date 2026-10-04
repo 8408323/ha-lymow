@@ -225,6 +225,8 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
                     tokens = await auth.login(username, user_input[CONF_PASSWORD])
                 else:
                     tokens = await auth.login_region(username, user_input[CONF_PASSWORD], self._region)
+            except (LymowAuthConnectionError, aiohttp.ClientError, TimeoutError):
+                errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
                 errors["base"] = "invalid_auth"
             else:
@@ -276,7 +278,8 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
         except LymowAuthError:
             return "invalid_oauth_code"
         except (KeyError, TypeError, ValueError):
-            return "invalid_oauth_code"
+            # The code already exchanged fine; a malformed identity/device reply is not the code's fault.
+            return "cannot_connect"
 
         if not isinstance(devices, list) or not all(
             isinstance(device, dict) and isinstance(device.get("deviceThingName"), str) for device in devices

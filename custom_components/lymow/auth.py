@@ -49,6 +49,12 @@ class LymowAuthConnectionError(LymowAuthError):
     """Raised when Cognito could not be reached or failed server-side (retryable)."""
 
 
+def _http_error(status: int, message: str) -> LymowAuthError:
+    """5xx/408/429 are outages, timeouts or throttling; other 4xx mean the credentials were rejected."""
+    transient = status >= 500 or status in (408, 429)
+    return (LymowAuthConnectionError if transient else LymowAuthError)(message)
+
+
 def _pad_hex(n: int) -> str:
     h = hex(n)[2:]
     if len(h) % 2:
@@ -209,10 +215,7 @@ class LymowAuth:
             ) as resp:
                 if not resp.ok:
                     await resp.read()
-                    # 5xx/408/429 are outages, timeouts or throttling; other 4xx (e.g. invalid_grant) mean the token is bad.
-                    transient = resp.status >= 500 or resp.status in (408, 429)
-                    error_cls = LymowAuthConnectionError if transient else LymowAuthError
-                    raise error_cls(f"OAuth token request failed with HTTP {resp.status}")
+                    raise _http_error(resp.status, f"OAuth token request failed with HTTP {resp.status}")
                 try:
                     data = await resp.json(content_type=None)
                 except (aiohttp.ContentTypeError, UnicodeDecodeError, ValueError) as exc:
@@ -246,13 +249,16 @@ class LymowAuth:
 
     async def login(self, username: str, password: str) -> dict[str, Any]:
         """Attempt login against all known regions, return tokens + region."""
+        transient_only = True
         for region in ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]:
             try:
                 return await self.login_region(username, password, region)
             except Exception as exc:
                 _LOGGER.debug("[%s] login failed: %s", region, exc)
+                transient_only &= isinstance(exc, (LymowAuthConnectionError, aiohttp.ClientError, TimeoutError))
                 continue
-        raise ValueError("Login failed for all regions")
+        # Only call it a credential failure if at least one region actually answered.
+        raise (LymowAuthConnectionError if transient_only else LymowAuthError)("Login failed for all regions")
 
     async def login_region(self, username: str, password: str, region: str) -> dict[str, Any]:
         """Attempt login against a specific region (user-selected override)."""
@@ -291,7 +297,7 @@ class LymowAuth:
         async with self._session.post(url, json=payload, headers=headers) as resp:
             if not resp.ok:
                 body = await resp.text()
-                raise ValueError(f"HTTP {resp.status}: {body}")
+                raise _http_error(resp.status, f"HTTP {resp.status}: {body}")
             data = await resp.json(content_type=None)
 
         params = data["ChallengeParameters"]
@@ -322,7 +328,7 @@ class LymowAuth:
         async with self._session.post(url, json=payload, headers=headers) as resp:
             if not resp.ok:
                 body = await resp.text()
-                raise ValueError(f"HTTP {resp.status}: {body}")
+                raise _http_error(resp.status, f"HTTP {resp.status}: {body}")
             data = await resp.json(content_type=None)
 
         return data["AuthenticationResult"]

@@ -354,6 +354,18 @@ async def test_password_relogin_requires_stored_credentials() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ensure_auth_transient_relogin_failure_raises_update_failed() -> None:
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    coord, _, _ = _make_coordinator()
+    auth = _setup_auth(coord, refresh_ok=False)
+    auth.login_region.side_effect = LymowAuthConnectionError("down")
+    coord._token_expiry = datetime.now(UTC)
+    with pytest.raises(UpdateFailed):
+        await coord._async_ensure_auth()
+
+
+@pytest.mark.asyncio
 async def test_ensure_auth_raises_config_entry_auth_failed_when_relogin_fails() -> None:
     coord, _, _ = _make_coordinator()
     _setup_auth(coord, refresh_ok=False, login_ok=False)

@@ -357,7 +357,7 @@ async def test_google_rejects_callback_state_mismatch_before_exchange() -> None:
     [
         (LymowAuthError("expired"), "invalid_oauth_code"),
         (aiohttp.ClientConnectionError(), "cannot_connect"),
-        (KeyError("missing"), "invalid_oauth_code"),
+        (KeyError("missing"), "cannot_connect"),
     ],
 )
 async def test_google_exchange_failures_show_specific_error(side_effect: Exception, expected_error: str) -> None:
@@ -481,6 +481,13 @@ async def test_password_reauth_auto_region_and_failure_paths() -> None:
         result = await flow.async_step_reauth_confirm({CONF_PASSWORD: "wrong-password"})
     assert result["errors"] == {"base": "invalid_auth"}
     auth.login.assert_awaited_once()
+    auth.login.side_effect = aiohttp.ClientConnectionError()
+    with (
+        patch.object(_config_flow_mod, "async_get_clientsession", return_value=MagicMock()),
+        patch.object(_config_flow_mod, "LymowAuth", return_value=auth),
+    ):
+        result = await flow.async_step_reauth_confirm({CONF_PASSWORD: "right-password"})
+    assert result["errors"] == {"base": "cannot_connect"}
 
 
 async def test_google_reauth_replaces_token_without_creating_duplicate() -> None:
