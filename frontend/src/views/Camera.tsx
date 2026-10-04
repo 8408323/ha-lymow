@@ -267,14 +267,18 @@ function DriveCard() {
   const send = (lin: number, ang: number) =>
     getHass()
       .callService("lymow", "ble_drive", { entity_id: device.entities.mower, linear: +(lin * LINEAR_MAX).toFixed(3), angular: +(ang * ANGULAR_MAX).toFixed(3), duration: 0.3 })
-      .then(() => setErr(""))
-      .catch((e) => setErr(e?.message ?? String(e)));
+      .then(() => (setErr(""), true))
+      .catch((e) => (setErr(e?.message ?? String(e)), false));
 
   // One request in flight at a time: each call holds the BLE link for its
   // duration, so firing on a timer would queue stale motions behind each other
   // and the release (stop) would only land after the backlog drained.
   const run = async (): Promise<void> => {
-    while (active.current) await send(vel.current.lin, vel.current.ang);
+    while (active.current) {
+      // A failing call (mower out of Bluetooth range) returns at once — back off
+      // instead of hammering Home Assistant while the stick is held.
+      if (!(await send(vel.current.lin, vel.current.ang))) await new Promise((r) => setTimeout(r, 1000));
+    }
     await send(0, 0);
     loop.current = active.current ? run() : null;
   };

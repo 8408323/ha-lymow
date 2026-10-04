@@ -175,6 +175,8 @@ export function useSnapshot(thing: string | undefined): Snapshot | undefined {
   const getHass = useHassRef();
   const [snap, setSnap] = useState<Snapshot>();
   useEffect(() => {
+    // Never show (or act on) the previous mower's map/backups while switching.
+    setSnap(undefined);
     if (!thing) return;
     let unsub: (() => Promise<void>) | undefined;
     let alive = true;

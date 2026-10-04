@@ -2761,3 +2761,41 @@ async def test_services_reach_mowers_of_every_config_entry() -> None:
         cb()
     await handlers["delete_zone"](_make_call(["lawn_mower.a"], {"zone_hash_id": "z1"}))
     coord_a.async_delete_zone.assert_awaited_once()
+
+
+async def test_ble_drive_runs_once_per_owning_entry() -> None:
+    """ble_drive drives each config entry's robot once, using that entry's BLE address."""
+    from types import SimpleNamespace
+
+    from lymow.const import CONF_BLE_ADDRESS, DOMAIN
+
+    coord_a, coord_b = _make_coord(), _make_coord()
+    coord_a.async_ble_drive = AsyncMock()
+    coord_b.async_ble_drive = AsyncMock()
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-a": coord_a, "entry-b": coord_b}}
+    entry_a = MagicMock(entry_id="entry-a", options={CONF_BLE_ADDRESS: "AA:AA"})
+    entry_b = MagicMock(entry_id="entry-b", options={CONF_BLE_ADDRESS: "BB:BB"})
+    hass.config_entries.async_get_entry = {"entry-a": entry_a, "entry-b": entry_b}.get
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entity_id, entry_id):
+        def _inner(entities):
+            for e in entities:
+                e.entity_id = entity_id
+                e.registry_entry = SimpleNamespace(config_entry_id=entry_id)
+
+        return _inner
+
+    await async_setup_entry(hass, entry_a, _add("lawn_mower.a", "entry-a"))
+    await async_setup_entry(hass, entry_b, _add("lawn_mower.b", "entry-b"))
+
+    call = _make_call(
+        ["lawn_mower.a", "lawn_mower.b", "lawn_mower.a"], {"linear": 0.2, "angular": 0.0, "duration": 0.3}
+    )
+    await handlers["ble_drive"](call)
+    coord_a.async_ble_drive.assert_awaited_once_with("AA:AA", 0.2, 0.0, 0.3)
+    coord_b.async_ble_drive.assert_awaited_once_with("BB:BB", 0.2, 0.0, 0.3)

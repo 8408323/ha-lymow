@@ -653,6 +653,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     registry[entry.entry_id] = entities
     entry.async_on_unload(lambda: registry.pop(entry.entry_id, None))
 
+    def _ble_targets(entity_ids: list[str]) -> list[tuple[LymowMower, str]]:
+        """One (mower, BLE address) per owning config entry.
+
+        Each entry is one robot on one BLE link, so several entity_ids of the same
+        entry are driven once (motions never stack), while mowers of different
+        entries each get their own call."""
+        entity_map = _all_mowers(hass)
+        per_owner: dict[str, LymowMower] = {}
+        for eid in entity_ids:
+            if (target := entity_map.get(eid)) is not None:
+                per_owner.setdefault((_owner_entry(hass, target) or entry).entry_id, target)
+        resolved = []
+        for target in per_owner.values():
+            owner = _owner_entry(hass, target) or entry
+            # Prefer an explicitly-configured address; otherwise auto-discover the
+            # robot over Bluetooth by its advertised name (deviceBluetooth).
+            address = (owner.options.get(CONF_BLE_ADDRESS) or "").strip()
+            if not address:
+                ble_name = (target.coordinator.data.get(target._thing_name) or {}).get("deviceBluetooth")
+                address = _discover_ble_address(hass, ble_name or "") or ""
+            if not address:
+                raise ServiceValidationError(
+                    "Couldn't find the robot over Bluetooth — make sure it's powered and in range, "
+                    "or set its BLE address in the Lymow integration options."
+                )
+            resolved.append((target, address))
+        return resolved
+
     async def handle_delete_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
@@ -1244,22 +1272,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         ssid: str = call.data["ssid"]
         password: str = call.data["password"]
-        entity_map = _all_mowers(hass)
-        targeted = [entity_map[eid] for eid in entity_ids if eid in entity_map]
-        if not targeted:
-            return
-        coordinator = targeted[0].coordinator
-        owner = _owner_entry(hass, targeted[0]) or entry
-        address = (owner.options.get(CONF_BLE_ADDRESS) or "").strip()
-        if not address:
-            ble_name = (coordinator.data.get(targeted[0]._thing_name) or {}).get("deviceBluetooth")
-            address = _discover_ble_address(hass, ble_name or "") or ""
-        if not address:
-            raise ServiceValidationError(
-                "Couldn't find the robot over Bluetooth — make sure it's powered and in range, "
-                "or set its BLE address in the Lymow integration options."
-            )
-        await coordinator.async_set_wifi(address, ssid, password)
+        for target, address in _ble_targets(entity_ids):
+            await target.coordinator.async_set_wifi(address, ssid, password)
 
     async def handle_set_device_settings(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
@@ -1345,25 +1359,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # One BLE transport per config entry (one robot at one address): drive
         # exactly once even when several entity_ids are targeted, so overlapping
         # motions never stack on the same link.
-        entity_map = _all_mowers(hass)
-        targeted = [entity_map[eid] for eid in entity_ids if eid in entity_map]
-        if not targeted:
-            return
-        coordinator = targeted[0].coordinator
-        owner = _owner_entry(hass, targeted[0]) or entry
-
-        # Prefer an explicitly-configured address; otherwise auto-discover the
-        # robot over Bluetooth by its advertised name (deviceBluetooth).
-        address = (owner.options.get(CONF_BLE_ADDRESS) or "").strip()
-        if not address:
-            ble_name = (coordinator.data.get(targeted[0]._thing_name) or {}).get("deviceBluetooth")
-            address = _discover_ble_address(hass, ble_name or "") or ""
-        if not address:
-            raise ServiceValidationError(
-                "Couldn't find the robot over Bluetooth — make sure it's powered and in range, "
-                "or set its BLE address in the Lymow integration options."
-            )
-        await coordinator.async_ble_drive(address, linear, angular, duration)
+        for target, address in _ble_targets(entity_ids):
+            await target.coordinator.async_ble_drive(address, linear, angular, duration)
 
     async def handle_start_edit_boundary(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]

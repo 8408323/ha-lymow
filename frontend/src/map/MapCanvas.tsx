@@ -81,10 +81,12 @@ export function MapCanvas(props: Props) {
     if (robot) pts.push(toSvg(robot));
     return pts;
   }, [map]);
+  // Lawn geometry without the moving robot: drives the fit and the rotation pivot.
+  const staticSvg = robot ? allSvg.slice(0, -1) : allSvg;
   const center = useMemo(() => {
-    const b = bbox(allSvg) ?? { minX: -5, minY: -5, maxX: 5, maxY: 5 };
+    const b = bbox(staticSvg) ?? { minX: -5, minY: -5, maxX: 5, maxY: 5 };
     return { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 };
-  }, [allSvg.length, go.length]);
+  }, [map.go_zones, map.nogo_zones, map.channels, map.charging_station]);
 
   const fit = () => {
     const b = bbox(allSvg.map((p) => rotate(p, center, rotation))) ?? { minX: -5, minY: -5, maxX: 5, maxY: 5 };
@@ -93,7 +95,11 @@ export function MapCanvas(props: Props) {
     const pad = Math.max(1.5, (w + h) * 0.05);
     setVb({ x: b.minX - pad, y: b.minY - pad, w: w + 2 * pad, h: h + 2 * pad });
   };
-  const fitKey = `${go.length}|${nogo.length}|${channels.length}|${allSvg.length > 0}`;
+  // Refit when the lawn geometry changes (restore, edits), but not on live pose updates.
+  const fitKey = useMemo(() => {
+    const b = bbox(staticSvg);
+    return b ? [b.minX, b.minY, b.maxX, b.maxY].map((v) => v.toFixed(1)).join("|") : "";
+  }, [map.go_zones, map.nogo_zones, map.channels, map.charging_station]);
   useEffect(fit, [fitKey, rotation]);
 
   useLayoutEffect(() => {

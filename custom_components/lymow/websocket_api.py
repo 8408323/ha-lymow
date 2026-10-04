@@ -53,6 +53,22 @@ def _find(hass: HomeAssistant, thing: str) -> Any | None:
     return None
 
 
+def _backup(entry: Any) -> dict[str, Any] | None:
+    """A backup row in a fixed shape, or None if it can't be acted on (no object key).
+
+    The list comes from the Lymow cloud as-is; normalise it here so the panel can
+    rely on the types instead of trusting the REST payload."""
+    if not isinstance(entry, dict) or not isinstance(entry.get("file"), str) or not entry["file"]:
+        return None
+    name, when, preview = entry.get("name"), entry.get("backupTime"), entry.get("preview")
+    return {
+        "file": entry["file"],
+        "name": name if isinstance(name, str) else "",
+        "backupTime": when if isinstance(when, (int, float)) and not isinstance(when, bool) else None,
+        "preview": preview if isinstance(preview, dict) else None,
+    }
+
+
 def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     """Everything the panel needs for one mower that isn't an entity state."""
     data = (coordinator.data or {}).get(thing) or {}
@@ -63,8 +79,7 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
         # None = not received yet (a query is in flight). The panel must not edit
         # schedules then: add_schedule writes the full list and would drop the rest.
         "schedules": None if schedules is None else [_schedule_to_local(s) for s in schedules],
-        # Only backups that can actually be restored/renamed/deleted (have a key).
-        "backups": [b for b in data.get("backupMapList") or [] if isinstance(b.get("file"), str) and b["file"]],
+        "backups": [row for b in data.get("backupMapList") or [] if (row := _backup(b))],
         "online": data.get("deviceState") != "offline",
     }
 

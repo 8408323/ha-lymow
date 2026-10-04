@@ -44,7 +44,12 @@ def test_snapshot_contents() -> None:
     coord = _coordinator(
         {
             "schedules": [sched],
-            "backupMapList": [{"file": "a"}, {"file": None, "name": "broken"}],
+            "backupMapList": [
+                {"file": "a"},
+                {"file": None, "name": "broken"},
+                "junk",
+                {"file": "b", "name": 5, "backupTime": "x"},
+            ],
             "deviceState": "offline",
             "mapData": {},
         }
@@ -52,7 +57,10 @@ def test_snapshot_contents() -> None:
     snap = ws.snapshot(coord, THING)
     assert snap["thing"] == THING
     assert snap["schedules"][0]["hour"] == 8  # converted to local time
-    assert snap["backups"] == [{"file": "a"}]
+    assert snap["backups"] == [
+        {"file": "a", "name": "", "backupTime": None, "preview": None},
+        {"file": "b", "name": "", "backupTime": None, "preview": None},
+    ]
     assert snap["online"] is False
     assert snap["map"] == {}
 
@@ -127,7 +135,7 @@ def test_subscribe_pushes_initial_and_only_changed_snapshots() -> None:
     coord.data[THING]["backupMapList"] = [{"file": "x"}]
     coord.listeners[0]()
     assert conn.send_message.call_count == 2
-    assert conn.send_message.call_args.args[0]["event"]["backups"] == [{"file": "x"}]
+    assert conn.send_message.call_args.args[0]["event"]["backups"][0]["file"] == "x"
 
     conn.subscriptions[7]()  # unsubscribe removes the listener
     assert coord.listeners == []
