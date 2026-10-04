@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n, useT, type T } from "../i18n";
+import type { Schedule } from "../hass";
 import { useMower, zoneLabel } from "../mower";
 import { pad2, weekday } from "../status";
 import { Button, Card, Chip, Empty, Field, Toggle, useUi } from "../ui";
@@ -27,7 +28,11 @@ export function SchedulesView() {
     const d = scheduleDrafts.get(device.thing);
     if (!d || adding || !snap?.schedules) return;
     const [h, m] = d.time.split(":").map(Number);
-    if (snap.schedules.some((s) => s.hour === h && s.minute === m && JSON.stringify([...(s.dayOfWeek ?? [])].sort()) === JSON.stringify([...d.days].sort())))
+    const same = (a: unknown[] = [], b: unknown[] = []) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+    // A matching row must agree on everything submitted, and be new (not in the list before).
+    const match = (s: Schedule) =>
+      s.hour === h && s.minute === m && same(s.dayOfWeek, d.days) && (s.isRepeated ?? true) === d.repeat && !s.isDisabled && (d.picked.length === 0 || same(s.zones, d.picked));
+    if (snap.schedules.some((s) => match(s) && !(d.before ?? []).includes(s.id)))
       scheduleDrafts.delete(device.thing);
   }, [snap?.schedules, adding]);
   const snapRef = useRef(snap);
@@ -37,17 +42,6 @@ export function SchedulesView() {
   const loading = !snap || snap.schedules === null;
   // Opened with the list still unknown (e.g. a lost reply while on another tab): ask again.
   // Also when the first snapshot arrives after mount; once per unknown phase.
-  const asked = useRef(false);
-  const unknown = !!snap && snap.schedules === null && snap.online;
-  useEffect(() => {
-    if (!unknown) {
-      asked.current = false;
-      return;
-    }
-    if (asked.current || awaitingAfter !== undefined) return;
-    asked.current = true;
-    call("lymow", "query_schedules");
-  }, [unknown]);
   // One schedule change at a time: each service call rewrites the mower's whole
   // list from the cache, so overlapping edits would undo each other. Controls stay
   // locked until the call returns and the mower has re-reported its schedules.
@@ -70,6 +64,20 @@ export function SchedulesView() {
     return () => window.clearTimeout(t);
   }, [awaitingAfter]);
   // Offline: the write would be queued at the broker and the confirming query never answered.
+  // Keeps retrying with backoff (10 s → 60 s) until a list arrives or the mower goes offline.
+  const unknown = !!snap && snap.schedules === null && snap.online;
+  useEffect(() => {
+    if (!unknown || awaitingAfter !== undefined) return;
+    let delay = 10000;
+    let id = 0;
+    const ask = () => {
+      call("lymow", "query_schedules");
+      id = window.setTimeout(ask, delay);
+      delay = Math.min(60000, delay * 2);
+    };
+    ask();
+    return () => window.clearTimeout(id);
+  }, [unknown, awaitingAfter !== undefined]);
   const locked = busy || loading || awaitingAfter !== undefined || snap?.online === false;
   const mutate = async (fn: () => Promise<boolean>) => {
     const before = snap?.schedules;
@@ -159,7 +167,7 @@ export function SchedulesView() {
 }
 
 // A half-filled add form outlives the view per mower (tab switch, HA sidebar, other mower).
-type ScheduleDraft = { days: number[]; time: string; picked: string[]; repeat: boolean };
+type ScheduleDraft = { days: number[]; time: string; picked: string[]; repeat: boolean; before?: number[] };
 const scheduleDrafts = new Map<string, ScheduleDraft>();
 
 function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (fn: () => Promise<boolean>) => Promise<void>; locked: boolean }) {
@@ -173,7 +181,7 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
   const [picked, setPicked] = useState<string[]>(kept?.picked ?? []);
   const [repeat, setRepeat] = useState(kept?.repeat ?? true);
   useEffect(() => {
-    scheduleDrafts.set(device.thing, { days, time, picked, repeat });
+    scheduleDrafts.set(device.thing, { days, time, picked, repeat, before: scheduleDrafts.get(device.thing)?.before });
   }, [days, time, picked, repeat]);
   const done = () => {
     scheduleDrafts.delete(device.thing);
@@ -237,7 +245,12 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
             });
             // Close the form, but keep the draft until the mower's list shows the new
             // schedule; if it never does, the next Add starts from these values.
-            if (ok) onDone();
+            if (ok) {
+              // Rows already present can't be the confirmation of this new one.
+              const d = scheduleDrafts.get(device.thing);
+              if (d) scheduleDrafts.set(device.thing, { ...d, before: (snap?.schedules ?? []).map((x) => x.id) });
+              onDone();
+            }
           }}
         >
           {t("Save schedule")}

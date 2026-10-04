@@ -160,12 +160,14 @@ def _schedule(sched: Any) -> dict[str, Any] | None:
         return None
     if not isinstance(days, list) or any(_int_in(d, 0, 6) is None for d in days):
         return None
-    zones = sched.get("zones")
+    zones = [z for z in sched.get("zones") or [] if isinstance(z, str)] if isinstance(sched.get("zones"), list) else []
+    if not zones:
+        return None  # a zone-less mower schedule mows nothing; don't show it as "All zones"
     return _schedule_to_local(
         {
             **sched,
             "dayOfWeek": days,
-            "zones": [z for z in zones if isinstance(z, str)] if isinstance(zones, list) else [],
+            "zones": zones,
         }
     )
 
@@ -195,6 +197,10 @@ def _redact(hass: HomeAssistant, connection: websocket_api.ActiveConnection, thi
 def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     """Everything the panel needs for one mower that isn't an entity state."""
     data = (coordinator.data or {}).get(thing) or {}
+    if not isinstance(data.get("mapData"), dict):
+        data = {**data, "mapData": {}}  # untrusted: never iterate a non-mapping map
+    if not isinstance(data.get("runTimeConfig", {}), dict):
+        data = {**data, "runTimeConfig": {}}
     schedules = data.get("schedules")
     return {
         "thing": thing,

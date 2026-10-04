@@ -314,7 +314,7 @@ function LiveAdjust() {
       <Button
         variant="primary"
         icon="mdi:send"
-        disabled={!mowing || !Object.keys(changes).length}
+        disabled={!mowing || !Object.keys(changes).length || snap?.online !== true}
         onClick={async () => {
           if (await call("lymow", "set_run_time_config", changes, t("Sent to the mower"))) {
             setCut(null);
@@ -334,7 +334,7 @@ const pendingHeadlight = new Map<string, { draft: { on: boolean; start: string; 
 
 function Headlight() {
   const t = useT();
-  const { call, device } = useMower();
+  const { call, device, snap } = useMower();
   const mower = useMowerEntity("mower");
   const a = mower?.attributes ?? {};
   // The robot config arrives over MQTT after load (and some firmware never reports
@@ -398,7 +398,7 @@ function Headlight() {
       <Button
         variant="primary"
         icon="mdi:check"
-        disabled={!draft || saved}
+        disabled={!draft || saved || snap?.online !== true}
         onClick={async () => {
           if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) {
             // Recorded even if the view is gone by now, unless a newer edit replaced it.
@@ -497,7 +497,8 @@ function ActionButtons() {
   const t = useT();
   const list = useEntitiesOf(["button"]);
   const hass = useHass();
-  const { device, call } = useMower();
+  const { device, call, snap } = useMower();
+  const off = snap?.online !== true; // mower commands; HA would report "sent" for an offline mower
   const ui = useUi();
   const live = list.filter(([, id]) => hass.states[id]);
   const safe = live.filter(([k]) => !DANGEROUS_BUTTONS.has(k));
@@ -511,7 +512,7 @@ function ActionButtons() {
     <Card title={t("Actions")} icon="mdi:gesture-tap-button" className="ly-card--wide">
       <div className="ly-actions">
         {safe.map(([k, id]) => (
-          <Button key={k} icon="mdi:gesture-tap" onClick={() => press(id, false)}>
+          <Button key={k} icon="mdi:gesture-tap" disabled={off} onClick={() => press(id, false)}>
             {entityLabel(hass.states[id], device.name, t)}
           </Button>
         ))}
@@ -521,7 +522,7 @@ function ActionButtons() {
           <summary>{t("Maintenance & reset")}</summary>
           <div className="ly-actions">
             {danger.map(([k, id]) => (
-              <Button key={k} variant="danger" icon="mdi:alert-outline" onClick={() => press(id, true)}>
+              <Button key={k} variant="danger" icon="mdi:alert-outline" disabled={off} onClick={() => press(id, true)}>
                 {entityLabel(hass.states[id], device.name, t)}
               </Button>
             ))}

@@ -50,7 +50,7 @@ def test_register_adds_both_commands() -> None:
 
 
 def test_snapshot_contents() -> None:
-    sched = {"id": 1, "hour": 6, "minute": 0, "timeZone": 2, "dayOfWeek": [1]}
+    sched = {"id": 1, "hour": 6, "minute": 0, "timeZone": 2, "dayOfWeek": [1], "zones": ["z1"]}
     coord = _coordinator(
         {
             "schedules": [sched],
@@ -426,21 +426,22 @@ def test_snapshot_drops_malformed_schedules() -> None:
                 {"hour": 1, "minute": 0, "timeZone": 99},
                 {"id": 2, "hour": 1, "minute": 0, "dayOfWeek": [9]},
                 {"id": 3, "hour": 1, "minute": 0, "dayOfWeek": "mon"},
-                {"id": 8, "hour": 1, "minute": 0, "zones": "z1"},
+                {"id": 8, "hour": 1, "minute": 0, "zones": "z1"},  # zones not a list
+                {"id": 9, "hour": 1, "minute": 0, "zones": ["z2"]},
                 {"hour": 1, "minute": 0},  # no id
             ]
         }
     )
     out = ws.snapshot(coord, THING)["schedules"]
     assert out[0]["hour"] == 0 and out[0]["dayOfWeek"] == [2] and out[0]["zones"] == ["z1"]  # 22:30 UTC+2 → Tue 00:30
-    assert len(out) == 2 and out[1]["zones"] == [] and out[1]["dayOfWeek"] == []
+    assert len(out) == 2 and out[1]["zones"] == ["z2"] and out[1]["dayOfWeek"] == []
 
 
 def test_stream_hides_parts_the_user_cannot_read() -> None:
     coord = _coordinator(
         {
             "mapData": {"goZones": [{"hashId": "z", "polygon": [{"x": 1.0, "y": 2.0}]}], "gpsOrigin": {"lat": 59.0}},
-            "schedules": [{"id": 1, "hour": 1, "minute": 0}],
+            "schedules": [{"id": 1, "hour": 1, "minute": 0, "zones": ["z"]}],
             "backupMapList": [{"file": "b"}],
             "runTimeConfig": {"cutHeight": 50},
             "mapReceivedAt": 123.0,
@@ -507,3 +508,8 @@ def test_snapshot_survives_non_list_sections_and_far_points() -> None:
     snap = ws.snapshot(coord, THING)
     assert snap["schedules"] == [] and snap["backups"] == []
     assert snap["map"]["go_zones"][0]["polygon"] == [{"x": 1.0, "y": 2.0}]
+
+
+def test_snapshot_tolerates_non_mapping_map_data() -> None:
+    snap = ws.snapshot(_coordinator({"mapData": [1, 2], "runTimeConfig": 5}), THING)
+    assert snap["run_time_config"] == {} and isinstance(snap["map"], dict)
