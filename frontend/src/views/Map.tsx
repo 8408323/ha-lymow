@@ -128,13 +128,13 @@ export function MapView() {
   // Back / Escape must not silently throw away a reshaped polygon.
   const requestLeave = async () => {
     if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
-    dropZoneDrafts(device.thing);
+    dropZoneDrafts(device.thing, latest.current.focus?.id);
     leaveFocus();
   };
   const exitEdit = async () => {
     // The focused zone may have vanished (deleted elsewhere) with work still pending.
     if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
-    dropZoneDrafts(device.thing);
+    dropZoneDrafts(device.thing, latest.current.focus?.id);
     leaveFocus();
     setMode("browse");
   };
@@ -194,7 +194,7 @@ export function MapView() {
             const ok = await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true });
             if (ok) {
               latest.current.discarded = true; // discarded on purpose: don't stash it
-              dropZoneDrafts(device.thing);
+              dropZoneDrafts(device.thing, latest.current.focus?.id);
             }
             return ok;
           }
@@ -596,8 +596,9 @@ const ZONE_TOGGLES = [
 // Unapplied (or unconfirmed) zone settings outlive the view, like shape drafts:
 // leaving through HA's sidebar can't be vetoed.
 const zoneDrafts = new Map<string, { draft: Record<string, number | boolean>; saved: boolean }>();
-function dropZoneDrafts(thing: string) {
-  for (const k of [...zoneDrafts.keys()]) if (k.startsWith(`${thing}:`)) zoneDrafts.delete(k);
+/** Drop the kept settings draft of the zone being discarded (only that one). */
+function dropZoneDrafts(thing: string, zoneId: string | undefined) {
+  if (zoneId) zoneDrafts.delete(`${thing}:${zoneId}`);
 }
 
 function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<string, any> | undefined; onDraft: (pending: boolean) => void }) {

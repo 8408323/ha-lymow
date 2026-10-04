@@ -288,8 +288,8 @@ function DriveCard() {
   const canControl = useRef(device.can_control);
   canControl.current = device.can_control;
   const send = (lin: number, ang: number) =>
-    held.current || canControl.current === false
-      ? Promise.resolve((setErr(held.current ? t("The mower is reconnecting. Try again in a moment.") : t("You can view this mower but not control it.")), false))
+    held.current || !device.entities.mower || canControl.current === false
+      ? Promise.resolve((setErr(held.current || !device.entities.mower ? t("The mower is reconnecting. Try again in a moment.") : t("You can view this mower but not control it.")), false))
       : getHass()
       .callService("lymow", "ble_drive", { entity_id: device.entities.mower, linear: +(lin * LINEAR_MAX).toFixed(3), angular: +(ang * ANGULAR_MAX).toFixed(3), duration: 0.3 })
       .then(() => (setErr(""), true))
