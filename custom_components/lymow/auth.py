@@ -9,10 +9,11 @@ import logging
 import os
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlencode
 
 import aiohttp
 
-from .const import REGION_CONFIG
+from .const import COGNITO_DOMAINS, REGION_CONFIG
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,6 +38,25 @@ N_HEX = (
 )
 G_HEX = "2"
 INFO_BITS = b"Caldera Derived Key"
+OAUTH_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=15)
+
+
+class LymowAuthError(ValueError):
+    """Raised when Cognito authentication fails."""
+
+
+class LymowAuthConnectionError(LymowAuthError):
+    """Raised when Cognito could not be reached or failed server-side (retryable)."""
+
+
+def _http_error(status: int, message: str) -> LymowAuthError:
+    """5xx/408/429 are outages, timeouts or throttling; other 4xx mean the credentials were rejected.
+
+    Cognito reports throttling as HTTP 400 with a TooManyRequests/LimitExceeded
+    ``__type``, so the body (included in ``message``) is checked too."""
+    throttled = "TooManyRequestsException" in message or "LimitExceededException" in message
+    transient = status >= 500 or status in (408, 429) or throttled
+    return (LymowAuthConnectionError if transient else LymowAuthError)(message)
 
 
 def _pad_hex(n: int) -> str:
@@ -130,15 +150,120 @@ class LymowAuth:
     def __init__(self, session: aiohttp.ClientSession) -> None:
         self._session = session
 
+    def get_oauth_authorize_url(
+        self,
+        *,
+        region: str,
+        redirect_uri: str,
+        provider: str = "Google",
+        state: str | None = None,
+        code_challenge: str | None = None,
+    ) -> str:
+        """Build a Cognito Hosted UI authorization URL."""
+        domain, client_id = self._oauth_config(region)
+        params = {
+            "client_id": client_id,
+            "response_type": "code",
+            "scope": "openid aws.cognito.signin.user.admin",
+            "redirect_uri": redirect_uri,
+            "identity_provider": provider,
+        }
+        if state:
+            params["state"] = state
+        if code_challenge:
+            params["code_challenge"] = code_challenge
+            params["code_challenge_method"] = "S256"
+        return f"https://{domain}/oauth2/authorize?{urlencode(params)}"
+
+    async def exchange_oauth_code(
+        self,
+        *,
+        region: str,
+        code: str,
+        redirect_uri: str,
+        code_verifier: str,
+    ) -> dict[str, Any]:
+        """Exchange an OAuth authorization code for Cognito tokens."""
+        return await self._request_oauth_tokens(
+            region,
+            {
+                "grant_type": "authorization_code",
+                "client_id": self._oauth_config(region)[1],
+                "code": code,
+                "redirect_uri": redirect_uri,
+                "code_verifier": code_verifier,
+            },
+        )
+
+    async def refresh_oauth_tokens(self, *, refresh_token: str, region: str) -> dict[str, Any]:
+        """Refresh Cognito tokens through the Hosted UI token endpoint."""
+        result = await self._request_oauth_tokens(
+            region,
+            {
+                "grant_type": "refresh_token",
+                "client_id": self._oauth_config(region)[1],
+                "refresh_token": refresh_token,
+            },
+        )
+        result["RefreshToken"] = result.get("RefreshToken") or refresh_token
+        return result
+
+    async def _request_oauth_tokens(self, region: str, payload: dict[str, str]) -> dict[str, Any]:
+        domain, _ = self._oauth_config(region)
+        try:
+            async with self._session.post(
+                f"https://{domain}/oauth2/token",
+                data=payload,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=OAUTH_REQUEST_TIMEOUT,
+            ) as resp:
+                if not resp.ok:
+                    await resp.read()
+                    raise _http_error(resp.status, f"OAuth token request failed with HTTP {resp.status}")
+                try:
+                    data = await resp.json(content_type=None)
+                except (aiohttp.ContentTypeError, UnicodeDecodeError, ValueError) as exc:
+                    raise LymowAuthConnectionError("OAuth token response was not valid JSON") from exc
+        except (aiohttp.ClientError, TimeoutError) as exc:
+            raise LymowAuthConnectionError("OAuth token request could not be completed") from exc
+
+        access_token = data.get("access_token") if isinstance(data, dict) else None
+        id_token = data.get("id_token") if isinstance(data, dict) else None
+        if not isinstance(access_token, str) or not access_token or not isinstance(id_token, str) or not id_token:
+            # A garbled 200 doesn't prove the token was rejected — retry, don't reauth.
+            raise LymowAuthConnectionError("OAuth token response was missing required fields")
+        refresh_token = data.get("refresh_token")
+        return {
+            "AccessToken": access_token,
+            "IdToken": id_token,
+            # Only a non-empty string is usable; anything else falls back to the stored token.
+            "RefreshToken": refresh_token if isinstance(refresh_token, str) and refresh_token else None,
+            "ExpiresIn": data.get("expires_in", 3600),
+            "TokenType": data.get("token_type", "Bearer"),
+        }
+
+    @staticmethod
+    def _oauth_config(region: str) -> tuple[str, str]:
+        domain = COGNITO_DOMAINS.get(region)
+        config = REGION_CONFIG.get(region)
+        client_id = config.get("client_id") if config else None
+        if not domain or not client_id:
+            raise LymowAuthError("OAuth is not configured for the selected region")
+        return domain, client_id
+
     async def login(self, username: str, password: str) -> dict[str, Any]:
         """Attempt login against all known regions, return tokens + region."""
+        any_transient = False
         for region in ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]:
             try:
                 return await self.login_region(username, password, region)
             except Exception as exc:
                 _LOGGER.debug("[%s] login failed: %s", region, exc)
+                any_transient |= isinstance(exc, (LymowAuthConnectionError, aiohttp.ClientError, TimeoutError))
                 continue
-        raise ValueError("Login failed for all regions")
+        # A region that didn't answer may be the account's real one, so any
+        # transient failure keeps the overall result retryable.
+        raise (LymowAuthConnectionError if any_transient else LymowAuthError)("Login failed for all regions")
 
     async def login_region(self, username: str, password: str, region: str) -> dict[str, Any]:
         """Attempt login against a specific region (user-selected override)."""
@@ -177,7 +302,7 @@ class LymowAuth:
         async with self._session.post(url, json=payload, headers=headers) as resp:
             if not resp.ok:
                 body = await resp.text()
-                raise ValueError(f"HTTP {resp.status}: {body}")
+                raise _http_error(resp.status, f"HTTP {resp.status}: {body}")
             data = await resp.json(content_type=None)
 
         params = data["ChallengeParameters"]
@@ -208,7 +333,7 @@ class LymowAuth:
         async with self._session.post(url, json=payload, headers=headers) as resp:
             if not resp.ok:
                 body = await resp.text()
-                raise ValueError(f"HTTP {resp.status}: {body}")
+                raise _http_error(resp.status, f"HTTP {resp.status}: {body}")
             data = await resp.json(content_type=None)
 
         return data["AuthenticationResult"]
@@ -232,7 +357,10 @@ class LymowAuth:
                 body = await resp.text()
                 raise ValueError(f"Token refresh failed HTTP {resp.status}: {body}")
             data = await resp.json(content_type=None)
-        return data["AuthenticationResult"]
+        result = data.get("AuthenticationResult") if isinstance(data, dict) else None
+        if not isinstance(result, dict) or not all(isinstance(result.get(k), str) for k in ("AccessToken", "IdToken")):
+            raise LymowAuthConnectionError("Token refresh response was missing required fields")
+        return result
 
     async def get_aws_credentials(self, id_token: str, region: str) -> dict[str, Any]:
         """Exchange Cognito IdToken for temporary AWS credentials."""
