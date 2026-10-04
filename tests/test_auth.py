@@ -391,10 +391,13 @@ class TestLymowAuthOAuth:
         with aioresponses() as mocked:
             mocked.post(_COGNITO_OAUTH_EU, status=503)
             mocked.post(_COGNITO_OAUTH_EU, status=429)
+            mocked.post(_COGNITO_OAUTH_EU, status=408)
             mocked.post(_COGNITO_OAUTH_EU, status=400)
             with pytest.raises(LymowAuthConnectionError, match="HTTP 503"):
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
             with pytest.raises(LymowAuthConnectionError, match="HTTP 429"):
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
+            with pytest.raises(LymowAuthConnectionError, match="HTTP 408"):
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
             with pytest.raises(LymowAuthError, match="HTTP 400") as exc_info:
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
@@ -431,3 +434,10 @@ class TestLymowAuthGetAwsCredentials:
             m.post(_COGNITO_IDENTITY_EU, status=403)
             with pytest.raises(aiohttp.ClientResponseError):
                 await auth_client.get_aws_credentials("id-token", "eu-west-1")
+
+
+async def test_refresh_oauth_ignores_non_string_refresh_token(auth_client):
+    with aioresponses() as mocked:
+        mocked.post(_COGNITO_OAUTH_EU, payload={"access_token": "a", "id_token": "i", "refresh_token": ["bad"]})
+        result = await auth_client.refresh_oauth_tokens(refresh_token="keep-me", region="eu-west-1")
+    assert result["RefreshToken"] == "keep-me"

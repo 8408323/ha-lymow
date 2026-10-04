@@ -209,8 +209,8 @@ class LymowAuth:
             ) as resp:
                 if not resp.ok:
                     await resp.read()
-                    # 5xx/429 are outages or throttling; other 4xx (e.g. invalid_grant) mean the token is bad.
-                    transient = resp.status >= 500 or resp.status == 429
+                    # 5xx/408/429 are outages, timeouts or throttling; other 4xx (e.g. invalid_grant) mean the token is bad.
+                    transient = resp.status >= 500 or resp.status in (408, 429)
                     error_cls = LymowAuthConnectionError if transient else LymowAuthError
                     raise error_cls(f"OAuth token request failed with HTTP {resp.status}")
                 try:
@@ -225,10 +225,12 @@ class LymowAuth:
         if not isinstance(access_token, str) or not access_token or not isinstance(id_token, str) or not id_token:
             # A garbled 200 doesn't prove the token was rejected — retry, don't reauth.
             raise LymowAuthConnectionError("OAuth token response was missing required fields")
+        refresh_token = data.get("refresh_token")
         return {
             "AccessToken": access_token,
             "IdToken": id_token,
-            "RefreshToken": data.get("refresh_token"),
+            # Only a non-empty string is usable; anything else falls back to the stored token.
+            "RefreshToken": refresh_token if isinstance(refresh_token, str) and refresh_token else None,
             "ExpiresIn": data.get("expires_in", 3600),
             "TokenType": data.get("token_type", "Bearer"),
         }

@@ -705,7 +705,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         else:
             try:
                 result = await self._auth.refresh_tokens(self._refresh_token, self._region)
-            except Exception:  # noqa: BLE001
+            except Exception as refresh_err:  # noqa: BLE001
+                _LOGGER.debug("Lymow token refresh failed, falling back to re-login: %s", refresh_err)
                 if self._username is None or self._password is None:
                     raise ConfigEntryAuthFailed("Lymow password credentials are missing")
                 try:
