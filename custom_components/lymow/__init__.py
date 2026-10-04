@@ -38,14 +38,22 @@ _PANEL_REGISTERED_KEY = f"{DOMAIN}_panel_registered"
 _PANEL_URL_PATH = "lymow"
 
 
-def _card_url(name: str = "lymow-map-card.js") -> str:
-    """Return a card URL with the integration version as cache buster."""
+def _read_version() -> str:
     try:
         manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
-        version = manifest.get("version", "0")
+        return manifest.get("version", "0")
     except Exception:
-        version = "0"
-    return f"/custom_components/{DOMAIN}/{name}?v={version}"
+        return "0"
+
+
+# Read once at import (HA imports custom integrations in an executor) — reading it
+# per call from async_setup_entry is blocking I/O inside the event loop.
+_VERSION = _read_version()
+
+
+def _card_url(name: str = "lymow-map-card.js") -> str:
+    """Return a card URL with the integration version as cache buster."""
+    return f"/custom_components/{DOMAIN}/{name}?v={_VERSION}"
 
 
 PLATFORMS = [

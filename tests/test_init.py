@@ -712,8 +712,7 @@ async def test_remove_panel_swallows_errors_but_clears_key() -> None:
 
 def test_card_url_falls_back_when_manifest_unreadable() -> None:
     with patch.object(_lymow.json, "loads", side_effect=ValueError("bad")):
-        url = _lymow._card_url()
-    assert url.endswith("v=0")
+        assert _lymow._read_version() == "0"
 
 
 async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> None:
