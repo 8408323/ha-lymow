@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { area, convexHull, labelPoint, niceLength, pathD, pointInPolygon, polylineLength, rotate, simplify } from "./geometry";
+import { area, labelPoint, niceLength, pathD, pointInPolygon, polylineLength, rotate, simplify } from "./geometry";
 
 const square = [
   { x: 0, y: 0 },
@@ -25,10 +25,6 @@ describe("geometry", () => {
       { x: 0, y: 10 },
     ];
     expect(pointInPolygon(labelPoint(l), l)).toBe(true);
-  });
-
-  it("convex hull drops interior points", () => {
-    expect(convexHull([...square, { x: 5, y: 5 }])).toHaveLength(4);
   });
 
   it("simplify keeps corners of a densely sampled square", () => {

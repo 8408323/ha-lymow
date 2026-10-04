@@ -282,6 +282,7 @@ except ImportError:
         return lambda: None  # no-op unsubscribe; tests patch this when they assert on it
 
     _ha_ev.async_track_time_interval = _async_track_time_interval  # type: ignore[attr-defined]
+    _ha_ev.async_call_later = lambda hass, delay, action: lambda: None  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.event", _ha_ev)
 
     # ── homeassistant.helpers.restore_state ───────────────────────────────────

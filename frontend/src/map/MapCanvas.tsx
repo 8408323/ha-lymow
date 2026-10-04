@@ -10,7 +10,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Reac
 import type { MapData, Point, Zone } from "../hass";
 import { zoneLabel } from "../mower";
 import { Icon, cx } from "../ui";
-import { area, bbox, convexHull, fromSvg, labelPoint, niceLength, pathD, polylineLength, rotate, toSvg } from "./geometry";
+import { area, bbox, fromSvg, labelPoint, niceLength, pathD, polylineLength, rotate, toSvg } from "./geometry";
 
 export type Kind = "go" | "nogo" | "ch";
 export type LabelMode = "name" | "area" | "both" | "none";
@@ -236,11 +236,10 @@ export function MapCanvas(props: Props) {
     else props.onBackground?.();
   };
 
-  // Mowed area: hull of the server-side mow path, clipped to the go-zones.
-  const mowed = useMemo(() => {
-    const pts = (map.mow_path?.segments ?? []).flat();
-    return pts.length >= 3 ? convexHull(pts) : [];
-  }, [map.mow_path]);
+  // Mowed area: the recorded paths drawn at the cutting width and clipped to the
+  // zones — only ground the mower actually covered (a hull would overstate it).
+  const swath = (map.mowing_settings?.pathSpacing ?? 30) / 100;
+  const mowedPaths = useMemo(() => (map.mow_path?.segments ?? []).filter((s) => s.length > 1).map((s) => pathD(s, false)), [map.mow_path]);
 
   const label = (z: Zone, i: number, kind: Kind): string | null => {
     if (labels === "none") return null;
@@ -298,7 +297,13 @@ export function MapCanvas(props: Props) {
                 data-kind="go"
               />
             ))}
-            {mowed.length > 0 && <path d={pathD(mowed)} className="m-mowed" clipPath={`url(#${clipId})`} />}
+            {mowedPaths.length > 0 && (
+              <g className="m-mowed" clipPath={`url(#${clipId})`} style={{ strokeWidth: swath }}>
+                {mowedPaths.map((d, i) => (
+                  <path key={i} d={d} />
+                ))}
+              </g>
+            )}
             {props.showTrail !== false &&
               (map.mow_path?.segments ?? []).map((s, i) => <path key={i} d={pathD(s, false)} className="m-trail" />)}
             {props.showTrail !== false && props.trail && props.trail.length > 1 && <path d={pathD(props.trail, false)} className="m-trail m-trail--live" />}

@@ -6,7 +6,17 @@ import sys
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 ws = sys.modules["lymow.websocket_api"]
+
+
+@pytest.fixture(autouse=True)
+def _no_push_throttle():
+    """Send every change immediately; the throttle has its own test."""
+    with patch.object(ws, "_MIN_PUSH_INTERVAL_S", 0):
+        yield
+
 
 THING = "device_aabbcc"
 
@@ -293,3 +303,40 @@ def test_snapshot_run_time_config_prefers_mirrored_writes() -> None:
         {"mapData": {"runTimeConfig": {"cutHeight": 40, "moveSpeed": 0.5}}, "runTimeConfig": {"cutHeight": 60}}
     )
     assert ws.snapshot(coord, THING)["run_time_config"] == {"cutHeight": 60, "moveSpeed": 0.5}
+
+
+def test_pushes_are_throttled_with_a_trailing_send() -> None:
+    coord = _coordinator({"poseEastM": 1.0})
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": coord}}
+    conn = _connection()
+    later: list = []
+    clock = [100.0]
+
+    def _call_later(_hass, delay, action):
+        later.append((delay, action))
+        return lambda: later.clear()
+
+    with (
+        patch.object(ws, "_MIN_PUSH_INTERVAL_S", 1.0),
+        patch.object(ws, "async_call_later", _call_later),
+        patch.object(ws.time, "monotonic", lambda: clock[0]),
+    ):
+        ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
+        assert conn.send_message.call_count == 1  # initial snapshot, immediately
+
+        coord.data[THING]["poseEastM"] = 2.0
+        coord.listeners[0]()
+        coord.listeners[0]()  # a second update while a send is pending: no new timer
+        assert conn.send_message.call_count == 1 and len(later) == 1
+        assert 0 < later[0][0] <= ws._MIN_PUSH_INTERVAL_S
+
+        clock[0] += 1.0
+        later.pop()[1](None)  # trailing send carries the latest state
+        assert conn.send_message.call_count == 2
+        assert conn.send_message.call_args.args[0]["event"]["map"]["poseEastM"] == 2.0
+
+        coord.data[THING]["poseEastM"] = 3.0
+        coord.listeners[0]()  # schedule another
+        conn.subscriptions[7]()  # unsubscribing cancels it
+        assert later == []

@@ -18,7 +18,7 @@ const lit = (s) => JSON.parse(s);
 for (const f of files) {
   const src = readFileSync(f, "utf8");
   for (const m of src.matchAll(/\bt\(\s*("(?:[^"\\]|\\.)*")/g)) keys.add(lit(m[1]));
-  if (/status\.ts$|App\.tsx$/.test(f)) for (const m of src.matchAll(/label: ("(?:[^"\\]|\\.)*")/g)) keys.add(lit(m[1]));
+  if (/status\.ts$|App\.tsx$|Map\.tsx$/.test(f)) for (const m of src.matchAll(/label: ("(?:[^"\\]|\\.)*")/g)) keys.add(lit(m[1]));
   if (/status\.ts$/.test(f)) for (const m of src.matchAll(/^\s+\d+: ("(?:[^"\\]|\\.)*"),?$/gm)) keys.add(lit(m[1]));
   if (/Diagnostics\.tsx$/.test(f)) for (const m of src.matchAll(/\[("(?:[^"\\]|\\.)*"), \//g)) keys.add(lit(m[1]));
 }

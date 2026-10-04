@@ -10,6 +10,7 @@ Actions go through the regular ``lymow.*`` services (also over the websocket).
 from __future__ import annotations
 
 import math
+import time
 from typing import Any
 
 import voluptuous as vol
@@ -17,6 +18,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.event import async_call_later
 
 from .const import DOMAIN
 from .sensor import _schedule_to_local, map_payload
@@ -26,6 +28,8 @@ POLICY_READ = "read"
 
 
 _REBIND_KEY = f"{DOMAIN}_ws_rebinders"
+# Upper bound on snapshot pushes per subscription (seconds between sends).
+_MIN_PUSH_INTERVAL_S = 1.0
 
 
 @callback
@@ -205,15 +209,29 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
         connection.send_error(msg["id"], "not_found", f"Unknown mower {thing}")
         return
 
-    state: dict[str, Any] = {"coordinator": coordinator}
+    state: dict[str, Any] = {"coordinator": coordinator, "sent_at": 0.0, "timer": None}
+
+    @callback
+    def _send(_now: Any = None) -> None:
+        state["timer"] = None
+        snap = snapshot(state["coordinator"], thing)
+        # Only forward real changes.
+        if snap != state.get("snap"):
+            state["snap"] = snap
+            state["sent_at"] = time.monotonic()
+            connection.send_message(websocket_api.event_message(msg["id"], snap))
 
     @callback
     def _push() -> None:
-        snap = snapshot(state["coordinator"], thing)
-        # MQTT pushes arrive several times a second; only forward real changes.
-        if snap != state.get("snap"):
-            state["snap"] = snap
-            connection.send_message(websocket_api.event_message(msg["id"], snap))
+        # While mowing, MQTT pose updates arrive several times a second and each
+        # snapshot carries the whole map: send at most one per interval, trailing.
+        if state["timer"] is not None:
+            return
+        wait = state["sent_at"] + _MIN_PUSH_INTERVAL_S - time.monotonic()
+        if wait <= 0:
+            _send()
+        else:
+            state["timer"] = async_call_later(hass, wait, _send)
 
     @callback
     def _rebind() -> None:
@@ -233,7 +251,7 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
         state["unlisten"]()
         state["coordinator"] = new
         state["unlisten"] = new.async_add_listener(_push)
-        _push()
+        _send()
 
     state["unlisten"] = coordinator.async_add_listener(_push)
     rebinders: set = hass.data.setdefault(_REBIND_KEY, set())
@@ -241,6 +259,8 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
 
     @callback
     def _unsubscribe() -> None:
+        if state["timer"] is not None:
+            state["timer"]()
         state["unlisten"]()
         rebinders.discard(_rebind)
 

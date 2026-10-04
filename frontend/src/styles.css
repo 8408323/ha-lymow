@@ -993,8 +993,11 @@ h3 {
 }
 
 .m-mowed {
-  fill: #1f6f3d;
-  fill-opacity: 0.55;
+  fill: none;
+  stroke: #1f6f3d;
+  stroke-opacity: 0.55;
+  stroke-linecap: round;
+  stroke-linejoin: round;
   pointer-events: none;
 }
 

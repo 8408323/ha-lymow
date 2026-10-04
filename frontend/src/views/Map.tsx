@@ -400,7 +400,7 @@ function EditPanel(p: {
   onClose: () => void;
 }) {
   const t = useT();
-  const { call } = useMower();
+  const { call, snap } = useMower();
   const ui = useUi();
   const { focus, zone } = p;
   const texts = {
@@ -474,49 +474,51 @@ function EditPanel(p: {
         </section>
       )}
 
-      {focus.kind === "go" && <ZoneSettings key={zone.hashId} zone={zone} />}
+      {focus.kind === "go" && <ZoneSettings key={zone.hashId} zone={zone} global={snap?.map.mowing_settings} />}
     </div>
   );
 }
 
-function ZoneSettings({ zone }: { zone: Zone }) {
+const ZONE_FIELDS = [
+  { key: "cut_height", src: "cutHeight", label: "Cutting height", min: 20, max: 100, step: 5, unit: "mm", fallback: 40 },
+  { key: "move_speed", src: "moveSpeed", label: "Speed", min: 0.1, max: 1.5, step: 0.05, unit: "m/s", fallback: 0.5 },
+  { key: "path_spacing", src: "pathSpacing", label: "Path spacing", min: 20, max: 40, step: 1, unit: "cm", fallback: 30 },
+  { key: "perimeter_mow_laps", src: "perimeterMowLaps", label: "Perimeter laps", min: 0, max: 3, step: 1, unit: undefined, fallback: 1 },
+] as const;
+
+function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any> | undefined }) {
   const t = useT();
   const { call } = useMower();
-  const cfg = zone.zoneConfig ?? {};
-  const [cut, setCut] = useState<number>(zone.cutHeight ?? cfg.cutHeight ?? 40);
-  const [speed, setSpeed] = useState<number>(cfg.moveSpeed ?? 0.5);
-  const [spacing, setSpacing] = useState<number>(zone.pathSpacing ?? cfg.pathSpacing ?? 30);
-  const [laps, setLaps] = useState<number>(cfg.perimeterMowLaps ?? 1);
-  const [initial, setInitial] = useState(() => JSON.stringify([cut, speed, spacing, laps]));
-  const changed = JSON.stringify([cut, speed, spacing, laps]) !== initial;
+  // Effective value: the zone's own config, else the global default the mower uses.
+  const effective = (src: string, fallback: number): number => {
+    const own = src === "cutHeight" ? zone.cutHeight ?? zone.zoneConfig?.cutHeight : src === "pathSpacing" ? zone.pathSpacing ?? zone.zoneConfig?.pathSpacing : zone.zoneConfig?.[src];
+    return typeof own === "number" ? own : typeof global?.[src] === "number" ? global[src] : fallback;
+  };
+  // Only fields the user moved are sent, so untouched ones keep inheriting.
+  const [draft, setDraft] = useState<Record<string, number>>({});
+  const changed = Object.keys(draft).length > 0;
   return (
     <section className="ly-subsection">
       <h3>{t("Mowing settings for this zone")}</h3>
-      <Field label={t("Cutting height")}>
-        <Slider value={cut} min={20} max={100} step={5} unit="mm" onChange={setCut} />
-      </Field>
-      <Field label={t("Speed")}>
-        <Slider value={speed} min={0.1} max={1.5} step={0.05} unit="m/s" format={(v) => v.toFixed(2)} onChange={setSpeed} />
-      </Field>
-      <Field label={t("Path spacing")}>
-        <Slider value={spacing} min={20} max={40} step={1} unit="cm" onChange={setSpacing} />
-      </Field>
-      <Field label={t("Perimeter laps")}>
-        <Slider value={laps} min={0} max={3} onChange={setLaps} />
-      </Field>
+      {ZONE_FIELDS.map((f) => (
+        <Field key={f.key} label={t(f.label)}>
+          <Slider
+            value={draft[f.key] ?? effective(f.src, f.fallback)}
+            min={f.min}
+            max={f.max}
+            step={f.step}
+            unit={f.unit}
+            format={f.key === "move_speed" ? (v) => v.toFixed(2) : undefined}
+            onChange={(v) => setDraft({ ...draft, [f.key]: v })}
+          />
+        </Field>
+      ))}
       <Button
         variant="primary"
         icon="mdi:check"
         disabled={!changed}
         onClick={async () => {
-          const ok = await call(
-            "lymow",
-            "set_zone_config",
-            { zone_hash_id: zone.hashId, cut_height: cut, move_speed: speed, path_spacing: spacing, perimeter_mow_laps: laps },
-            t("Zone settings applied"),
-          );
-          // What was just saved is the new baseline (the component is keyed per zone).
-          if (ok) setInitial(JSON.stringify([cut, speed, spacing, laps]));
+          if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) setDraft({});
         }}
       >
         {t("Apply zone settings")}
