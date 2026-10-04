@@ -164,6 +164,7 @@ function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
       };
       pc.onconnectionstatechange = () => pc?.connectionState === "failed" && onStatus(t("The cloud connection failed. Try again."));
       ws = new WebSocket(session.viewerWssUrl);
+      const early: RTCIceCandidateInit[] = [];
       pc.onicecandidate = (e) => e.candidate && ws?.readyState === 1 && ws.send(JSON.stringify({ action: "ICE_CANDIDATE", messagePayload: enc(e.candidate) }));
       ws.onopen = async () => {
         try {
@@ -189,9 +190,13 @@ function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
             await pc!.setRemoteDescription({ type: "answer", sdp: payload.sdp });
           } catch {
             if (alive) onStatus(t("The cloud connection failed. Try again."));
+            return;
           }
+          // Candidates that arrived before the answer couldn't be applied yet.
+          for (const c of early.splice(0)) await pc!.addIceCandidate(c).catch(() => undefined);
         } else if (kind === "ICE_CANDIDATE") {
-          await pc!.addIceCandidate(payload).catch(() => undefined);
+          if (!pc!.remoteDescription) early.push(payload);
+          else await pc!.addIceCandidate(payload).catch(() => undefined);
         }
       };
       ws.onerror = () => alive && onStatus(t("The signalling connection failed."));

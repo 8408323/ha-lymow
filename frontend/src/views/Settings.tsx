@@ -166,9 +166,9 @@ function MowingDefaults() {
 
 function LiveAdjust() {
   const t = useT();
-  const { call, ent } = useMower();
+  const { call, snap } = useMower();
   const mowing = useMowerEntity("mower")?.state === "mowing";
-  const rtc = useEntity(ent("map"))?.attributes.run_time_config as { cutHeight?: number; moveSpeed?: number } | undefined;
+  const rtc = snap?.run_time_config;
   // Only send what the user moved: an untouched slider must not overwrite the
   // running task's value with a default.
   const [cut, setCut] = useState<number | null>(null);
@@ -357,7 +357,7 @@ function ActionButtons() {
   const press = async (id: string, dangerous: boolean) => {
     const name = shortName(hass.states[id], device.name);
     if (dangerous && !(await ui.confirm({ title: `${name}?`, body: t("This can't be undone from Home Assistant."), confirm: name, danger: true }))) return;
-    await call("button", "press", { entity_id: id }, `${name} sent`);
+    await call("button", "press", { entity_id: id }, t("{name} sent", { name }));
   };
   return (
     <Card title={t("Actions")} icon="mdi:gesture-tap-button" className="ly-card--wide">

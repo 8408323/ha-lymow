@@ -286,3 +286,10 @@ def test_backup_time_must_be_a_sane_epoch() -> None:
     assert ws._backup({"file": "a", "backupTime": float("inf")})["backupTime"] is None
     assert ws._backup({"file": "a", "backupTime": -5})["backupTime"] is None
     assert ws._backup({"file": "a", "backupTime": 1_784_475_670})["backupTime"] == 1_784_475_670
+
+
+def test_snapshot_run_time_config_prefers_mirrored_writes() -> None:
+    coord = _coordinator(
+        {"mapData": {"runTimeConfig": {"cutHeight": 40, "moveSpeed": 0.5}}, "runTimeConfig": {"cutHeight": 60}}
+    )
+    assert ws.snapshot(coord, THING)["run_time_config"] == {"cutHeight": 60, "moveSpeed": 0.5}

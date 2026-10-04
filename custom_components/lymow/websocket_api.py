@@ -141,6 +141,11 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     return {
         "thing": thing,
         "map": _finite(map_payload(data)),
+        # Live run-time overrides: the map reply's copy, overlaid by the values the
+        # coordinator mirrors after a successful set_run_time_config.
+        "run_time_config": _finite(
+            {**((data.get("mapData") or {}).get("runTimeConfig") or {}), **(data.get("runTimeConfig") or {})}
+        ),
         # None = not received yet (a query is in flight). The panel must not edit
         # schedules then: add_schedule writes the full list and would drop the rest.
         "schedules": None if schedules is None else [_schedule_to_local(s) for s in schedules],

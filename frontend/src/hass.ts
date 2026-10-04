@@ -144,6 +144,7 @@ export interface Backup {
 
 export interface Snapshot {
   thing: string;
+  run_time_config?: { cutHeight?: number; moveSpeed?: number; cutSpeed?: number };
   /** Set when the mower's config entry was unloaded; the stream ends. */
   gone?: boolean;
   map: MapData;
@@ -169,7 +170,9 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
         .then((d) => {
           if (!alive) return;
           setDevices(d);
-          if (!d.length) t = window.setTimeout(load, 5000);
+          // Keep polling until every mower's own entity is registered (setup
+          // publishes the coordinator before the platforms finish).
+          if (!d.length || d.some((x) => !x.entities.mower)) t = window.setTimeout(load, 5000);
         });
     load().then(() => {
       if (alive && !t) t = window.setTimeout(load, 4000);

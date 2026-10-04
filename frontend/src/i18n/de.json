@@ -302,6 +302,7 @@
  "once": "einmalig",
  "{h} h {m} min": "{h} Std. {m} Min.",
  "{m} min": "{m} Min.",
+ "{name} sent": "{name} gesendet",
  "{name} set to {value}": "{name} auf {value} gesetzt",
  "{n} s": "{n} s",
  "{pct}% of the task done": "{pct} % der Aufgabe erledigt"

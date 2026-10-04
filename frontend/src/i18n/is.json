@@ -302,6 +302,7 @@
  "once": "einu sinni",
  "{h} h {m} min": "{h} klst. {m} mín.",
  "{m} min": "{m} mín.",
+ "{name} sent": "{name} sent",
  "{name} set to {value}": "{name} stillt á {value}",
  "{n} s": "{n} sek.",
  "{pct}% of the task done": "{pct}% af verkinu lokið"

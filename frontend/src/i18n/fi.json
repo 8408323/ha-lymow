@@ -302,6 +302,7 @@
  "once": "kerran",
  "{h} h {m} min": "{h} t {m} min",
  "{m} min": "{m} min",
+ "{name} sent": "{name} lähetetty",
  "{name} set to {value}": "{name} asetettu arvoon {value}",
  "{n} s": "{n} s",
  "{pct}% of the task done": "{pct} % tehtävästä valmis"

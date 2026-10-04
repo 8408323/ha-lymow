@@ -302,6 +302,7 @@
  "once": "en gång",
  "{h} h {m} min": "{h} h {m} min",
  "{m} min": "{m} min",
+ "{name} sent": "{name} skickat",
  "{name} set to {value}": "{name} satt till {value}",
  "{n} s": "{n} s",
  "{pct}% of the task done": "{pct} % av uppgiften klar"

@@ -302,6 +302,7 @@
  "once": "一次",
  "{h} h {m} min": "{h} 小时 {m} 分钟",
  "{m} min": "{m} 分钟",
+ "{name} sent": "已发送 {name}",
  "{name} set to {value}": "{name} 已设为 {value}",
  "{n} s": "{n} 秒",
  "{pct}% of the task done": "任务已完成 {pct}%"

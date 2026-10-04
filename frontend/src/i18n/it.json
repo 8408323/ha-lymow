@@ -302,6 +302,7 @@
  "once": "una volta",
  "{h} h {m} min": "{h} h {m} min",
  "{m} min": "{m} min",
+ "{name} sent": "{name} inviato",
  "{name} set to {value}": "{name} impostato a {value}",
  "{n} s": "{n} s",
  "{pct}% of the task done": "{pct}% dell'attività completato"
