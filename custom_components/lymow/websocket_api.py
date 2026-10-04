@@ -138,6 +138,31 @@ def _backup(entry: Any) -> dict[str, Any] | None:
     }
 
 
+def _int_in(value: Any, lo: int, hi: int) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and lo <= value <= hi else None
+
+
+def _schedule(sched: Any) -> dict[str, Any] | None:
+    """A schedule in local time, or None when the decoded entry is malformed."""
+    if not isinstance(sched, dict):
+        return None
+    hour, minute = _int_in(sched.get("hour"), 0, 23), _int_in(sched.get("minute"), 0, 59)
+    days = sched.get("dayOfWeek") or []
+    tz = sched.get("timeZone") or 0
+    if hour is None or minute is None or _int_in(tz, -24, 24) is None:
+        return None
+    if not isinstance(days, list) or any(_int_in(d, 0, 6) is None for d in days):
+        return None
+    zones = sched.get("zones")
+    return _schedule_to_local(
+        {
+            **sched,
+            "dayOfWeek": days,
+            "zones": [z for z in zones if isinstance(z, str)] if isinstance(zones, list) else [],
+        }
+    )
+
+
 def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     """Everything the panel needs for one mower that isn't an entity state."""
     data = (coordinator.data or {}).get(thing) or {}
@@ -152,7 +177,7 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
         ),
         # None = not received yet (a query is in flight). The panel must not edit
         # schedules then: add_schedule writes the full list and would drop the rest.
-        "schedules": None if schedules is None else [_schedule_to_local(s) for s in schedules],
+        "schedules": None if schedules is None else [row for s in schedules if (row := _schedule(s))],
         "backups": [row for b in data.get("backupMapList") or [] if (row := _backup(b))],
         "online": data.get("deviceState") != "offline",
     }

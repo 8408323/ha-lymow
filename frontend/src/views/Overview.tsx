@@ -201,6 +201,7 @@ function NextSchedule({ schedules, go }: { schedules: Schedule[] | null | undefi
           <strong>
             {weekday(upcoming.at.getDay(), locale)} {pad2(upcoming.s.hour)}:{pad2(upcoming.s.minute)}
           </strong>
+          {upcoming.s.isRepeated === false && <span className="ly-muted">{t("once")}</span>}
           <span className="ly-muted">{upcoming.s.zones?.length ? upcoming.s.zones.map(zoneName).join(", ") : t("All zones")}</span>
         </div>
       ) : (

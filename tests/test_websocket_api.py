@@ -401,3 +401,23 @@ def test_gone_cancels_a_pending_trailing_send() -> None:
         ws.notify_coordinators_changed(hass)
     assert cancelled == [True]
     assert conn.send_message.call_args.args[0]["event"] == {"thing": THING, "gone": True}
+
+
+def test_snapshot_drops_malformed_schedules() -> None:
+    good = {"dayOfWeek": [1], "hour": 22, "minute": 30, "timeZone": 2, "zones": ["z1", 5], "isRepeated": True}
+    coord = _coordinator(
+        {
+            "schedules": [
+                good,
+                "junk",
+                {"hour": "x", "minute": 0},
+                {"hour": 1, "minute": 0, "timeZone": 99},
+                {"hour": 1, "minute": 0, "dayOfWeek": [9]},
+                {"hour": 1, "minute": 0, "dayOfWeek": "mon"},
+                {"hour": 1, "minute": 0, "zones": "z1"},
+            ]
+        }
+    )
+    out = ws.snapshot(coord, THING)["schedules"]
+    assert out[0]["hour"] == 0 and out[0]["dayOfWeek"] == [2] and out[0]["zones"] == ["z1"]  # 22:30 UTC+2 → Tue 00:30
+    assert len(out) == 2 and out[1]["zones"] == [] and out[1]["dayOfWeek"] == []

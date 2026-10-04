@@ -5,7 +5,7 @@
 // through useSyncExternalStore selectors (useEntity, useHass) so only the ones
 // whose entity object actually changed re-render.
 
-import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 export interface HassEntity {
   entity_id: string;
@@ -162,10 +162,12 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
   const getHass = useHassRef();
   const [devices, setDevices] = useState<LymowDevice[]>();
   const [generation, setGeneration] = useState(0);
+  // Survive reload(): the `gone` refresh is exactly when the grace matters.
+  const known = useRef<LymowDevice[]>([]);
+  const missingSince = useRef(new Map<string, number>()).current;
   useEffect(() => {
     let alive = true;
     let t = 0;
-    let emptySince: number | undefined;
     // Entities register a moment after the entry loads, and a reload can leave the
     // list empty for a while: refresh once shortly after, then keep polling while empty.
     const load = (): Promise<void> =>
@@ -182,14 +184,22 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
             setDevices((prev) => prev ?? []);
             return;
           }
-          // A config-entry reload briefly reports no mowers; keep the current list (and
-          // with it every open view and draft) for a grace period instead of unmounting.
-          emptySince = d.length ? undefined : (emptySince ?? Date.now());
-          if (emptySince === undefined || Date.now() - emptySince > EMPTY_GRACE_MS) setDevices(d);
-          else setDevices((prev) => (prev?.length ? prev : d));
-          // Keep polling until every mower's own entity is registered (setup
+          // A config-entry reload briefly drops its mowers from the reply; keep each
+          // previously known one (and with it any open view and draft) for a grace
+          // period instead of unmounting, and keep polling until it is back.
+          const now = Date.now();
+          const seen = new Set(d.map((x) => x.thing));
+          for (const k of [...missingSince.keys()]) if (seen.has(k)) missingSince.delete(k);
+          const kept = known.current.filter((x) => {
+            if (seen.has(x.thing)) return false;
+            if (!missingSince.has(x.thing)) missingSince.set(x.thing, now);
+            return now - missingSince.get(x.thing)! <= EMPTY_GRACE_MS;
+          });
+          known.current = [...d, ...kept];
+          setDevices(known.current);
+          // Also keep polling until every mower's own entity is registered (setup
           // publishes the coordinator before the platforms finish).
-          if (!d.length || d.some((x) => !x.entities.mower)) t = window.setTimeout(load, 5000);
+          if (kept.length || !d.length || d.some((x) => !x.entities.mower)) t = window.setTimeout(load, 5000);
         });
     load().then(() => {
       if (alive && !t) t = window.setTimeout(load, 4000);

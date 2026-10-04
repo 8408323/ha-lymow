@@ -69,7 +69,7 @@ function MowingDefaults() {
       perimeter_mow_dir: ms?.perimeterMowDir ?? 2,
       obs_dec_mode: ms?.obsDecMode ?? 2,
       clean_mode: ms?.cleanMode || 1,
-      relative_clean_dir: ms?.relativeCleanDir ?? 90,
+      stripe_angle: ms?.stripeAngle ?? -1,
       safe_margin_mode: Boolean(ms?.safeMarginMode),
       turn_off_outer_motor: Boolean(ms?.turnOffOuterMotor),
       path_order: Boolean(ms?.pathOrder),
@@ -103,8 +103,16 @@ function MowingDefaults() {
             ]}
           />
         </Field>
-        <Field label={t("Mowing direction")} hint={t("Angle of the stripes relative to the zone.")}>
-          <Slider value={v.relative_clean_dir} min={0} max={180} step={5} unit="°" onChange={(x) => set("relative_clean_dir", x)} />
+        <Field label={t("Mowing direction")} hint={t("Optimized lets the mower pick the stripe direction for each zone.")}>
+          <Segmented
+            value={v.stripe_angle < 0 ? "auto" : "fixed"}
+            onChange={(x) => set("stripe_angle", x === "auto" ? -1 : 90)}
+            options={[
+              { value: "auto", label: t("Optimized") },
+              { value: "fixed", label: t("Fixed angle") },
+            ]}
+          />
+          {v.stripe_angle >= 0 && <Slider value={v.stripe_angle} min={0} max={179} step={1} unit="°" onChange={(x) => set("stripe_angle", x)} />}
         </Field>
         <Field label={t("Speed")}>
           <Slider value={v.move_speed} min={0.3} max={1} step={0.1} unit="m/s" format={(x) => x.toFixed(1)} onChange={(x) => set("move_speed", x)} />
