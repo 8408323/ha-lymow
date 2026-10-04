@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n, useT, type T } from "../i18n";
 import { useMower, zoneLabel } from "../mower";
 import { pad2, weekday } from "../status";
@@ -29,11 +29,23 @@ export function SchedulesView() {
   // list from the cache, so overlapping edits would undo each other. Controls stay
   // locked until the call returns and the mower has re-reported its schedules.
   const [busy, setBusy] = useState(false);
-  const locked = busy || loading;
-  const mutate = async (fn: () => Promise<unknown>) => {
+  // After a successful call, stay locked until the mower reports a list newer than
+  // the one the call was based on (the null "querying" phase may be throttled away).
+  const [awaitingAfter, setAwaitingAfter] = useState<unknown>(undefined);
+  useEffect(() => {
+    if (awaitingAfter !== undefined && snap?.schedules && snap.schedules !== awaitingAfter) setAwaitingAfter(undefined);
+  }, [snap?.schedules]);
+  useEffect(() => {
+    if (awaitingAfter === undefined) return;
+    const t = window.setTimeout(() => setAwaitingAfter(undefined), 30000); // never lock forever
+    return () => window.clearTimeout(t);
+  }, [awaitingAfter]);
+  const locked = busy || loading || awaitingAfter !== undefined;
+  const mutate = async (fn: () => Promise<boolean>) => {
+    const before = snap?.schedules;
     setBusy(true);
     try {
-      await fn();
+      if (await fn()) setAwaitingAfter(before);
     } finally {
       setBusy(false);
     }
@@ -115,7 +127,7 @@ export function SchedulesView() {
   );
 }
 
-function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (fn: () => Promise<unknown>) => Promise<void>; locked: boolean }) {
+function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (fn: () => Promise<boolean>) => Promise<void>; locked: boolean }) {
   const t = useT();
   const { locale } = useI18n();
   const { snap, call } = useMower();
@@ -172,6 +184,7 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
               { hour, minute, day_of_week: days, repeated: repeat, disabled: false, zones: allZones ? zones.map((z) => z.hashId) : picked },
               t("Schedule added"),
               );
+              return ok;
             });
             if (ok) onDone();
           }}

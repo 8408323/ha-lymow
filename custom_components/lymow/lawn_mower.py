@@ -660,22 +660,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     entry.async_on_unload(_forget_mowers)
 
     def _ble_targets(entity_ids: list[str]) -> list[tuple[LymowMower, str]]:
-        """One (mower, BLE address) per owning config entry.
+        """One (mower, BLE address) per targeted robot.
 
-        Each entry is one robot on one BLE link, so several entity_ids of the same
-        entry are driven once (motions never stack), while mowers of different
-        entries each get their own call."""
+        Duplicate entity_ids for the same robot are driven once (motions never stack
+        on one link). The configured BLE address option belongs to a config entry,
+        i.e. an account that may own several mowers, so it is only trusted when that
+        entry has exactly one mower; otherwise each robot is found by its own
+        advertised Bluetooth name, so a command can never reach the wrong mower."""
         entity_map = _all_mowers(hass)
-        per_owner: dict[str, LymowMower] = {}
+        per_robot: dict[str, LymowMower] = {}
         for eid in entity_ids:
             if (target := entity_map.get(eid)) is not None:
-                per_owner.setdefault((_owner_entry(hass, target) or entry).entry_id, target)
+                per_robot.setdefault(target._thing_name, target)
         resolved = []
-        for target in per_owner.values():
+        for target in per_robot.values():
             owner = _owner_entry(hass, target) or entry
-            # Prefer an explicitly-configured address; otherwise auto-discover the
-            # robot over Bluetooth by its advertised name (deviceBluetooth).
-            address = (owner.options.get(CONF_BLE_ADDRESS) or "").strip()
+            address = ""
+            if len(target.coordinator.devices) == 1:
+                address = (owner.options.get(CONF_BLE_ADDRESS) or "").strip()
             if not address:
                 ble_name = (target.coordinator.data.get(target._thing_name) or {}).get("deviceBluetooth")
                 address = _discover_ble_address(hass, ble_name or "") or ""
@@ -1362,9 +1364,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         angular: float = call.data[ATTR_ANGULAR]
         duration: float = call.data[ATTR_DURATION]
 
-        # One BLE transport per config entry (one robot at one address): drive
-        # exactly once even when several entity_ids are targeted, so overlapping
-        # motions never stack on the same link.
+        # Each robot is driven once even when targeted several times, so
+        # overlapping motions never stack on the same link.
         for target, address in _ble_targets(entity_ids):
             await target.coordinator.async_ble_drive(address, linear, angular, duration)
 

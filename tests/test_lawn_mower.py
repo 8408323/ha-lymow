@@ -2763,13 +2763,15 @@ async def test_services_reach_mowers_of_every_config_entry() -> None:
     coord_a.async_delete_zone.assert_awaited_once()
 
 
-async def test_ble_drive_runs_once_per_owning_entry() -> None:
-    """ble_drive drives each config entry's robot once, using that entry's BLE address."""
+async def test_ble_drive_runs_once_per_robot() -> None:
+    """ble_drive drives each robot once, using its single-mower entry's BLE address."""
     from types import SimpleNamespace
 
     from lymow.const import CONF_BLE_ADDRESS, DOMAIN
 
     coord_a, coord_b = _make_coord(), _make_coord()
+    coord_b.devices = [{"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
+    coord_b.data = {"mower-002": {}}
     coord_a.async_ble_drive = AsyncMock()
     coord_b.async_ble_drive = AsyncMock()
     hass = MagicMock()
@@ -2799,3 +2801,35 @@ async def test_ble_drive_runs_once_per_owning_entry() -> None:
     await handlers["ble_drive"](call)
     coord_a.async_ble_drive.assert_awaited_once_with("AA:AA", 0.2, 0.0, 0.3)
     coord_b.async_ble_drive.assert_awaited_once_with("BB:BB", 0.2, 0.0, 0.3)
+
+
+async def test_ble_address_option_ignored_for_multi_mower_entry(monkeypatch) -> None:
+    """An account-level BLE address is ambiguous with two mowers: discover each by name."""
+    from types import SimpleNamespace
+
+    import lymow.lawn_mower as lm
+    from lymow.const import CONF_BLE_ADDRESS, DOMAIN
+
+    coord = _make_coord()
+    coord.devices = [DEVICE, {"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
+    coord.data = {THING: {"deviceBluetooth": "Lymow_A"}, "mower-002": {"deviceBluetooth": "Lymow_B"}}
+    coord.async_ble_drive = AsyncMock()
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock(entry_id="entry-1", options={CONF_BLE_ADDRESS: "AA:AA"})
+    hass.config_entries.async_get_entry = {"entry-1": entry}.get
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+    monkeypatch.setattr(lm, "_discover_ble_address", lambda _hass, name: {"Lymow_B": "BB:BB"}.get(name))
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = f"lawn_mower.{e._thing_name}"
+            e.registry_entry = SimpleNamespace(config_entry_id="entry-1")
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower-002"], {"linear": 0.1, "angular": 0.0, "duration": 0.3})
+    await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_awaited_once_with("BB:BB", 0.1, 0.0, 0.3)

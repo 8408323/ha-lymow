@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TabId } from "../App";
 import { fireHassEvent, useEntity, useHassRef, type Schedule } from "../hass";
 import { MapCanvas } from "../map/MapCanvas";
@@ -173,6 +173,12 @@ function NextSchedule({ schedules, go }: { schedules: Schedule[] | null | undefi
   // Schedule hours are the mower's local time; compare against "now" in Home
   // Assistant's timezone, not the browser's.
   const tz = useHassRef()().config.time_zone;
+  // Re-render every minute so a passed slot moves on even without new data.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = window.setInterval(() => setTick((n) => n + 1), 60000);
+    return () => window.clearInterval(id);
+  }, []);
   const now = wallClock(tz);
   const upcoming = (schedules ?? [])
     .map((s) => ({ s, at: nextRun(s, now) }))

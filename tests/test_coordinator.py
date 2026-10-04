@@ -10,7 +10,7 @@ import sys
 import types
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
@@ -2914,7 +2914,7 @@ _TWO_SQUARES = {
             "hashId": "beta",
             "cutHeight": 50,
             "isEnabled": True,
-            "polygon": [{"x": 5.0, "y": 0.0}, {"x": 7.0, "y": 0.0}, {"x": 7.0, "y": 2.0}, {"x": 5.0, "y": 2.0}],
+            "polygon": [{"x": 2.0, "y": 0.0}, {"x": 4.0, "y": 0.0}, {"x": 4.0, "y": 2.0}, {"x": 2.0, "y": 2.0}],
         },
     ],
     "nogoZones": [
@@ -4125,3 +4125,32 @@ async def test_async_complete_edit_boundary_publishes_and_requeries_map() -> Non
     await coord.async_complete_edit_boundary(THING)
     mqtt.async_publish_command.assert_awaited_once_with(THING, encode_complete_zone_partition())
     coord.async_query_map.assert_awaited_once_with(THING)
+
+
+async def test_async_merge_zones_refuses_zones_that_do_not_touch() -> None:
+    """The hull of two separated squares would swallow the gap between them."""
+    import copy
+
+    apart = copy.deepcopy(_TWO_SQUARES)
+    apart["goZones"][1]["polygon"] = [
+        {"x": 5.0, "y": 0.0},
+        {"x": 7.0, "y": 0.0},
+        {"x": 7.0, "y": 2.0},
+        {"x": 5.0, "y": 2.0},
+    ]
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": apart}}
+    with pytest.raises(HomeAssistantError, match="don't share an edge"):
+        await coord.async_merge_zones(THING, ["alpha", "beta"])
+    mqtt.async_publish_command.assert_not_called()
+
+
+async def test_async_set_zone_config_preserves_disabled_state() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "z1", "isEnabled": False}]}}}
+    coord.async_query_map = AsyncMock()
+    with patch("lymow.protocol.encode_set_zone_config", return_value=b"x") as enc:
+        await coord.async_set_zone_config(THING, [{"hashId": "z1", "cutHeight": 50}, {"hashId": "zz", "cutHeight": 40}])
+    sent = enc.call_args.args[0]
+    assert sent[0]["isEnabled"] is False  # kept off
+    assert sent[1]["isEnabled"] is True  # unknown zone defaults to enabled

@@ -496,7 +496,16 @@ function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any
   };
   // Only fields the user moved are sent, so untouched ones keep inheriting.
   const [draft, setDraft] = useState<Record<string, number>>({});
+  const [saved, setSaved] = useState(false);
   const changed = Object.keys(draft).length > 0;
+  // Keep showing what was applied until the map reply carries it, then drop the draft.
+  const reported = ZONE_FIELDS.map((f) => effective(f.src, f.fallback)).join("|");
+  useEffect(() => {
+    if (saved && ZONE_FIELDS.every((f) => !(f.key in draft) || Math.abs(draft[f.key] - effective(f.src, f.fallback)) < 1e-6)) {
+      setDraft({});
+      setSaved(false);
+    }
+  }, [reported]);
   return (
     <section className="ly-subsection">
       <h3>{t("Mowing settings for this zone")}</h3>
@@ -509,16 +518,19 @@ function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any
             step={f.step}
             unit={f.unit}
             format={f.key === "move_speed" ? (v) => v.toFixed(2) : undefined}
-            onChange={(v) => setDraft({ ...draft, [f.key]: v })}
+            onChange={(v) => {
+              setSaved(false);
+              setDraft({ ...draft, [f.key]: v });
+            }}
           />
         </Field>
       ))}
       <Button
         variant="primary"
         icon="mdi:check"
-        disabled={!changed}
+        disabled={!changed || saved}
         onClick={async () => {
-          if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) setDraft({});
+          if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) setSaved(true);
         }}
       >
         {t("Apply zone settings")}

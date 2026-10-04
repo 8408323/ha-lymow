@@ -247,6 +247,11 @@ _OTA_TERMINAL_STATUSES = frozenset(
 )
 
 
+# Merging zones may grow the area by at most this fraction (hull slack for zones
+# that share an edge); more means the zones are apart and the gap would be added.
+_MERGE_MAX_EXTRA_AREA = 0.05
+
+
 class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Coordinator that merges REST polling with live MQTT state.
 
@@ -1617,6 +1622,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         if not updates:
             raise HomeAssistantError("set_zone_config: at least one zone update is required")
+        # The wire record always carries isEnabled (an omitted value encodes as
+        # enabled), so a settings-only update would silently re-enable a zone the
+        # user switched off. Fill it in from the cached map.
+        cached = {
+            z.get("hashId"): z for z in ((self.data or {}).get(thing_name, {}).get("mapData") or {}).get("goZones", [])
+        }
+        updates = [
+            u if "isEnabled" in u else {**u, "isEnabled": cached.get(u.get("hashId"), {}).get("isEnabled", True)}
+            for u in updates
+        ]
         await self._mqtt.async_publish_command(thing_name, encode_set_zone_config(updates))
         await self.async_query_map(thing_name)
 
@@ -2207,7 +2222,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         Raises ``HomeAssistantError`` if the map isn't loaded, fewer than 2 zones
         are requested, or any requested zone is missing from the cached map.
         """
-        from .geometry import merge_zone_polygons
+        from .geometry import merge_zone_polygons, polygon_area
 
         if len(hash_ids) < 2:
             raise HomeAssistantError(f"async_merge_zones needs at least 2 zones, got {len(hash_ids)}")
@@ -2225,6 +2240,15 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             merged_hull = merge_zone_polygons(*polygons)
         except ValueError as err:
             raise HomeAssistantError(f"Could not merge zones: {err}") from err
+        # The merged outline is the convex hull: for zones that don't touch it would
+        # also take in the ground between them (paths, beds, a house). Refuse unless
+        # the hull adds little beyond the zones themselves.
+        inputs_area = sum(polygon_area(p) for p in polygons)
+        if polygon_area(merged_hull) > inputs_area * (1 + _MERGE_MAX_EXTRA_AREA):
+            raise HomeAssistantError(
+                "These zones don't share an edge, so merging them would add the ground between them to the "
+                "mowing area. Merge only zones that touch."
+            )
 
         keeper = hash_ids[0]
         await self._mqtt.async_publish_command(thing_name, encode_set_zone_polygon(keeper, merged_hull))
