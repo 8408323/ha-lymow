@@ -4237,3 +4237,13 @@ async def test_channel_names_persist_and_can_be_cleared() -> None:
     assert coord.data[THING]["mapData"]["channels"] == [{"hashId": "c1"}, {"hashId": "c2", "name": "Keep"}]
     assert storage.MEMORY[f"lymow.channel_names.{THING}"] == {}
     storage.MEMORY.clear()
+
+
+def test_map_replies_are_stamped() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": []}})
+    stamp = coord.data[THING]["mapReceivedAt"]
+    assert isinstance(stamp, float) and stamp > 0
+    coord.on_mqtt_state(THING, {"battery": 50})  # not a map reply: stamp unchanged
+    assert coord.data[THING]["mapReceivedAt"] == stamp

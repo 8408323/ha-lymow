@@ -402,7 +402,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # A QUERY_SCHEDULES reply carries the full schedule list in one message
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
         if "mapData" in patch:
-            patch = self._absorb_edit_echo(thing_name, patch)
+            # Stamp real map replies, so the panel can tell the mower's answer from
+            # an optimistic local patch.
+            patch = {**self._absorb_edit_echo(thing_name, patch), "mapReceivedAt": time.time()}
             patch = self._apply_channel_name_overrides(thing_name, patch)
         # Cache non-empty pathData so the map card can show last-mow coverage
         # even after the robot docks (robot stops sending path data when docked).

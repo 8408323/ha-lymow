@@ -282,8 +282,11 @@ function DriveCard() {
   const [err, setErr] = useState("");
   const [shown, setShown] = useState({ lin: 0, ang: 0 });
 
+  // The drive loop outlives renders; read the held state through a ref.
+  const held = useRef(device.held);
+  held.current = device.held;
   const send = (lin: number, ang: number) =>
-    device.held
+    held.current
       ? Promise.resolve((setErr(t("The mower is reconnecting. Try again in a moment.")), false))
       : getHass()
       .callService("lymow", "ble_drive", { entity_id: device.entities.mower, linear: +(lin * LINEAR_MAX).toFixed(3), angular: +(ang * ANGULAR_MAX).toFixed(3), duration: 0.3 })

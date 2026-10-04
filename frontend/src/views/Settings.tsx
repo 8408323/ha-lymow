@@ -93,18 +93,21 @@ function MowingDefaults() {
   // Keep what was sent until the mower's own map reply agrees; if a later reply
   // differs (rejected or normalised) or none ever matches, give the edits back.
   const ui = useUi();
-  const [pending, setPending] = useState<{ sent: Record<string, unknown>; matched: boolean } | null>(null);
+  // `after`: the map reply time at save. Only a newer reply from the mower counts,
+  // not the coordinator's optimistic patch.
+  const [pending, setPending] = useState<{ sent: Record<string, unknown>; matched: boolean; after: number } | null>(null);
+  const receivedAt = snap?.map_received_at ?? 0;
   const restore = (sent: Record<string, unknown>) => {
     setEdits((e) => ({ ...sent, ...e }));
     setPending(null);
     ui.toast(t("The mower didn't keep all of these settings. Check them and save again."), "bad");
   };
   useEffect(() => {
-    if (!pending) return;
+    if (!pending || receivedAt <= pending.after) return;
     const same = Object.entries(pending.sent).every(([k, val]) => (initial as any)[k] === val);
     if (same && !pending.matched) setPending({ ...pending, matched: true });
     else if (!same && pending.matched) restore(pending.sent);
-  }, [initial, pending]);
+  }, [initial, pending, receivedAt]);
   useEffect(() => {
     if (!pending) return;
     const id = window.setTimeout(() => (pending.matched ? setPending(null) : restore(pending.sent)), 30000);
@@ -112,7 +115,7 @@ function MowingDefaults() {
   }, [pending?.sent, pending?.matched]);
   const save = async () => {
     if (await call("lymow", "set_task_config", changed, t("Mowing defaults saved"))) {
-      setPending({ sent: changed, matched: false });
+      setPending({ sent: changed, matched: false, after: receivedAt });
       call("lymow", "query_map"); // ask for the mower's own copy to confirm against
     }
   };

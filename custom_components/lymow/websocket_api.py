@@ -168,6 +168,7 @@ def _schedule(sched: Any) -> dict[str, Any] | None:
 _GUARDED = (
     ("map", "map", {}),
     ("run_time_config", "map", {}),  # also a map-sensor attribute
+    ("map_received_at", "map", None),
     ("schedules", "schedules", None),
     ("backups", "backup_maps", []),
 )
@@ -203,6 +204,8 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
         "schedules": None if schedules is None else [row for s in schedules if (row := _schedule(s))],
         "backups": [row for b in data.get("backupMapList") or [] if (row := _backup(b))],
         "online": data.get("deviceState") != "offline",
+        # When the mower last sent a map reply (epoch s), for confirming edits.
+        "map_received_at": data.get("mapReceivedAt"),
     }
 
 

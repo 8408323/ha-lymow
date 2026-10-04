@@ -156,6 +156,8 @@ export interface Snapshot {
   schedules: Schedule[] | null;
   backups: Backup[];
   online: boolean;
+  /** Epoch seconds of the mower's latest map reply. */
+  map_received_at?: number | null;
 }
 
 const EMPTY_GRACE_MS = 60000;

@@ -80,8 +80,7 @@ export function MapView() {
   const [showTrail, setShowTrail] = useStored("lymow_trail", true);
   const [sheetOpen, setSheetOpen] = useState(true);
   const trail = useLiveTrail(map);
-  const latest = useRef({ dirty, focus, editPts, editBase });
-  latest.current = { dirty, focus, editPts, editBase };
+  const latest = useRef({ dirty, focus, editPts, editBase, pendingSave: false, discarded: false });
   useEffect(() => {
     if (stash?.thing === device.thing) {
       const s = stash;
@@ -95,7 +94,8 @@ export function MapView() {
     }
     return () => {
       const l = latest.current;
-      if (l.dirty && l.focus && l.editPts) stash = { thing: device.thing, focus: l.focus, pts: l.editPts, base: l.editBase };
+      // A save still awaiting the mower is the only copy too: keep it for a retry.
+      if ((l.dirty || l.pendingSave) && !l.discarded && l.focus && l.editPts) stash = { thing: device.thing, focus: l.focus, pts: l.editPts, base: l.editBase };
     };
   }, []);
 
@@ -148,6 +148,7 @@ export function MapView() {
   const [awaitShape, setAwaitShape] = useState<string | null>(null);
   // Until the mower confirms a saved shape the draft is the only copy, so keep it guarded.
   const guarded = dirty || awaitShape !== null;
+  latest.current = { ...latest.current, dirty, focus, editPts, editBase, pendingSave: awaitShape !== null };
   const reportedShape = JSON.stringify(find(focus)?.polygon ?? null);
   useEffect(() => {
     if (awaitShape !== null && focus && reportedShape !== awaitShape) {
@@ -171,7 +172,7 @@ export function MapView() {
       guarded
         ? async () => {
             const ok = await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true });
-            if (ok) latest.current.dirty = false; // discarded on purpose: don't stash it
+            if (ok) latest.current.discarded = true; // discarded on purpose: don't stash it
             return ok;
           }
         : null,
@@ -344,7 +345,8 @@ function BrowsePanel(p: {
   const { call } = useMower();
   const ui = useUi();
   const zones = p.map.go_zones ?? [];
-  const sel = [...p.selected];
+  // Only zones still on the map: one deleted elsewhere must not be sent to the mower.
+  const sel = [...p.selected].filter((id) => zones.some((z) => z.hashId === id));
   const toggle = (id: string) => {
     const next = new Set(p.selected);
     next.has(id) ? next.delete(id) : next.add(id);
