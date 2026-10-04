@@ -15,6 +15,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
@@ -280,6 +281,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._mqtt = mqtt_client
         self.devices = devices
         self._mqtt_state: dict[str, dict[str, Any]] = {}
+        # No-go zone names live in HA only (the mower and app have no names for
+        # them), persisted per mower: {thing: {hashId: name}}.
+        self._nogo_names: dict[str, dict[str, str]] = {}
         # Track work status per device to detect important transitions.
         self._prev_work_status: dict[str, int] = {}
         # Track online state so on_mqtt_online only fires the persistent-notification
@@ -770,6 +774,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     **backup_fields,
                     **self._ota_state.get(thing, {}),
                     **self._mqtt_state.get(thing, {}),
+                    "nogoNames": dict(self._nogo_names.get(thing, {})),
                 }
                 _apply_config_defaults(merged)
                 result[thing] = merged
@@ -1074,19 +1079,28 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             new_device = {**self.data[thing_name], "mapData": new_map}
             self.async_set_updated_data({**self.data, thing_name: new_device})
 
-    async def async_rename_nogo_zone(self, thing_name: str, hash_id: str, name: str) -> None:
-        """Rename a no-go zone by hashId — mirrors async_rename_zone but targets PbMap.nogoZones."""
-        from .protocol import encode_rename_nogo_zone
+    def _nogo_store(self, thing_name: str) -> Store:
+        return Store(self.hass, 1, f"{DOMAIN}.nogo_names.{thing_name}")
 
-        await self._mqtt.async_publish_command(thing_name, encode_rename_nogo_zone(hash_id, name))
+    async def async_load_nogo_names(self) -> None:
+        """Load the HA-side no-go zone names for every mower of this entry."""
+        for device in self.devices:
+            thing = device["deviceThingName"]
+            stored = await self._nogo_store(thing).async_load()
+            if isinstance(stored, dict):
+                self._nogo_names[thing] = {str(k): v for k, v in stored.items() if isinstance(v, str) and v}
+
+    async def async_rename_nogo_zone(self, thing_name: str, hash_id: str, name: str) -> None:
+        """Name a no-go zone. Kept in HA storage: the mower doesn't keep no-go names
+        (the app can't name them), so nothing is sent. An empty name clears it."""
+        names = self._nogo_names.setdefault(thing_name, {})
+        if name.strip():
+            names[hash_id] = name.strip()
+        else:
+            names.pop(hash_id, None)
+        await self._nogo_store(thing_name).async_save(dict(names))
         if self.data and thing_name in self.data:
-            map_data = self.data[thing_name].get("mapData", {})
-            new_zones = [
-                {**z, "name": name} if z.get("hashId") == hash_id else z for z in map_data.get("nogoZones", [])
-            ]
-            new_map = {**map_data, "nogoZones": new_zones}
-            new_device = {**self.data[thing_name], "mapData": new_map}
-            self.async_set_updated_data({**self.data, thing_name: new_device})
+            self.async_set_updated_data({**self.data, thing_name: {**self.data[thing_name], "nogoNames": dict(names)}})
 
     async def async_rename_channel(self, thing_name: str, hash_id: str, name: str) -> None:
         """Assign a display name to a channel (HA-side only; no protobuf name field)."""

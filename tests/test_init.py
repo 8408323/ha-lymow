@@ -210,6 +210,7 @@ def _make_hass(www_registered: bool = False) -> MagicMock:
 def _make_coordinator() -> MagicMock:
     coord = MagicMock()
     coord.async_config_entry_first_refresh = AsyncMock()
+    coord.async_load_nogo_names = AsyncMock()
     coord.async_query_all_maps = AsyncMock()
     coord.async_query_all_schedules = AsyncMock()
     coord.async_query_all_robot_configs = AsyncMock()

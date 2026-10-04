@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
 from homeassistant.exceptions import ServiceValidationError, Unauthorized, UnknownUser
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -632,6 +633,7 @@ _BLE_DRIVE_SCHEMA = vol.Schema(
 _MOWERS_KEY = f"{DOMAIN}_mower_entities"
 # homeassistant.auth.permissions.const.POLICY_CONTROL
 POLICY_CONTROL = "control"
+POLICY_READ = "read"
 
 
 def _all_mowers(hass: HomeAssistant) -> dict[str, LymowMower]:
@@ -659,6 +661,21 @@ async def _permitted_mowers(hass: HomeAssistant, call: ServiceCall) -> dict[str,
         if eid in mowers and not user.permissions.check_entity(eid, POLICY_CONTROL):
             raise Unauthorized(context=call.context, entity_id=eid, permission=POLICY_CONTROL)
     return {eid: e for eid, e in mowers.items() if user.permissions.check_entity(eid, POLICY_CONTROL)}
+
+
+async def _require_camera_read(hass: HomeAssistant, call: ServiceCall, thing: str) -> None:
+    """A live video session shows the mower's camera: non-admins also need read
+    access to that camera entity, not just control of the mower."""
+    if call.context.user_id is None:
+        return
+    user = await hass.auth.async_get_user(call.context.user_id)
+    if user is None:
+        raise UnknownUser(context=call.context)
+    if user.is_admin:
+        return
+    camera = er.async_get(hass).async_get_entity_id("camera", DOMAIN, f"{thing}_camera")
+    if camera is None or not user.permissions.check_entity(camera, POLICY_READ):
+        raise Unauthorized(context=call.context, entity_id=camera, permission=POLICY_READ)
 
 
 def _owner_entry(hass: HomeAssistant, entity: LymowMower) -> ConfigEntry | None:
@@ -1045,6 +1062,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             if entity is None:
                 continue
             coordinator = entity.coordinator  # the entry that owns this mower
+            await _require_camera_read(hass, call, entity._thing_name)
             return await coordinator.async_start_video_session(entity._thing_name)
         raise ServiceValidationError(f"No matching Lymow entity in {entity_ids!r}")
 

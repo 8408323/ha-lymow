@@ -429,6 +429,7 @@ def test_stream_hides_parts_the_user_cannot_read() -> None:
             "mapData": {"goZones": [{"hashId": "z", "polygon": [{"x": 1.0, "y": 2.0}]}], "gpsOrigin": {"lat": 59.0}},
             "schedules": [{"hour": 1, "minute": 0}],
             "backupMapList": [{"file": "b"}],
+            "runTimeConfig": {"cutHeight": 50},
         }
     )
     hass = MagicMock()
@@ -440,7 +441,7 @@ def test_stream_hides_parts_the_user_cannot_read() -> None:
         er_get.return_value.async_get_entity_id.side_effect = lookup
         ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
     event = conn.send_message.call_args.args[0]["event"]
-    assert event["map"] == {} and event["backups"] == []
+    assert event["map"] == {} and event["backups"] == [] and event["run_time_config"] == {}
     assert event["schedules"][0]["minute"] == 0
 
 

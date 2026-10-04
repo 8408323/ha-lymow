@@ -32,9 +32,10 @@ export function SchedulesView() {
   // After a successful call, stay locked until the mower reports a list newer than
   // the one the call was based on (the null "querying" phase may be throttled away).
   const [awaitingAfter, setAwaitingAfter] = useState<unknown>(undefined);
+  // Also runs when the wait is armed: the reply can arrive before the service call returns.
   useEffect(() => {
     if (awaitingAfter !== undefined && snap?.schedules && snap.schedules !== awaitingAfter) setAwaitingAfter(undefined);
-  }, [snap?.schedules]);
+  }, [snap?.schedules, awaitingAfter]);
   useEffect(() => {
     if (awaitingAfter === undefined) return;
     const t = window.setTimeout(() => setAwaitingAfter(undefined), 30000); // never lock forever

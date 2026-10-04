@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components.lawn_mower import LawnMowerActivity
@@ -2875,3 +2875,50 @@ async def test_services_enforce_control_permission_for_non_admins() -> None:
     with pytest.raises(Unauthorized):
         await delete(call)
     assert coord.async_delete_zone.await_count == 2
+
+
+async def test_start_video_session_needs_camera_read_for_non_admins() -> None:
+    from types import SimpleNamespace
+
+    from homeassistant.exceptions import Unauthorized, UnknownUser
+    from lymow.const import DOMAIN
+
+    lawn_mower = sys.modules["lymow.lawn_mower"]
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_start_video_session = AsyncMock(return_value={"channelARN": "arn"})
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.m"
+
+    await async_setup_entry(hass, MagicMock(entry_id="entry-1"), _add)
+    may = lambda allowed: SimpleNamespace(  # noqa: E731
+        is_admin=False, permissions=SimpleNamespace(check_entity=lambda eid, p: eid in allowed)
+    )
+    users = {
+        "admin": SimpleNamespace(is_admin=True, permissions=None),
+        "viewer": may({"lawn_mower.m", "camera.cam"}),
+        "no_cam": may({"lawn_mower.m"}),
+    }
+    hass.auth.async_get_user = AsyncMock(side_effect=lambda uid: users.get(uid))
+    start = handlers["start_video_session"]
+    with patch.object(lawn_mower.er, "async_get", create=True) as er_get:
+        er_get.return_value.async_get_entity_id.return_value = "camera.cam"
+        for uid in (None, "admin", "viewer"):
+            assert await start(_make_call(["lawn_mower.m"], user_id=uid)) == {"channelARN": "arn"}
+        with pytest.raises(Unauthorized):
+            await start(_make_call(["lawn_mower.m"], user_id="no_cam"))
+        er_get.return_value.async_get_entity_id.return_value = None  # no camera entity
+        with pytest.raises(Unauthorized):
+            await start(_make_call(["lawn_mower.m"], user_id="viewer"))
+    users.pop("viewer")
+    hass.auth.async_get_user = AsyncMock(side_effect=[users["no_cam"], None])  # removed between checks
+    with pytest.raises(UnknownUser):
+        await start(_make_call(["lawn_mower.m"], user_id="no_cam"))

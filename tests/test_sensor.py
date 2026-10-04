@@ -1744,3 +1744,14 @@ def test_rtsp_url_sensor_is_diagnostic_and_disabled_by_default() -> None:
     assert e._attr_unique_id == f"{THING}_rtsp_url"
     assert e.entity_category == EntityCategory.DIAGNOSTIC
     assert e._attr_entity_registry_enabled_default is False
+
+
+def test_map_payload_overlays_ha_nogo_names() -> None:
+    from lymow.sensor import map_payload
+
+    data = {
+        "mapData": {"nogoZones": [{"hashId": "a", "name": "robot"}, {"hashId": "b"}, {"name": "no id"}]},
+        "nogoNames": {"a": "Flower bed"},
+    }
+    names = [z.get("name") for z in map_payload(data)["nogo_zones"]]
+    assert names == ["Flower bed", None, "no id"]

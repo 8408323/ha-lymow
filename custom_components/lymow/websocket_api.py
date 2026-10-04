@@ -165,7 +165,12 @@ def _schedule(sched: Any) -> dict[str, Any] | None:
 
 # Snapshot parts and the sensor whose read permission guards each (unique-id suffix),
 # so the stream never shows a non-admin more than their entity access allows.
-_GUARDED = (("map", "map", {}), ("schedules", "schedules", None), ("backups", "backup_maps", []))
+_GUARDED = (
+    ("map", "map", {}),
+    ("run_time_config", "map", {}),  # also a map-sensor attribute
+    ("schedules", "schedules", None),
+    ("backups", "backup_maps", []),
+)
 
 
 def _redact(hass: HomeAssistant, connection: websocket_api.ActiveConnection, thing: str, snap: dict) -> dict:

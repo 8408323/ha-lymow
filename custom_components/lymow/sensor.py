@@ -798,7 +798,11 @@ def map_payload(data: dict[str, Any]) -> dict[str, Any]:
         # MQTT delivers repeated partial map responses without full zone data
         attrs["go_zones"] = [z for z in _zones(map_data["goZones"]) if z.get("hashId")]
     if "nogoZones" in map_data:
-        attrs["nogo_zones"] = _zones(map_data["nogoZones"])
+        # Names given in HA (see async_rename_nogo_zone) win over anything the map carries.
+        names = data.get("nogoNames") or {}
+        attrs["nogo_zones"] = [
+            {**z, "name": names[z["hashId"]]} if z.get("hashId") in names else z for z in _zones(map_data["nogoZones"])
+        ]
     if "channels" in map_data:
         attrs["channels"] = _zones(map_data["channels"])
     if "gpsOrigin" in map_data:

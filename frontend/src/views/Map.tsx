@@ -90,7 +90,8 @@ export function MapView() {
     setVertex(null);
     setDirty(false);
     const z = find(f);
-    const handles = f.kind !== "ch" && z?.polygon ? simplify(z.polygon, MAX_HANDLES) : null;
+    // No-go outlines can't be changed yet: the mower ignores the edit (#290).
+    const handles = f.kind === "go" && z?.polygon ? simplify(z.polygon, MAX_HANDLES) : null;
     setEditPts(handles);
     setEditBase(handles && z?.polygon ? { orig: z.polygon, initial: handles } : null);
     setSheetOpen(true);
@@ -484,6 +485,9 @@ function EditPanel(p: {
         </Button>
       </div>
 
+      {focus.kind === "nogo" && (
+        <p className="ly-muted">{t("The mower doesn't accept changes to a no-go area's shape yet. Its name is kept in Home Assistant.")}</p>
+      )}
       {p.editPts && (
         <section className="ly-subsection">
           <h3>{t("Shape")}</h3>
@@ -537,6 +541,7 @@ const ZONE_TOGGLES = [
 
 function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any> | undefined }) {
   const t = useT();
+  const ui = useUi();
   const { call } = useMower();
   // Effective value: the zone's own config, else the global default the mower uses.
   const effective = (src: string, fallback: number): number => {
@@ -558,6 +563,15 @@ function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any
       setSaved(false);
     }
   }, [reported]);
+  // No matching reply (rejected, normalised or lost): keep the draft but let the user retry.
+  useEffect(() => {
+    if (!saved) return;
+    const id = window.setTimeout(() => {
+      setSaved(false);
+      ui.toast(t("The mower hasn't confirmed these settings yet. Apply again to retry."), "bad");
+    }, 20000);
+    return () => window.clearTimeout(id);
+  }, [saved]);
   return (
     <section className="ly-subsection">
       <h3>{t("Mowing settings for this zone")}</h3>

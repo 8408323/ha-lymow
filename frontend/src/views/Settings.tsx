@@ -77,15 +77,18 @@ function MowingDefaults() {
     }),
     [JSON.stringify(ms)],
   );
-  // Mirror the mower until the user edits; a late map update must not wipe a draft.
-  const [draft, setDraft] = useState<typeof initial | null>(null);
-  const v = draft ?? initial;
-  // Once the mower reports what was saved, go back to mirroring it.
+  // Only the fields the user touched: everything else keeps mirroring the mower, so
+  // values arriving after an edit (or fallbacks shown before the first map reply)
+  // are never sent back as if the user had chosen them.
+  const [edits, setEdits] = useState<Partial<typeof initial>>({});
+  const v = { ...initial, ...edits };
+  // Drop edits the mower now reports (saved, or set the same elsewhere).
   useEffect(() => {
-    if (draft && JSON.stringify(draft) === JSON.stringify(initial)) setDraft(null);
+    const left = Object.fromEntries(Object.entries(edits).filter(([k, val]) => val !== (initial as any)[k]));
+    if (Object.keys(left).length !== Object.keys(edits).length) setEdits(left);
   }, [initial]);
-  const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setDraft({ ...v, [k]: val });
-  const changed = Object.fromEntries(Object.entries(v).filter(([k, val]) => val !== (initial as any)[k]));
+  const set = <K extends keyof typeof v>(k: K, val: (typeof v)[K]) => setEdits({ ...edits, [k]: val });
+  const changed = Object.fromEntries(Object.entries(edits).filter(([k, val]) => val !== (initial as any)[k]));
 
   return (
     <Card title={t("Mowing defaults")} icon="mdi:robot-mower-outline" className="ly-card--wide">
@@ -170,7 +173,7 @@ function MowingDefaults() {
         <Button variant="primary" icon="mdi:check" disabled={!Object.keys(changed).length} onClick={() => call("lymow", "set_task_config", changed, t("Mowing defaults saved"))}>
           {t("Save changes")}
         </Button>
-        <Button variant="ghost" icon="mdi:undo" disabled={!Object.keys(changed).length} onClick={() => setDraft(null)}>
+        <Button variant="ghost" icon="mdi:undo" disabled={!Object.keys(changed).length} onClick={() => setEdits({})}>
           {t("Discard")}
         </Button>
         <span className="ly-spacer" />

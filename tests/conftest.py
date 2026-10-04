@@ -222,6 +222,23 @@ except ImportError:
     _ha_helpers = types.ModuleType("homeassistant.helpers")
     sys.modules.setdefault("homeassistant.helpers", _ha_helpers)
 
+    # ── homeassistant.helpers.storage — in-memory Store keyed by storage key ─
+    _ha_storage = types.ModuleType("homeassistant.helpers.storage")
+    _ha_storage.MEMORY = {}  # type: ignore[attr-defined]
+
+    class _Store:
+        def __init__(self, hass, version, key):
+            self.key = key
+
+        async def async_load(self):
+            return _ha_storage.MEMORY.get(self.key)
+
+        async def async_save(self, data):
+            _ha_storage.MEMORY[self.key] = data
+
+    _ha_storage.Store = _Store  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.storage", _ha_storage)
+
     # ── homeassistant.util (namespace) + dt subset ───────────────────────────
     import datetime as _dt
     import zoneinfo as _zi
