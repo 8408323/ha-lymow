@@ -308,9 +308,7 @@ class TestStartProxy:
         ent = _entity({"ipAddress": "192.168.1.85"})
         ent.hass = MagicMock()
         created_task = {}
-        ent.hass.async_create_background_task = (
-            lambda coro, name: created_task.setdefault("coro", coro) or "task"
-        )
+        ent.hass.async_create_background_task = lambda coro, name: created_task.setdefault("coro", coro) or "task"
 
         monkeypatch.setattr(camera, "_free_port", lambda: 45678)
 
