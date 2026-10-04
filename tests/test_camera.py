@@ -262,14 +262,14 @@ class TestOnCoordinatorUpdate:
         ent = camera.LymowCamera(coord, {"deviceThingName": THING})
         ent.hass = MagicMock()
         ent._on_coordinator_update()
-        ent.hass.async_create_task.assert_not_called()
+        ent.hass.async_create_background_task.assert_not_called()
 
     def test_starts_restart_when_no_proc(self):
         coord = _Coord({THING: {"ipAddress": "192.168.1.85"}})
         ent = camera.LymowCamera(coord, {"deviceThingName": THING})
         ent.hass = MagicMock()
         captured = {}
-        ent.hass.async_create_task = lambda coro: captured.setdefault("coro", coro)
+        ent.hass.async_create_background_task = lambda coro, name: captured.setdefault("coro", coro)
         ent._proxy_proc = None
         ent._on_coordinator_update()
         assert "coro" in captured
@@ -280,7 +280,7 @@ class TestOnCoordinatorUpdate:
         ent = camera.LymowCamera(coord, {"deviceThingName": THING})
         ent.hass = MagicMock()
         captured = {}
-        ent.hass.async_create_task = lambda coro: captured.setdefault("coro", coro)
+        ent.hass.async_create_background_task = lambda coro, name: captured.setdefault("coro", coro)
         ent._proxy_proc = MagicMock()
         ent._proxy_ip = "192.168.1.85"
         ent._on_coordinator_update()
@@ -294,7 +294,7 @@ class TestOnCoordinatorUpdate:
         ent._proxy_proc = MagicMock()
         ent._proxy_ip = "192.168.1.85"
         ent._on_coordinator_update()
-        ent.hass.async_create_task.assert_not_called()
+        ent.hass.async_create_background_task.assert_not_called()
 
 
 class TestStartProxy:
@@ -308,7 +308,7 @@ class TestStartProxy:
         ent = _entity({"ipAddress": "192.168.1.85"})
         ent.hass = MagicMock()
         created_task = {}
-        ent.hass.async_create_task = lambda coro: created_task.setdefault("coro", coro) or "task"
+        ent.hass.async_create_background_task = lambda coro, name: created_task.setdefault("coro", coro) or "task"
 
         monkeypatch.setattr(camera, "_free_port", lambda: 45678)
 
@@ -342,7 +342,7 @@ class TestStartProxy:
         ent = _entity({"ipAddress": "192.168.1.85"})
         ent.hass = MagicMock()
         captured = {}
-        ent.hass.async_create_task = lambda coro: captured.setdefault("coro", coro) or "task"
+        ent.hass.async_create_background_task = lambda coro, name: captured.setdefault("coro", coro) or "task"
 
         monkeypatch.setattr(camera, "_free_port", lambda: 45679)
 
