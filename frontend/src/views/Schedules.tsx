@@ -36,9 +36,18 @@ export function SchedulesView() {
   // (add_schedule writes the whole list), so everything waits for the reply.
   const loading = !snap || snap.schedules === null;
   // Opened with the list still unknown (e.g. a lost reply while on another tab): ask again.
+  // Also when the first snapshot arrives after mount; once per unknown phase.
+  const asked = useRef(false);
+  const unknown = !!snap && snap.schedules === null && snap.online;
   useEffect(() => {
-    if (snap && snap.schedules === null && snap.online) call("lymow", "query_schedules");
-  }, []);
+    if (!unknown) {
+      asked.current = false;
+      return;
+    }
+    if (asked.current || awaitingAfter !== undefined) return;
+    asked.current = true;
+    call("lymow", "query_schedules");
+  }, [unknown]);
   // One schedule change at a time: each service call rewrites the mower's whole
   // list from the cache, so overlapping edits would undo each other. Controls stay
   // locked until the call returns and the mower has re-reported its schedules.

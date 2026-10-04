@@ -67,5 +67,8 @@ describe("geometry", () => {
     expect(isSimplePolygon([{ x: 0, y: 0 }, { x: 10, y: 10 }, { x: 10, y: 0 }, { x: 0, y: 10 }])).toBe(false); // bow tie
     expect(isSimplePolygon([{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 10, y: 0 }])).toBe(false); // collinear
     expect(isSimplePolygon([{ x: 0, y: 0 }, { x: 1, y: 1 }])).toBe(false);
+    expect(isSimplePolygon([...square, square[0]])).toBe(true); // closing duplicate
+    // vertex touching a non-adjacent edge
+    expect(isSimplePolygon([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 5, y: 0 }, { x: 0, y: 10 }])).toBe(false);
   });
 });

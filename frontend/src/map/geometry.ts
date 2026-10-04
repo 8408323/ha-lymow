@@ -55,7 +55,13 @@ export function centre(poly: Point[]): Point {
 }
 
 /** A usable boundary: non-zero area and no edge crossing a non-adjacent edge. */
-export function isSimplePolygon(poly: Point[]): boolean {
+export function isSimplePolygon(input: Point[]): boolean {
+  // Repeated consecutive points (robot outlines repeat the first point at the end)
+  // aren't edges.
+  const poly = input.filter((p, i) => {
+    const q = input[(i + 1) % input.length];
+    return input.length < 2 || p.x !== q.x || p.y !== q.y;
+  });
   const n = poly.length;
   if (n < 3 || area(poly) < 0.01) return false;
   const cross = (o: Point, a: Point, b: Point) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
@@ -65,6 +71,9 @@ export function isSimplePolygon(poly: Point[]): boolean {
       if (i === 0 && j === n - 1) continue; // shares a vertex with edge i
       const c = poly[j], d = poly[(j + 1) % n];
       if (cross(a, b, c) * cross(a, b, d) < 0 && cross(c, d, a) * cross(c, d, b) < 0) return false;
+      // Touching counts too: a vertex on (or overlapping along) a non-adjacent edge.
+      const eps = 1e-6;
+      if (distToSegment(c, a, b) < eps || distToSegment(d, a, b) < eps || distToSegment(a, c, d) < eps || distToSegment(b, c, d) < eps) return false;
     }
   }
   return true;

@@ -607,7 +607,7 @@ const ZONE_TOGGLES = [
 
 // Unapplied (or unconfirmed) zone settings outlive the view, like shape drafts:
 // leaving through HA's sidebar can't be vetoed.
-const zoneDrafts = new Map<string, { draft: Record<string, number | boolean>; saved: boolean }>();
+const zoneDrafts = new Map<string, { draft: Record<string, number | boolean>; saved: boolean; until?: number }>();
 /** Drop the kept settings draft of the zone being discarded (only that one). */
 function dropZoneDrafts(thing: string, zoneId: string | undefined) {
   if (zoneId) zoneDrafts.delete(`${thing}:${zoneId}`);
@@ -628,7 +628,7 @@ function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<st
   const [draft, setDraft] = useState<Record<string, number | boolean>>(kept?.draft ?? {});
   const [saved, setSaved] = useState(kept?.saved ?? false);
   useEffect(() => {
-    if (Object.keys(draft).length) zoneDrafts.set(draftKey, { draft, saved });
+    if (Object.keys(draft).length) zoneDrafts.set(draftKey, { draft, saved, until: zoneDrafts.get(draftKey)?.until });
     else zoneDrafts.delete(draftKey);
   }, [draft, saved]);
   const changed = Object.keys(draft).length > 0;
@@ -650,10 +650,12 @@ function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<st
   // No matching reply (rejected, normalised or lost): keep the draft but let the user retry.
   useEffect(() => {
     if (!saved) return;
+    // Absolute deadline kept with the draft, so time spent away counts.
+    const until = zoneDrafts.get(draftKey)?.until ?? Date.now() + 20000;
     const id = window.setTimeout(() => {
       setSaved(false);
       ui.toast(t("The mower hasn't confirmed these settings yet. Apply again to retry."), "bad");
-    }, 20000);
+    }, Math.max(0, until - Date.now()));
     return () => window.clearTimeout(id);
   }, [saved]);
   return (
@@ -697,7 +699,7 @@ function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<st
             // Recorded even if the view is gone by now, unless a newer draft replaced it.
             const cur = zoneDrafts.get(draftKey);
             if (!cur || JSON.stringify(cur.draft) === JSON.stringify(draft)) {
-              zoneDrafts.set(draftKey, { draft, saved: true });
+              zoneDrafts.set(draftKey, { draft, saved: true, until: Date.now() + 20000 });
               setSaved(true);
             }
           }
