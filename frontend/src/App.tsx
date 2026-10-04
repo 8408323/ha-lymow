@@ -61,6 +61,11 @@ function Shell({ narrow, route, host }: { narrow: boolean; route: Route; host: H
   const t = useT();
   const [devices, reloadDevices] = useDevices();
   const [thing, setThing] = useState<string>();
+  // Pin the first mower once the list loads, so a reload that reorders the list
+  // (the reloading mower is appended as held) doesn't switch to another one.
+  useEffect(() => {
+    if (!thing && devices?.length) setThing(devices[0].thing);
+  }, [devices]);
   const device = devices?.find((d) => d.thing === thing) ?? devices?.[0];
   const snap = useSnapshot(device?.thing);
   useEffect(() => {

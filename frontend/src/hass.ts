@@ -234,7 +234,8 @@ export function useSnapshot(thing: string | undefined): Snapshot | undefined {
         (s) => {
           if (!alive) return;
           setSnap(s);
-          if (s.gone) again();
+          // Access can be restored later; keep retrying (slowly) like a reload.
+          if (s.gone || s.unauthorized) again();
         },
         { type: "lymow/subscribe", thing },
       )

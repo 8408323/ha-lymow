@@ -319,6 +319,7 @@
  "Restore": "Palauta",
  "Restore backup map": "Palauta kartan varmuuskopio",
  "Restore “{name}”?": "Palautetaanko ”{name}”?",
+ "Restored your unsaved shape.": "Tallentamaton muoto palautettiin.",
  "Resume": "Jatka",
  "Resume threshold": "Jatkamisraja",
  "Resumed": "Jatketaan",

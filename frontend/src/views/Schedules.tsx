@@ -34,7 +34,8 @@ export function SchedulesView() {
   const [awaitingAfter, setAwaitingAfter] = useState<unknown>(undefined);
   // Also runs when the wait is armed: the reply can arrive before the service call returns.
   useEffect(() => {
-    if (awaitingAfter !== undefined && snap?.schedules && snap.schedules !== awaitingAfter) setAwaitingAfter(undefined);
+    // By content: every snapshot carries a fresh array, even when the schedules didn't change.
+    if (awaitingAfter !== undefined && snap?.schedules && JSON.stringify(snap.schedules) !== JSON.stringify(awaitingAfter)) setAwaitingAfter(undefined);
   }, [snap?.schedules, awaitingAfter]);
   useEffect(() => {
     if (awaitingAfter === undefined) return;

@@ -59,9 +59,13 @@ interface Focus {
   id: string;
 }
 
+// Unsaved shape kept when the panel is torn down (e.g. leaving via HA's sidebar,
+// which a custom panel can't veto); restored when the map opens again.
+let stash: { thing: string; focus: Focus; pts: Handle[]; base: { orig: Point[]; initial: Handle[] } | null } | null = null;
+
 export function MapView() {
   const t = useT();
-  const { snap } = useMower();
+  const { snap, device } = useMower();
   const ui = useUi();
   const map = snap?.map;
   const [mode, setMode] = useState<"browse" | "edit">("browse");
@@ -76,6 +80,24 @@ export function MapView() {
   const [showTrail, setShowTrail] = useStored("lymow_trail", true);
   const [sheetOpen, setSheetOpen] = useState(true);
   const trail = useLiveTrail(map);
+  const latest = useRef({ dirty, focus, editPts, editBase });
+  latest.current = { dirty, focus, editPts, editBase };
+  useEffect(() => {
+    if (stash?.thing === device.thing) {
+      const s = stash;
+      stash = null;
+      setMode("edit");
+      setFocus(s.focus);
+      setEditPts(s.pts);
+      setEditBase(s.base);
+      setDirty(true);
+      ui.toast(t("Restored your unsaved shape."));
+    }
+    return () => {
+      const l = latest.current;
+      if (l.dirty && l.focus && l.editPts) stash = { thing: device.thing, focus: l.focus, pts: l.editPts, base: l.editBase };
+    };
+  }, []);
 
   const go = map?.go_zones ?? [];
   const nogo = map?.nogo_zones ?? [];
@@ -145,7 +167,15 @@ export function MapView() {
 
   // Switching tabs would unmount the editor; ask first while a shape is dirty.
   useEffect(() => {
-    setLeaveGuard(guarded ? () => ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }) : null);
+    setLeaveGuard(
+      guarded
+        ? async () => {
+            const ok = await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true });
+            if (ok) latest.current.dirty = false; // discarded on purpose: don't stash it
+            return ok;
+          }
+        : null,
+    );
     return () => setLeaveGuard(null);
   }, [guarded]);
 

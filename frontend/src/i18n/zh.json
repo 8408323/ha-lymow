@@ -319,6 +319,7 @@
  "Restore": "恢复",
  "Restore backup map": "恢复地图备份",
  "Restore “{name}”?": "恢复“{name}”？",
+ "Restored your unsaved shape.": "已恢复未保存的形状。",
  "Resume": "继续",
  "Resume threshold": "续割阈值",
  "Resumed": "已继续",

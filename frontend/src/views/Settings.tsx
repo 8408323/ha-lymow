@@ -109,7 +109,7 @@ function MowingDefaults() {
     if (!pending) return;
     const id = window.setTimeout(() => (pending.matched ? setPending(null) : restore(pending.sent)), 30000);
     return () => window.clearTimeout(id);
-  }, [pending?.sent]);
+  }, [pending?.sent, pending?.matched]);
   const save = async () => {
     if (await call("lymow", "set_task_config", changed, t("Mowing defaults saved"))) {
       setPending({ sent: changed, matched: false });

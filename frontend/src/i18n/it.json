@@ -319,6 +319,7 @@
  "Restore": "Ripristina",
  "Restore backup map": "Ripristina backup mappa",
  "Restore “{name}”?": "Ripristinare «{name}»?",
+ "Restored your unsaved shape.": "La forma non salvata è stata ripristinata.",
  "Resume": "Riprendi",
  "Resume threshold": "Soglia di ripresa",
  "Resumed": "Ripreso",
