@@ -392,6 +392,7 @@
  "The mower is reconnecting. Try again in a moment.": "Leikkuri yhdistää uudelleen. Yritä hetken päästä uudelleen.",
  "The mower isn't reachable on your network. Try the Cloud view.": "Leikkuria ei tavoiteta kotiverkosta. Kokeile Pilvi-näkymää.",
  "The mower isn't reachable right now": "Leikkuriin ei saada juuri nyt yhteyttä",
+ "The mower reported a different shape than the one saved. Check it and save again.": "Leikkuri ilmoitti eri muodon kuin tallennettu. Tarkista se ja tallenna uudelleen.",
  "The mower stops mowing automatically until you add a new schedule.": "Leikkuri lopettaa automaattisen leikkuun, kunnes lisäät uuden aikataulun.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Leikkurin nykyinen kartta korvataan tällä varmuuskopiolla. Kieltoalueet eivät aina palaudu — tarkista ne kartalta ennen leikkuuta.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Kieltoalue poistetaan leikkurin kartalta. Kartan varmuuskopion palautus ei aina tuo kieltoalueita takaisin, joten poista se vain, jos olet varma.",

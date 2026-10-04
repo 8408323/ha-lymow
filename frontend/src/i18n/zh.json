@@ -392,6 +392,7 @@
  "The mower is reconnecting. Try again in a moment.": "割草机正在重新连接，请稍后再试。",
  "The mower isn't reachable on your network. Try the Cloud view.": "在你的网络中无法连接割草机。请尝试云端视图。",
  "The mower isn't reachable right now": "暂时无法连接割草机",
+ "The mower reported a different shape than the one saved. Check it and save again.": "割草机返回的形状与保存的不同。请检查后再次保存。",
  "The mower stops mowing automatically until you add a new schedule.": "在你添加新计划之前，割草机将不再自动割草。",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "割草机当前的地图将被此备份替换。禁区不一定会被恢复 — 割草前请在地图上检查。",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "该禁区将从割草机地图中移除。恢复地图备份不一定能找回禁区，请确认后再删除。",

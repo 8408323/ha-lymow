@@ -392,6 +392,7 @@
  "The mower is reconnecting. Try again in a moment.": "Il robot si sta riconnettendo. Riprova tra poco.",
  "The mower isn't reachable on your network. Try the Cloud view.": "Il robot non è raggiungibile sulla tua rete. Prova la vista Cloud.",
  "The mower isn't reachable right now": "Il robot non è raggiungibile al momento",
+ "The mower reported a different shape than the one saved. Check it and save again.": "Il robot ha riportato una forma diversa da quella salvata. Controllala e salva di nuovo.",
  "The mower stops mowing automatically until you add a new schedule.": "Il robot smette di tagliare in automatico finché non aggiungi una nuova programmazione.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "La mappa attuale del robot viene sostituita da questo backup. Le zone vietate non sempre vengono ripristinate — controllale sulla mappa prima di tagliare.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "La zona vietata viene rimossa dalla mappa del robot. Il ripristino di un backup non sempre recupera le zone vietate, quindi eliminala solo se sei sicuro.",

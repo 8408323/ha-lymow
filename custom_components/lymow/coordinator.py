@@ -1114,6 +1114,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     def _name_store(self, kind: str, thing: str) -> Store:
         # The thing name comes from the cloud and ends up in a .storage file name:
         # keep only safe characters and add a short hash so distinct names can't collide.
+        thing = str(thing)  # the device list is untrusted; never let a bad type break setup
         safe = re.sub(r"[^A-Za-z0-9_-]", "_", thing)[:64]
         digest = hashlib.sha256(thing.encode()).hexdigest()[:8]
         key = f"{DOMAIN}.{kind}_names.{safe}" if safe == thing else f"{DOMAIN}.{kind}_names.{safe}_{digest}"

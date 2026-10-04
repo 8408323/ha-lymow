@@ -4259,3 +4259,13 @@ async def test_name_store_key_is_safe_for_hostile_thing_names() -> None:
     assert "/" not in key and ".." not in key.split("channel_names.")[1].replace("_", "")
     assert key.startswith("lymow.channel_names.______etc_x_")
     storage.MEMORY.clear()
+
+
+@pytest.mark.asyncio
+async def test_name_store_tolerates_non_string_thing() -> None:
+    from homeassistant.helpers import storage
+
+    coord, _, _ = _make_coordinator(devices=[{"deviceThingName": 12345}])
+    await coord.async_load_names()  # must not raise during setup
+    assert coord._name_store("nogo", 12345) is not None
+    storage.MEMORY.clear()

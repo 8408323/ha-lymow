@@ -80,7 +80,8 @@ export function SchedulesView() {
           </>
         }
       >
-        {adding && !loading && <AddSchedule onDone={() => setAdding(false)} mutate={mutate} locked={locked} />}
+        {/* Kept while a refresh is loading, so a half-filled form isn't lost. */}
+        {adding && <AddSchedule onDone={() => setAdding(false)} mutate={mutate} locked={locked} />}
         {loading ? (
           <div className="ly-loading">
             <span className="ly-spinner" /> {t("Loading schedules from the mower…")}
@@ -140,7 +141,9 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
   const [repeat, setRepeat] = useState(true);
   const toggleDay = (d: number) => setDays(days.includes(d) ? days.filter((x) => x !== d) : [...days, d]);
   const toggleZone = (id: string) => setPicked(picked.includes(id) ? picked.filter((x) => x !== id) : [...picked, id]);
-  const allZones = picked.length === 0;
+  // Zones removed from the map since they were picked are dropped, not sent.
+  const live = picked.filter((id) => zones.some((z) => z.hashId === id));
+  const allZones = live.length === 0;
   return (
     <div className="ly-form">
       <Field label={t("Days")}>
@@ -183,7 +186,7 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
               ok = await call(
               "lymow",
               "add_schedule",
-              { hour, minute, day_of_week: days, repeated: repeat, disabled: false, zones: allZones ? zones.map((z) => z.hashId) : picked },
+              { hour, minute, day_of_week: days, repeated: repeat, disabled: false, zones: allZones ? zones.map((z) => z.hashId) : live },
               t("Schedule added"),
               );
               return ok;

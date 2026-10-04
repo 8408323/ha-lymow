@@ -392,6 +392,7 @@
  "The mower is reconnecting. Try again in a moment.": "La tondeuse se reconnecte. Réessayez dans un instant.",
  "The mower isn't reachable on your network. Try the Cloud view.": "La tondeuse est injoignable sur votre réseau. Essayez la vue Cloud.",
  "The mower isn't reachable right now": "La tondeuse est injoignable pour le moment",
+ "The mower reported a different shape than the one saved. Check it and save again.": "La tondeuse a renvoyé une forme différente de celle enregistrée. Vérifiez-la et enregistrez à nouveau.",
  "The mower stops mowing automatically until you add a new schedule.": "La tondeuse cesse de tondre automatiquement jusqu'à ce que vous ajoutiez une nouvelle planification.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "La carte actuelle de la tondeuse est remplacée par cette sauvegarde. Les zones interdites ne sont pas toujours restaurées — vérifiez-les sur la carte avant de tondre.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "La zone interdite est retirée de la carte de la tondeuse. Restaurer une sauvegarde ne ramène pas toujours les zones interdites : ne la supprimez que si vous en êtes sûr.",

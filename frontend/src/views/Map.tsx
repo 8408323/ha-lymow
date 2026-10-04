@@ -152,10 +152,18 @@ export function MapView() {
   const guarded = dirty || awaitShape !== null;
   latest.current = { ...latest.current, dirty, focus, editPts, editBase, pendingSave: awaitShape !== null };
   const reportedShape = JSON.stringify(find(focus)?.polygon ?? null);
+  const savedArea = useRef(0);
   useEffect(() => {
     if (awaitShape !== null && focus && reportedShape !== awaitShape) {
       setAwaitShape(null);
-      startEditShape(focus);
+      // The mower thins the outline a little, so compare areas, not points. A clearly
+      // different shape (normalised or changed elsewhere) keeps the draft for a retry.
+      const got = area(find(focus)?.polygon ?? []);
+      if (Math.abs(got - savedArea.current) <= savedArea.current * 0.03) startEditShape(focus);
+      else {
+        setDirty(true);
+        ui.toast(t("The mower reported a different shape than the one saved. Check it and save again."), "bad");
+      }
     }
   }, [reportedShape, awaitShape]); // also when armed: the reply can beat the service call
   useEffect(() => {
@@ -283,6 +291,7 @@ export function MapView() {
             onReset={() => startEditShape(focus)}
             awaiting={awaitShape !== null}
             onSaved={() => {
+              savedArea.current = area(outline ?? []);
               setAwaitShape(reportedShape);
               setDirty(false);
             }}

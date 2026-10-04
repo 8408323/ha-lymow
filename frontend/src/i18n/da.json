@@ -392,6 +392,7 @@
  "The mower is reconnecting. Try again in a moment.": "Robotten genopretter forbindelsen. Prøv igen om lidt.",
  "The mower isn't reachable on your network. Try the Cloud view.": "Plæneklipperen kan ikke nås på dit netværk. Prøv Sky-visningen.",
  "The mower isn't reachable right now": "Plæneklipperen kan ikke nås lige nu",
+ "The mower reported a different shape than the one saved. Check it and save again.": "Robotten rapporterede en anden form end den gemte. Tjek den og gem igen.",
  "The mower stops mowing automatically until you add a new schedule.": "Plæneklipperen holder op med at klippe automatisk, indtil du tilføjer en ny tidsplan.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Plæneklipperens nuværende kort erstattes af denne sikkerhedskopi. Forbudte områder gendannes ikke altid — tjek dem på kortet, før du klipper.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Det forbudte område fjernes fra plæneklipperens kort. En gendannet kortsikkerhedskopi bringer ikke altid forbudte områder tilbage, så slet det kun, hvis du er sikker.",

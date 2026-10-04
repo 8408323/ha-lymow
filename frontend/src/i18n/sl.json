@@ -392,6 +392,7 @@
  "The mower is reconnecting. Try again in a moment.": "Kosilnica se znova povezuje. Poskusite znova čez trenutek.",
  "The mower isn't reachable on your network. Try the Cloud view.": "Kosilnica v vašem omrežju ni dosegljiva. Poskusite pogled Oblak.",
  "The mower isn't reachable right now": "Kosilnica trenutno ni dosegljiva",
+ "The mower reported a different shape than the one saved. Check it and save again.": "Kosilnica je sporočila drugačno obliko od shranjene. Preverite jo in znova shranite.",
  "The mower stops mowing automatically until you add a new schedule.": "Kosilnica preneha samodejno kositi, dokler ne dodate novega urnika.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Trenutni zemljevid kosilnice bo nadomeščen s to varnostno kopijo. Prepovedana območja se ne obnovijo vedno — pred košnjo jih preverite na zemljevidu.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Prepovedano območje bo odstranjeno z zemljevida kosilnice. Obnova varnostne kopije zemljevida ne vrne vedno prepovedanih območij, zato ga izbrišite le, če ste prepričani.",

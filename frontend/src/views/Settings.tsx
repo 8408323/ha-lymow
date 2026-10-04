@@ -56,9 +56,14 @@ function LanguageCard() {
   );
 }
 
+// Pending default saves outlive the Settings view (per mower), so leaving before the
+// mower confirms still restores the edits if it never does.
+type PendingDefaults = { sent: Record<string, unknown>; matched: boolean; after: number; deadline: number };
+const pendingDefaults = new Map<string, PendingDefaults>();
+
 function MowingDefaults() {
   const t = useT();
-  const { snap, call } = useMower();
+  const { snap, call, device } = useMower();
   const ms = snap?.map.mowing_settings;
   const initial = useMemo(
     () => ({
@@ -95,7 +100,11 @@ function MowingDefaults() {
   const ui = useUi();
   // `after`: the map reply time at save. Only a newer reply from the mower counts,
   // not the coordinator's optimistic patch.
-  const [pending, setPending] = useState<{ sent: Record<string, unknown>; matched: boolean; after: number } | null>(null);
+  const [pending, setPending] = useState<PendingDefaults | null>(() => pendingDefaults.get(device.thing) ?? null);
+  useEffect(() => {
+    if (pending) pendingDefaults.set(device.thing, pending);
+    else pendingDefaults.delete(device.thing);
+  }, [pending]);
   const receivedAt = snap?.map_received_at ?? 0;
   const restore = (sent: Record<string, unknown>) => {
     setEdits((e) => ({ ...sent, ...e }));
@@ -110,12 +119,12 @@ function MowingDefaults() {
   }, [initial, pending, receivedAt]);
   useEffect(() => {
     if (!pending) return;
-    const id = window.setTimeout(() => (pending.matched ? setPending(null) : restore(pending.sent)), 30000);
+    const id = window.setTimeout(() => (pending.matched ? setPending(null) : restore(pending.sent)), Math.max(0, pending.deadline - Date.now()));
     return () => window.clearTimeout(id);
   }, [pending?.sent, pending?.matched]);
   const save = async () => {
     if (await call("lymow", "set_task_config", changed, t("Mowing defaults saved"))) {
-      setPending({ sent: changed, matched: false, after: receivedAt });
+      setPending({ sent: changed, matched: false, after: receivedAt, deadline: Date.now() + 30000 });
       call("lymow", "query_map"); // ask for the mower's own copy to confirm against
     }
   };

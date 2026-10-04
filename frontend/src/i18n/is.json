@@ -392,6 +392,7 @@
  "The mower is reconnecting. Try again in a moment.": "Sláttuvélin er að tengjast aftur. Reyndu aftur eftir smástund.",
  "The mower isn't reachable on your network. Try the Cloud view.": "Ekki næst í sláttuvélina á netinu þínu. Prófaðu Ský-sýnina.",
  "The mower isn't reachable right now": "Ekki næst í sláttuvélina eins og er",
+ "The mower reported a different shape than the one saved. Check it and save again.": "Sláttuvélin skilaði annarri lögun en þeirri sem var vistuð. Athugaðu hana og vistaðu aftur.",
  "The mower stops mowing automatically until you add a new schedule.": "Sláttuvélin hættir að slá sjálfvirkt þar til þú bætir við nýrri tímaáætlun.",
  "The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing.": "Núverandi korti sláttuvélarinnar er skipt út fyrir þetta afrit. Bannsvæði eru ekki alltaf endurheimt — athugaðu þau á kortinu áður en þú slærð.",
  "The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.": "Bannsvæðið er fjarlægt af korti sláttuvélarinnar. Endurheimt afrits af korti skilar bannsvæðum ekki alltaf aftur, svo eyddu því aðeins ef þú ert viss.",
