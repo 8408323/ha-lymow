@@ -132,20 +132,9 @@ class LymowAuth:
 
     async def login(self, username: str, password: str) -> dict[str, Any]:
         """Attempt login against all known regions, return tokens + region."""
-        # eu-west-1 client_id is confirmed; use it as fallback for regions where it
-        # hasn't been individually extracted yet (all regions share the same app)
-        fallback_client_id: str = REGION_CONFIG["eu-west-1"]["client_id"]  # type: ignore[assignment]
         for region in ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]:
-            cfg = REGION_CONFIG[region]
-            pool_id = cfg.get("user_pool_id")
-            if pool_id is None:
-                _LOGGER.debug("[%s] skipped — user_pool_id not configured", region)
-                continue
-            client_id: str = cfg.get("client_id") or fallback_client_id
             try:
-                result = await self._srp_login(username, password, region, pool_id, client_id)
-                result["region"] = region
-                return result
+                return await self.login_region(username, password, region)
             except Exception as exc:
                 _LOGGER.debug("[%s] login failed: %s", region, exc)
                 continue
@@ -153,12 +142,10 @@ class LymowAuth:
 
     async def login_region(self, username: str, password: str, region: str) -> dict[str, Any]:
         """Attempt login against a specific region (user-selected override)."""
-        fallback_client_id: str = REGION_CONFIG["eu-west-1"]["client_id"]  # type: ignore[assignment]
+        # Each region's Cognito pool has its own app client (APK bundle).
         cfg = REGION_CONFIG[region]
-        pool_id = cfg.get("user_pool_id")
-        if pool_id is None:
-            raise ValueError(f"Region {region} has no user_pool_id configured")
-        client_id: str = cfg.get("client_id") or fallback_client_id
+        pool_id: str = cfg["user_pool_id"]  # type: ignore[assignment]
+        client_id: str = cfg["client_id"]  # type: ignore[assignment]
         result = await self._srp_login(username, password, region, pool_id, client_id)
         result["region"] = region
         return result
