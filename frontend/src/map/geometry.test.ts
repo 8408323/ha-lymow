@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { area, labelPoint, niceLength, pathD, pointInPolygon, polylineLength, rotate, simplify } from "./geometry";
+import { area, expand, labelPoint, niceLength, pathD, pointInPolygon, polylineLength, rotate, simplify } from "./geometry";
 
 const square = [
   { x: 0, y: 0 },
@@ -45,5 +45,20 @@ describe("geometry", () => {
     expect(niceLength(3.2)).toBe(5);
     expect(niceLength(12)).toBe(20);
     expect(pathD([{ x: 1, y: 2 }], false)).toBe("M1.000,-2.000");
+  });
+
+  it("expand keeps original detail between untouched handles", () => {
+    const dense = Array.from({ length: 12 }, (_, i) => ({ x: Math.cos(i / 2), y: Math.sin(i / 2) + (i % 2) * 0.01 }));
+    const handles = simplify(dense, 4);
+    expect(expand(handles, dense, handles)).toEqual(dense.map((p) => ({ x: p.x, y: p.y })));
+    // Moving one handle straightens only its two edges.
+    const moved = handles.map((h, i) => (i === 0 ? { x: 9, y: 9 } : h));
+    const out = expand(moved, dense, handles);
+    expect(out[0]).toEqual({ x: 9, y: 9 });
+    expect(out.length).toBeGreaterThan(4);
+    expect(out.length).toBeLessThan(dense.length);
+    // Deleting a handle leaves the straight edge the editor showed.
+    const del = handles.filter((_, i) => i !== 1);
+    expect(expand(del, dense, handles).length).toBeLessThan(dense.length - 1);
   });
 });

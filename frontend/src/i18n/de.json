@@ -89,7 +89,7 @@
  "Docking": "Dockt an",
  "Done editing": "Bearbeitung fertig",
  "Drag the charging station ⚡ to move it.": "Ziehe die Ladestation ⚡, um sie zu verschieben.",
- "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {n} points for editing.": "Ziehe die Punkte, um die Form zu ändern. Tippe auf einen kleinen Punkt an einer Kante, um einen Punkt hinzuzufügen. Wähle einen Punkt aus und drücke Entf, um ihn zu entfernen. Der Umriss wird zum Bearbeiten auf {n} Punkte vereinfacht.",
+ "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. Edges you don't touch keep their full detail.": "Ziehe die Punkte, um die Form zu ändern. Tippe auf einen kleinen Punkt an einer Kante, um einen Punkt hinzuzufügen. Wähle einen Punkt aus und drücke Entf, um ihn zu entfernen. Kanten, die du nicht berührst, behalten alle Details.",
  "Drag the white points to reshape, tap the small dots on an edge to add a point.": "Ziehe die weißen Punkte, um die Form zu ändern, tippe auf die kleinen Punkte an einer Kante, um einen Punkt hinzuzufügen.",
  "Drive": "Fahren",
  "Drive the mower by hand over Bluetooth. Home Assistant (or a Bluetooth proxy) has to be within range of the mower.": "Fahre den Mäher per Bluetooth von Hand. Home Assistant (oder ein Bluetooth-Proxy) muss in Reichweite des Mähers sein.",

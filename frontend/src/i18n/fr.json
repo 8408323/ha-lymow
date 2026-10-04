@@ -89,7 +89,7 @@
  "Docking": "Retour à la station",
  "Done editing": "Terminer la modification",
  "Drag the charging station ⚡ to move it.": "Faites glisser la station de charge ⚡ pour la déplacer.",
- "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {n} points for editing.": "Faites glisser les points pour modifier la forme. Touchez un petit point sur un bord pour ajouter un point. Sélectionnez un point et appuyez sur Suppr pour le retirer. Le contour est simplifié à {n} points pour la modification.",
+ "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. Edges you don't touch keep their full detail.": "Faites glisser les points pour modifier la forme. Touchez un petit point sur un bord pour ajouter un point. Sélectionnez un point et appuyez sur Suppr pour le retirer. Les bords que vous ne touchez pas gardent tous leurs détails.",
  "Drag the white points to reshape, tap the small dots on an edge to add a point.": "Faites glisser les points blancs pour modifier la forme, touchez les petits points sur un bord pour ajouter un point.",
  "Drive": "Conduite",
  "Drive the mower by hand over Bluetooth. Home Assistant (or a Bluetooth proxy) has to be within range of the mower.": "Conduisez la tondeuse à la main via Bluetooth. Home Assistant (ou un proxy Bluetooth) doit être à portée de la tondeuse.",

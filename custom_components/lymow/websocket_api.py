@@ -166,6 +166,7 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
     devices = []
     for entry_id, coordinator in _coordinators(hass).items():
         reg_entries = er.async_entries_for_config_entry(registry, entry_id)
+        entry_devices = dr.async_entries_for_config_entry(dev_reg, entry_id)
         for device in coordinator.devices:
             thing = device["deviceThingName"]
             entities: dict[str, str] = {}
@@ -178,7 +179,7 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
             if not _can_read(connection, entities.get("mower")):
                 continue
             entities = {k: v for k, v in entities.items() if _can_read(connection, v)}
-            dev = dev_reg.async_get_device(identifiers={(DOMAIN, thing)})
+            dev = next((d for d in entry_devices if (DOMAIN, thing) in d.identifiers), None)
             devices.append(
                 {
                     "entry_id": entry_id,

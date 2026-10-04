@@ -89,7 +89,7 @@
  "Docking": "正在回充",
  "Done editing": "完成编辑",
  "Drag the charging station ⚡ to move it.": "拖动充电站 ⚡ 以移动它。",
- "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {n} points for editing.": "拖动点以改变形状。点按边上的小圆点可添加一个点。选中一个点并按 Delete 键可将其删除。编辑时轮廓简化为 {n} 个点。",
+ "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. Edges you don't touch keep their full detail.": "拖动点以改变形状。点按边上的小圆点可添加一个点。选中一个点并按 Delete 键可将其删除。未改动的边保留全部细节。",
  "Drag the white points to reshape, tap the small dots on an edge to add a point.": "拖动白色点改变形状，点按边上的小圆点可添加一个点。",
  "Drive": "驾驶",
  "Drive the mower by hand over Bluetooth. Home Assistant (or a Bluetooth proxy) has to be within range of the mower.": "通过蓝牙手动驾驶割草机。Home Assistant（或蓝牙代理）必须在割草机的范围内。",

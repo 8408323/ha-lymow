@@ -89,7 +89,7 @@
  "Docking": "Telakoituu",
  "Done editing": "Muokkaus valmis",
  "Drag the charging station ⚡ to move it.": "Siirrä latausasemaa ⚡ vetämällä.",
- "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {n} points for editing.": "Muuta muotoa vetämällä pisteitä. Lisää piste napauttamalla pientä täplää reunalla. Valitse piste ja poista se Delete-näppäimellä. Ääriviiva yksinkertaistetaan muokkausta varten {n} pisteeseen.",
+ "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. Edges you don't touch keep their full detail.": "Muuta muotoa vetämällä pisteitä. Lisää piste napauttamalla pientä täplää reunalla. Valitse piste ja poista se Delete-näppäimellä. Reunat, joihin et koske, säilyttävät kaikki yksityiskohdat.",
  "Drag the white points to reshape, tap the small dots on an edge to add a point.": "Muuta muotoa vetämällä valkoisia pisteitä, lisää piste napauttamalla reunan pieniä täpliä.",
  "Drive": "Aja",
  "Drive the mower by hand over Bluetooth. Home Assistant (or a Bluetooth proxy) has to be within range of the mower.": "Aja leikkuria käsin Bluetoothin kautta. Home Assistantin (tai Bluetooth-välityspalvelimen) on oltava leikkurin kantaman sisällä.",

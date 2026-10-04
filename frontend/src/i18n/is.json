@@ -89,7 +89,7 @@
  "Docking": "Leggur að",
  "Done editing": "Lokið við breytingar",
  "Drag the charging station ⚡ to move it.": "Dragðu hleðslustöðina ⚡ til að færa hana.",
- "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {n} points for editing.": "Dragðu punktana til að breyta lögun. Pikkaðu á lítinn depil á brún til að bæta við punkti. Veldu punkt og ýttu á Delete til að fjarlægja hann. Útlínan er einfölduð í {n} punkta til breytinga.",
+ "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. Edges you don't touch keep their full detail.": "Dragðu punktana til að breyta lögun. Pikkaðu á lítinn depil á brún til að bæta við punkti. Veldu punkt og ýttu á Delete til að fjarlægja hann. Brúnir sem þú snertir ekki halda öllum smáatriðum.",
  "Drag the white points to reshape, tap the small dots on an edge to add a point.": "Dragðu hvítu punktana til að breyta lögun, pikkaðu á litlu deplana á brún til að bæta við punkti.",
  "Drive": "Aka",
  "Drive the mower by hand over Bluetooth. Home Assistant (or a Bluetooth proxy) has to be within range of the mower.": "Aktu sláttuvélinni handvirkt yfir Bluetooth. Home Assistant (eða Bluetooth-proxy) þarf að vera innan drægni sláttuvélarinnar.",

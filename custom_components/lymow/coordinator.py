@@ -250,6 +250,9 @@ _OTA_TERMINAL_STATUSES = frozenset(
 # Merging zones may grow the area by at most this fraction (hull slack for zones
 # that share an edge); more means the zones are apart and the gap would be added.
 _MERGE_MAX_EXTRA_AREA = 0.05
+# Zones closer than this (metres) count as touching: mapped neighbours rarely
+# share an edge exactly.
+_MERGE_TOUCH_TOLERANCE_M = 0.3
 
 
 class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
@@ -2222,7 +2225,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         Raises ``HomeAssistantError`` if the map isn't loaded, fewer than 2 zones
         are requested, or any requested zone is missing from the cached map.
         """
-        from .geometry import merge_zone_polygons, polygon_area
+        from .geometry import merge_zone_polygons, polygon_area, polygons_touch
 
         if len(hash_ids) < 2:
             raise HomeAssistantError(f"async_merge_zones needs at least 2 zones, got {len(hash_ids)}")
@@ -2243,8 +2246,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # The merged outline is the convex hull: for zones that don't touch it would
         # also take in the ground between them (paths, beds, a house). Refuse unless
         # the hull adds little beyond the zones themselves.
+        # Every zone must also reach the others (directly or via a chain), so two
+        # long zones with a strip of lawn between them can't slip under the area check.
+        reached = {0}
+        frontier = [0]
+        while frontier:
+            i = frontier.pop()
+            for j in range(len(polygons)):
+                if j not in reached and polygons_touch(polygons[i], polygons[j], _MERGE_TOUCH_TOLERANCE_M):
+                    reached.add(j)
+                    frontier.append(j)
         inputs_area = sum(polygon_area(p) for p in polygons)
-        if polygon_area(merged_hull) > inputs_area * (1 + _MERGE_MAX_EXTRA_AREA):
+        if len(reached) < len(polygons) or polygon_area(merged_hull) > inputs_area * (1 + _MERGE_MAX_EXTRA_AREA):
             raise HomeAssistantError(
                 "These zones don't share an edge, so merging them would add the ground between them to the "
                 "mowing area. Merge only zones that touch."

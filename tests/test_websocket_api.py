@@ -112,14 +112,17 @@ def test_devices_maps_entities_by_unique_id_suffix() -> None:
         SimpleNamespace(unique_id="other_thing_battery", entity_id="sensor.other"),
         SimpleNamespace(unique_id=None, entity_id="sensor.none"),
     ]
-    dev = SimpleNamespace(id="dev1", name="Lawn", name_by_user="Front lawn")
+    dev = SimpleNamespace(
+        id="dev1", name="Lawn", name_by_user="Front lawn", identifiers={("lymow", "other"), ("lymow", THING)}
+    )
     conn = _connection()
     with (
         patch.object(ws.er, "async_get", create=True),
         patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=reg_entries),
-        patch.object(ws.dr, "async_get", create=True) as dr_get,
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True) as dr_entries,
     ):
-        dr_get.return_value.async_get_device.return_value = dev
+        dr_entries.return_value = [dev]
         ws.ws_devices(hass, conn, {"id": 1})
     result = conn.send_result.call_args.args[1]
     assert result == [
@@ -140,9 +143,10 @@ def test_devices_falls_back_to_api_name_without_device() -> None:
     with (
         patch.object(ws.er, "async_get", create=True),
         patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=[]),
-        patch.object(ws.dr, "async_get", create=True) as dr_get,
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True) as dr_entries,
     ):
-        dr_get.return_value.async_get_device.return_value = None
+        dr_entries.return_value = []
         ws.ws_devices(hass, conn, {"id": 1})
     device = conn.send_result.call_args.args[1][0]
     assert device["name"] == "Lawn"
@@ -194,9 +198,10 @@ def test_devices_hidden_from_users_without_read_access() -> None:
     with (
         patch.object(ws.er, "async_get", create=True),
         patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=reg_entries),
-        patch.object(ws.dr, "async_get", create=True) as dr_get,
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True) as dr_entries,
     ):
-        dr_get.return_value.async_get_device.return_value = None
+        dr_entries.return_value = []
         hidden = _connection(admin=False)
         ws.ws_devices(hass, hidden, {"id": 1})
         partial = _connection(admin=False, readable={"lawn_mower.lawn"})
@@ -246,9 +251,12 @@ def test_devices_prefers_live_name_after_rename() -> None:
     with (
         patch.object(ws.er, "async_get", create=True),
         patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=[]),
-        patch.object(ws.dr, "async_get", create=True) as dr_get,
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True) as dr_entries,
     ):
-        dr_get.return_value.async_get_device.return_value = SimpleNamespace(id="d", name="Old", name_by_user=None)
+        dr_entries.return_value = [
+            SimpleNamespace(id="d", name="Old", name_by_user=None, identifiers={("lymow", THING)})
+        ]
         ws.ws_devices(hass, conn, {"id": 1})
     assert conn.send_result.call_args.args[1][0]["name"] == "Renamed"
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from functools import partial
@@ -113,27 +114,37 @@ async def _remove_legacy_lovelace(hass: HomeAssistant) -> None:
         _LOGGER.debug("Could not clean up legacy Lymow Lovelace items (non-fatal)", exc_info=True)
 
 
+async def _async_init_panel(hass: HomeAssistant) -> None:
+    websocket_api.async_register(hass)
+    www_path = Path(__file__).parent / "www"
+    if www_path.is_dir():
+        await hass.http.async_register_static_paths(
+            [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
+        )
+        await _remove_legacy_lovelace(hass)
+        # Remember that the panel's JS is actually being served this run, so we
+        # only ever register the panel when its module_url resolves.
+        hass.data[_WWW_SERVED_KEY] = True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Once per HA run: serve www/ (the panel bundle), register the panel's
     # websocket commands, and remove resources left by the old Lovelace cards.
-    if not hass.data.get(_WWW_REGISTERED_KEY):
-        # Claim this before the first await: entries are set up concurrently at
-        # startup, and registering the static path twice would fail the second.
-        hass.data[_WWW_REGISTERED_KEY] = True
+    # Entries set up concurrently at startup share one future: the first runs the
+    # init, the others wait for (and fail with) its result. A failure releases the
+    # claim so a later setup retries.
+    if (init := hass.data.get(_WWW_REGISTERED_KEY)) is not None:
+        await init
+    else:
+        init = hass.data[_WWW_REGISTERED_KEY] = asyncio.get_running_loop().create_future()
         try:
-            websocket_api.async_register(hass)
-            www_path = Path(__file__).parent / "www"
-            if www_path.is_dir():
-                await hass.http.async_register_static_paths(
-                    [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
-                )
-                await _remove_legacy_lovelace(hass)
-                # Remember that the panel's JS is actually being served this run, so we
-                # only ever register the panel when its module_url resolves.
-                hass.data[_WWW_SERVED_KEY] = True
-        except Exception:
-            hass.data.pop(_WWW_REGISTERED_KEY, None)  # let the next setup retry
+            await _async_init_panel(hass)
+        except BaseException as err:
+            hass.data.pop(_WWW_REGISTERED_KEY, None)
+            init.set_exception(err)
+            init.exception()  # retrieved here; waiters still receive it
             raise
+        init.set_result(None)
 
     session = async_get_clientsession(hass)
     auth = LymowAuth(session)

@@ -24,6 +24,8 @@ interface Props {
   activeVertex?: number | null;
   onVertex?: (i: number | null) => void;
   onEditChange?: (pts: Point[]) => void;
+  /** Full outline drawn behind the handles (defaults to the handles themselves). */
+  editOutline?: Point[] | null;
   onPick?: (kind: Kind, hashId: string) => void;
   onBackground?: () => void;
   stationMovable?: boolean;
@@ -348,7 +350,7 @@ export function MapCanvas(props: Props) {
             )}
             {edit && edit.length > 1 && (
               <g className="m-edit">
-                <path d={pathD(edit)} className="m-edit__poly" />
+                <path d={pathD(props.editOutline ?? edit)} className="m-edit__poly" />
                 {edit.map((p, i) => {
                   const q = edit[(i + 1) % edit.length];
                   return <circle key={`m${i}`} cx={(p.x + q.x) / 2} cy={-(p.y + q.y) / 2} r={px(5)} className="m-edit__mid" data-handle={`m:${i}`} />;

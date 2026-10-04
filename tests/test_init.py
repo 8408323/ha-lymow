@@ -13,6 +13,7 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Minimal HA stubs so __init__.py can import without the HA stack
 # ---------------------------------------------------------------------------
+import asyncio
 import importlib.util
 import os
 import sys
@@ -194,7 +195,9 @@ def _make_hass(www_registered: bool = False) -> MagicMock:
     hass = MagicMock()
     hass.data = {}
     if www_registered:
-        hass.data[_WWW_REGISTERED_KEY] = True
+        done = asyncio.get_event_loop().create_future()
+        done.set_result(None)
+        hass.data[_WWW_REGISTERED_KEY] = done
     hass.http.async_register_static_paths = AsyncMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
@@ -496,7 +499,7 @@ async def test_async_setup_entry_registers_www_once() -> None:
 
     # www was not yet registered, so async_register_static_paths should have been called
     hass.http.async_register_static_paths.assert_awaited_once()
-    assert hass.data[_WWW_REGISTERED_KEY] is True
+    assert hass.data[_WWW_REGISTERED_KEY].done()
 
 
 async def test_async_setup_entry_skips_www_when_already_registered() -> None:
@@ -764,7 +767,7 @@ async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> No
     assert result is True
     hass.http.async_register_static_paths.assert_not_awaited()
     # The www-registered key is still set so we don't re-check the dir each setup.
-    assert hass.data[_WWW_REGISTERED_KEY] is True
+    assert hass.data[_WWW_REGISTERED_KEY].done()
     # No JS served → no panel registered (would be a broken sidebar entry).
     assert _PANEL_REGISTERED_KEY not in hass.data
 
@@ -878,4 +881,26 @@ async def test_www_registration_rolls_back_on_failure() -> None:
     entry = _make_entry()
     with pytest.raises(RuntimeError):
         await async_setup_entry(hass, entry)
+    assert _lymow._WWW_REGISTERED_KEY not in hass.data
+
+
+async def test_concurrent_setup_waits_for_shared_www_init() -> None:
+    """A second entry set up while the first is still initialising shares its result."""
+    hass = _make_hass(www_registered=False)
+    gate = asyncio.Event()
+
+    async def _slow(_paths):
+        await gate.wait()
+        raise RuntimeError("boom")
+
+    hass.http.async_register_static_paths = _slow
+    first = asyncio.ensure_future(async_setup_entry(hass, _make_entry()))
+    await asyncio.sleep(0)
+    second = asyncio.ensure_future(async_setup_entry(hass, _make_entry()))
+    await asyncio.sleep(0)
+    assert not second.done()  # waiting on the first, not skipping ahead
+    gate.set()
+    for task in (first, second):
+        with pytest.raises(RuntimeError):
+            await task
     assert _lymow._WWW_REGISTERED_KEY not in hass.data

@@ -65,6 +65,44 @@ def merge_zone_polygons(*polygons: list[dict[str, float]]) -> list[dict[str, flo
     return convex_hull(all_points)
 
 
+def _seg_dist(p: dict[str, float], a: dict[str, float], b: dict[str, float]) -> float:
+    dx, dy = b["x"] - a["x"], b["y"] - a["y"]
+    len2 = dx * dx + dy * dy
+    t = max(0.0, min(1.0, ((p["x"] - a["x"]) * dx + (p["y"] - a["y"]) * dy) / len2)) if len2 else 0.0
+    return math.hypot(p["x"] - (a["x"] + t * dx), p["y"] - (a["y"] + t * dy))
+
+
+def _segs_cross(a: dict[str, float], b: dict[str, float], c: dict[str, float], d: dict[str, float]) -> bool:
+    d1, d2 = _cross(a, b, c), _cross(a, b, d)
+    d3, d4 = _cross(c, d, a), _cross(c, d, b)
+    return d1 * d2 < 0 and d3 * d4 < 0
+
+
+def _inside(p: dict[str, float], poly: list[dict[str, float]]) -> bool:
+    inside = False
+    for i in range(len(poly)):
+        a, b = poly[i], poly[i - 1]
+        if (a["y"] > p["y"]) != (b["y"] > p["y"]) and p["x"] < (b["x"] - a["x"]) * (p["y"] - a["y"]) / (
+            b["y"] - a["y"]
+        ) + a["x"]:
+            inside = not inside
+    return inside
+
+
+def polygons_touch(a: list[dict[str, float]], b: list[dict[str, float]], tolerance: float) -> bool:
+    """Whether two polygons overlap or come within ``tolerance`` of each other."""
+    edges_a = [(a[i - 1], a[i]) for i in range(len(a))]
+    edges_b = [(b[i - 1], b[i]) for i in range(len(b))]
+    if any(_inside(p, b) for p in a) or any(_inside(p, a) for p in b):
+        return True
+    if any(_segs_cross(*ea, *eb) for ea in edges_a for eb in edges_b):
+        return True
+    # Disjoint: the closest approach is always between a vertex and an edge.
+    return any(_seg_dist(p, *e) <= tolerance for p in a for e in edges_b) or any(
+        _seg_dist(p, *e) <= tolerance for p in b for e in edges_a
+    )
+
+
 def polygon_area(polygon: list[dict[str, float]]) -> float:
     """Area of a simple polygon (shoelace), in the same squared units as its coordinates.
 

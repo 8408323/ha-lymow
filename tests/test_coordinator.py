@@ -4145,6 +4145,37 @@ async def test_async_merge_zones_refuses_zones_that_do_not_touch() -> None:
     mqtt.async_publish_command.assert_not_called()
 
 
+async def test_async_merge_zones_refuses_large_zones_with_a_strip_between() -> None:
+    """Two 100 m squares 1 m apart pass the 5 % area check; contact must still be required."""
+    zones = {
+        "goZones": [
+            {
+                "hashId": "alpha",
+                "polygon": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 100.0, "y": 0.0},
+                    {"x": 100.0, "y": 100.0},
+                    {"x": 0.0, "y": 100.0},
+                ],
+            },
+            {
+                "hashId": "beta",
+                "polygon": [
+                    {"x": 101.0, "y": 0.0},
+                    {"x": 201.0, "y": 0.0},
+                    {"x": 201.0, "y": 100.0},
+                    {"x": 101.0, "y": 100.0},
+                ],
+            },
+        ]
+    }
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": zones}}
+    with pytest.raises(HomeAssistantError, match="don't share an edge"):
+        await coord.async_merge_zones(THING, ["alpha", "beta"])
+    mqtt.async_publish_command.assert_not_called()
+
+
 async def test_async_set_zone_config_preserves_disabled_state() -> None:
     coord, mqtt, _ = _make_coordinator()
     coord.data = {THING: {"mapData": {"goZones": [{"hashId": "z1", "isEnabled": False}]}}}

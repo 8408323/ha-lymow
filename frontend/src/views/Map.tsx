@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { setLeaveGuard } from "../App";
 import type { MapData, Point, Zone } from "../hass";
-import { area, simplify } from "../map/geometry";
+import { area, expand, simplify, type Handle } from "../map/geometry";
 import { MapCanvas, type Kind, type LabelMode } from "../map/MapCanvas";
 import { useT } from "../i18n";
 import { useMower, useMowerEntity, zoneLabel } from "../mower";
@@ -67,7 +67,8 @@ export function MapView() {
   const [mode, setMode] = useState<"browse" | "edit">("browse");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [focus, setFocus] = useState<Focus | null>(null);
-  const [editPts, setEditPts] = useState<Point[] | null>(null);
+  const [editPts, setEditPts] = useState<Handle[] | null>(null);
+  const [editBase, setEditBase] = useState<{ orig: Point[]; initial: Handle[] } | null>(null);
   const [dirty, setDirty] = useState(false);
   const [vertex, setVertex] = useState<number | null>(null);
   const [rotation, setRotation] = useStored("lymow_rotation", 0);
@@ -82,13 +83,16 @@ export function MapView() {
   const find = (f: Focus | null): Zone | undefined =>
     f ? (f.kind === "go" ? go : f.kind === "nogo" ? nogo : channels).find((z) => z.hashId === f.id) : undefined;
   const focused = find(focus);
+  const outline = editPts && editBase ? expand(editPts, editBase.orig, editBase.initial) : editPts;
 
   const startEditShape = (f: Focus) => {
     setFocus(f);
     setVertex(null);
     setDirty(false);
     const z = find(f);
-    setEditPts(f.kind !== "ch" && z?.polygon ? simplify(z.polygon, MAX_HANDLES) : null);
+    const handles = f.kind !== "ch" && z?.polygon ? simplify(z.polygon, MAX_HANDLES) : null;
+    setEditPts(handles);
+    setEditBase(handles && z?.polygon ? { orig: z.polygon, initial: handles } : null);
     setSheetOpen(true);
   };
   const leaveFocus = () => {
@@ -99,7 +103,7 @@ export function MapView() {
   };
   // Back / Escape must not silently throw away a reshaped polygon.
   const requestLeave = async () => {
-    if (dirty && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
+    if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
     leaveFocus();
   };
   const exitEdit = () => {
@@ -118,6 +122,8 @@ export function MapView() {
   // After Save, wait for the mower's map reply before treating the shape as stored:
   // refresh the editor from the reported outline, or offer Save again if none comes.
   const [awaitShape, setAwaitShape] = useState<string | null>(null);
+  // Until the mower confirms a saved shape the draft is the only copy, so keep it guarded.
+  const guarded = dirty || awaitShape !== null;
   const reportedShape = JSON.stringify(find(focus)?.polygon ?? null);
   useEffect(() => {
     if (awaitShape !== null && focus && reportedShape !== awaitShape) {
@@ -137,9 +143,9 @@ export function MapView() {
 
   // Switching tabs would unmount the editor; ask first while a shape is dirty.
   useEffect(() => {
-    setLeaveGuard(dirty ? () => ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }) : null);
+    setLeaveGuard(guarded ? () => ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }) : null);
     return () => setLeaveGuard(null);
-  }, [dirty]);
+  }, [guarded]);
 
   // Keyboard: Esc steps back, Delete removes the selected vertex, E enters edit mode.
   const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
@@ -191,6 +197,7 @@ export function MapView() {
         selected={mode === "browse" ? selected : undefined}
         focused={focus?.id}
         edit={editPts}
+        editOutline={outline}
         activeVertex={vertex}
         onVertex={setVertex}
         onEditChange={(p) => {
@@ -240,6 +247,7 @@ export function MapView() {
             zone={focused}
             index={(focus.kind === "go" ? go : focus.kind === "nogo" ? nogo : channels).indexOf(focused)}
             editPts={editPts}
+            outline={outline}
             dirty={dirty}
             vertex={vertex}
             onDeleteVertex={deleteVertex}
@@ -419,6 +427,7 @@ function EditPanel(p: {
   zone: Zone;
   index: number;
   editPts: Point[] | null;
+  outline: Point[] | null;
   dirty: boolean;
   vertex: number | null;
   onDeleteVertex: () => void;
@@ -478,7 +487,7 @@ function EditPanel(p: {
         <section className="ly-subsection">
           <h3>{t("Shape")}</h3>
           <p className="ly-muted">
-            {t("Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {n} points for editing.", { n: p.editPts.length })}
+            {t("Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. Edges you don't touch keep their full detail.")}
           </p>
           <div className="ly-btnrow">
             <Button
@@ -486,7 +495,7 @@ function EditPanel(p: {
               icon="mdi:content-save-outline"
               disabled={!p.dirty}
               onClick={async () => {
-                const polygon = p.editPts!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
+                const polygon = p.outline!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
                 const ok = await call("lymow", focus.kind === "go" ? "update_zone_polygon" : "update_nogo_polygon", { [key]: zone.hashId, polygon }, t("Shape saved"));
                 if (ok) p.onSaved();
               }}

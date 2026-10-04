@@ -102,13 +102,16 @@ export function distToSegment(p: Point, a: Point, b: Point): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+/** An edit handle; `src` is its index in the original outline while it hasn't moved. */
+export type Handle = Point & { src?: number };
+
 /**
- * Reduce a polygon to at most `max` vertices, keeping the most significant ones
+ * Reduce a polygon to at most `max` handles, keeping the most significant vertices
  * (Visvalingam: repeatedly drop the vertex spanning the smallest triangle).
  * Robot outlines carry hundreds of points; editing needs a handful of handles.
  */
-export function simplify(poly: Point[], max: number): Point[] {
-  const pts = [...poly];
+export function simplify(poly: Point[], max: number): Handle[] {
+  const pts: Handle[] = poly.map((p, src) => ({ x: p.x, y: p.y, src }));
   const tri = (i: number) => {
     const a = pts[(i - 1 + pts.length) % pts.length];
     const b = pts[i];
@@ -128,6 +131,29 @@ export function simplify(poly: Point[], max: number): Point[] {
     pts.splice(minI, 1);
   }
   return pts;
+}
+
+/**
+ * The outline to save: between two neighbouring handles that are both untouched
+ * the original vertices come back, so editing one corner doesn't flatten the rest
+ * of the boundary. `initial` is the handle set the editor started from: a span
+ * that skips one of those had a handle deleted, and stays the straight edge shown.
+ */
+export function expand(handles: Handle[], orig: Point[], initial: Handle[]): Point[] {
+  const starts = new Set(initial.map((h) => h.src));
+  const out: Point[] = [];
+  handles.forEach((h, i) => {
+    out.push({ x: h.x, y: h.y });
+    const n = handles[(i + 1) % handles.length];
+    if (h.src === undefined || n.src === undefined) return;
+    const span: Point[] = [];
+    for (let k = (h.src + 1) % orig.length; k !== n.src; k = (k + 1) % orig.length) {
+      if (starts.has(k)) return;
+      span.push(orig[k]);
+    }
+    out.push(...span);
+  });
+  return out;
 }
 
 /** A "nice" scale-bar length (1/2/5 × 10ⁿ metres) close to `target` metres. */

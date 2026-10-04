@@ -89,7 +89,7 @@
  "Docking": "Dokker",
  "Done editing": "Ferdig med redigering",
  "Drag the charging station ⚡ to move it.": "Dra ladestasjonen ⚡ for å flytte den.",
- "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {n} points for editing.": "Dra punktene for å endre formen. Trykk på en liten prikk på en kant for å legge til et punkt. Velg et punkt og trykk Delete for å fjerne det. Omrisset forenkles til {n} punkter under redigering.",
+ "Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. Edges you don't touch keep their full detail.": "Dra punktene for å endre formen. Trykk på en liten prikk på en kant for å legge til et punkt. Velg et punkt og trykk Delete for å fjerne det. Kanter du ikke rører, beholder alle detaljer.",
  "Drag the white points to reshape, tap the small dots on an edge to add a point.": "Dra de hvite punktene for å endre formen, trykk på de små prikkene på en kant for å legge til et punkt.",
  "Drive": "Kjør",
  "Drive the mower by hand over Bluetooth. Home Assistant (or a Bluetooth proxy) has to be within range of the mower.": "Kjør klipperen manuelt over Bluetooth. Home Assistant (eller en Bluetooth-proxy) må være innen rekkevidde av klipperen.",
