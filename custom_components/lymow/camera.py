@@ -122,7 +122,8 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
         if not current_ip:
             return
         if self._proxy_proc is None or current_ip != self._proxy_ip:
-            self.hass.async_create_task(self._restart_proxy())
+            # background: HA's startup waits for normal tasks, and the proxy's reader never finishes
+            self.hass.async_create_background_task(self._restart_proxy(), "lymow_camera_proxy_restart")
 
     async def _restart_proxy(self) -> None:
         await self._stop_proxy()
@@ -171,7 +172,9 @@ class LymowCamera(CoordinatorEntity[LymowCoordinator], Camera):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
             )
-            self._ts_reader_task = self.hass.async_create_task(self._read_ffmpeg_stdout())
+            self._ts_reader_task = self.hass.async_create_background_task(
+                self._read_ffmpeg_stdout(), "lymow_camera_ffmpeg_reader"
+            )
             _LOGGER.debug("Lymow MPEG-TS proxy started (pid=%s) for %s", self._proxy_proc.pid, rtsp_url)
         except Exception as exc:
             _LOGGER.warning("Lymow proxy could not start (%s); falling back to direct RTSP", exc)
