@@ -397,7 +397,7 @@ async def test_google_missing_identity_is_rejected() -> None:
         patch.object(_config_flow_mod, "LymowApiClient", return_value=client),
     ):
         result = await flow.async_step_google({OAUTH_RESULT: _callback(flow)})
-    assert result["errors"] == {"base": "invalid_oauth_code"}
+    assert result["errors"] == {"base": "cannot_connect"}
 
 
 @pytest.mark.parametrize("devices", [[], {"unexpected": "shape"}, [None]])
@@ -414,7 +414,7 @@ async def test_google_rejects_no_devices_or_malformed_device_response(devices: A
     if devices == []:
         assert result == {"type": "abort", "reason": "no_devices"}
     else:
-        assert result["errors"] == {"base": "invalid_oauth_code"}
+        assert result["errors"] == {"base": "cannot_connect"}
 
 
 async def test_google_invalid_id_token_uses_region_title() -> None:

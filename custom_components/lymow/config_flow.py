@@ -265,7 +265,7 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
             creds = await auth.get_aws_credentials(tokens["IdToken"], self._region)
             identity_id = creds.get("identity_id")
             if not isinstance(identity_id, str) or not identity_id:
-                return "invalid_oauth_code"
+                return "cannot_connect"
             client = LymowApiClient(
                 session=session,
                 access_token=tokens["AccessToken"],
@@ -284,7 +284,7 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
         if not isinstance(devices, list) or not all(
             isinstance(device, dict) and isinstance(device.get("deviceThingName"), str) for device in devices
         ):
-            return "invalid_oauth_code"
+            return "cannot_connect"
         if not devices:
             return self.async_abort(reason="no_devices")
 
