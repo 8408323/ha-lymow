@@ -15,10 +15,14 @@ from .const import (
     CONF_BLE_ADDRESS,
     CONF_PASSWORD,
     CONF_REGION,
+    CONF_RTSP_PATH,
+    CONF_RTSP_PORT,
     CONF_USERNAME,
     DOMAIN,
     REGION_AUTO,
     REGION_CHOICES,
+    RTSP_PORT,
+    normalize_rtsp_path,
 )
 
 STEP_USER_SCHEMA = vol.Schema(
@@ -83,12 +87,26 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class LymowOptionsFlow(OptionsFlow):
-    """Options: the robot's BLE MAC for local manual drive."""
+    """Options: the robot's BLE MAC for local manual drive and the camera RTSP path/port."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
-            return self.async_create_entry(data={CONF_BLE_ADDRESS: user_input.get(CONF_BLE_ADDRESS, "").strip()})
+            return self.async_create_entry(
+                data={
+                    CONF_BLE_ADDRESS: user_input.get(CONF_BLE_ADDRESS, "").strip(),
+                    CONF_RTSP_PATH: normalize_rtsp_path(user_input.get(CONF_RTSP_PATH)),
+                    CONF_RTSP_PORT: user_input.get(CONF_RTSP_PORT, RTSP_PORT),
+                }
+            )
 
-        current = self.config_entry.options.get(CONF_BLE_ADDRESS, "")
-        schema = vol.Schema({vol.Optional(CONF_BLE_ADDRESS, default=current): str})
+        options = self.config_entry.options
+        schema = vol.Schema(
+            {
+                vol.Optional(CONF_BLE_ADDRESS, default=options.get(CONF_BLE_ADDRESS, "")): str,
+                vol.Optional(CONF_RTSP_PATH, default=options.get(CONF_RTSP_PATH, "")): str,
+                vol.Optional(CONF_RTSP_PORT, default=options.get(CONF_RTSP_PORT, RTSP_PORT)): vol.All(
+                    vol.Coerce(int), vol.Range(min=1, max=65535)
+                ),
+            }
+        )
         return self.async_show_form(step_id="init", data_schema=schema)

@@ -122,7 +122,7 @@ def test_device_locked_none_when_missing() -> None:
     assert e.is_on is None
 
 
-async def test_async_setup_entry_creates_seven_per_device() -> None:
+async def test_async_setup_entry_creates_eight_per_device() -> None:
     coord = _make_coord({"isCharging": True, "isRecharging": False, "stolenStatus": False, "deviceLocked": False})
 
     hass = MagicMock()
@@ -134,21 +134,22 @@ async def test_async_setup_entry_creates_seven_per_device() -> None:
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
     # Exact count, not just type set — catches accidental duplicates.
-    assert len(added) == 7
+    assert len(added) == 8
     types = [type(e).__name__ for e in added]
     assert sorted(types) == [
         "ChargingBinarySensor",
         "DeviceLockedBinarySensor",
         "LteWorkingBinarySensor",
         "RechargingBinarySensor",
+        "RobotLiftedBinarySensor",
         "StolenBinarySensor",
         "TheftLockBinarySensor",
         "WifiWorkingBinarySensor",
     ]
 
 
-async def test_async_setup_entry_seven_per_device_with_two_devices() -> None:
-    """Two devices → exactly fourteen entities (no duplicates, no skips)."""
+async def test_async_setup_entry_eight_per_device_with_two_devices() -> None:
+    """Two devices → exactly sixteen entities (no duplicates, no skips)."""
     coord = _make_coord({"isCharging": True})
     coord.devices = [DEVICE, {"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
 
@@ -160,7 +161,7 @@ async def test_async_setup_entry_seven_per_device_with_two_devices() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
 
-    assert len(added) == 14
+    assert len(added) == 16
     thing_names = sorted({e._thing_name for e in added})
     assert thing_names == ["mower-001", "mower-002"]
 
@@ -229,3 +230,36 @@ async def test_async_setup_entry_no_devices() -> None:
     added: list = []
     await async_setup_entry(hass, entry, lambda entities: added.extend(entities))
     assert added == []
+
+
+# ---------------------------------------------------------------------------
+# RobotLiftedBinarySensor — derived from cliff/incline error codes
+# ---------------------------------------------------------------------------
+
+
+def test_robot_lifted_metadata_and_unknown_until_pboutput() -> None:
+    from homeassistant.components.binary_sensor import BinarySensorDeviceClass
+    from lymow.binary_sensor import RobotLiftedBinarySensor
+
+    e = RobotLiftedBinarySensor(_make_coord({}), DEVICE)  # no errorCodes yet
+    assert e._attr_unique_id == f"{THING}_robot_lifted"
+    assert e._attr_name == "Robot lifted or tilted"
+    assert e._attr_device_class == BinarySensorDeviceClass.PROBLEM
+    assert e.is_on is None
+
+
+def test_robot_lifted_on_for_cliff_or_incline_off_otherwise() -> None:
+    from lymow.binary_sensor import RobotLiftedBinarySensor
+
+    assert RobotLiftedBinarySensor(_make_coord({"errorCodes": [17]}), DEVICE).is_on is True  # cliff
+    assert RobotLiftedBinarySensor(_make_coord({"errorCodes": [1, 18]}), DEVICE).is_on is True  # incline (mixed)
+    assert RobotLiftedBinarySensor(_make_coord({"errorCodes": []}), DEVICE).is_on is False  # no errors
+    assert RobotLiftedBinarySensor(_make_coord({"errorCodes": [5, 6]}), DEVICE).is_on is False  # unrelated errors
+
+
+def test_lifted_error_codes_match_const_names() -> None:
+    # Drift guard: the two codes must stay the cliff/incline body errors.
+    from lymow.binary_sensor import _LIFTED_ERROR_CODES
+    from lymow.const import ERROR_NAMES
+
+    assert {ERROR_NAMES[c] for c in _LIFTED_ERROR_CODES} == {"ERROR_ROBOT_CLIFF", "ERROR_ROBOT_INCLINE"}

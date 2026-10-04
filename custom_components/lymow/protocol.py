@@ -455,6 +455,13 @@ def decode_map_response(pb_bytes: bytes) -> dict[str, Any]:
     if isinstance(gcc_raw, bytes) and len(gcc_raw) > 0:
         result["globalChannelConfig"] = decode_channel_config(gcc_raw)
 
+    # ---- Run-time config (f13) — PbRunTimeConfig, the robot's live mowing
+    # overrides (cut height / move speed / cut speed); the readback the
+    # QUERY_RUN_TIME_CONFIG reply (and map responses) carry.
+    rtc_raw = _first(content, _MAP_CONTENT_RUN_TIME_CONFIG)
+    if isinstance(rtc_raw, bytes) and len(rtc_raw) > 0:
+        result["runTimeConfig"] = decode_run_time_config(rtc_raw)
+
     return result
 
 
@@ -582,6 +589,23 @@ def decode_zone_config(data: bytes) -> dict[str, Any]:
             continue
         if fn in _ZONE_CONFIG_INT_NAMES and isinstance(val, int):
             out[_ZONE_CONFIG_INT_NAMES[fn]] = val
+    return out
+
+
+def decode_run_time_config(data: bytes) -> dict[str, Any]:
+    """Decode a PbRunTimeConfig sub-message (PbMap.f13).
+
+    Mirrors ``encode_set_run_time_config``: cutHeight (f1, int), moveSpeed
+    (f4, float32), cutSpeed (f6, int). Missing fields are simply absent.
+    """
+    out: dict[str, Any] = {}
+    for fn, _wt, val in _decode_fields(data):
+        if fn == 4:
+            out["moveSpeed"] = _decode_f32(val)
+        elif fn == 1 and isinstance(val, int):
+            out["cutHeight"] = val
+        elif fn == 6 and isinstance(val, int):
+            out["cutSpeed"] = val
     return out
 
 
@@ -1503,7 +1527,13 @@ def encode_set_task_config(**fields: Any) -> bytes:
     userCtrl=9 path). Channel fields (``_CHANNEL_CONFIG_FIELDS``) ride alongside
     in the sibling PbMap.f12 globalChannelConfig — exactly as the app's Save sends
     both snapshots together.
+
+    ``overwrite_existing`` selects the app's "Overwrite Custom" variant instead
+    (userCtrl **48**, GLOBAL_SETTING_Y): the global settings are also pushed down
+    onto every per-zone custom, discarding zone overrides. Same envelope shape,
+    only the userCtrl differs.
     """
+    overwrite_existing = bool(fields.pop("overwrite_existing", False))
 
     def _encode(field_no: int, kind: str, value: Any) -> bytes:
         if kind == "bool":
@@ -1525,15 +1555,16 @@ def encode_set_task_config(**fields: Any) -> bytes:
             chan_cfg += _encode(field_no, kind, value)
         else:
             raise ValueError(f"unknown task-config field: {name}")
-    from .const import USER_CTRL_GLOBAL_SETTING_N
+    from .const import USER_CTRL_GLOBAL_SETTING_N, USER_CTRL_GLOBAL_SETTING_Y
 
     pb_map = b""
     if zone_cfg:
         pb_map += _field_bytes(11, zone_cfg)  # PbMap.globalZoneConfig
     if chan_cfg:
         pb_map += _field_bytes(12, chan_cfg)  # PbMap.globalChannelConfig
+    user_ctrl = USER_CTRL_GLOBAL_SETTING_Y if overwrite_existing else USER_CTRL_GLOBAL_SETTING_N
     pb = _field_i32(2, PB_VERSION)
-    pb += _field_i32(5, USER_CTRL_GLOBAL_SETTING_N)
+    pb += _field_i32(5, user_ctrl)
     pb += _field_bytes(12, pb_map)  # PbInput.map (f12)
     return pb
 
@@ -1825,6 +1856,17 @@ def encode_set_device_settings(
     pb += _field_i32(5, USER_CTRL_SET_TASK_CONFIG)
     pb += _field_bytes(26, cfg)  # PbInput.taskConfig
     return pb
+
+
+def encode_app_connect_heartbeat(session_id: str) -> bytes:
+    """Encode the app-presence heartbeat the app sends to register as connected.
+
+    Wire layout from APK/Hermes `heartbeat` (fn #8981): PbInput{appConnect = field 7
+    = ConnectToggle.TOGGLE_CONNECTED (2), uuid = field 27 (string)}. No version field.
+    The robot only streams RTK diagnostics to a client that keeps sending this — so
+    HA must send it (plus the queries) to pull RTK detail without the app open.
+    """
+    return _field_i32(7, 2) + _field_bytes(27, session_id.encode())
 
 
 def encode_query_map(queryIndex: int = 0) -> bytes:

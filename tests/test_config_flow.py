@@ -240,3 +240,39 @@ async def test_options_flow_blank_address_when_omitted():
     flow = _make_options_flow()
     await flow.async_step_init({})
     assert flow.async_create_entry.call_args.kwargs["data"]["ble_address"] == ""
+
+
+async def test_options_flow_saves_rtsp_path_and_port():
+    flow = _make_options_flow()
+    await flow.async_step_init({"rtsp_path": "  h264ESVideoMain  ", "rtsp_port": 10023})
+    data = flow.async_create_entry.call_args.kwargs["data"]
+    assert data["rtsp_path"] == "h264ESVideoMain"
+    assert data["rtsp_port"] == 10023
+
+
+async def test_options_flow_strips_leading_slash_from_rtsp_path():
+    flow = _make_options_flow()
+    await flow.async_step_init({"rtsp_path": "  /h264ESVideoMain  "})
+    assert flow.async_create_entry.call_args.kwargs["data"]["rtsp_path"] == "h264ESVideoMain"
+
+
+async def test_options_flow_strips_multiple_leading_slashes_from_rtsp_path():
+    flow = _make_options_flow()
+    await flow.async_step_init({"rtsp_path": "  ///h264ESVideoMain  "})
+    assert flow.async_create_entry.call_args.kwargs["data"]["rtsp_path"] == "h264ESVideoMain"
+
+
+async def test_options_flow_rtsp_path_with_only_slashes_becomes_empty_string():
+    flow = _make_options_flow()
+    await flow.async_step_init({"rtsp_path": "  ///  "})
+    assert flow.async_create_entry.call_args.kwargs["data"]["rtsp_path"] == ""
+
+
+async def test_options_flow_rtsp_defaults_when_omitted():
+    from lymow.const import RTSP_PORT
+
+    flow = _make_options_flow()
+    await flow.async_step_init({})
+    data = flow.async_create_entry.call_args.kwargs["data"]
+    assert data["rtsp_path"] == ""
+    assert data["rtsp_port"] == RTSP_PORT

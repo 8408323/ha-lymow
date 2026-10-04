@@ -27,6 +27,7 @@ from .const import (
     DOMAIN,
     SERVICE_BLE_DRIVE,
     WORK_STATUS_DOCKED_GROUP,
+    WORK_STATUS_DOCKING,
     WORK_STATUS_ERROR_GROUP,
     WORK_STATUS_MOWING_GROUP,
     WORK_STATUS_OFFLINE,
@@ -482,6 +483,7 @@ _SET_TASK_CONFIG_SCHEMA = vol.Schema(
             for k in _TASK_CONFIG_SERVICE_FIELDS
         },
         **{vol.Optional(k): v for k, v in _TASK_CONFIG_IGNORED_FIELDS.items()},
+        vol.Optional("overwrite_existing"): cv.boolean,
     }
 )
 _SET_RUN_TIME_CONFIG_SCHEMA = vol.Schema(
@@ -575,6 +577,18 @@ _ADD_SCHEDULE_SCHEMA = vol.Schema(
         vol.Optional("disabled", default=False): cv.boolean,
     }
 )
+
+
+def _require_schedule_zones(zones: list[str]) -> None:
+    """A schedule needs >=1 zone and every zone ID must be non-blank (else the app hides it)."""
+    if not zones or any(not str(z).strip() for z in zones):
+        raise ServiceValidationError(
+            "A mowing schedule must target at least one zone, and every zone ID must be non-empty. "
+            "A zone-less (or blank-zone) schedule is stored by the mower but does not appear in the "
+            "app and would mow nothing."
+        )
+
+
 _DELETE_SCHEDULE_SCHEMA = vol.Schema(
     {
         vol.Required("entity_id"): cv.entity_ids,
@@ -960,6 +974,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_set_schedules(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
+        raw_schedules = call.data[_ATTR_SCHEDULES]
+        for s in raw_schedules:
+            _require_schedule_zones(s["zones"])
         entries = [
             {
                 "hour": s["hour"],
@@ -969,7 +986,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
                 "isRepeated": s["repeated"],
                 "isDisabled": s["disabled"],
             }
-            for s in call.data[_ATTR_SCHEDULES]
+            for s in raw_schedules
         ]
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
         for eid in entity_ids:
@@ -980,6 +997,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_add_schedule(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
+        _require_schedule_zones(call.data["zones"])
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -1078,6 +1096,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         fields = {proto: call.data[svc] for svc, proto in _TASK_CONFIG_SERVICE_FIELDS.items() if svc in call.data}
         if not fields:
             raise ServiceValidationError("set_task_config: provide at least one parameter to set.")
+        if "overwrite_existing" in call.data:
+            fields["overwrite_existing"] = call.data["overwrite_existing"]
         entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -1506,6 +1526,11 @@ class LymowMower(CoordinatorEntity[LymowCoordinator], LawnMowerEntity):
         if ws in WORK_STATUS_MOWING_GROUP:
             return LawnMowerActivity.MOWING
         if ws in WORK_STATUS_RETURNING_GROUP:
+            # The robot keeps workStatus=DOCKING(4) while it tops up; charging means
+            # it's home, not returning (#271). A real error status isn't in this group,
+            # so error handling below is unaffected.
+            if ws == WORK_STATUS_DOCKING and self._device_data.get("isCharging"):
+                return LawnMowerActivity.DOCKED
             return LawnMowerActivity.RETURNING
         if ws in WORK_STATUS_DOCKED_GROUP:
             return LawnMowerActivity.DOCKED

@@ -18,9 +18,21 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ERROR_DESCRIPTIONS, ERROR_REMEDIATION, MOW_END_TYPES, WARNING_DESCRIPTIONS
+from .const import (
+    CONF_RTSP_PATH,
+    CONF_RTSP_PORT,
+    DOMAIN,
+    ERROR_DESCRIPTIONS,
+    ERROR_REMEDIATION,
+    MOW_END_TYPES,
+    RTSP_PATH,
+    RTSP_PORT,
+    WARNING_DESCRIPTIONS,
+    normalize_rtsp_path,
+)
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
+from .geometry import polygon_area
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -484,8 +496,8 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
     LymowSensorDescription(
         key="last_clean_duration",
         name="Last mow duration",
-        value_key="lastCleanDurationMin",
-        native_unit_of_measurement=UnitOfTime.MINUTES,
+        value_key="lastCleanDurationSec",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.MEASUREMENT,
         icon="mdi:timer-outline",
@@ -518,8 +530,8 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
     LymowSensorDescription(
         key="total_clean_time",
         name="Total mow time",
-        value_key="totalCleanTimeMin",
-        native_unit_of_measurement=UnitOfTime.MINUTES,
+        value_key="totalCleanTimeSec",
+        native_unit_of_measurement=UnitOfTime.SECONDS,
         device_class=SensorDeviceClass.DURATION,
         state_class=SensorStateClass.TOTAL_INCREASING,
         icon="mdi:timer-sand",
@@ -611,6 +623,10 @@ SENSORS: tuple[LymowSensorDescription, ...] = (
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
+    # Resolve the camera RTSP path/port the same way the camera platform does, so
+    # the Local RTSP URL sensor advertises the endpoint actually in use.
+    rtsp_path = normalize_rtsp_path(entry.options.get(CONF_RTSP_PATH)) or RTSP_PATH
+    rtsp_port = entry.options.get(CONF_RTSP_PORT) or RTSP_PORT
     entities: list[SensorEntity] = []
     for device in coordinator.devices:
         for description in SENSORS:
@@ -628,6 +644,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entities.append(LymowLastCleanSensor(coordinator, device))
         entities.append(LymowRobotTimezoneSensor(coordinator, device))
         entities.append(LymowHeadlightWindowSensor(coordinator, device))
+        entities.append(LymowTotalMappedAreaSensor(coordinator, device))
+        entities.append(LymowRtspUrlSensor(coordinator, device, rtsp_path=rtsp_path, rtsp_port=rtsp_port))
     async_add_entities(entities)
 
 
@@ -823,6 +841,8 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
             attrs["mowing_settings"] = map_data["globalZoneConfig"]
         if "globalChannelConfig" in map_data:
             attrs["channel_config"] = map_data["globalChannelConfig"]
+        if "runTimeConfig" in map_data:
+            attrs["run_time_config"] = map_data["runTimeConfig"]
 
         path_data = (self.coordinator.data.get(self._thing_name) or {}).get("pathData")
         if path_data:
@@ -848,12 +868,24 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         return attrs
 
 
+def _schedule_to_local(sched: dict[str, Any]) -> dict[str, Any]:
+    """Copy a decoded schedule with hour/minute/dayOfWeek shifted from stored UTC to local (via timeZone)."""
+    out = dict(sched)
+    offset = int(sched.get("timeZone", 0) or 0)
+    day_delta, out["hour"] = divmod(int(sched.get("hour", 0)) + offset, 24)
+    days = sched.get("dayOfWeek")
+    if days:
+        out["dayOfWeek"] = [(int(d) + day_delta) % 7 for d in days]
+    return out
+
+
 class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     """Mowing schedules reported by the robot (USER_CTRL_QUERY_SCHEDULES).
 
-    State is the number of schedules. Each schedule's days, UTC time, target
+    State is the number of schedules. Each schedule's days, local time, target
     zones, repeat/disabled flags and id are exposed in the ``schedules``
-    attribute. None until the first reply arrives.
+    attribute (times converted from the stored UTC using ``timeZone``). None
+    until the first reply arrives.
     """
 
     _attr_has_entity_name = True
@@ -874,7 +906,7 @@ class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         schedules = (self.coordinator.data.get(self._thing_name) or {}).get("schedules") or []
-        return {"schedules": schedules}
+        return {"schedules": [_schedule_to_local(s) for s in schedules]}
 
 
 class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
@@ -989,6 +1021,82 @@ class LymowCleanHistoryDetailsSensor(CoordinatorEntity[LymowCoordinator], Sensor
             if val is not None:
                 attrs[attr] = val
         return attrs
+
+
+class LymowTotalMappedAreaSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Total mapped lawn — sum of the go-zone polygon areas (client-computed, ENU m²).
+
+    Distinct from the robot-reported area sensors (``map_area`` = ``mapAreaM2`` and
+    ``total_area_m2`` = ``totalTaskAreaM2``, the current task's area): this is a
+    static geometric sum over every mapped go-zone. Go-zone count is already the
+    ``Map`` sensor's state and mission/remaining time already have their own
+    sensors, so only this genuinely-new diagnostic is added.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:vector-square"
+    _attr_native_unit_of_measurement = UnitOfArea.SQUARE_METERS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._attr_unique_id = f"{self._thing_name}_total_mapped_area"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Total mapped area"
+
+    @property
+    def native_value(self) -> float | None:
+        map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData")
+        zones = map_data.get("goZones", []) if isinstance(map_data, dict) else []
+        areas = [polygon_area(z["polygon"]) for z in zones if z.get("hashId") and isinstance(z.get("polygon"), list)]
+        if not areas:
+            return None  # no go-zones yet (map not loaded) — unknown, not a spurious 0
+        # Leave display rounding to suggested_display_precision, per this module's convention.
+        return sum(areas)
+
+
+class LymowRtspUrlSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
+    """Local LAN RTSP stream URL for the robot's camera (for go2rtc / VLC / a card).
+
+    The camera entity already streams this locally; this exposes the raw
+    ``rtsp://<ip>:10022/<path>`` URL so it can be plugged into external viewers.
+    Diagnostic, disabled by default; None until the robot's IP is known.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:video-input-component"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: LymowCoordinator,
+        device: dict,
+        rtsp_path: str = RTSP_PATH,
+        rtsp_port: int = RTSP_PORT,
+    ) -> None:
+        super().__init__(coordinator)
+        self._thing_name = device["deviceThingName"]
+        self._rtsp_path = rtsp_path
+        self._rtsp_port = rtsp_port
+        self._attr_unique_id = f"{self._thing_name}_rtsp_url"
+        self._attr_device_info = lymow_device_info(self.coordinator, device)
+        self._attr_name = "Local RTSP URL"
+
+    @property
+    def native_value(self) -> str | None:
+        data = self.coordinator.data.get(self._thing_name) or {}
+        # Mirror the camera's IP resolution (camera._IP_KEYS) so this URL points at
+        # whatever address the camera actually streams from.
+        for key in ("ipAddress", "wifiIp", "ip_address"):
+            ip = data.get(key)
+            if isinstance(ip, str) and ip.strip():
+                return f"rtsp://{ip.strip()}:{self._rtsp_port}/{self._rtsp_path}"
+        return None
 
 
 class LymowBackupMapsSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):

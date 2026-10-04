@@ -14,6 +14,10 @@ from .const import DOMAIN
 from .coordinator import LymowCoordinator
 from .entity import lymow_device_info
 
+# The robot has no dedicated "picked up" flag; being carried or tilted past a
+# threshold mid-mow is reported as these body error codes (const.ERROR_NAMES).
+_LIFTED_ERROR_CODES = (17, 18)  # ERROR_ROBOT_CLIFF, ERROR_ROBOT_INCLINE
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -32,6 +36,7 @@ async def async_setup_entry(
                 WifiWorkingBinarySensor(coordinator, device),
                 LteWorkingBinarySensor(coordinator, device),
                 TheftLockBinarySensor(coordinator, device),
+                RobotLiftedBinarySensor(coordinator, device),
             ]
         )
     if entities:
@@ -160,3 +165,25 @@ class TheftLockBinarySensor(_LymowBinarySensor):
         if value is None:
             return None
         return not bool(value)
+
+
+class RobotLiftedBinarySensor(_LymowBinarySensor):
+    """On when the robot reports being lifted or tilted (cliff / incline error).
+
+    There is no dedicated "picked up" flag on the wire; the robot raises
+    ERROR_ROBOT_CLIFF / ERROR_ROBOT_INCLINE when its wheels leave the ground or
+    it tilts past a threshold — e.g. carried mid-mow — so this surfaces those
+    already-decoded error codes as a single automation-friendly boolean.
+    """
+
+    _attr_device_class = BinarySensorDeviceClass.PROBLEM
+
+    def __init__(self, coordinator: LymowCoordinator, device: dict) -> None:
+        super().__init__(coordinator, device, "Robot lifted or tilted", "robot_lifted")
+
+    @property
+    def is_on(self) -> bool | None:
+        codes = self._device_data.get("errorCodes")
+        if not isinstance(codes, list):
+            return None  # no pboutput yet -> unknown
+        return any(code in _LIFTED_ERROR_CODES for code in codes)

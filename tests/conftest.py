@@ -135,6 +135,9 @@ except ImportError:
     class _HomeAssistant:
         pass
 
+    class _Event:
+        pass
+
     class _ServiceCall:
         pass
 
@@ -147,6 +150,7 @@ except ImportError:
         ONLY = "only"
 
     _ha_core.HomeAssistant = _HomeAssistant  # type: ignore[attr-defined]
+    _ha_core.Event = _Event  # type: ignore[attr-defined]
     _ha_core.ServiceCall = _ServiceCall  # type: ignore[attr-defined]
     _ha_core.callback = _callback  # type: ignore[attr-defined]
     _ha_core.SupportsResponse = _SupportsResponse  # type: ignore[attr-defined]
@@ -264,6 +268,34 @@ except ImportError:
     _ha_uc.UpdateFailed = _UpdateFailed  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.update_coordinator", _ha_uc)
 
+    # ── homeassistant.helpers.event ───────────────────────────────────────────
+    _ha_ev = types.ModuleType("homeassistant.helpers.event")
+
+    def _async_track_time_interval(hass, action, interval, *args, **kwargs):
+        return lambda: None  # no-op unsubscribe; tests patch this when they assert on it
+
+    _ha_ev.async_track_time_interval = _async_track_time_interval  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.event", _ha_ev)
+
+    # ── homeassistant.helpers.restore_state ───────────────────────────────────
+    _ha_rs = types.ModuleType("homeassistant.helpers.restore_state")
+
+    class _RestoreEntity:
+        async def async_get_last_state(self):
+            return getattr(self, "_test_last_state", None)
+
+    _ha_rs.RestoreEntity = _RestoreEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.restore_state", _ha_rs)
+
+    # ── homeassistant.components.persistent_notification ──────────────────────
+    _ha_pn = types.ModuleType("homeassistant.components.persistent_notification")
+
+    def _pn_async_create(hass, message, title=None, notification_id=None):
+        getattr(hass, "_notifications", []).append((title, message, notification_id))
+
+    _ha_pn.async_create = _pn_async_create  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.persistent_notification", _ha_pn)
+
     # ── homeassistant.helpers.entity_platform ─────────────────────────────────
     _ha_ep = types.ModuleType("homeassistant.helpers.entity_platform")
     _ha_ep.AddEntitiesCallback = None  # type: ignore[attr-defined]
@@ -332,6 +364,7 @@ except ImportError:
     # ── homeassistant.components (namespace) ──────────────────────────────────
     _ha_comp = types.ModuleType("homeassistant.components")
     sys.modules.setdefault("homeassistant.components", _ha_comp)
+    _ha_comp.persistent_notification = _ha_pn  # type: ignore[attr-defined]
 
     # ── homeassistant.components.lawn_mower ───────────────────────────────────
     _ha_lm = types.ModuleType("homeassistant.components.lawn_mower")
@@ -442,6 +475,20 @@ except ImportError:
 
     _ha_select.SelectEntity = _SelectEntity  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.select", _ha_select)
+
+    # ── homeassistant.components.event ────────────────────────────────────────
+    _ha_event = types.ModuleType("homeassistant.components.event")
+
+    class _EventEntity:
+        async def async_added_to_hass(self):  # base hook the entity awaits via super()
+            pass
+
+        def _trigger_event(self, event_type, event_attributes=None):
+            self._last_event_type = event_type
+            self._last_event_attributes = event_attributes
+
+    _ha_event.EventEntity = _EventEntity  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.event", _ha_event)
 
     # ── homeassistant.components.text ─────────────────────────────────────────
     _ha_text = types.ModuleType("homeassistant.components.text")

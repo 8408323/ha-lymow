@@ -1041,6 +1041,27 @@ def test_decode_map_response_global_zone_and_channel_config() -> None:
     assert result["globalChannelConfig"] == {"detectMode": 2, "cutHeight": 60}
 
 
+def test_decode_run_time_config_round_trips_fields() -> None:
+    """PbRunTimeConfig: cutHeight(f1)/moveSpeed(f4,float)/cutSpeed(f6)."""
+    from lymow.protocol import _field_f32, _field_i32, decode_run_time_config
+
+    raw = _field_i32(1, 55) + _field_f32(4, 0.6) + _field_i32(6, 90)
+    out = decode_run_time_config(raw)
+    assert out["cutHeight"] == 55
+    assert out["cutSpeed"] == 90
+    assert pytest.approx(out["moveSpeed"], abs=1e-4) == 0.6
+
+
+def test_decode_map_response_run_time_config() -> None:
+    """decode_map_response surfaces PbMap.f13 runTimeConfig (the QUERY_RUN_TIME_CONFIG readback)."""
+    extra = _field_bytes(13, _field_i32(1, 45) + _field_f32(4, 0.4) + _field_i32(6, 80))
+    result = decode_map_response(_build_map_response_with_raw_extra(extra))
+    rtc = result["runTimeConfig"]
+    assert rtc["cutHeight"] == 45
+    assert rtc["cutSpeed"] == 80
+    assert pytest.approx(rtc["moveSpeed"], abs=1e-4) == 0.4
+
+
 def test_decode_map_response_charging_station_with_z_and_enu_altitude() -> None:
     """PbPose.f4 = z (altitude) and PbRobotLLACoords.f3 = altitude both surface."""
     extra = _field_bytes(
@@ -3147,6 +3168,26 @@ def test_encode_set_task_config_wraps_in_pbinput() -> None:
     assert struct.unpack("<f", struct.pack("<I", _first(cfg, 4)))[0] == pytest.approx(0.5, rel=1e-5)
 
 
+def test_encode_set_task_config_overwrite_existing_uses_uc48() -> None:
+    """overwrite_existing=True selects userCtrl=48 (GLOBAL_SETTING_Y, "Overwrite Custom")."""
+    from lymow.protocol import encode_set_task_config
+
+    pb = encode_set_task_config(perimeterMowLaps=2, overwrite_existing=True)
+    f = _decode_fields(pb)
+    assert _first(f, 5) == 48  # USER_CTRL_GLOBAL_SETTING_Y
+    # The flag itself must not leak into the config submessage.
+    cfg = _decode_fields(_first(_decode_fields(_first(f, 12)), 11))
+    assert _first(cfg, 10) == 2  # perimeterMowLaps still written
+
+
+def test_encode_set_task_config_defaults_to_keep_custom_uc49() -> None:
+    """Without overwrite_existing the "Keep Custom" userCtrl=49 is used."""
+    from lymow.protocol import encode_set_task_config
+
+    assert _first(_decode_fields(encode_set_task_config(perimeterMowLaps=2)), 5) == 49
+    assert _first(_decode_fields(encode_set_task_config(perimeterMowLaps=2, overwrite_existing=False)), 5) == 49
+
+
 def test_encode_set_task_config_skips_none_and_rejects_unknown() -> None:
     from lymow.protocol import encode_set_task_config
 
@@ -3615,6 +3656,18 @@ def test_encode_set_nogo_polygon_uses_nogo_field() -> None:
     bi = _decode_fields(_first(_decode_fields(_first(pb_map, 2)), 1))
     assert _first(bi, 3).decode() == "ngabcdef"
     assert _decode_map_polygon(_first(bi, 5)) == poly
+
+
+def test_encode_app_connect_heartbeat_registers_presence() -> None:
+    """App-presence heartbeat (PbInput{f7=TOGGLE_CONNECTED, f27=uuid}, no version) —
+    sending this is what unlocks the robot's RTK diagnostic stream for HA."""
+    from lymow.protocol import encode_app_connect_heartbeat
+
+    pb = encode_app_connect_heartbeat("sess123")
+    f = _decode_fields(pb)
+    assert _first(f, 7) == 2  # appConnect = ConnectToggle.TOGGLE_CONNECTED
+    assert _first(f, 27).decode() == "sess123"  # uuid
+    assert _first(f, 2) is None  # no version field, matching the app's heartbeat
 
 
 def test_encode_merge_zones_matches_app_wire_format() -> None:

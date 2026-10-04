@@ -62,6 +62,51 @@ Each mower device exposes the following entities:
 | Mow progress | % | ✅ |
 | Mow strip count | — | ❌ |
 
+### RTK diagnostics
+
+Detailed RTK GNSS health — location precision, per-band satellite counts and SNR, base-station status, data-error rate, differential age, LoRa bandwidth, antenna gain — is exposed as **Diagnostic** sensors. The robot only streams this detail to a client it sees as a connected app, so two switches control it:
+
+| Switch | What it does |
+|--------|--------------|
+| App presence | Registers HA as a connected app via a periodic heartbeat. Kept separate because registering presence may affect other robot behaviour. |
+| RTK diagnostics | Keeps the RTK sensors live **without the Lymow app open**. Requires App presence — turning it on enables presence automatically and tells you where the presence toggle is. |
+
+Both are **off by default** (they run a continuous MQTT poll). Turn on **RTK diagnostics** to stream live RTK data; turn it off — or turn off **App presence** — to stop.
+
+#### On a dashboard
+
+The switches and sensors are plain entities, so you can surface them on any dashboard. This example keeps the two toggles always visible and shows the live metrics only while RTK diagnostics is on — a card `visibility` condition hides the detail card when it's off:
+
+```yaml
+type: grid
+cards:
+  - type: heading
+    heading: RTK diagnostics
+    icon: mdi:satellite-uplink
+  - type: entities
+    entities:
+      - entity: switch.lymow_THING_app_presence
+        name: App presence
+      - entity: switch.lymow_THING_rtk_diagnostics
+        name: RTK diagnostics
+      - sensor.lymow_THING_rtk_status
+      - sensor.lymow_THING_rtk_satellites
+  - type: entities
+    title: Live RTK detail
+    visibility:
+      - condition: state
+        entity: switch.lymow_THING_rtk_diagnostics
+        state: "on"
+    entities:
+      - sensor.lymow_THING_location_precision
+      - sensor.lymow_THING_l1_snr
+      - sensor.lymow_THING_rtk_base_station
+      # … and the remaining rtk_* sensors (SNR/satellites per band, CW interference,
+      #   antenna gain, DC voltage, LoRa bandwidth, data error rate, differential age)
+```
+
+Replace `lymow_THING` with your mower's entity-ID prefix (see the device page — e.g. `sensor.<mower>_l1_snr`).
+
 ### Per-zone entities (one set per configured mowing zone)
 
 | Entity | Description |
@@ -120,6 +165,22 @@ title: My lawn                            # optional
 
 - **View mode** — tap a go-zone to select it, then *Mow selected*.
 - **Edit mode** — tap *Edit map*, tap a go-zone, then drag the vertex handles, tap an edge **+** to insert a vertex or a vertex's **✕** to delete one, and *Save* (writes via `lymow.update_zone_polygon`).
+
+## Screenshots
+
+| Dashboard & map | RTK diagnostics |
+|---|---|
+| ![Dashboard overview](docs/screenshots/dashboard-overview-cropped.png) | ![RTK diagnostics](docs/screenshots/rtk-diagnostics-cropped.png) |
+
+→ [See all screenshots](docs/SCREENSHOTS.md) (Settings, Backups, Schedules, integration page)
+
+## Example dashboard
+
+A complete dashboard — **Overview/map, Camera, Drive, Schedules, Backups, Settings, and Diagnostics** (with the RTK section) — is in [`examples/dashboard.yaml`](examples/dashboard.yaml). Every custom card it uses ships with the integration.
+
+To use it: **Settings → Dashboards → Add dashboard**, open the new dashboard, then **⋮ → Edit dashboard → ⋮ → Raw configuration editor**, and paste the file. Replace `your_mower` with your mower's entity-id prefix (check its device page, e.g. `sensor.<prefix>_map`).
+
+Two caveats: a few sensors (Wi-Fi RSSI, the RTK detail metrics, …) are **disabled by default** — enable them on the device page if a row shows *unavailable*; and **per-zone** entities depend on your own map, so they're left out of the example.
 
 ## Contributing
 

@@ -151,6 +151,45 @@ async def test_returning_to_docked_fires_done() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mow_done_fires_session_completed_with_summary() -> None:
+    """The mow-done transition fires lymow_session_completed with the session summary."""
+    from lymow.const import WORK_STATUS_CHARGING, WORK_STATUS_MOWING
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "workStatus": WORK_STATUS_MOWING,
+            "cleanReport": {"cleanAreaM2": 123.4, "cleanTimeMin": 42, "percent": 100},
+            "battery": 77,
+        }
+    }
+    coord._prev_work_status[THING] = WORK_STATUS_MOWING
+
+    coord.on_mqtt_state(THING, {"workStatus": WORK_STATUS_CHARGING})
+
+    fires = {c[0][0]: c[0][1] for c in coord.hass.bus.async_fire.call_args_list}
+    assert "lymow_session_completed" in fires
+    payload = fires["lymow_session_completed"]
+    assert payload["thing_name"] == THING
+    assert (payload["area_m2"], payload["duration_min"], payload["percent"], payload["end_battery_pct"]) == (
+        123.4,
+        42,
+        100,
+        77,
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_summary_falls_back_to_rest_and_mission_fields() -> None:
+    """Without a cleanReport, area/duration fall back to the REST/mission fields."""
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"lastCleanAreaM2": 50, "missionTimeMin": 12, "battery": 60}}
+    summary = coord._session_summary(THING)
+    assert (summary["area_m2"], summary["duration_min"], summary["end_battery_pct"]) == (50, 12, 60)
+    assert "percent" not in summary  # no report -> no completion %
+
+
+@pytest.mark.asyncio
 async def test_notification_ids_differ_between_error_and_done() -> None:
     """Error and done must use distinct notification_ids — HA dedupes by id."""
     from lymow.const import WORK_STATUS_CHARGING, WORK_STATUS_DOCKING, WORK_STATUS_ERROR

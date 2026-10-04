@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from lymow.geometry import convex_hull, merge_zone_polygons
+from lymow.geometry import convex_hull, merge_zone_polygons, polygon_area
 
 
 def _pt(x: float, y: float) -> dict[str, float]:
@@ -212,3 +212,40 @@ def test_split_polygon_areas_sum_to_original() -> None:
     original_area = _area(square)
     left, right = split_polygon(square, _pt(1, -1), _pt(3, 5))
     assert abs((_area(left) + _area(right)) - original_area) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# polygon_area
+# ---------------------------------------------------------------------------
+
+
+def test_polygon_area_unit_square() -> None:
+    square = [_pt(0, 0), _pt(1, 0), _pt(1, 1), _pt(0, 1)]
+    assert polygon_area(square) == 1.0
+
+
+def test_polygon_area_right_triangle() -> None:
+    assert polygon_area([_pt(0, 0), _pt(4, 0), _pt(0, 3)]) == 6.0
+
+
+def test_polygon_area_is_winding_independent() -> None:
+    ccw = [_pt(0, 0), _pt(2, 0), _pt(2, 2), _pt(0, 2)]
+    cw = list(reversed(ccw))
+    assert polygon_area(ccw) == polygon_area(cw) == 4.0
+
+
+def test_polygon_area_degenerate_is_zero() -> None:
+    assert polygon_area([]) == 0.0
+    assert polygon_area([_pt(0, 0), _pt(1, 1)]) == 0.0  # fewer than 3 vertices
+    assert polygon_area([_pt(0, 0), _pt(1, 1), _pt(2, 2)]) == 0.0  # collinear
+
+
+def test_polygon_area_tolerates_missing_coordinates() -> None:
+    # A hostile/partial decode where a vertex lost a key counts it as origin, no raise.
+    assert polygon_area([{"x": 0, "y": 0}, {"x": 2}, {"x": 2, "y": 2}, {"y": 2}]) >= 0.0
+
+
+def test_polygon_area_rejects_non_finite_coordinates() -> None:
+    # A malformed float32 decode can yield NaN/Inf; the area must stay finite (0.0), not propagate.
+    assert polygon_area([_pt(0, 0), _pt(float("nan"), 0), _pt(1, 1)]) == 0.0
+    assert polygon_area([_pt(0, 0), _pt(float("inf"), 0), _pt(1, 1)]) == 0.0

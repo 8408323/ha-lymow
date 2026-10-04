@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
@@ -18,8 +20,11 @@ from .bluetooth import LymowBleController
 from .const import (
     AUTH_REFRESH_MARGIN_SECONDS,
     DOMAIN,
+    EVENT_SESSION_COMPLETED,
     POLLING_INTERVAL,
+    RTK_DIAGNOSTIC_POLL_SECONDS,
     USER_CTRL_CLEAN,
+    USER_CTRL_DOCK,
     USER_CTRL_FLOOR_BACKUP,
     USER_CTRL_PAUSE,
     USER_CTRL_PAUSE_DOCK,
@@ -38,13 +43,16 @@ from .const import (
     WORK_STATUS_DOCKING,
     WORK_STATUS_ERROR_GROUP,
     WORK_STATUS_MOWING_GROUP,
+    WORK_STATUS_NONE,
     WORK_STATUS_PAUSE_DOCKING,
     WORK_STATUS_PAUSED_GROUP,
     WORK_STATUS_RETURNING_GROUP,
+    WORK_STATUS_WAITING,
 )
 from .mqtt import LymowMqttClient
 from .protocol import (
     decode_backup_map,
+    encode_app_connect_heartbeat,
     encode_complete_zone_partition,
     encode_delete_zone,
     encode_modify_zone_start,
@@ -292,6 +300,13 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # fired. Without this, restarting HA while the robot is already online
         # never triggers on_mqtt_online, so robotConfig/taskConfig stay unknown.
         self._startup_queried: set[str] = set()
+        # RTK diagnostics polling: while a device's switch is on, send the app-presence
+        # heartbeat + RTK queries on a fast timer so the robot streams RTK detail
+        # (it only streams to a client that keeps registering presence — see protocol).
+        self._presence_things: set[str] = set()
+        self._rtk_poll_things: set[str] = set()
+        self._rtk_poll_unsub: Any = None
+        self._rtk_session_id = uuid.uuid4().hex
         # Channel names have no protobuf field — store HA-side so renames survive
         # MQTT polls. Keyed by thing_name → {hashId → name}. Lost on HA restart;
         # the card's localStorage covers the browser-side persistence gap.
@@ -327,6 +342,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         failure on one transport can't leak the other's connection.
         """
         await super().async_shutdown()
+        if self._rtk_poll_unsub is not None:
+            self._rtk_poll_unsub()
+            self._rtk_poll_unsub = None
         try:
             await self._mqtt.disconnect()
         finally:
@@ -448,6 +466,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 notification_id=f"{DOMAIN}_{thing_name}_error",
             )
         elif prev_ws in WORK_STATUS_MOWING_GROUP | WORK_STATUS_RETURNING_GROUP and new_ws in WORK_STATUS_DOCKED_GROUP:
+            self.hass.bus.async_fire(
+                EVENT_SESSION_COMPLETED, {"device_name": device_label, **self._session_summary(thing_name)}
+            )
             self.hass.components.persistent_notification.async_create(
                 message=f"{device_label} has finished mowing and returned to the dock.",
                 title=f"Lymow — {device_label} done",
@@ -469,6 +490,35 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if new_ws in WORK_STATUS_MOWING_GROUP and not self._path_poll_pending.get(thing_name):
             self._path_poll_pending[thing_name] = True
             self.hass.async_create_task(self._async_poll_path(thing_name))
+
+    def _session_summary(self, thing_name: str) -> dict[str, Any]:
+        """Build the session-completed payload from the merged state at docking time.
+
+        End battery comes from the live ``battery`` (reliably current at docking);
+        area/duration prefer the end-of-mow ``cleanReport`` and fall back to the
+        REST last-clean / live mission-time fields, since the report may not land
+        in the same MQTT patch as the docked transition. A per-session covered-zone
+        list is not decoded yet, so it is intentionally omitted.
+        """
+        data = (self.data or {}).get(thing_name) or {}
+        report = data.get("cleanReport")
+        report = report if isinstance(report, dict) else {}
+        summary: dict[str, Any] = {"thing_name": thing_name}
+        area = report.get("cleanAreaM2")
+        if area is None:
+            area = data.get("lastCleanAreaM2")
+        if area is not None:
+            summary["area_m2"] = area
+        duration = report.get("cleanTimeMin")
+        if duration is None:
+            duration = data.get("missionTimeMin")
+        if duration is not None:
+            summary["duration_min"] = duration
+        if report.get("percent") is not None:
+            summary["percent"] = report["percent"]
+        if data.get("battery") is not None:
+            summary["end_battery_pct"] = data["battery"]
+        return summary
 
     def _check_rtk_guard(self, thing_name: str, patch: dict[str, Any]) -> None:
         """Auto-pause when RTK falls below user-configured threshold; auto-resume when it recovers.
@@ -740,11 +790,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         Response envelope:
             {"clean_history": [
-                {"clean_area": <num>, "clean_time": <int min>, "date": <epoch>,
+                {"clean_area": <num>, "clean_time": <int sec>, "date": <epoch>,
                  "used_battery": <int>, "percent": <0..1>, ...},
                 ...],
              "total_records": <int>,
-             "clean_summary": {"total_clean_time": <int min>, "total_clean_area": <num>}}
+             "clean_summary": {"total_clean_time": <int sec>, "total_clean_area": <num>}}
         """
         from datetime import UTC, datetime
 
@@ -766,7 +816,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         summary = history.get("clean_summary")
         if isinstance(summary, dict):
             if (t := summary.get("total_clean_time")) is not None:
-                out["totalCleanTimeMin"] = t
+                out["totalCleanTimeSec"] = t
             if (a := summary.get("total_clean_area")) is not None:
                 out["totalCleanHistoryAreaM2"] = a
 
@@ -784,7 +834,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if (area := last.get("clean_area")) is not None:
             out["lastCleanAreaM2"] = area
         if (t := last.get("clean_time")) is not None:
-            out["lastCleanDurationMin"] = t
+            out["lastCleanDurationSec"] = t
         if (epoch := last.get("date")) is not None:
             try:
                 out["lastCleanAt"] = datetime.fromtimestamp(int(epoch), tz=UTC)
@@ -937,8 +987,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
 
     async def async_dock(self, thing_name: str) -> None:
+        # Already charging → the mower is home; issuing RESUME_DOCK from a lingering
+        # PAUSE_DOCKING task would otherwise drive it back off the dock (#270).
+        if (self.data or {}).get(thing_name, {}).get("isCharging"):
+            return
         ws = self._current_work_status(thing_name)
-        ctrl = USER_CTRL_RESUME_DOCK if ws == WORK_STATUS_PAUSE_DOCKING else USER_CTRL_RECHARGE_DOCK
+        if ws == WORK_STATUS_PAUSE_DOCKING:
+            ctrl = USER_CTRL_RESUME_DOCK
+        elif ws in (WORK_STATUS_NONE, WORK_STATUS_WAITING):
+            # RECHARGE_DOCK (33) no-ops when idle with no active task; DOCK (2) sends it home.
+            ctrl = USER_CTRL_DOCK
+        else:
+            ctrl = USER_CTRL_RECHARGE_DOCK
         await self._mqtt.async_publish_command(thing_name, encode_userctrl(ctrl))
 
     async def async_resume(self, thing_name: str) -> None:
@@ -1151,14 +1211,48 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         await self.async_query_schedules(thing_name)
 
     async def async_set_task_config(self, thing_name: str, **fields: Any) -> None:
-        """Set global mowing settings (userCtrl=49 GLOBAL_SETTING, "Keep Custom").
+        """Set global mowing settings (GLOBAL_SETTING; userCtrl=49 "Keep Custom" / 48 "Overwrite Custom").
 
         Only the provided globalZoneConfig fields are sent; see
-        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names.
+        :data:`protocol._TASK_CONFIG_FIELDS` for the supported names. Pass
+        ``overwrite_existing=True`` for the "Overwrite Custom" variant (userCtrl=48),
+        which also resets per-zone customs to the new global values.
         """
-        from .protocol import encode_set_task_config
+        from .protocol import _TASK_CONFIG_FIELDS, encode_set_task_config
 
         await self._mqtt.async_publish_command(thing_name, encode_set_task_config(**fields))
+        updates = {k: v for k, v in fields.items() if v is not None and k in _TASK_CONFIG_FIELDS}
+        if updates:
+            self._optimistic_global_zone_config(thing_name, updates)
+        if fields.get("overwrite_existing"):
+            # "Overwrite Custom" also rewrites every zone's per-zone config; the
+            # optimistic patch above only covers the global defaults, so re-query
+            # the map to refresh the per-zone values the robot just reset.
+            self.hass.async_create_task(self.async_query_map(thing_name))
+
+    def _optimistic_global_zone_config(self, thing_name: str, updates: dict[str, Any]) -> None:
+        """Mirror written globalZoneConfig fields into cached state (immediate + poll-durable).
+
+        globalZoneConfig is only re-echoed on a full map query, so patch both the
+        live data (instant UI) and the MQTT-state cache the next REST poll rebuilds
+        from, so the value survives until the robot echoes it. Cached structures are
+        coerced to dicts first — a malformed decode must not turn a successful publish
+        into a failed service call.
+        """
+        # Poll-durable: only merge when a map already exists in the MQTT cache, so a
+        # partial mapData never wipes goZones on the next poll rebuild.
+        cached = self._mqtt_state.get(thing_name)
+        if isinstance(cached, dict) and isinstance(cached.get("mapData"), dict):
+            gzc = cached["mapData"].get("globalZoneConfig")
+            cached["mapData"]["globalZoneConfig"] = {**(gzc if isinstance(gzc, dict) else {}), **updates}
+        # Immediate: patch the live data so entities update now.
+        if self.data and thing_name in self.data:
+            existing = self.data[thing_name]
+            map_data = existing.get("mapData")
+            map_data = {**map_data} if isinstance(map_data, dict) else {}
+            gzc = map_data.get("globalZoneConfig")
+            map_data["globalZoneConfig"] = {**(gzc if isinstance(gzc, dict) else {}), **updates}
+            self.async_set_updated_data({**self.data, thing_name: {**existing, "mapData": map_data}})
 
     async def async_set_recharge_resume(
         self,
@@ -1405,6 +1499,61 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
     async def async_query_rtk_diagnostic_l2(self, thing_name: str) -> None:
         await self._publish_userctrl(thing_name, USER_CTRL_QUERY_RTK_DIAGNOSTIC_L2)
+
+    def is_presence_on(self, thing_name: str) -> bool:
+        return thing_name in self._presence_things
+
+    def set_presence(self, thing_name: str, enabled: bool) -> None:
+        """Start/stop the app-presence heartbeat for a device. Turning it off also
+        stops RTK polling, which can't work without presence."""
+        if enabled:
+            self._presence_things.add(thing_name)
+        else:
+            self._presence_things.discard(thing_name)
+            self._rtk_poll_things.discard(thing_name)  # RTK requires presence
+        self._ensure_poll_timer()
+
+    def is_rtk_polling(self, thing_name: str) -> bool:
+        return thing_name in self._rtk_poll_things
+
+    def set_rtk_polling(self, thing_name: str, enabled: bool) -> bool:
+        """Start/stop RTK diagnostic polling. Enabling it also enables presence (the
+        queries only work while the heartbeat registers an app). Returns True if
+        presence was newly enabled as a side effect, so the caller can notify."""
+        presence_added = False
+        if enabled:
+            self._rtk_poll_things.add(thing_name)
+            if thing_name not in self._presence_things:
+                self._presence_things.add(thing_name)
+                presence_added = True
+        else:
+            self._rtk_poll_things.discard(thing_name)
+        self._ensure_poll_timer()
+        return presence_added
+
+    def _ensure_poll_timer(self) -> None:
+        active = bool(self._presence_things or self._rtk_poll_things)
+        if active and self._rtk_poll_unsub is None:
+            self._rtk_poll_unsub = async_track_time_interval(
+                self.hass, self._rtk_poll_tick, timedelta(seconds=RTK_DIAGNOSTIC_POLL_SECONDS)
+            )
+        elif not active and self._rtk_poll_unsub is not None:
+            self._rtk_poll_unsub()
+            self._rtk_poll_unsub = None
+
+    @callback
+    def _rtk_poll_tick(self, _now: datetime) -> None:
+        for thing in self._presence_things | self._rtk_poll_things:
+            data = (self.data or {}).get(thing, {})
+            if _is_device_online(data) and self._mqtt.is_connected:
+                self.hass.async_create_task(self._rtk_poll_once(thing, thing in self._rtk_poll_things))
+
+    async def _rtk_poll_once(self, thing_name: str, query_rtk: bool) -> None:
+        """One cycle: register app presence; also query RTK L1+L2 when polling is on."""
+        await self._mqtt.async_publish_command(thing_name, encode_app_connect_heartbeat(self._rtk_session_id))
+        if query_rtk:
+            await self.async_query_rtk_diagnostic_l1(thing_name)
+            await self.async_query_rtk_diagnostic_l2(thing_name)
 
     async def async_update_zone_cut_height(self, thing_name: str, hash_id: str, mm: int) -> None:
         """Update cut height for a go-zone and push the map back to the robot."""

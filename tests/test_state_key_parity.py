@@ -69,7 +69,7 @@ def _sensor_value_keys() -> set[str]:
 def test_sensor_parser_finds_known_keys() -> None:
     """Sanity: regex parser picks up the canonical value_keys."""
     keys = _sensor_value_keys()
-    for name in ("battery", "errorCode", "lastCleanAt", "totalCleanTimeMin", "robotState"):
+    for name in ("battery", "errorCode", "lastCleanAt", "totalCleanTimeSec", "robotState"):
         assert name in keys
 
 

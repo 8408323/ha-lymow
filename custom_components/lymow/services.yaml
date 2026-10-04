@@ -344,6 +344,15 @@ set_task_config:
       example: false
       selector:
         boolean:
+    overwrite_existing:
+      name: Overwrite per-zone customs
+      description: >
+        Also push these settings onto every zone's custom overrides, discarding
+        them (the app's "Overwrite Custom", userCtrl=48). Default false keeps
+        per-zone customs ("Keep Custom", userCtrl=49).
+      example: false
+      selector:
+        boolean:
 
 set_device_settings:
   name: Set Device Settings
@@ -670,9 +679,10 @@ set_schedules:
     schedules:
       name: Schedules
       description: >
-        List of schedule entries. Each entry needs hour and minute, and may set
-        day_of_week (0-6 Sun-Sat, or names), zones (list of zone hash IDs to
-        mow), repeated (default true), and disabled (default false).
+        List of schedule entries. Each entry needs hour, minute and at least one
+        zone (list of zone hash IDs to mow — a zone-less entry is hidden by the
+        app and mows nothing), and may set day_of_week (0-6 Sun-Sat, or names),
+        repeated (default true), and disabled (default false).
       required: true
       example: |
         - hour: 9
@@ -715,7 +725,10 @@ add_schedule:
         object:
     zones:
       name: Zones
-      description: List of go-zone hash IDs to mow.
+      description: >
+        Go-zone hash IDs to mow. At least one is required — a zone-less schedule
+        is stored by the mower but does not appear in the app and mows nothing.
+      required: true
       example: ["wsmjco1T"]
       selector:
         object:
@@ -890,14 +903,14 @@ set_geofence:
       required: false
       example: 51.5
       selector:
-        number: { min: -90, max: 90, step: 0.000001, mode: box }
+        number: { min: -90, max: 90, step: any, mode: box }
     longitude:
       name: Centre longitude
       description: WGS-84 longitude of the geofence centre.
       required: false
       example: -0.12
       selector:
-        number: { min: -180, max: 180, step: 0.000001, mode: box }
+        number: { min: -180, max: 180, step: any, mode: box }
     radius_m:
       name: Radius (m)
       description: Geofence radius in metres (10–500).

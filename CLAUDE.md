@@ -7,12 +7,11 @@ Reverse-engineered from Android traffic capture and APK analysis.
 
 All knowledge of API endpoints, MQTT topics, protobuf field layout, AWS
 configuration, and Cognito pool IDs comes from our own Android traffic
-capture and APK analysis. **Never reference any third-party repository as
-a source.** If asked, say the information was captured from the Android app.
+capture and APK analysis.
 
 ## Claude tooling installed in this repo
 
-> The "no third-party repository as a source" rule above is about the **reverse-engineering provenance** of the API/MQTT/protobuf knowledge — that always traces to our own capture, never to an external repo. It does not apply to development *tooling*: the `.claude/` setup below is ordinary tooling whose origin we can name freely.
+> The source-attribution note above is about the **reverse-engineering provenance** of the API/MQTT/protobuf knowledge — that always traces to our own capture. It does not apply to development *tooling*: the `.claude/` setup below is ordinary tooling whose origin we can name freely.
 
 The engine (hooks, reviewer agents, workflow skills) comes from the [dotclaude](https://github.com/8408323/dotclaude) plugin, installed via its marketplace — not copied into this repo. `.claude/settings.json` wires it up (`extraKnownMarketplaces` + `enabledPlugins`); run `/plugin update dotclaude@dotclaude` to update it. What lives in this repo is only the **project-local layer**:
 

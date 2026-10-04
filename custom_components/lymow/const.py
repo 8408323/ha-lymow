@@ -2,6 +2,10 @@ from __future__ import annotations
 
 DOMAIN = "lymow"
 
+# Bus event fired once when a mow session finishes (mowing/returning -> docked),
+# carrying the session summary. Mirrored by the Last-mow-session event entity.
+EVENT_SESSION_COMPLETED = f"{DOMAIN}_session_completed"
+
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_REGION = "region"
@@ -11,6 +15,10 @@ REGION_CHOICES = [REGION_AUTO, "eu-west-1", "us-east-2", "ap-southeast-2", "ap-e
 
 # How often to poll REST device state (MQTT keeps live state between polls)
 POLLING_INTERVAL = 30  # seconds
+# How often to send the app-presence heartbeat + RTK diagnostic queries while the
+# RTK diagnostics switch is on. The robot only streams RTK detail to a client that
+# keeps registering presence; ~5s sustains it without the Lymow app open.
+RTK_DIAGNOSTIC_POLL_SECONDS = 5
 
 # Refresh Cognito tokens / AWS credentials this many seconds before they expire.
 # Without refresh the access token lapses (~24 h) and every REST poll 401s, taking
@@ -23,6 +31,12 @@ AUTH_REFRESH_MARGIN_SECONDS = 600
 # (The AWS KVS WebRTC path the app uses is for *remote* viewing.)
 RTSP_PORT = 10022
 RTSP_PATH = "h264ESVideoTest"
+
+
+def normalize_rtsp_path(value: str | None) -> str:
+    """Strip whitespace and leading slashes from an RTSP path."""
+    return (value or "").strip().lstrip("/")
+
 
 # Per-region AWS configuration — all values extracted from traffic capture and APK analysis
 REGION_CONFIG: dict[str, dict[str, str | None]] = {
@@ -41,8 +55,8 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "us-east-2": {
-        "client_id": None,  # not yet confirmed from capture
-        "user_pool_id": None,
+        "client_id": "3ftv5jumkv375hic8dpdqodj8n",  # from APK bundle
+        "user_pool_id": "us-east-2_GAyiLkZQf",  # from APK bundle
         "identity_pool_id": "us-east-2:037db699-5df0-4ed2-92b8-0dd0f1843918",
         "iot_host": "a3j5zqqo5iuph9-ats.iot.us-east-2.amazonaws.com",
         "api_device_list": "453ahng0z4",
@@ -55,7 +69,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "ap-southeast-2": {
-        "client_id": None,  # not yet confirmed from capture
+        "client_id": "2ch3nqqr0usf5sadvcrj2hp6ll",  # from APK bundle
         "user_pool_id": "ap-southeast-2_vNriuUNeQ",
         "identity_pool_id": "ap-southeast-2:87d0fe24-16af-4189-b02f-984a7ed14ee0",
         "iot_host": "a3j5zqqo5iuph9-ats.iot.ap-southeast-2.amazonaws.com",
@@ -69,7 +83,7 @@ REGION_CONFIG: dict[str, dict[str, str | None]] = {
         "s3_bucket": None,  # not yet confirmed from capture
     },
     "ap-east-1": {
-        "client_id": None,  # not yet confirmed from capture
+        "client_id": "46mirppdlu6mrbjd5bkiil0n20",  # from APK bundle
         "user_pool_id": "ap-east-1_23Lf1WZer",
         "identity_pool_id": "ap-east-1:3e9265aa-f564-4083-8e1e-988e6cfdc446",
         "iot_host": "a3j5zqqo5iuph9-ats.iot.ap-east-1.amazonaws.com",
@@ -610,6 +624,11 @@ BLE_DRIVE_MAX_DURATION_S = 5.0
 
 # Config-entry option holding the robot's BLE MAC (manual-drive transport).
 CONF_BLE_ADDRESS = "ble_address"
+
+# Config-entry options overriding the LAN camera RTSP path/port (default to the
+# 640×480 test stream above; lets a higher-res path be used without a code change).
+CONF_RTSP_PATH = "rtsp_path"
+CONF_RTSP_PORT = "rtsp_port"
 
 # Services
 SERVICE_BLE_DRIVE = "ble_drive"
