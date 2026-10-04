@@ -25,9 +25,11 @@ def _coordinator(data: dict | None = None) -> MagicMock:
     return coord
 
 
-def _connection() -> MagicMock:
+def _connection(admin: bool = True, readable: set[str] | None = None) -> MagicMock:
     conn = MagicMock()
     conn.subscriptions = {}
+    conn.user.is_admin = admin
+    conn.user.permissions.check_entity = lambda eid, policy: eid in (readable or set())
     return conn
 
 
@@ -40,7 +42,12 @@ def test_register_adds_both_commands() -> None:
 def test_snapshot_contents() -> None:
     sched = {"hour": 6, "minute": 0, "timeZone": 2, "dayOfWeek": [1]}
     coord = _coordinator(
-        {"schedules": [sched], "backupMapList": [{"file": "a"}], "deviceState": "offline", "mapData": {}}
+        {
+            "schedules": [sched],
+            "backupMapList": [{"file": "a"}, {"file": None, "name": "broken"}],
+            "deviceState": "offline",
+            "mapData": {},
+        }
     )
     snap = ws.snapshot(coord, THING)
     assert snap["thing"] == THING
@@ -124,3 +131,40 @@ def test_subscribe_pushes_initial_and_only_changed_snapshots() -> None:
 
     conn.subscriptions[7]()  # unsubscribe removes the listener
     assert coord.listeners == []
+
+
+def test_snapshot_schedules_unknown_until_received() -> None:
+    assert ws.snapshot(_coordinator({}), THING)["schedules"] is None
+    assert ws.snapshot(_coordinator({"schedules": []}), THING)["schedules"] == []
+
+
+def test_devices_hidden_from_users_without_read_access() -> None:
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": _coordinator()}}
+    reg_entries = [
+        SimpleNamespace(unique_id=THING, entity_id="lawn_mower.lawn"),
+        SimpleNamespace(unique_id=f"{THING}_battery", entity_id="sensor.lawn_battery"),
+    ]
+    with (
+        patch.object(ws.er, "async_get", create=True),
+        patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=reg_entries),
+        patch.object(ws.dr, "async_get", create=True) as dr_get,
+    ):
+        dr_get.return_value.async_get_device.return_value = None
+        hidden = _connection(admin=False)
+        ws.ws_devices(hass, hidden, {"id": 1})
+        partial = _connection(admin=False, readable={"lawn_mower.lawn"})
+        ws.ws_devices(hass, partial, {"id": 2})
+    assert hidden.send_result.call_args.args[1] == []
+    assert partial.send_result.call_args.args[1][0]["entities"] == {"mower": "lawn_mower.lawn"}
+
+
+def test_subscribe_rejects_user_without_read_access() -> None:
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": _coordinator()}}
+    conn = _connection(admin=False)
+    with patch.object(ws.er, "async_get", create=True) as er_get:
+        er_get.return_value.async_get_entity_id.return_value = "lawn_mower.lawn"
+        ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
+    assert conn.send_error.call_args.args[1] == "unauthorized"
+    assert conn.subscriptions == {}

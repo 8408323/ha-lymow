@@ -22,6 +22,9 @@ export function SchedulesView() {
   const { snap, call, zoneName } = useMower();
   const ui = useUi();
   const [adding, setAdding] = useState(false);
+  // Editing before the mower has reported its schedules would overwrite them
+  // (add_schedule writes the whole list), so everything waits for the reply.
+  const loading = !snap || snap.schedules === null;
   const schedules = [...(snap?.schedules ?? [])].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
 
   return (
@@ -43,14 +46,18 @@ export function SchedulesView() {
                 {t("Clear all")}
               </Button>
             )}
-            <Button variant="primary" icon="mdi:plus" onClick={() => setAdding(true)}>
+            <Button variant="primary" icon="mdi:plus" disabled={loading} onClick={() => setAdding(true)}>
               {t("Add")}
             </Button>
           </>
         }
       >
-        {adding && <AddSchedule onDone={() => setAdding(false)} />}
-        {!schedules.length && !adding ? (
+        {adding && !loading && <AddSchedule onDone={() => setAdding(false)} />}
+        {loading ? (
+          <div className="ly-loading">
+            <span className="ly-spinner" /> {t("Loading schedules from the mower…")}
+          </div>
+        ) : !schedules.length && !adding ? (
           <Empty icon="mdi:calendar-blank-outline" title={t("No schedules yet")}>
             {t("Add a schedule and the mower starts on its own at the chosen times.")}
           </Empty>

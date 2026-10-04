@@ -56,7 +56,7 @@ function Shell({ narrow, route, host }: { narrow: boolean; route: Route; host: H
   return (
     <div className={cx("ly-app", narrow && "ly-app--narrow")}>
         {device ? (
-          <MowerProvider device={device} snap={snap}>
+          <MowerProvider key={device.thing} device={device} snap={snap}>
             <TopBar narrow={narrow} host={host} devices={devices!} onPick={setThing} />
             <nav className="ly-tabs" aria-label={t("Sections")}>
               {TABS.map((item) => (

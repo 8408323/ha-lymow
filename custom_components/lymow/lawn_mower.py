@@ -629,20 +629,40 @@ _BLE_DRIVE_SCHEMA = vol.Schema(
 )
 
 
+_MOWERS_KEY = f"{DOMAIN}_mower_entities"
+
+
+def _all_mowers(hass: HomeAssistant) -> dict[str, LymowMower]:
+    """Every loaded Lymow mower entity by entity_id, across all config entries."""
+    return {e.entity_id: e for ents in hass.data.get(_MOWERS_KEY, {}).values() for e in ents}
+
+
+def _owner_entry(hass: HomeAssistant, entity: LymowMower) -> ConfigEntry | None:
+    """Config entry that owns a mower entity (its BLE address option lives there)."""
+    reg = getattr(entity, "registry_entry", None)
+    return hass.config_entries.async_get_entry(reg.config_entry_id) if reg and reg.config_entry_id else None
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback) -> None:
     coordinator: LymowCoordinator = hass.data[DOMAIN][entry.entry_id]
     entities = list(LymowMower(coordinator, device) for device in coordinator.devices)
     async_add_entities(entities)
+    # Services are domain-wide (the last registration wins), so they resolve their
+    # target across every config entry's mowers, not just this entry's.
+    registry = hass.data.setdefault(_MOWERS_KEY, {})
+    registry[entry.entry_id] = entities
+    entry.async_on_unload(lambda: registry.pop(entry.entry_id, None))
 
     async def handle_delete_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
 
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             thing_name = entity._thing_name
             # Validate zone exists in cached map (best-effort — map may not be loaded yet)
             map_data = coordinator.data.get(thing_name, {}).get("mapData") or {}
@@ -654,11 +674,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_delete_channel(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_CHANNEL_HASH_ID]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             thing_name = entity._thing_name
             map_data = coordinator.data.get(thing_name, {}).get("mapData") or {}
             chan_ids = {cid for c in map_data.get("channels", []) if (cid := c.get("hashId"))}
@@ -671,11 +692,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_delete_nogo_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             thing_name = entity._thing_name
             map_data = coordinator.data.get(thing_name, {}).get("mapData") or {}
             nogo_ids = {nid for n in map_data.get("nogoZones", []) if (nid := n.get("hashId"))}
@@ -689,30 +711,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         zone_hash_ids: list[str] = call.data[_ATTR_ZONE_HASH_IDS]
 
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             thing_name = entity._thing_name
             await coordinator.async_start_zones(thing_name, zone_hash_ids)
 
     async def handle_pause(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_pause(entity._thing_name)
 
     async def handle_query_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_query_map(entity._thing_name)
 
     async def handle_resume(call: ServiceCall) -> None:
@@ -720,65 +745,71 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # start_mowing sends USER_CTRL_CLEAN (a fresh task); this sends
         # USER_CTRL_RESUME so the robot picks up where it left off.
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_resume(entity._thing_name)
 
     async def handle_query_schedules(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_query_schedules(entity._thing_name)
 
     async def handle_update_zone_polygon(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
         polygon: list[dict] = call.data[_ATTR_POLYGON]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_update_zone_polygon(entity._thing_name, hash_id, polygon)
 
     async def handle_update_nogo_polygon(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
         polygon: list[dict] = call.data[_ATTR_POLYGON]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_update_nogo_polygon(entity._thing_name, hash_id, polygon)
 
     async def handle_update_zone_cut_height(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
         mm: int = call.data[_ATTR_CUT_HEIGHT_MM]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_update_zone_cut_height(entity._thing_name, hash_id, mm)
 
     async def handle_get_clean_history(call: ServiceCall) -> dict[str, Any]:
         entity_ids: list[str] = call.data["entity_id"]
         page: int = call.data["page"]
         page_size: int = call.data["page_size"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         result: dict[str, list[dict[str, Any]]] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             result[eid] = await coordinator.async_get_clean_history(entity._thing_name, page=page, page_size=page_size)
         return {"history": result}
 
@@ -790,11 +821,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             kwargs["cut_height_mm"] = call.data[_ATTR_CUT_HEIGHT_MM]
         if "channel_lift" in call.data:
             kwargs["channel_lift"] = call.data["channel_lift"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_update_channel_settings(entity._thing_name, hash_id, **kwargs)
 
     async def handle_set_geofence(call: ServiceCall) -> None:
@@ -803,11 +835,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         for k in ("latitude", "longitude", "radius_m", "name", "index"):
             if k in call.data:
                 kwargs[k] = call.data[k]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_geofence(entity._thing_name, **kwargs)
 
     async def handle_set_zone_config(call: ServiceCall) -> None:
@@ -821,11 +854,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         for svc_key, proto_key in _TASK_CONFIG_SERVICE_FIELDS.items():
             if svc_key in call.data:
                 update[proto_key] = call.data[svc_key]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_zone_config(entity._thing_name, [update])
 
     async def handle_add_zone(call: ServiceCall) -> dict[str, Any]:
@@ -833,12 +867,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         polygon: list[dict] = call.data[_ATTR_POLYGON]
         name: str = call.data[_ATTR_NAME]
         cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             new_id = await coordinator.async_add_zone(entity._thing_name, polygon, name=name, cut_height_mm=cut_height)
             new_ids[eid] = new_id
         return {"hash_ids": new_ids}
@@ -847,12 +882,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         polygon: list[dict] = call.data[_ATTR_POLYGON]
         parent_hash_id: str = call.data.get("parent_zone_hash_id", "")
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             new_id = await coordinator.async_add_nogo_zone(
                 entity._thing_name, polygon, parent_zone_hash_id=parent_hash_id
             )
@@ -865,12 +901,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         zone1: str = call.data.get("zone1_hash_id", "")
         zone2: str = call.data.get("zone2_hash_id", "")
         cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             new_id = await coordinator.async_add_channel(
                 entity._thing_name, polygon, zone1_hash_id=zone1, zone2_hash_id=zone2, cut_height_mm=cut_height
             )
@@ -882,12 +919,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         hash_ids: list[str] = call.data[_ATTR_ZONE_HASH_IDS]
         name: str = call.data[_ATTR_NAME]
         cut_height: int | None = call.data.get(_ATTR_CUT_HEIGHT_MM)
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             new_id = await coordinator.async_merge_zones(
                 entity._thing_name, hash_ids, name=name, cut_height_mm=cut_height
             )
@@ -901,12 +939,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         radius_m: float = call.data[_ATTR_RADIUS_M]
         cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
         name: str = call.data[_ATTR_NAME]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             new_id = await coordinator.async_pin_and_go(
                 entity._thing_name, x, y, radius_m=radius_m, cut_height_mm=cut_height, name=name
             )
@@ -919,12 +958,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         cut_p1: dict[str, float] = call.data[_ATTR_CUT_P1]
         cut_p2: dict[str, float] = call.data[_ATTR_CUT_P2]
         names: list[str] = call.data[_ATTR_NAMES]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         split_ids: dict[str, tuple[str, str]] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             left_id, right_id = await coordinator.async_split_zone(
                 entity._thing_name, hash_id, cut_p1, cut_p2, names=(names[0], names[1])
             )
@@ -940,33 +980,36 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         the credentials' ~15-minute lifetime.
         """
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             return await coordinator.async_start_video_session(entity._thing_name)
         raise ServiceValidationError(f"No matching Lymow entity in {entity_ids!r}")
 
     def _make_query_handler(method_name: str):
         async def _handler(call: ServiceCall) -> None:
             entity_ids: list[str] = call.data["entity_id"]
-            entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+            entity_map = _all_mowers(hass)
             for eid in entity_ids:
                 entity = entity_map.get(eid)
                 if entity is None:
                     continue
+                coordinator = entity.coordinator  # the entry that owns this mower
                 await getattr(coordinator, method_name)(entity._thing_name)
 
         return _handler
 
     async def handle_clear_schedules(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_clear_schedules(entity._thing_name)
 
     async def handle_set_schedules(call: ServiceCall) -> None:
@@ -985,21 +1028,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             }
             for s in raw_schedules
         ]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_schedules(entity._thing_name, entries)
 
     async def handle_add_schedule(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         _require_schedule_zones(call.data["zones"])
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_add_schedule(
                 entity._thing_name,
                 hour=call.data["hour"],
@@ -1013,66 +1058,72 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_delete_schedule(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         schedule_id: int = call.data["id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_delete_schedule(entity._thing_name, schedule_id)
 
     async def handle_toggle_schedule(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         schedule_id: int = call.data["id"]
         disabled: bool = call.data["disabled"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_toggle_schedule(entity._thing_name, schedule_id, disabled=disabled)
 
     async def handle_rename_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
         name: str = call.data[_ATTR_NAME]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_rename_zone(entity._thing_name, hash_id, name)
 
     async def handle_rename_nogo_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
         name: str = call.data[_ATTR_NAME]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_rename_nogo_zone(entity._thing_name, hash_id, name)
 
     async def handle_rename_channel(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data["channel_hash_id"]
         name: str = call.data[_ATTR_NAME]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_rename_channel(entity._thing_name, hash_id, name)
 
     async def handle_set_zone_enabled(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
         is_enabled: bool = call.data[_ATTR_IS_ENABLED]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_update_zone_enabled(entity._thing_name, hash_id, is_enabled)
 
     async def handle_move_charging_station(call: ServiceCall) -> None:
@@ -1080,11 +1131,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         x: float = call.data[_ATTR_X]
         y: float = call.data[_ATTR_Y]
         theta: float | None = call.data.get("theta")
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_move_charging_station(entity._thing_name, x, y, theta)
 
     async def handle_set_task_config(call: ServiceCall) -> None:
@@ -1095,11 +1147,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             raise ServiceValidationError("set_task_config: provide at least one parameter to set.")
         if "overwrite_existing" in call.data:
             fields["overwrite_existing"] = call.data["overwrite_existing"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_task_config(entity._thing_name, **fields)
 
     async def handle_set_run_time_config(call: ServiceCall) -> None:
@@ -1111,22 +1164,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         }
         if not fields:
             raise ServiceValidationError("set_run_time_config: provide at least one parameter to set.")
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_run_time_config(entity._thing_name, **fields)
 
     async def handle_set_network_priority(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         preferred: str = call.data[_ATTR_PREFERRED]
         metric_4g = preferred == "4g"
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_robot_config(entity._thing_name, metric_4g=metric_4g)
 
     async def handle_set_recharge_resume(call: ServiceCall) -> None:
@@ -1140,11 +1195,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         }
         if not any(v is not None for v in rr_kwargs.values()):
             raise ServiceValidationError("set_recharge_resume: provide at least one parameter to set.")
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_recharge_resume(entity._thing_name, **rr_kwargs)
 
     async def handle_set_headlight_schedule(call: ServiceCall) -> None:
@@ -1154,42 +1210,47 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         end = call.data.get(_ATTR_HL_END)
         if enable and (start is None or end is None):
             raise ServiceValidationError("set_headlight_schedule: enabling requires both start and end.")
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_headlight_schedule(entity._thing_name, enable=enable, start=start, end=end)
 
     async def handle_set_pin(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         pin: str = call.data["pin"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_pin(entity._thing_name, pin)
 
     async def handle_bind_rtk(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         base_id: str = call.data["base_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_bind_rtk(entity._thing_name, base_id)
 
     async def handle_set_wifi(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         ssid: str = call.data["ssid"]
         password: str = call.data["password"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         targeted = [entity_map[eid] for eid in entity_ids if eid in entity_map]
         if not targeted:
             return
-        address = (entry.options.get(CONF_BLE_ADDRESS) or "").strip()
+        coordinator = targeted[0].coordinator
+        owner = _owner_entry(hass, targeted[0]) or entry
+        address = (owner.options.get(CONF_BLE_ADDRESS) or "").strip()
         if not address:
             ble_name = (coordinator.data.get(targeted[0]._thing_name) or {}).get("deviceBluetooth")
             address = _discover_ble_address(hass, ble_name or "") or ""
@@ -1212,61 +1273,67 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         }
         if not any(v is not None for v in ds_kwargs.values()):
             raise ServiceValidationError("set_device_settings: provide at least one parameter to set.")
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_set_device_settings(entity._thing_name, **ds_kwargs)
 
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_rename_device(entity._thing_name, name)
 
     async def handle_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_backup_map(entity._thing_name)
 
     async def handle_restore_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         object_key: str = call.data[_ATTR_OBJECT_KEY]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_restore_backup_map(entity._thing_name, object_key)
 
     async def handle_delete_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         object_key: str = call.data[_ATTR_OBJECT_KEY]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_delete_backup_map(entity._thing_name, object_key)
 
     async def handle_rename_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         object_key: str = call.data[_ATTR_OBJECT_KEY]
         name: str = call.data[_ATTR_NAME]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             await coordinator.async_rename_backup_map(entity._thing_name, object_key, name)
 
     async def handle_ble_drive(call: ServiceCall) -> None:
@@ -1278,14 +1345,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # One BLE transport per config entry (one robot at one address): drive
         # exactly once even when several entity_ids are targeted, so overlapping
         # motions never stack on the same link.
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         targeted = [entity_map[eid] for eid in entity_ids if eid in entity_map]
         if not targeted:
             return
+        coordinator = targeted[0].coordinator
+        owner = _owner_entry(hass, targeted[0]) or entry
 
         # Prefer an explicitly-configured address; otherwise auto-discover the
         # robot over Bluetooth by its advertised name (deviceBluetooth).
-        address = (entry.options.get(CONF_BLE_ADDRESS) or "").strip()
+        address = (owner.options.get(CONF_BLE_ADDRESS) or "").strip()
         if not address:
             ble_name = (coordinator.data.get(targeted[0]._thing_name) or {}).get("deviceBluetooth")
             address = _discover_ble_address(hass, ble_name or "") or ""
@@ -1299,11 +1368,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_start_edit_boundary(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
                 continue
+            coordinator = entity.coordinator  # the entry that owns this mower
             thing_name = entity._thing_name
             map_data = coordinator.data.get(thing_name, {}).get("mapData") or {}
             go_ids = {z.get("hashId") for z in map_data.get("goZones", [])}
@@ -1313,11 +1383,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_complete_edit_boundary(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map: dict[str, LymowMower] = {e.entity_id: e for e in entities}
+        entity_map = _all_mowers(hass)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is not None:
-                await coordinator.async_complete_edit_boundary(entity._thing_name)
+                await entity.coordinator.async_complete_edit_boundary(entity._thing_name)
 
     hass.services.async_register(DOMAIN, _SERVICE_DELETE_ZONE, handle_delete_zone, schema=_DELETE_ZONE_SCHEMA)
     hass.services.async_register(

@@ -20,6 +20,9 @@ from homeassistant.helpers import entity_registry as er
 from .const import DOMAIN
 from .sensor import _schedule_to_local, map_payload
 
+# homeassistant.auth.permissions.const.POLICY_READ
+POLICY_READ = "read"
+
 
 @callback
 def async_register(hass: HomeAssistant) -> None:
@@ -29,6 +32,18 @@ def async_register(hass: HomeAssistant) -> None:
 
 def _coordinators(hass: HomeAssistant) -> dict[str, Any]:
     return hass.data.get(DOMAIN, {})
+
+
+def _can_read(connection: websocket_api.ActiveConnection, entity_id: str | None) -> bool:
+    """Admins see everything; other users need read access to the mower entity."""
+    user = connection.user
+    if user.is_admin:
+        return True
+    return entity_id is not None and user.permissions.check_entity(entity_id, POLICY_READ)
+
+
+def _mower_entity(hass: HomeAssistant, thing: str) -> str | None:
+    return er.async_get(hass).async_get_entity_id("lawn_mower", DOMAIN, thing)
 
 
 def _find(hass: HomeAssistant, thing: str) -> Any | None:
@@ -41,11 +56,15 @@ def _find(hass: HomeAssistant, thing: str) -> Any | None:
 def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     """Everything the panel needs for one mower that isn't an entity state."""
     data = (coordinator.data or {}).get(thing) or {}
+    schedules = data.get("schedules")
     return {
         "thing": thing,
         "map": map_payload(data),
-        "schedules": [_schedule_to_local(s) for s in data.get("schedules") or []],
-        "backups": data.get("backupMapList") or [],
+        # None = not received yet (a query is in flight). The panel must not edit
+        # schedules then: add_schedule writes the full list and would drop the rest.
+        "schedules": None if schedules is None else [_schedule_to_local(s) for s in schedules],
+        # Only backups that can actually be restored/renamed/deleted (have a key).
+        "backups": [b for b in data.get("backupMapList") or [] if isinstance(b.get("file"), str) and b["file"]],
         "online": data.get("deviceState") != "offline",
     }
 
@@ -67,6 +86,9 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
                     entities["mower"] = ent.entity_id
                 elif uid.startswith(f"{thing}_"):
                     entities[uid[len(thing) + 1 :]] = ent.entity_id
+            if not _can_read(connection, entities.get("mower")):
+                continue
+            entities = {k: v for k, v in entities.items() if _can_read(connection, v)}
             dev = dev_reg.async_get_device(identifiers={(DOMAIN, thing)})
             devices.append(
                 {
@@ -85,6 +107,9 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
 def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
     thing = msg["thing"]
     coordinator = _find(hass, thing)
+    if coordinator is not None and not _can_read(connection, _mower_entity(hass, thing)):
+        connection.send_error(msg["id"], "unauthorized", "Not allowed to read this mower")
+        return
     if coordinator is None:
         connection.send_error(msg["id"], "not_found", f"Unknown mower {thing}")
         return

@@ -51,7 +51,7 @@ export function BackupsView() {
           </Button>
         }
       >
-        <p className="ly-muted">{t("Backups are stored in the Lymow cloud. Restoring replaces the mower's current map, including zones, no-go areas and channels.")}</p>
+        <p className="ly-muted">{t("Backups are stored in the Lymow cloud. Restoring replaces the mower's current map.")}</p>
         {!backups.length ? (
           <Empty icon="mdi:cloud-outline" title={t("No backups yet")}>
             {t("Make a backup before you change the map, so you can always go back.")}
@@ -71,7 +71,7 @@ export function BackupsView() {
                     <Button
                       icon="mdi:backup-restore"
                       onClick={async () => {
-                        if (await ui.confirm({ title: t("Restore “{name}”?", { name }), body: t("The mower's current map is replaced by this backup."), confirm: t("Restore"), danger: true }))
+                        if (await ui.confirm({ title: t("Restore “{name}”?", { name }), body: t("The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing."), confirm: t("Restore"), danger: true }))
                           await call("lymow", "restore_backup_map", { object_key: b.file }, t("Backup restored"));
                       }}
                     >

@@ -160,7 +160,7 @@ function nextRun(s: Schedule, now: Date): Date | null {
   return null;
 }
 
-function NextSchedule({ schedules, go }: { schedules: Schedule[] | undefined; go: (t: TabId) => void }) {
+function NextSchedule({ schedules, go }: { schedules: Schedule[] | null | undefined; go: (t: TabId) => void }) {
   const { t, locale } = useI18n();
   const { zoneName } = useMower();
   const now = new Date();
@@ -178,7 +178,9 @@ function NextSchedule({ schedules, go }: { schedules: Schedule[] | undefined; go
         </Button>
       }
     >
-      {upcoming ? (
+      {!schedules ? (
+        <p className="ly-muted">{t("Loading schedules from the mower…")}</p>
+      ) : upcoming ? (
         <div className="ly-next">
           <strong>
             {weekday(upcoming.at.getDay(), locale)} {pad2(upcoming.s.hour)}:{pad2(upcoming.s.minute)}

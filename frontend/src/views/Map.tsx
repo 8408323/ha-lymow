@@ -122,7 +122,7 @@ export function MapView() {
   if (!map) {
     return (
       <div className="ly-loading">
-        <span className="ly-spinner" /> Loading map…
+        <span className="ly-spinner" /> {t("Loading map…")}
       </div>
     );
   }

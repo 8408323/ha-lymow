@@ -2725,3 +2725,39 @@ async def test_handle_move_charging_station_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"x": 1.0, "y": 2.0})
     await handlers["move_charging_station"](call)
     coord.async_move_charging_station.assert_not_called()
+
+
+async def test_services_reach_mowers_of_every_config_entry() -> None:
+    """Services are domain-wide and the last entry's registration wins, so a handler
+    registered by entry B must still command a mower that belongs to entry A."""
+    from lymow.const import DOMAIN
+
+    coord_a = _make_coord({"mapData": {"goZones": [{"hashId": "z1"}]}})
+    coord_b = _make_coord()
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-a": coord_a, "entry-b": coord_b}}
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entity_id):
+        def _inner(entities):
+            for e in entities:
+                e.entity_id = entity_id
+
+        return _inner
+
+    entry_a, entry_b = MagicMock(entry_id="entry-a"), MagicMock(entry_id="entry-b")
+    await async_setup_entry(hass, entry_a, _add("lawn_mower.a"))
+    await async_setup_entry(hass, entry_b, _add("lawn_mower.b"))
+
+    await handlers["delete_zone"](_make_call(["lawn_mower.a"], {"zone_hash_id": "z1"}))
+    coord_a.async_delete_zone.assert_awaited_once_with(THING, "z1")
+    coord_b.async_delete_zone.assert_not_called()
+
+    # Unloading entry A drops its mowers from the shared registry.
+    for cb in [c.args[0] for c in entry_a.async_on_unload.call_args_list]:
+        cb()
+    await handlers["delete_zone"](_make_call(["lawn_mower.a"], {"zone_hash_id": "z1"}))
+    coord_a.async_delete_zone.assert_awaited_once()

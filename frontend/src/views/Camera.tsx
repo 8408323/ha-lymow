@@ -43,9 +43,9 @@ export function CameraView() {
           {source === "cloud" ? (
             <CloudStream onStatus={setStatus} />
           ) : !cam ? (
-            <StageMsg icon="mdi:cctv-off" text="The camera entity isn't available." />
+            <StageMsg icon="mdi:cctv-off" text={t("The camera entity isn't available.")} />
           ) : cam.state === "unavailable" ? (
-            <StageMsg icon="mdi:lan-disconnect" text="The mower isn't reachable on your network. Try the Cloud view." />
+            <StageMsg icon="mdi:lan-disconnect" text={t("The mower isn't reachable on your network. Try the Cloud view.")} />
           ) : source === "lan" ? (
             <LanStream entityId={camId!} />
           ) : (
@@ -117,7 +117,7 @@ function Snapshots({ entityId, onStatus }: { entityId: string; onStatus: (s: str
   }, [entityId, fps]);
   return (
     <>
-      {src ? <img className="ly-stage__media" src={src} alt="Mower camera" /> : <StageMsg icon="mdi:camera-outline" text="Loading…" />}
+      {src ? <img className="ly-stage__media" src={src} alt={t("Mower camera")} /> : <StageMsg icon="mdi:camera-outline" text={t("Loading…")} />}
       <div className="ly-stage__fps">
         <button type="button" aria-label={t("Fewer frames")} onClick={() => setFps(Math.max(0.5, fps - 0.5))}>
           −
@@ -259,7 +259,8 @@ function DriveCard() {
   const { device } = useMower();
   const getHass = useHassRef();
   const vel = useRef({ lin: 0, ang: 0 });
-  const timer = useRef<number>(0);
+  const active = useRef(false);
+  const loop = useRef<Promise<void> | null>(null);
   const [err, setErr] = useState("");
   const [shown, setShown] = useState({ lin: 0, ang: 0 });
 
@@ -269,20 +270,27 @@ function DriveCard() {
       .then(() => setErr(""))
       .catch((e) => setErr(e?.message ?? String(e)));
 
+  // One request in flight at a time: each call holds the BLE link for its
+  // duration, so firing on a timer would queue stale motions behind each other
+  // and the release (stop) would only land after the backlog drained.
+  const run = async (): Promise<void> => {
+    while (active.current) await send(vel.current.lin, vel.current.ang);
+    await send(0, 0);
+    loop.current = active.current ? run() : null;
+  };
+
   const update = (part: Partial<{ lin: number; ang: number }>) => {
     vel.current = { ...vel.current, ...part };
     setShown(vel.current);
-    const { lin, ang } = vel.current;
-    if (lin === 0 && ang === 0) {
-      window.clearInterval(timer.current);
-      timer.current = 0;
-      send(0, 0);
-    } else if (!timer.current) {
-      send(lin, ang);
-      timer.current = window.setInterval(() => send(vel.current.lin, vel.current.ang), 100);
-    }
+    active.current = vel.current.lin !== 0 || vel.current.ang !== 0;
+    if (active.current && !loop.current) loop.current = run();
   };
-  useEffect(() => () => window.clearInterval(timer.current), []);
+  useEffect(
+    () => () => {
+      active.current = false;
+    },
+    [],
+  );
 
   return (
     <Card title={t("Drive")} icon="mdi:gamepad-variant-outline">

@@ -144,7 +144,8 @@ export interface Backup {
 export interface Snapshot {
   thing: string;
   map: MapData;
-  schedules: Schedule[];
+  /** null until the mower has answered the schedule query. */
+  schedules: Schedule[] | null;
   backups: Backup[];
   online: boolean;
 }

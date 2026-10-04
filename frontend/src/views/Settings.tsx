@@ -8,7 +8,19 @@ import { Button, Card, Field, Segmented, Select, Slider, TextInput, Toggle, useU
 const PER_ZONE = /^[A-Za-z0-9]{8}_(cut_height|enabled)$/;
 // Covered by dedicated controls elsewhere in the panel.
 const COVERED = new Set(["mow_pattern", "restore_backup_map"]);
-const DANGEROUS_BUTTONS = new Set(["restore_factory", "clear_all_zones_channels", "force_reinit", "abort_ota", "dock_and_forget_progress", "lock_robot", "toggle_lte_airplane"]);
+// Buttons that discard work, move the dock or cut connectivity get a confirmation.
+const DANGEROUS_BUTTONS = new Set([
+  "restore_factory",
+  "clear_all_zones_channels",
+  "force_reinit",
+  "abort_ota",
+  "dock_and_forget_progress",
+  "lock_robot",
+  "toggle_lte_airplane",
+  "cancel_task",
+  "charging_station_reset",
+  "set_charging_station_here",
+]);
 
 export function SettingsView() {
   return (
