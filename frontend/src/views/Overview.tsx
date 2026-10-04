@@ -158,7 +158,9 @@ function wallClock(timeZone: string): Date {
 function nextRun(s: Schedule, now: Date): Date | null {
   if (s.isDisabled) return null;
   const days = s.dayOfWeek?.length ? s.dayOfWeek : [0, 1, 2, 3, 4, 5, 6];
-  for (let add = 0; add < 8; add++) {
+  // A one-time schedule only has its occurrence within the coming week; once that
+  // has passed it must not reappear as next week's mow.
+  for (let add = 0; add < (s.isRepeated === false ? 7 : 8); add++) {
     const d = new Date(now);
     d.setDate(now.getDate() + add);
     d.setHours(s.hour, s.minute, 0, 0);

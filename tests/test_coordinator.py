@@ -4292,3 +4292,10 @@ async def test_cleared_channel_name_does_not_return_from_cache() -> None:
     data = await coord._async_update_data()
     assert data[THING]["mapData"]["channels"] == [{"hashId": "c1"}]
     storage.MEMORY.clear()
+
+
+def test_edit_echo_is_not_stamped() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}]}}}
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "a", "name": "N", "polygon": []}]}})
+    assert "mapReceivedAt" not in coord.data[THING]

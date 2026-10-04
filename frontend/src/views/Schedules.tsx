@@ -42,7 +42,8 @@ export function SchedulesView() {
     const t = window.setTimeout(() => setAwaitingAfter(undefined), 30000); // never lock forever
     return () => window.clearTimeout(t);
   }, [awaitingAfter]);
-  const locked = busy || loading || awaitingAfter !== undefined;
+  // Offline: the write would be queued at the broker and the confirming query never answered.
+  const locked = busy || loading || awaitingAfter !== undefined || snap?.online === false;
   const mutate = async (fn: () => Promise<boolean>) => {
     const before = snap?.schedules;
     setBusy(true);

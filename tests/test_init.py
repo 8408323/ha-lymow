@@ -911,7 +911,15 @@ async def test_setup_drops_malformed_device_records() -> None:
     hass = _make_hass(www_registered=True)
     entry = _make_entry(region="eu-west-1")
     client = _make_client(
-        [{"deviceThingName": "thing-1"}, {"deviceThingName": 5}, {"deviceThingName": ""}, "junk", {"name": "x"}]
+        [
+            {"deviceThingName": "thing-1"},
+            {"deviceThingName": 5},
+            {"deviceThingName": ""},
+            {"deviceThingName": "a/#"},
+            {"deviceThingName": "a b"},
+            "junk",
+            {"name": "x"},
+        ]
     )
     coord = _make_coordinator()
     with (

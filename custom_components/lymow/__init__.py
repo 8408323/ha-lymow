@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,9 @@ _PANEL_REGISTERED_KEY = f"{DOMAIN}_panel_registered"
 _PANEL_URL_PATH = "lymow"
 # Dashboard that versions before the panel auto-created; see _remove_legacy_lovelace.
 _LEGACY_DASHBOARD = "lymow-mower"
+# Thing names go into MQTT topics, REST paths and storage keys: no separators,
+# wildcards, whitespace or control characters.
+_THING_RE = re.compile(r"[A-Za-z0-9_.:-]{1,128}")
 
 
 def _read_version() -> str:
@@ -173,7 +177,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     devices = [
         d
         for d in await client.get_devices()
-        if isinstance(d, dict) and isinstance(d.get("deviceThingName"), str) and 0 < len(d["deviceThingName"]) <= 128
+        if isinstance(d, dict)
+        and isinstance(d.get("deviceThingName"), str)
+        and _THING_RE.fullmatch(d["deviceThingName"])
     ]
     things = [d["deviceThingName"] for d in devices]
 

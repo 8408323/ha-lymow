@@ -469,3 +469,27 @@ def test_snapshot_online_uses_positive_signals() -> None:
     assert ws.snapshot(_coordinator({"deviceState": "ONLINE"}), THING)["online"] is True
     assert ws.snapshot(_coordinator({"deviceState": "weird", "isOnline": True}), THING)["online"] is True
     assert ws.snapshot(_coordinator({"deviceState": "offline"}), THING)["online"] is False
+
+
+def test_devices_longest_thing_prefix_owns_the_entity() -> None:
+    coord = _coordinator()
+    coord.devices = [{"deviceThingName": "abc"}, {"deviceThingName": "abc_mower"}]
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": coord}}
+    reg_entries = [
+        SimpleNamespace(unique_id="abc", entity_id="lawn_mower.a"),
+        SimpleNamespace(unique_id="abc_battery", entity_id="sensor.a_battery"),
+        SimpleNamespace(unique_id="abc_mower", entity_id="lawn_mower.b"),
+        SimpleNamespace(unique_id="abc_mower_battery", entity_id="sensor.b_battery"),
+    ]
+    conn = _connection()
+    with (
+        patch.object(ws.er, "async_get", create=True),
+        patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=reg_entries),
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True, return_value=[]),
+    ):
+        ws.ws_devices(hass, conn, {"id": 1})
+    a, b = conn.send_result.call_args.args[1]
+    assert a["entities"] == {"mower": "lawn_mower.a", "battery": "sensor.a_battery"}
+    assert b["entities"] == {"mower": "lawn_mower.b", "battery": "sensor.b_battery"}

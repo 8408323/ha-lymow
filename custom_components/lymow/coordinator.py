@@ -406,7 +406,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if "mapData" in patch:
             # Stamp real map replies, so the panel can tell the mower's answer from
             # an optimistic local patch.
-            patch = {**self._absorb_edit_echo(thing_name, patch), "mapReceivedAt": time.time()}
+            absorbed = self._absorb_edit_echo(thing_name, patch)
+            # Only full map replies are stamped: an echo merged into the cache carries
+            # the cache's (possibly optimistic) settings, so it can't confirm a save.
+            patch = absorbed if absorbed is not patch else {**patch, "mapReceivedAt": time.time()}
             patch = self._apply_channel_name_overrides(thing_name, patch)
         # Cache non-empty pathData so the map card can show last-mow coverage
         # even after the robot docks (robot stops sending path data when docked).

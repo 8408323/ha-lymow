@@ -226,11 +226,20 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
     for entry_id, coordinator in _coordinators(hass).items():
         reg_entries = er.async_entries_for_config_entry(registry, entry_id)
         entry_devices = dr.async_entries_for_config_entry(dev_reg, entry_id)
+        things = [d["deviceThingName"] for d in coordinator.devices]
+
+        def owner(uid: str) -> str | None:
+            # Longest match wins: with things "abc" and "abc_mower", "abc_mower" is
+            # the second mower's own entity, not a sensor of the first.
+            return max((t for t in things if uid == t or uid.startswith(f"{t}_")), key=len, default=None)
+
         for device in coordinator.devices:
             thing = device["deviceThingName"]
             entities: dict[str, str] = {}
             for ent in reg_entries:
                 uid = ent.unique_id or ""
+                if owner(uid) != thing:
+                    continue
                 if uid == thing:
                     entities["mower"] = ent.entity_id
                 elif uid.startswith(f"{thing}_"):

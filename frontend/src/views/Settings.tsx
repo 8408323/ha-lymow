@@ -330,7 +330,7 @@ function LiveAdjust() {
 
 // A headlight save the mower hasn't echoed yet outlives the view (per mower), so
 // leaving Settings doesn't lose what was sent.
-const pendingHeadlight = new Map<string, { on: boolean; start: string; end: string }>();
+const pendingHeadlight = new Map<string, { draft: { on: boolean; start: string; end: string }; saved: boolean }>();
 
 function Headlight() {
   const t = useT();
@@ -348,12 +348,14 @@ function Headlight() {
     start: a.headlight_start ? shiftClock(a.headlight_start as string, offset) : "21:00",
     end: a.headlight_end ? shiftClock(a.headlight_end as string, offset) : "23:00",
   };
-  const [draft, setDraft] = useState<typeof live | null>(() => pendingHeadlight.get(device.thing) ?? null);
+  // Kept per mower from the first edit (not only after Save), so leaving Settings
+  // or a failed save never loses the values.
+  const [draft, setDraft] = useState<typeof live | null>(() => pendingHeadlight.get(device.thing)?.draft ?? null);
   // After Save the robot echoes its config later (or never, on some firmware):
   // keep showing what was sent, and drop the draft once the mower reports it.
-  const [saved, setSaved] = useState(() => pendingHeadlight.has(device.thing));
+  const [saved, setSaved] = useState(() => pendingHeadlight.get(device.thing)?.saved ?? false);
   useEffect(() => {
-    if (saved && draft) pendingHeadlight.set(device.thing, draft);
+    if (draft) pendingHeadlight.set(device.thing, { draft, saved });
     else pendingHeadlight.delete(device.thing);
   }, [saved, draft]);
   const v = draft ?? live;
@@ -397,7 +399,7 @@ function Headlight() {
         disabled={!draft || saved}
         onClick={async () => {
           if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) {
-            pendingHeadlight.set(device.thing, v); // recorded even if the view is gone by now
+            pendingHeadlight.set(device.thing, { draft: v, saved: true }); // recorded even if the view is gone by now
             setSaved(true);
           }
         }}
