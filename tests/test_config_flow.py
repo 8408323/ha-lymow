@@ -560,6 +560,8 @@ async def test_reauth_missing_entry_and_invalid_google_region_abort() -> None:
     google.context = {"entry_id": entry.entry_id}
     google.hass.config_entries.async_get_entry.return_value = entry
     assert await google.async_step_reauth(entry.data) == {"type": "abort", "reason": "region_required"}
+    stale = {**entry.data, CONF_REGION: "xx-nowhere-1"}
+    assert await google.async_step_reauth(stale) == {"type": "abort", "reason": "region_required"}
 
 
 async def test_internal_google_guards_raise_when_state_missing() -> None:

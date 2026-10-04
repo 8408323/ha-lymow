@@ -208,7 +208,7 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
         self._region = entry_data.get(CONF_REGION, REGION_AUTO)
         self._auth_method = entry_data.get(CONF_AUTH_METHOD, AUTH_METHOD_PASSWORD)
         if self._auth_method == AUTH_METHOD_GOOGLE:
-            if self._region == REGION_AUTO:
+            if self._region not in COGNITO_DOMAINS:
                 return self.async_abort(reason="region_required")
             return await self.async_step_google()
         return await self.async_step_reauth_confirm()

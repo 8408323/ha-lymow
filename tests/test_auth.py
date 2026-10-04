@@ -191,6 +191,18 @@ class TestLymowAuthLogin:
         with pytest.raises(LymowAuthConnectionError, match="Login failed for all regions"):
             await auth_client.login("user", "pass")
 
+    async def test_login_one_unreachable_region_keeps_failure_retryable(self, auth_client):
+        auth_client._srp_login = AsyncMock(
+            side_effect=[
+                LymowAuthError("UserNotFound"),
+                aiohttp.ClientConnectionError(),
+                LymowAuthError("x"),
+                LymowAuthError("y"),
+            ]
+        )
+        with pytest.raises(LymowAuthConnectionError):
+            await auth_client.login("user", "pass")
+
     async def test_login_raises_when_all_regions_fail(self, auth_client):
         auth_client._srp_login = AsyncMock(side_effect=ValueError("auth error"))
         with pytest.raises(ValueError, match="Login failed for all regions"):

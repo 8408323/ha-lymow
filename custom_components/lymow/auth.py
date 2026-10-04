@@ -253,16 +253,17 @@ class LymowAuth:
 
     async def login(self, username: str, password: str) -> dict[str, Any]:
         """Attempt login against all known regions, return tokens + region."""
-        transient_only = True
+        any_transient = False
         for region in ["eu-west-1", "us-east-2", "ap-southeast-2", "ap-east-1"]:
             try:
                 return await self.login_region(username, password, region)
             except Exception as exc:
                 _LOGGER.debug("[%s] login failed: %s", region, exc)
-                transient_only &= isinstance(exc, (LymowAuthConnectionError, aiohttp.ClientError, TimeoutError))
+                any_transient |= isinstance(exc, (LymowAuthConnectionError, aiohttp.ClientError, TimeoutError))
                 continue
-        # Only call it a credential failure if at least one region actually answered.
-        raise (LymowAuthConnectionError if transient_only else LymowAuthError)("Login failed for all regions")
+        # A region that didn't answer may be the account's real one, so any
+        # transient failure keeps the overall result retryable.
+        raise (LymowAuthConnectionError if any_transient else LymowAuthError)("Login failed for all regions")
 
     async def login_region(self, username: str, password: str, region: str) -> dict[str, Any]:
         """Attempt login against a specific region (user-selected override)."""
