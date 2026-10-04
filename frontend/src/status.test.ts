@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { HassEntity } from "./hass";
-import { formatState } from "./status";
+import { translate } from "./i18n";
+import { formatState as fs, weekday } from "./status";
+
+const formatState = (x: HassEntity) => fs(x, (k, v) => translate("en", k, v), "en");
 
 const e = (state: string, attributes: Record<string, unknown> = {}) => ({ entity_id: "sensor.x", state, attributes }) as HassEntity;
 
@@ -12,8 +15,14 @@ describe("formatState", () => {
   });
 
   it("rounds plain numbers and keeps units", () => {
-    expect(formatState(e("1482.894587", { unit_of_measurement: "m²" }))).toBe("1482.9 m²");
+    expect(formatState(e("1482.894587", { unit_of_measurement: "m²" }))).toBe("1,482.9 m²");
     expect(formatState(e("97", { unit_of_measurement: "%" }))).toBe("97 %");
+  });
+
+  it("translates and localises", () => {
+    expect(fs(e("on"), (k, v) => translate("sv", k, v), "sv")).toBe("På");
+    expect(fs(e("1482.9", { unit_of_measurement: "m²" }), (k) => k, "sv")).toBe("1\u00a0482,9 m²");
+    expect(weekday(1, "en")).toBe("Mon");
   });
 
   it("shows missing values as a dash and relative dates", () => {

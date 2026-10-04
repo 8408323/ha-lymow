@@ -5,6 +5,7 @@
 // onBackground. In edit mode, vertex handles drag, edge "+" handles insert a
 // vertex, and the dock can be dragged when stationMovable.
 
+import { useT } from "../i18n";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { MapData, Point, Zone } from "../hass";
 import { zoneLabel } from "../mower";
@@ -53,6 +54,7 @@ type Drag =
 const TAP_PX = 5;
 
 export function MapCanvas(props: Props) {
+  const t = useT();
   const { map, interactive = true, selected, focused, edit, labels = "name", rotation = 0 } = props;
   const wrapRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
@@ -236,7 +238,7 @@ export function MapCanvas(props: Props) {
 
   const label = (z: Zone, i: number, kind: Kind): string | null => {
     if (labels === "none") return null;
-    const name = kind === "go" ? zoneLabel(z, i) : z.name?.trim() || (kind === "nogo" ? "No-go" : z.isDockingChannel ? "Dock channel" : "Channel");
+    const name = kind === "go" ? zoneLabel(z, i, t) : z.name?.trim() || t(kind === "nogo" ? "No-go" : z.isDockingChannel ? t("Dock channel") : t("Channel"));
     const poly = z.polygon ?? [];
     const metric = kind === "ch" ? `${polylineLength(poly).toFixed(0)} m` : `${Math.round(z.area ?? area(poly))} m²`;
     if (labels === "area") return metric;
@@ -261,7 +263,7 @@ export function MapCanvas(props: Props) {
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           role="img"
-          aria-label="Lawn map"
+          aria-label={t("Lawn map")}
         >
           <defs>
             <clipPath id={clipId}>
@@ -356,7 +358,7 @@ export function MapCanvas(props: Props) {
             {scaleM >= 1000 ? `${scaleM / 1000} km` : `${scaleM} m`}
           </div>
           <div className="ly-map__ctrl">
-            <button type="button" title="North up" aria-label="Reset rotation" className="ly-map__compass" onClick={() => props.onRotation?.(0)}>
+            <button type="button" title={t("North up")} aria-label={t("Reset rotation")} className="ly-map__compass" onClick={() => props.onRotation?.(0)}>
               <svg viewBox="-12 -12 24 24" style={{ transform: `rotate(${rotation}deg)` }}>
                 <path d="M0,-10 L5,4 L0,1 L-5,4 Z" className="c-n" />
                 <text y={10.5}>N</text>
@@ -364,21 +366,21 @@ export function MapCanvas(props: Props) {
             </button>
             {props.onRotation && (
               <>
-                <button type="button" className="ly-map__rot" title="Rotate left" aria-label="Rotate left" onClick={() => props.onRotation!((rotation - 15 + 360) % 360)}>
+                <button type="button" className="ly-map__rot" title={t("Rotate left")} aria-label={t("Rotate left")} onClick={() => props.onRotation!((rotation - 15 + 360) % 360)}>
                   <Icon name="mdi:rotate-left" size={18} />
                 </button>
-                <button type="button" className="ly-map__rot" title="Rotate right" aria-label="Rotate right" onClick={() => props.onRotation!((rotation + 15) % 360)}>
+                <button type="button" className="ly-map__rot" title={t("Rotate right")} aria-label={t("Rotate right")} onClick={() => props.onRotation!((rotation + 15) % 360)}>
                   <Icon name="mdi:rotate-right" size={18} />
                 </button>
               </>
             )}
-            <button type="button" title="Zoom in" aria-label="Zoom in" onClick={() => vb && zoomAt({ x: vb.x + vb.w / 2, y: vb.y + vb.h / 2 }, 1 / 1.4)}>
+            <button type="button" title={t("Zoom in")} aria-label={t("Zoom in")} onClick={() => vb && zoomAt({ x: vb.x + vb.w / 2, y: vb.y + vb.h / 2 }, 1 / 1.4)}>
               <Icon name="mdi:plus" size={18} />
             </button>
-            <button type="button" title="Zoom out" aria-label="Zoom out" onClick={() => vb && zoomAt({ x: vb.x + vb.w / 2, y: vb.y + vb.h / 2 }, 1.4)}>
+            <button type="button" title={t("Zoom out")} aria-label={t("Zoom out")} onClick={() => vb && zoomAt({ x: vb.x + vb.w / 2, y: vb.y + vb.h / 2 }, 1.4)}>
               <Icon name="mdi:minus" size={18} />
             </button>
-            <button type="button" title="Fit lawn" aria-label="Fit lawn" onClick={fit}>
+            <button type="button" title={t("Fit lawn")} aria-label={t("Fit lawn")} onClick={fit}>
               <Icon name="mdi:fit-to-screen-outline" size={18} />
             </button>
           </div>

@@ -2,6 +2,7 @@
 // Only glyphs come from HA (<ha-icon>, mdi set); everything else is ours.
 
 import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useT } from "./i18n";
 
 declare module "react" {
   namespace JSX {
@@ -270,7 +271,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
     confirm: (o) => new Promise((resolve) => setDialog({ ...o, resolve: (v) => resolve(Boolean(v)) })),
     prompt: (o) =>
       new Promise((resolve) =>
-        setDialog({ title: o.title, confirm: o.confirm ?? "Save", input: { label: o.label, value: o.value ?? "", placeholder: o.placeholder, maxLength: o.maxLength }, resolve: (v) => resolve(typeof v === "string" ? v : null) }),
+        setDialog({ title: o.title, confirm: o.confirm, input: { label: o.label, value: o.value ?? "", placeholder: o.placeholder, maxLength: o.maxLength }, resolve: (v) => resolve(typeof v === "string" ? v : null) }),
       ),
     toast,
   };
@@ -292,6 +293,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
 }
 
 function DialogView({ req, close }: { req: DialogReq; close: (v: string | boolean | null) => void }) {
+  const t = useT();
   const [text, setText] = useState(req.input?.value ?? "");
   const inputRef = useRef<HTMLInputElement>(null);
   const okRef = useRef<HTMLButtonElement>(null);
@@ -321,10 +323,10 @@ function DialogView({ req, close }: { req: DialogReq; close: (v: string | boolea
         )}
         <div className="ly-dialog__actions">
           <Button variant="ghost" onClick={() => close(req.input ? null : false)}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <button ref={okRef} type="button" className={cx("ly-btn", req.danger ? "ly-btn--danger" : "ly-btn--primary")} onClick={ok}>
-            {req.confirm ?? "Confirm"}
+            {req.confirm ?? t(req.input ? "Save" : "Confirm")}
           </button>
         </div>
       </div>

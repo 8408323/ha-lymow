@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MapData, Point, Zone } from "../hass";
 import { area, simplify } from "../map/geometry";
 import { MapCanvas, type Kind, type LabelMode } from "../map/MapCanvas";
+import { useT } from "../i18n";
 import { useMower, useMowerEntity, zoneLabel } from "../mower";
 import { MOWING_WORK_STATUS, RTK, WORK_STATUS, num } from "../status";
 import { Badge, Button, Empty, Field, Icon, Segmented, Slider, Toggle, cx, useUi } from "../ui";
@@ -53,6 +54,7 @@ interface Focus {
 }
 
 export function MapView() {
+  const t = useT();
   const { snap, call } = useMower();
   const ui = useUi();
   const map = snap?.map;
@@ -126,8 +128,8 @@ export function MapView() {
   }
   if (!go.length && !map.charging_station) {
     return (
-      <Empty icon="mdi:map-search-outline" title="No map yet">
-        The mower hasn't sent its map yet. Use the refresh button at the top to ask for it.
+      <Empty icon="mdi:map-search-outline" title={t("No map yet")}>
+        {t("The mower hasn't sent its map yet. Use the refresh button at the top to ask for it.")}
       </Empty>
     );
   }
@@ -163,11 +165,11 @@ export function MapView() {
         stationMovable={mode === "edit" && !focus}
         onStationMoved={async (p) => {
           const ok = await ui.confirm({
-            title: "Move the charging station?",
-            body: "The mower will use this spot as its dock from now on. Only do this if you physically moved the station.",
-            confirm: "Move station",
+            title: t("Move the charging station?"),
+            body: t("The mower will use this spot as its dock from now on. Only do this if you physically moved the station."),
+            confirm: t("Move station"),
           });
-          if (ok) await call("lymow", "move_charging_station", { x: +p.x.toFixed(3), y: +p.y.toFixed(3) }, "Charging station moved");
+          if (ok) await call("lymow", "move_charging_station", { x: +p.x.toFixed(3), y: +p.y.toFixed(3) }, t("Charging station moved"));
         }}
         trail={trail}
         labels={labels}
@@ -177,8 +179,8 @@ export function MapView() {
         overlay={<MapStatus map={map} />}
         className="ly-mapview__canvas"
       />
-      <aside className="ly-sheet" aria-label={mode === "edit" ? "Map editor" : "Zones"}>
-        <button type="button" className="ly-sheet__grip" onClick={() => setSheetOpen(!sheetOpen)} aria-label={sheetOpen ? "Collapse panel" : "Expand panel"}>
+      <aside className="ly-sheet" aria-label={mode === "edit" ? t("Map editor") : t("Zones")}>
+        <button type="button" className="ly-sheet__grip" onClick={() => setSheetOpen(!sheetOpen)} aria-label={sheetOpen ? t("Collapse panel") : t("Expand panel")}>
           <span />
         </button>
         {mode === "browse" ? (
@@ -214,13 +216,13 @@ export function MapView() {
               <Icon name="mdi:pencil-ruler" /> Edit map
             </h2>
             <ol className="ly-steps">
-              <li>Tap a zone, no-go area or channel to edit it.</li>
-              <li>Drag the white points to reshape, tap the small dots on an edge to add a point.</li>
-              <li>Drag the charging station ⚡ to move it.</li>
+              <li>{t("Tap a zone, no-go area or channel to edit it.")}</li>
+              <li>{t("Drag the white points to reshape, tap the small dots on an edge to add a point.")}</li>
+              <li>{t("Drag the charging station ⚡ to move it.")}</li>
             </ol>
-            <p className="ly-muted">New zones are created by driving the mower around them in the Lymow app; the robot can't create them from a drawing.</p>
+            <p className="ly-muted">{t("New zones are created by driving the mower around them in the Lymow app; the robot can't create them from a drawing.")}</p>
             <Button variant="primary" icon="mdi:check" block onClick={exitEdit}>
-              Done editing
+              {t("Done editing")}
             </Button>
           </div>
         )}
@@ -230,6 +232,7 @@ export function MapView() {
 }
 
 function MapStatus({ map }: { map: MapData }) {
+  const t = useT();
   const battery = num(useMowerEntity("battery")?.state);
   const ws = map.workStatus;
   const rtk = map.rtkStatus !== undefined ? RTK[map.rtkStatus] : undefined;
@@ -238,14 +241,14 @@ function MapStatus({ map }: { map: MapData }) {
     <div className="ly-map__status">
       {ws !== undefined && (
         <Badge tone={mowing ? "good" : ws === 7 || ws === 13 ? "bad" : ws === 3 || ws === 10 ? "warn" : "info"} icon="mdi:robot-mower">
-          {WORK_STATUS[ws] ?? `Status ${ws}`}
+          {WORK_STATUS[ws] ? t(WORK_STATUS[ws]) : t("Status {n}", { n: ws })}
         </Badge>
       )}
       {mowing && map.mowProgress !== undefined && <Badge icon="mdi:grass">{Math.round(map.mowProgress)}%</Badge>}
       {battery !== undefined && <Badge icon="mdi:battery">{Math.round(battery)}%</Badge>}
       {rtk && (
         <Badge tone={rtk.tone} icon="mdi:satellite-variant">
-          {rtk.label}
+          {t(rtk.label)}
         </Badge>
       )}
     </div>
@@ -262,6 +265,7 @@ function BrowsePanel(p: {
   showTrail: boolean;
   setShowTrail: (v: boolean) => void;
 }) {
+  const t = useT();
   const { call } = useMower();
   const ui = useUi();
   const zones = p.map.go_zones ?? [];
@@ -277,21 +281,21 @@ function BrowsePanel(p: {
         <Icon name="mdi:texture-box" /> Zones
         <span className="ly-muted">{zones.length}</span>
       </h2>
-      <p className="ly-muted">Tap zones on the map or in the list to choose what to mow.</p>
+      <p className="ly-muted">{t("Tap zones on the map or in the list to choose what to mow.")}</p>
       <ul className="ly-zones">
         {zones.map((z, i) => (
           <li key={z.hashId} className={cx("ly-zone", p.selected.has(z.hashId) && "ly-zone--sel", z.isEnabled === false && "ly-zone--off")}>
             <button type="button" className="ly-zone__pick" onClick={() => toggle(z.hashId)} aria-pressed={p.selected.has(z.hashId)}>
               <span className="ly-check">{p.selected.has(z.hashId) && <Icon name="mdi:check" size={14} />}</span>
-              <span className="ly-zone__name">{zoneLabel(z, i)}</span>
+              <span className="ly-zone__name">{zoneLabel(z, i, t)}</span>
               <span className="ly-zone__meta">
                 {Math.round(z.area ?? area(z.polygon ?? []))} m² · {z.cutHeight ?? z.zoneConfig?.cutHeight ?? "–"} mm
               </span>
             </button>
             <Toggle
-              label={`${zoneLabel(z, i)} enabled`}
+              label={`${zoneLabel(z, i, t)} enabled`}
               checked={z.isEnabled !== false}
-              onChange={(v) => call("lymow", "set_zone_enabled", { zone_hash_id: z.hashId, is_enabled: v }, v ? "Zone enabled" : "Zone disabled")}
+              onChange={(v) => call("lymow", "set_zone_enabled", { zone_hash_id: z.hashId, is_enabled: v }, v ? t("Zone enabled") : t("Zone disabled"))}
             />
           </li>
         ))}
@@ -306,7 +310,7 @@ function BrowsePanel(p: {
             if (await call("lymow", "start_zone", { zone_hash_ids: sel }, `Mowing ${sel.length} zone${sel.length > 1 ? "s" : ""}`)) p.setSelected(new Set());
           }}
         >
-          {sel.length ? `Mow ${sel.length} selected` : "Select zones to mow"}
+          {sel.length ? t("Mow {n} selected", { n: sel.length }) : t("Select zones to mow")}
         </Button>
         {sel.length >= 2 && (
           <Button
@@ -314,37 +318,37 @@ function BrowsePanel(p: {
             block
             onClick={async () => {
               const ok = await ui.confirm({
-                title: `Merge ${sel.length} zones?`,
-                body: "They become one zone with a new ID. Schedules or per-zone settings that pointed at the old zones need to be set up again.",
-                confirm: "Merge",
+                title: t("Merge {n} zones?", { n: sel.length }),
+                body: t("They become one zone with a new ID. Schedules or per-zone settings that pointed at the old zones need to be set up again."),
+                confirm: t("Merge"),
               });
-              if (ok && (await call("lymow", "merge_zones", { zone_hash_ids: sel }, "Zones merged"))) p.setSelected(new Set());
+              if (ok && (await call("lymow", "merge_zones", { zone_hash_ids: sel }, t("Zones merged")))) p.setSelected(new Set());
             }}
           >
-            Merge selected
+            {t("Merge selected")}
           </Button>
         )}
         <Button icon="mdi:pencil-ruler" block onClick={p.onEdit}>
-          Edit map
+          {t("Edit map")}
         </Button>
       </div>
       <details className="ly-details">
-        <summary>Display</summary>
-        <Field label="Labels">
+        <summary>{t("Display")}</summary>
+        <Field label={t("Labels")}>
           <Segmented
             value={p.labels}
             onChange={p.setLabels}
             options={[
-              { value: "name", label: "Name" },
-              { value: "area", label: "Area" },
-              { value: "both", label: "Both" },
-              { value: "none", label: "None" },
+              { value: "name", label: t("Name") },
+              { value: "area", label: t("Area") },
+              { value: "both", label: t("Both") },
+              { value: "none", label: t("None") },
             ]}
           />
         </Field>
         <div className="ly-row">
-          <span>Show mowing trail</span>
-          <Toggle checked={p.showTrail} onChange={p.setShowTrail} label="Show mowing trail" />
+          <span>{t("Show mowing trail")}</span>
+          <Toggle checked={p.showTrail} onChange={p.setShowTrail} label={t("Show mowing trail")} />
         </div>
         <ul className="ly-legend">
           <li>
@@ -380,52 +384,57 @@ function EditPanel(p: {
   onSaved: () => void;
   onClose: () => void;
 }) {
+  const t = useT();
   const { call } = useMower();
   const ui = useUi();
   const { focus, zone } = p;
-  const kindName = focus.kind === "go" ? "zone" : focus.kind === "nogo" ? "no-go area" : "channel";
-  const title = focus.kind === "go" ? zoneLabel(zone, p.index) : zone.name?.trim() || (focus.kind === "nogo" ? "No-go area" : "Channel");
+  const texts = {
+    go: { rename: t("Rename zone"), removed: t("The zone is removed from the mower's map. You can bring it back by restoring a map backup.") },
+    nogo: { rename: t("Rename no-go area"), removed: t("The no-go area is removed from the mower's map. You can bring it back by restoring a map backup.") },
+    ch: { rename: t("Rename channel"), removed: t("The channel is removed from the mower's map. You can bring it back by restoring a map backup.") },
+  }[focus.kind];
+  const title = focus.kind === "go" ? zoneLabel(zone, p.index, t) : zone.name?.trim() || t(focus.kind === "nogo" ? t("No-go area") : t("Channel"));
   const key = focus.kind === "go" ? "zone_hash_id" : focus.kind === "nogo" ? "nogo_hash_id" : "channel_hash_id";
   const svc = focus.kind === "go" ? "zone" : focus.kind === "nogo" ? "nogo_zone" : "channel";
 
   return (
     <div className="ly-sheet__body">
       <h2 className="ly-sheet__title">
-        <Button variant="ghost" icon="mdi:arrow-left" title="Back" onClick={p.onClose} />
+        <Button variant="ghost" icon="mdi:arrow-left" title={t("Back")} onClick={p.onClose} />
         {title}
       </h2>
       <div className="ly-btnrow">
         <Button
           icon="mdi:rename-outline"
           onClick={async () => {
-            const name = await ui.prompt({ title: `Rename ${kindName}`, label: "Name", value: zone.name ?? "", placeholder: title, maxLength: 40 });
-            if (name) await call("lymow", `rename_${svc}`, { [key]: zone.hashId, name }, "Renamed");
+            const name = await ui.prompt({ title: texts.rename, label: t("Name"), value: zone.name ?? "", placeholder: title, maxLength: 40 });
+            if (name) await call("lymow", `rename_${svc}`, { [key]: zone.hashId, name }, t("Renamed"));
           }}
         >
-          Rename
+          {t("Rename")}
         </Button>
         <Button
           variant="danger"
           icon="mdi:delete-outline"
           onClick={async () => {
             const ok = await ui.confirm({
-              title: `Delete ${title}?`,
-              body: `The ${kindName} is removed from the mower's map. You can bring it back by restoring a map backup.`,
-              confirm: "Delete",
+              title: t("Delete {name}?", { name: title }),
+              body: texts.removed,
+              confirm: t("Delete"),
               danger: true,
             });
-            if (ok && (await call("lymow", `delete_${svc}`, { [key]: zone.hashId }, "Deleted"))) p.onClose();
+            if (ok && (await call("lymow", `delete_${svc}`, { [key]: zone.hashId }, t("Deleted")))) p.onClose();
           }}
         >
-          Delete
+          {t("Delete")}
         </Button>
       </div>
 
       {p.editPts && (
         <section className="ly-subsection">
-          <h3>Shape</h3>
+          <h3>{t("Shape")}</h3>
           <p className="ly-muted">
-            Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {p.editPts.length} points for editing.
+            {t("Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. The outline is simplified to {n} points for editing.", { n: p.editPts.length })}
           </p>
           <div className="ly-btnrow">
             <Button
@@ -434,17 +443,17 @@ function EditPanel(p: {
               disabled={!p.dirty}
               onClick={async () => {
                 const polygon = p.editPts!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
-                const ok = await call("lymow", focus.kind === "go" ? "update_zone_polygon" : "update_nogo_polygon", { [key]: zone.hashId, polygon }, "Shape saved");
+                const ok = await call("lymow", focus.kind === "go" ? "update_zone_polygon" : "update_nogo_polygon", { [key]: zone.hashId, polygon }, t("Shape saved"));
                 if (ok) p.onSaved();
               }}
             >
-              Save shape
+              {t("Save shape")}
             </Button>
             <Button icon="mdi:undo" disabled={!p.dirty} onClick={p.onReset}>
-              Discard
+              {t("Discard")}
             </Button>
             <Button icon="mdi:vector-point-minus" disabled={p.vertex === null || p.editPts.length <= 3} onClick={p.onDeleteVertex}>
-              Delete point
+              {t("Delete point")}
             </Button>
           </div>
         </section>
@@ -456,6 +465,7 @@ function EditPanel(p: {
 }
 
 function ZoneSettings({ zone }: { zone: Zone }) {
+  const t = useT();
   const { call } = useMower();
   const cfg = zone.zoneConfig ?? {};
   const [cut, setCut] = useState<number>(zone.cutHeight ?? cfg.cutHeight ?? 40);
@@ -466,17 +476,17 @@ function ZoneSettings({ zone }: { zone: Zone }) {
   const changed = JSON.stringify([cut, speed, spacing, laps]) !== initial;
   return (
     <section className="ly-subsection">
-      <h3>Mowing settings for this zone</h3>
-      <Field label="Cutting height">
+      <h3>{t("Mowing settings for this zone")}</h3>
+      <Field label={t("Cutting height")}>
         <Slider value={cut} min={20} max={100} step={5} unit="mm" onChange={setCut} />
       </Field>
-      <Field label="Speed">
+      <Field label={t("Speed")}>
         <Slider value={speed} min={0.1} max={1.5} step={0.05} unit="m/s" format={(v) => v.toFixed(2)} onChange={setSpeed} />
       </Field>
-      <Field label="Path spacing">
+      <Field label={t("Path spacing")}>
         <Slider value={spacing} min={20} max={40} step={1} unit="cm" onChange={setSpacing} />
       </Field>
-      <Field label="Perimeter laps">
+      <Field label={t("Perimeter laps")}>
         <Slider value={laps} min={0} max={3} onChange={setLaps} />
       </Field>
       <Button
@@ -488,11 +498,11 @@ function ZoneSettings({ zone }: { zone: Zone }) {
             "lymow",
             "set_zone_config",
             { zone_hash_id: zone.hashId, cut_height: cut, move_speed: speed, path_spacing: spacing, perimeter_mow_laps: laps },
-            "Zone settings applied",
+            t("Zone settings applied"),
           )
         }
       >
-        Apply zone settings
+        {t("Apply zone settings")}
       </Button>
     </section>
   );

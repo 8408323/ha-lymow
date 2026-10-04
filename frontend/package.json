@@ -7,7 +7,9 @@
     "build": "tsc --noEmit && vite build",
     "dev": "vite build --watch",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "i18n:keys": "node scripts/i18n.mjs",
+    "i18n:check": "node scripts/i18n.mjs --check"
   },
   "dependencies": {
     "react": "^19.3.0",

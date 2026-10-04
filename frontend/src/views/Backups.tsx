@@ -1,5 +1,6 @@
 import type { Backup, Point } from "../hass";
 import { bbox, pathD } from "../map/geometry";
+import { useT } from "../i18n";
 import { useMower } from "../mower";
 import { Button, Card, Empty, Icon, useUi } from "../ui";
 
@@ -35,24 +36,25 @@ function Thumb({ b }: { b: Backup }) {
 }
 
 export function BackupsView() {
+  const t = useT();
   const { snap, call } = useMower();
   const ui = useUi();
   const backups = [...(snap?.backups ?? [])].sort((a, b) => (b.backupTime ?? 0) - (a.backupTime ?? 0));
   return (
     <div className="ly-grid ly-grid--narrow">
       <Card
-        title="Map backups"
+        title={t("Map backups")}
         icon="mdi:cloud-sync-outline"
         actions={
-          <Button variant="primary" icon="mdi:cloud-upload-outline" onClick={() => call("lymow", "backup_map", {}, "Backup requested — it shows up here within a few minutes")}>
-            Back up now
+          <Button variant="primary" icon="mdi:cloud-upload-outline" onClick={() => call("lymow", "backup_map", {}, t("Backup requested — it shows up here within a few minutes"))}>
+            {t("Back up now")}
           </Button>
         }
       >
-        <p className="ly-muted">Backups are stored in the Lymow cloud. Restoring replaces the mower's current map, including zones, no-go areas and channels.</p>
+        <p className="ly-muted">{t("Backups are stored in the Lymow cloud. Restoring replaces the mower's current map, including zones, no-go areas and channels.")}</p>
         {!backups.length ? (
-          <Empty icon="mdi:cloud-outline" title="No backups yet">
-            Make a backup before you change the map, so you can always go back.
+          <Empty icon="mdi:cloud-outline" title={t("No backups yet")}>
+            {t("Make a backup before you change the map, so you can always go back.")}
           </Empty>
         ) : (
           <ul className="ly-list">
@@ -69,27 +71,27 @@ export function BackupsView() {
                     <Button
                       icon="mdi:backup-restore"
                       onClick={async () => {
-                        if (await ui.confirm({ title: `Restore “${name}”?`, body: "The mower's current map is replaced by this backup.", confirm: "Restore", danger: true }))
-                          await call("lymow", "restore_backup_map", { object_key: b.file }, "Backup restored");
+                        if (await ui.confirm({ title: t("Restore “{name}”?", { name }), body: t("The mower's current map is replaced by this backup."), confirm: t("Restore"), danger: true }))
+                          await call("lymow", "restore_backup_map", { object_key: b.file }, t("Backup restored"));
                       }}
                     >
-                      Restore
+                      {t("Restore")}
                     </Button>
                     <Button
                       variant="ghost"
                       icon="mdi:rename-outline"
-                      title="Rename"
+                      title={t("Rename")}
                       onClick={async () => {
-                        const n = await ui.prompt({ title: "Rename backup", label: "Name", value: b.name ?? "", maxLength: 40 });
-                        if (n && n !== b.name) await call("lymow", "rename_backup_map", { object_key: b.file, name: n }, "Backup renamed");
+                        const n = await ui.prompt({ title: t("Rename backup"), label: t("Name"), value: b.name ?? "", maxLength: 40 });
+                        if (n && n !== b.name) await call("lymow", "rename_backup_map", { object_key: b.file, name: n }, t("Backup renamed"));
                       }}
                     />
                     <Button
                       variant="ghost"
                       icon="mdi:delete-outline"
-                      title="Delete"
+                      title={t("Delete")}
                       onClick={async () => {
-                        if (await ui.confirm({ title: `Delete “${name}”?`, confirm: "Delete", danger: true })) await call("lymow", "delete_backup_map", { object_key: b.file }, "Backup deleted");
+                        if (await ui.confirm({ title: t("Delete “{name}”?", { name }), confirm: t("Delete"), danger: true })) await call("lymow", "delete_backup_map", { object_key: b.file }, t("Backup deleted"));
                       }}
                     />
                   </div>

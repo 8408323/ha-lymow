@@ -2,11 +2,13 @@ import { useRef } from "react";
 import type { TabId } from "../App";
 import { fireHassEvent, useEntity, type Schedule } from "../hass";
 import { MapCanvas } from "../map/MapCanvas";
+import { useI18n, useT } from "../i18n";
 import { useMower, useMowerEntity } from "../mower";
-import { DAYS, RTK, formatState, mowerState, num, pad2 } from "../status";
+import { RTK, formatState, mowerState, num, pad2, weekday } from "../status";
 import { Badge, Button, Card, Icon, cx } from "../ui";
 
 export function OverviewView({ go }: { go: (t: TabId) => void }) {
+  const t = useT();
   const { snap, ent } = useMower();
   const ref = useRef<HTMLDivElement>(null);
   const moreInfo = (key: string) => {
@@ -17,22 +19,22 @@ export function OverviewView({ go }: { go: (t: TabId) => void }) {
     <div className="ly-grid ly-grid--overview" ref={ref}>
       <Hero />
       <div className="ly-tiles">
-        <Tile k="battery" icon="mdi:battery" label="Battery" moreInfo={moreInfo} />
-        <Tile k="mow_progress" icon="mdi:progress-check" label="Progress" moreInfo={moreInfo} />
-        <Tile k="remaining_area" icon="mdi:grass" label="Area left" moreInfo={moreInfo} />
-        <Tile k="last_clean_at" icon="mdi:calendar-check" label="Last mow" moreInfo={moreInfo} />
-        <Tile k="last_clean_area" icon="mdi:texture-box" label="Last mow area" moreInfo={moreInfo} />
+        <Tile k="battery" icon="mdi:battery" label={t("Battery")} moreInfo={moreInfo} />
+        <Tile k="mow_progress" icon="mdi:progress-check" label={t("Progress")} moreInfo={moreInfo} />
+        <Tile k="remaining_area" icon="mdi:grass" label={t("Area left")} moreInfo={moreInfo} />
+        <Tile k="last_clean_at" icon="mdi:calendar-check" label={t("Last mow")} moreInfo={moreInfo} />
+        <Tile k="last_clean_area" icon="mdi:texture-box" label={t("Last mow area")} moreInfo={moreInfo} />
         <RtkTile moreInfo={moreInfo} rtk={snap?.map.rtkStatus} />
-        <Tile k="connectivity" icon="mdi:access-point-network" label="Connection" moreInfo={moreInfo} />
-        <Tile k="remain_clean_time" icon="mdi:timer-sand" label="Time left" moreInfo={moreInfo} />
+        <Tile k="connectivity" icon="mdi:access-point-network" label={t("Connection")} moreInfo={moreInfo} />
+        <Tile k="remain_clean_time" icon="mdi:timer-sand" label={t("Time left")} moreInfo={moreInfo} />
       </div>
       <Card
-        title="Lawn"
+        title={t("Lawn")}
         icon="mdi:map-outline"
         className="ly-card--map"
         actions={
           <Button variant="ghost" icon="mdi:arrow-expand" onClick={() => go("map")}>
-            Open map
+            {t("Open map")}
           </Button>
         }
       >
@@ -41,7 +43,7 @@ export function OverviewView({ go }: { go: (t: TabId) => void }) {
             <MapCanvas map={snap.map} interactive={false} labels="name" />
           </div>
         ) : (
-          <p className="ly-muted">The map appears once the mower has sent it.</p>
+          <p className="ly-muted">{t("The map appears once the mower has sent it.")}</p>
         )}
       </Card>
       <NextSchedule schedules={snap?.schedules} go={go} />
@@ -50,6 +52,7 @@ export function OverviewView({ go }: { go: (t: TabId) => void }) {
 }
 
 function Hero() {
+  const t = useT();
   const { call } = useMower();
   const mower = useMowerEntity("mower");
   const progress = num(useMowerEntity("mow_progress")?.state);
@@ -61,18 +64,18 @@ function Hero() {
   const errorText = mower?.attributes.error_description ?? mower?.attributes.error;
   const off = state === "unavailable";
 
-  const start = () => call("lawn_mower", "start_mowing", {}, "Mowing started");
-  const pause = () => call("lawn_mower", "pause", {}, "Paused");
-  const resume = () => call("lymow", "resume", {}, "Resumed");
-  const dock = () => call("lawn_mower", "dock", {}, "Returning to the dock");
+  const start = () => call("lawn_mower", "start_mowing", {}, t("Mowing started"));
+  const pause = () => call("lawn_mower", "pause", {}, t("Paused"));
+  const resume = () => call("lymow", "resume", {}, t("Resumed"));
+  const dock = () => call("lawn_mower", "dock", {}, t("Returning to the dock"));
 
   let sub = "";
-  if (error) sub = errorText ? `Error ${error}: ${errorText}` : `Error code ${error}`;
-  else if (lifted) sub = "The mower is lifted or tilted";
-  else if (state === "mowing" && progress !== undefined) sub = `${Math.round(progress)}% of the task done`;
-  else if (state === "docked") sub = charging ? "Charging in the dock" : "Resting in the dock";
-  else if (state === "paused") sub = "Waiting — resume or send it home";
-  else if (off) sub = "The mower isn't reachable right now";
+  if (error) sub = errorText ? t("Error {code}: {text}", { code: error, text: errorText }) : t("Error code {code}", { code: error });
+  else if (lifted) sub = t("The mower is lifted or tilted");
+  else if (state === "mowing" && progress !== undefined) sub = t("{pct}% of the task done", { pct: Math.round(progress) });
+  else if (state === "docked") sub = (charging ? t("Charging in the dock") : t("Resting in the dock"));
+  else if (state === "paused") sub = t("Waiting — resume or send it home");
+  else if (off) sub = t("The mower isn't reachable right now");
 
   return (
     <section className={cx("ly-hero", `ly-hero--${st.tone}`)}>
@@ -80,7 +83,7 @@ function Hero() {
         <Icon name={st.icon} size={40} />
       </div>
       <div className="ly-hero__text">
-        <h1>{st.label}</h1>
+        <h1>{t(st.label)}</h1>
         {sub && <p>{sub}</p>}
         {state === "mowing" && progress !== undefined && (
           <div className="ly-progress" role="progressbar" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}>
@@ -91,22 +94,22 @@ function Hero() {
       <div className="ly-hero__actions">
         {(state === "docked" || state === "unknown" || state === "error") && (
           <Button variant="primary" size="lg" icon="mdi:play" onClick={start} disabled={off}>
-            Start mowing
+            {t("Start mowing")}
           </Button>
         )}
         {(state === "mowing" || state === "returning") && (
           <Button variant="secondary" size="lg" icon="mdi:pause" onClick={pause}>
-            Pause
+            {t("Pause")}
           </Button>
         )}
         {state === "paused" && (
           <Button variant="primary" size="lg" icon="mdi:play" onClick={resume}>
-            Resume
+            {t("Resume")}
           </Button>
         )}
         {state !== "docked" && state !== "returning" && !off && (
           <Button variant="secondary" size="lg" icon="mdi:home-import-outline" onClick={dock}>
-            Dock
+            {t("Dock")}
           </Button>
         )}
       </div>
@@ -116,27 +119,30 @@ function Hero() {
 
 function Tile({ k, icon, label, moreInfo }: { k: string; icon: string; label: string; moreInfo: (k: string) => void }) {
   const e = useEntity(useMower().ent(k));
+  const { t, locale } = useI18n();
   if (!e) return null;
   return (
     <button type="button" className="ly-tile" onClick={() => moreInfo(k)}>
       <Icon name={icon} />
-      <span className="ly-tile__label">{label}</span>
-      <span className="ly-tile__value" title={formatState(e)}>
-        {formatState(e)}
+      <span className="ly-tile__label">{t(label)}</span>
+      <span className="ly-tile__value" title={formatState(e, t, locale)}>
+        {formatState(e, t, locale)}
       </span>
     </button>
   );
 }
 
 function RtkTile({ rtk, moreInfo }: { rtk: number | undefined; moreInfo: (k: string) => void }) {
+  const t = useT();
   if (rtk === undefined) return null;
   const r = RTK[rtk] ?? { label: `Status ${rtk}`, tone: "neutral" as const };
+  const label = RTK[rtk] ? t(r.label) : t("Status {n}", { n: rtk });
   return (
     <button type="button" className="ly-tile" onClick={() => moreInfo("rtk_status")}>
       <Icon name="mdi:satellite-variant" />
-      <span className="ly-tile__label">Positioning</span>
+      <span className="ly-tile__label">{t("Positioning")}</span>
       <span className="ly-tile__value">
-        <Badge tone={r.tone}>{r.label}</Badge>
+        <Badge tone={r.tone}>{label}</Badge>
       </span>
     </button>
   );
@@ -155,6 +161,7 @@ function nextRun(s: Schedule, now: Date): Date | null {
 }
 
 function NextSchedule({ schedules, go }: { schedules: Schedule[] | undefined; go: (t: TabId) => void }) {
+  const { t, locale } = useI18n();
   const { zoneName } = useMower();
   const now = new Date();
   const upcoming = (schedules ?? [])
@@ -163,23 +170,23 @@ function NextSchedule({ schedules, go }: { schedules: Schedule[] | undefined; go
     .sort((a, b) => +a.at - +b.at)[0];
   return (
     <Card
-      title="Next mow"
+      title={t("Next mow")}
       icon="mdi:calendar-clock"
       actions={
         <Button variant="ghost" icon="mdi:pencil-outline" onClick={() => go("schedules")}>
-          Schedules
+          {t("Schedules")}
         </Button>
       }
     >
       {upcoming ? (
         <div className="ly-next">
           <strong>
-            {DAYS[upcoming.at.getDay()]} {pad2(upcoming.s.hour)}:{pad2(upcoming.s.minute)}
+            {weekday(upcoming.at.getDay(), locale)} {pad2(upcoming.s.hour)}:{pad2(upcoming.s.minute)}
           </strong>
           <span className="ly-muted">{upcoming.s.zones?.length ? upcoming.s.zones.map(zoneName).join(", ") : "All zones"}</span>
         </div>
       ) : (
-        <p className="ly-muted">No active schedule. Add one to mow automatically.</p>
+        <p className="ly-muted">{t("No active schedule. Add one to mow automatically.")}</p>
       )}
     </Card>
   );

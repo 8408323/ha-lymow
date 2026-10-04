@@ -188,6 +188,8 @@ for your mower, no dashboard setup needed:
 | **Settings** | Mowing defaults, live adjustments during a mow, headlight schedule, every mower switch/option, maintenance actions and setup (name, PIN, RTK base, Wi-Fi, geofence). |
 | **Diagnostics** | Every sensor, grouped and searchable; tap one for its history. |
 
+The panel follows your Home Assistant language and is available in every language the Lymow app supports — English, German, French, Italian, Spanish, Polish, Slovenian and Simplified Chinese — plus Swedish, Norwegian, Danish, Finnish and Icelandic. You can override it under **Settings → Language** (saved per browser).
+
 ![The Lymow panel](docs/screenshots/panel-overview.png)
 
 → [More screenshots](docs/SCREENSHOTS.md)

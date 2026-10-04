@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { fireHassEvent, useHass } from "../hass";
+import { useI18n } from "../i18n";
 import { useMower } from "../mower";
 import { formatState } from "../status";
 import { Card, Icon, TextInput } from "../ui";
@@ -12,6 +13,7 @@ const GROUPS: [string, RegExp][] = [
 ];
 
 export function DiagnosticsView({ host }: { host: HTMLElement }) {
+  const { t, locale } = useI18n();
   const hass = useHass();
   const { device } = useMower();
   const [q, setQ] = useState("");
@@ -21,7 +23,7 @@ export function DiagnosticsView({ host }: { host: HTMLElement }) {
       const e = hass.states[id];
       const full: string = e.attributes.friendly_name ?? id;
       const name = full.startsWith(`${device.name} `) ? full.slice(device.name.length + 1) : full;
-      return { k, id, name, value: formatState(e) };
+      return { k, id, name, value: formatState(e, t, locale) };
     })
     .filter((r) => !q || `${r.name} ${r.value}`.toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -33,12 +35,12 @@ export function DiagnosticsView({ host }: { host: HTMLElement }) {
     <div className="ly-grid">
       <div className="ly-search">
         <Icon name="mdi:magnify" />
-        <TextInput placeholder="Search sensors" value={q} onChange={(e) => setQ(e.target.value)} />
+        <TextInput placeholder={t("Search sensors")} value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
       {grouped
         .filter(([, list]) => list.length)
         .map(([title, list]) => (
-          <Card key={title} title={title} className="ly-card--wide">
+          <Card key={title} title={t(title)} className="ly-card--wide">
             <dl className="ly-diag">
               {list.map((r) => (
                 <button type="button" key={r.id} className="ly-diag__row" onClick={() => fireHassEvent(host, "hass-more-info", { entityId: r.id })}>

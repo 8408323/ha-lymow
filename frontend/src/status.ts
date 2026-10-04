@@ -1,4 +1,5 @@
 import type { HassEntity } from "./hass";
+import type { T } from "./i18n";
 
 export type Tone = "neutral" | "good" | "warn" | "bad" | "info";
 
@@ -45,7 +46,11 @@ export const RTK: Record<number, { label: string; tone: Tone }> = {
   3: { label: "RTK fixed", tone: "good" },
 };
 
-export const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+/** Short weekday name for 0=Sun…6=Sat in the given locale. */
+export function weekday(day: number, locale: string): string {
+  // 2023-01-01 was a Sunday.
+  return new Date(2023, 0, 1 + day).toLocaleDateString(locale, { weekday: "short" });
+}
 
 export const pad2 = (n: number) => String(n).padStart(2, "0");
 
@@ -56,28 +61,29 @@ export function num(state: string | undefined): number | undefined {
 }
 
 /** Human-friendly entity value: relative dates, durations, rounded numbers with units. */
-export function formatState(e: HassEntity): string {
+export function formatState(e: HassEntity, t: T, locale: string): string {
   const unit = e.attributes.unit_of_measurement;
   const dc = e.attributes.device_class;
   if (e.state === "unknown" || e.state === "unavailable") return "—";
+  if (e.state === "on" || e.state === "off") return e.state === "on" ? t("On") : t("Off");
   if (dc === "timestamp") {
     const d = new Date(e.state);
     if (isNaN(+d)) return e.state;
     const days = Math.round((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 864e5);
-    const time = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-    if (days === 0) return `Today ${time}`;
-    if (days === 1) return `Yesterday ${time}`;
-    return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    const time = d.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+    if (days === 0) return t("Today {time}", { time });
+    if (days === 1) return t("Yesterday {time}", { time });
+    return d.toLocaleDateString(locale, { day: "numeric", month: "short" });
   }
   const n = Number(e.state);
   if (Number.isFinite(n)) {
     const secs = unit === "s" ? n : unit === "min" ? n * 60 : unit === "h" ? n * 3600 : undefined;
     if (secs !== undefined && (dc === "duration" || unit !== "h")) {
-      if (secs < 60) return `${Math.round(secs)} s`;
+      if (secs < 60) return t("{n} s", { n: Math.round(secs) });
       const m = Math.round(secs / 60);
-      return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+      return m >= 60 ? t("{h} h {m} min", { h: Math.floor(m / 60), m: m % 60 }) : t("{m} min", { m });
     }
-    return `${Math.round(n * 10) / 10}${unit ? ` ${unit}` : ""}`;
+    return `${(Math.round(n * 10) / 10).toLocaleString(locale)}${unit ? ` ${unit}` : ""}`;
   }
   return e.state;
 }

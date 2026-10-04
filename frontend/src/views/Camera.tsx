@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useEntity, useHass, useHassRef } from "../hass";
+import { useT } from "../i18n";
 import { useMower } from "../mower";
 import { Button, Card, Icon, Segmented, cx } from "../ui";
 
 type Source = "lan" | "snap" | "cloud";
 
 export function CameraView() {
+  const t = useT();
   const { ent } = useMower();
   const camId = ent("camera");
   const cam = useEntity(camId);
@@ -16,7 +18,7 @@ export function CameraView() {
   return (
     <div className="ly-grid ly-grid--camera">
       <Card
-        title="Camera"
+        title={t("Camera")}
         icon="mdi:cctv"
         className="ly-card--wide"
         actions={
@@ -33,7 +35,7 @@ export function CameraView() {
                 { value: "cloud", label: "Cloud", icon: "mdi:cloud-outline" },
               ]}
             />
-            <Button variant="ghost" icon="mdi:fullscreen" title="Full screen" onClick={() => stageRef.current?.requestFullscreen?.()} />
+            <Button variant="ghost" icon="mdi:fullscreen" title={t("Full screen")} onClick={() => stageRef.current?.requestFullscreen?.()} />
           </>
         }
       >
@@ -52,7 +54,7 @@ export function CameraView() {
           {status && <div className="ly-stage__status">{status}</div>}
         </div>
         <p className="ly-muted ly-note">
-          <b>Live</b> streams over your home network. <b>Snapshots</b> uses less bandwidth. <b>Cloud</b> works from anywhere but takes a few seconds to connect.
+          {t("Live streams over your home network. Snapshots use less bandwidth. Cloud works from anywhere but takes a few seconds to connect.")}
         </p>
       </Card>
       <DriveCard />
@@ -82,6 +84,7 @@ function LanStream({ entityId }: { entityId: string }) {
 }
 
 function Snapshots({ entityId, onStatus }: { entityId: string; onStatus: (s: string) => void }) {
+  const t = useT();
   const getHass = useHassRef();
   const [src, setSrc] = useState<string>();
   const [fps, setFps] = useState(2);
@@ -101,7 +104,7 @@ function Snapshots({ entityId, onStatus }: { entityId: string; onStatus: (s: str
       };
       img.onerror = () => {
         if (!alive) return;
-        onStatus("Waiting for the camera…");
+        onStatus(t("Waiting for the camera…"));
         timer = window.setTimeout(tick, 1000);
       };
       img.src = url;
@@ -116,11 +119,11 @@ function Snapshots({ entityId, onStatus }: { entityId: string; onStatus: (s: str
     <>
       {src ? <img className="ly-stage__media" src={src} alt="Mower camera" /> : <StageMsg icon="mdi:camera-outline" text="Loading…" />}
       <div className="ly-stage__fps">
-        <button type="button" aria-label="Fewer frames" onClick={() => setFps(Math.max(0.5, fps - 0.5))}>
+        <button type="button" aria-label={t("Fewer frames")} onClick={() => setFps(Math.max(0.5, fps - 0.5))}>
           −
         </button>
         {fps} fps
-        <button type="button" aria-label="More frames" onClick={() => setFps(Math.min(5, fps + 0.5))}>
+        <button type="button" aria-label={t("More frames")} onClick={() => setFps(Math.min(5, fps + 0.5))}>
           +
         </button>
       </div>
@@ -130,6 +133,7 @@ function Snapshots({ entityId, onStatus }: { entityId: string; onStatus: (s: str
 
 /** AWS Kinesis Video WebRTC viewer, signalled through the session from lymow.start_video_session. */
 function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
+  const t = useT();
   const { callWithResponse } = useMower();
   const videoRef = useRef<HTMLVideoElement>(null);
   const [attempt, setAttempt] = useState(0);
@@ -140,16 +144,16 @@ function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
     let watchdog = 0;
     const enc = (o: unknown) => btoa(JSON.stringify(o));
     (async () => {
-      onStatus("Connecting to the cloud camera…");
+      onStatus(t("Connecting to the cloud camera…"));
       let session: { viewerWssUrl?: string; webrtcIceServers?: RTCIceServer[] };
       try {
         session = await callWithResponse("lymow", "start_video_session");
       } catch (e: any) {
-        if (alive) onStatus(`Couldn't start the cloud session: ${e?.message ?? e}`);
+        if (alive) onStatus(t("Couldn't start the cloud session: {error}", { error: e?.message ?? e }));
         return;
       }
       if (!alive) return;
-      if (!session?.viewerWssUrl) return onStatus("The cloud camera isn't available right now.");
+      if (!session?.viewerWssUrl) return onStatus(t("The cloud camera isn't available right now."));
       pc = new RTCPeerConnection({ iceServers: session.webrtcIceServers ?? [], bundlePolicy: "max-bundle" });
       pc.addTransceiver("video", { direction: "recvonly" });
       pc.ontrack = (e) => {
@@ -158,7 +162,7 @@ function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
         v.srcObject = e.streams[0] ?? new MediaStream([e.track]);
         v.play().catch(() => undefined);
       };
-      pc.onconnectionstatechange = () => pc?.connectionState === "failed" && onStatus("The cloud connection failed. Try again.");
+      pc.onconnectionstatechange = () => pc?.connectionState === "failed" && onStatus(t("The cloud connection failed. Try again."));
       ws = new WebSocket(session.viewerWssUrl);
       pc.onicecandidate = (e) => e.candidate && ws?.readyState === 1 && ws.send(JSON.stringify({ action: "ICE_CANDIDATE", messagePayload: enc(e.candidate) }));
       ws.onopen = async () => {
@@ -177,12 +181,12 @@ function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
           // non-JSON keepalives from the signalling channel
         }
       };
-      ws.onerror = () => alive && onStatus("The signalling connection failed.");
+      ws.onerror = () => alive && onStatus(t("The signalling connection failed."));
       watchdog = window.setTimeout(async () => {
         const stats = await pc?.getStats();
         let frames = 0;
         stats?.forEach((r: any) => r.type === "inbound-rtp" && r.kind === "video" && (frames = r.framesDecoded ?? 0));
-        if (alive && !frames) onStatus("No video from the mower — is it online?");
+        if (alive && !frames) onStatus(t("No video from the mower — is it online?"));
       }, 25000);
     })();
     return () => {
@@ -196,7 +200,7 @@ function CloudStream({ onStatus }: { onStatus: (s: string) => void }) {
   return (
     <>
       <video ref={videoRef} className="ly-stage__media" autoPlay playsInline muted onLoadedData={() => onStatus("")} />
-      <button type="button" className="ly-stage__retry" title="Reconnect" aria-label="Reconnect" onClick={() => setAttempt(attempt + 1)}>
+      <button type="button" className="ly-stage__retry" title={t("Reconnect")} aria-label={t("Reconnect")} onClick={() => setAttempt(attempt + 1)}>
         <Icon name="mdi:refresh" size={18} />
       </button>
     </>
@@ -251,6 +255,7 @@ function Joystick({ axis, label, onChange }: { axis: "y" | "x"; label: string; o
 }
 
 function DriveCard() {
+  const t = useT();
   const { device } = useMower();
   const getHass = useHassRef();
   const vel = useRef({ lin: 0, ang: 0 });
@@ -280,11 +285,11 @@ function DriveCard() {
   useEffect(() => () => window.clearInterval(timer.current), []);
 
   return (
-    <Card title="Drive" icon="mdi:gamepad-variant-outline">
-      <p className="ly-muted">Drive the mower by hand over Bluetooth. Home Assistant (or a Bluetooth proxy) has to be within range of the mower.</p>
+    <Card title={t("Drive")} icon="mdi:gamepad-variant-outline">
+      <p className="ly-muted">{t("Drive the mower by hand over Bluetooth. Home Assistant (or a Bluetooth proxy) has to be within range of the mower.")}</p>
       <div className="ly-drive">
-        <Joystick axis="y" label="Forward / back" onChange={(v) => update({ lin: v })} />
-        <Joystick axis="x" label="Turn" onChange={(v) => update({ ang: v })} />
+        <Joystick axis="y" label={t("Forward / back")} onChange={(v) => update({ lin: v })} />
+        <Joystick axis="x" label={t("Turn")} onChange={(v) => update({ ang: v })} />
       </div>
       <p className={cx("ly-drive__readout", err && "ly-drive__readout--err")}>
         {err || `${(shown.lin * LINEAR_MAX).toFixed(2)} m/s · ${(shown.ang * ANGULAR_MAX).toFixed(2)} rad/s`}

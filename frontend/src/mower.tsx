@@ -1,5 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import { useEntity, useHassRef, type HassEntity, type LymowDevice, type Snapshot, type Zone } from "./hass";
+import { useT, type T } from "./i18n";
 import { useUi } from "./ui";
 
 interface MowerApi {
@@ -31,9 +32,9 @@ export function useMowerEntity(key: string): HassEntity | undefined {
   return useEntity(useMower().ent(key));
 }
 
-export function zoneLabel(z: Zone, index?: number): string {
+export function zoneLabel(z: Zone, index: number | undefined, t: T): string {
   if (z.name && z.name.trim()) return z.name.trim();
-  return index !== undefined ? `Zone ${index + 1}` : `Zone ${z.hashId.slice(0, 4)}`;
+  return t("Zone {n}", { n: index !== undefined ? index + 1 : z.hashId.slice(0, 4) });
 }
 
 function errorText(e: unknown): string {
@@ -44,6 +45,7 @@ function errorText(e: unknown): string {
 export function MowerProvider({ device, snap, children }: { device: LymowDevice; snap: Snapshot | undefined; children: ReactNode }) {
   const getHass = useHassRef();
   const ui = useUi();
+  const t = useT();
   const mower = device.entities.mower;
   const zones = snap?.map.go_zones ?? [];
 
@@ -54,7 +56,7 @@ export function MowerProvider({ device, snap, children }: { device: LymowDevice;
     async call(domain, service, data = {}, success) {
       try {
         await getHass().callService(domain, service, { entity_id: mower, ...data });
-        if (success) ui.toast(success);
+        if (success) ui.toast(t(success));
         return true;
       } catch (e) {
         ui.toast(errorText(e), "bad");
@@ -67,7 +69,7 @@ export function MowerProvider({ device, snap, children }: { device: LymowDevice;
     },
     zoneName(hashId) {
       const i = zones.findIndex((z) => z.hashId === hashId);
-      return i >= 0 ? zoneLabel(zones[i], i) : `Zone ${hashId.slice(0, 4)}`;
+      return i >= 0 ? zoneLabel(zones[i], i, t) : t("Zone {n}", { n: hashId.slice(0, 4) });
     },
   };
   return <MowerContext.Provider value={api}>{children}</MowerContext.Provider>;

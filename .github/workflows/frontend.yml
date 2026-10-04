@@ -32,6 +32,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Every UI string is translated
+        run: npm run i18n:check
+
       - name: Type-check and build
         run: npm run build
 

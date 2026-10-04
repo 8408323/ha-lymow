@@ -60,6 +60,12 @@ export function useHass(): Hass {
   return useSyncExternalStore(store.subscribe, () => store.hass) as Hass;
 }
 
+/** HA's UI language; re-renders only when it changes. */
+export function useHassLanguage(): string {
+  const store = useStore();
+  return useSyncExternalStore(store.subscribe, () => store.hass?.language ?? "en");
+}
+
 /** Stable accessor for actions — never triggers a re-render. */
 export function useHassRef(): () => Hass {
   const store = useStore();
