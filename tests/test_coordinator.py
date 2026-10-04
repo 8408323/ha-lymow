@@ -4247,3 +4247,15 @@ def test_map_replies_are_stamped() -> None:
     assert isinstance(stamp, float) and stamp > 0
     coord.on_mqtt_state(THING, {"battery": 50})  # not a map reply: stamp unchanged
     assert coord.data[THING]["mapReceivedAt"] == stamp
+
+
+@pytest.mark.asyncio
+async def test_name_store_key_is_safe_for_hostile_thing_names() -> None:
+    from homeassistant.helpers import storage
+
+    coord, _, _ = _make_coordinator()
+    await coord.async_rename_channel("../../etc/x", "c1", "Gate")
+    (key,) = [k for k in storage.MEMORY if "channel_names" in k]
+    assert "/" not in key and ".." not in key.split("channel_names.")[1].replace("_", "")
+    assert key.startswith("lymow.channel_names.______etc_x_")
+    storage.MEMORY.clear()

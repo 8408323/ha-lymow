@@ -130,7 +130,9 @@ export function MapView() {
     if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
     leaveFocus();
   };
-  const exitEdit = () => {
+  const exitEdit = async () => {
+    // The focused zone may have vanished (deleted elsewhere) with work still pending.
+    if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
     leaveFocus();
     setMode("browse");
   };

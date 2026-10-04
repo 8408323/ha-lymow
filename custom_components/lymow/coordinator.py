@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -1109,6 +1111,14 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             new_device = {**self.data[thing_name], "mapData": new_map}
             self.async_set_updated_data({**self.data, thing_name: new_device})
 
+    def _name_store(self, kind: str, thing: str) -> Store:
+        # The thing name comes from the cloud and ends up in a .storage file name:
+        # keep only safe characters and add a short hash so distinct names can't collide.
+        safe = re.sub(r"[^A-Za-z0-9_-]", "_", thing)[:64]
+        digest = hashlib.sha256(thing.encode()).hexdigest()[:8]
+        key = f"{DOMAIN}.{kind}_names.{safe}" if safe == thing else f"{DOMAIN}.{kind}_names.{safe}_{digest}"
+        return Store(self.hass, 1, key)
+
     def _names(self, kind: str) -> dict[str, dict[str, str]]:
         return self._nogo_names if kind == "nogo" else self._channel_name_overrides
 
@@ -1117,7 +1127,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         for device in self.devices:
             thing = device["deviceThingName"]
             for kind in ("nogo", "channel"):
-                stored = await Store(self.hass, 1, f"{DOMAIN}.{kind}_names.{thing}").async_load()
+                stored = await self._name_store(kind, thing).async_load()
                 if isinstance(stored, dict):
                     self._names(kind)[thing] = {str(k): v for k, v in stored.items() if isinstance(v, str) and v}
 
@@ -1129,7 +1139,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             names[hash_id] = name
         else:
             names.pop(hash_id, None)
-        await Store(self.hass, 1, f"{DOMAIN}.{kind}_names.{thing_name}").async_save(dict(names))
+        await self._name_store(kind, thing_name).async_save(dict(names))
         return name
 
     async def async_rename_nogo_zone(self, thing_name: str, hash_id: str, name: str) -> None:

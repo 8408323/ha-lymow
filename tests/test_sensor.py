@@ -1755,3 +1755,11 @@ def test_map_payload_overlays_ha_nogo_names() -> None:
     }
     names = [z.get("name") for z in map_payload(data)["nogo_zones"]]
     assert names == ["Flower bed", None, "no id"]
+
+
+def test_map_payload_tolerates_malformed_rtk_status() -> None:
+    from lymow.sensor import map_payload
+
+    assert map_payload({"rtkStatus": "garbage"})["rtkLabel"] == "Unknown"
+    assert map_payload({"rtkStatus": 9})["rtkLabel"] == "Unknown (9)"
+    assert map_payload({"rtkStatus": 2})["rtkLabel"] == "Fixed"

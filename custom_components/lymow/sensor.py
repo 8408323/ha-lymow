@@ -842,7 +842,9 @@ def map_payload(data: dict[str, Any]) -> dict[str, Any]:
     rtk_raw = data.get("rtkStatus")
     if rtk_raw is not None:
         _RTK_LABELS = {0: "No fix", 1: "Float fix", 2: "Fixed", 3: "RTK fixed"}
-        attrs["rtkLabel"] = _RTK_LABELS.get(int(rtk_raw), f"Unknown ({rtk_raw})")
+        # Malformed values must not break the map payload (and with it the panel stream).
+        code = rtk_raw if isinstance(rtk_raw, int) and not isinstance(rtk_raw, bool) else None
+        attrs["rtkLabel"] = _RTK_LABELS.get(code, f"Unknown ({rtk_raw})" if code is not None else "Unknown")
     # Live mow progress so the card status bar shows % without needing a separate entity
     for key in ("mowProgress", "mowStripCount", "totalTaskAreaM2"):
         val = data.get(key)
