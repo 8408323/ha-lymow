@@ -184,26 +184,39 @@ function Headlight() {
   const { call } = useMower();
   const mower = useMowerEntity("mower");
   const a = mower?.attributes ?? {};
-  const [on, setOn] = useState<boolean>(Boolean(a.headlight_enabled));
-  const [start, setStart] = useState<string>(a.headlight_start ?? "21:00");
-  const [end, setEnd] = useState<string>(a.headlight_end ?? "23:00");
+  // The robot config arrives over MQTT after load (and some firmware never reports
+  // the headlight window). Until the user edits, the form mirrors the mower, and
+  // Save needs an explicit edit, so opening the page never writes defaults.
+  const known = typeof a.headlight_enabled === "boolean";
+  const live = { on: Boolean(a.headlight_enabled), start: (a.headlight_start as string) ?? "21:00", end: (a.headlight_end as string) ?? "23:00" };
+  const [draft, setDraft] = useState<typeof live | null>(null);
+  const v = draft ?? live;
+  const edit = (part: Partial<typeof live>) => setDraft({ ...v, ...part });
   return (
     <Card title={t("Headlight")} icon="mdi:car-light-high">
+      {!known && <p className="ly-muted">{t("The mower hasn't reported its headlight schedule. Saving here replaces whatever is set in the Lymow app.")}</p>}
       <div className="ly-row">
         <span>{t("Light on a schedule")}</span>
-        <Toggle checked={on} onChange={setOn} label={t("Headlight schedule")} />
+        <Toggle checked={v.on} onChange={(on) => edit({ on })} label={t("Headlight schedule")} />
       </div>
-      {on && (
+      {v.on && (
         <div className="ly-form ly-form--cols">
           <Field label={t("On at")}>
-            <input type="time" className="ly-input ly-input--time" value={start} onChange={(e) => setStart(e.target.value)} />
+            <input type="time" className="ly-input ly-input--time" value={v.start} onChange={(e) => edit({ start: e.target.value })} />
           </Field>
           <Field label={t("Off at")}>
-            <input type="time" className="ly-input ly-input--time" value={end} onChange={(e) => setEnd(e.target.value)} />
+            <input type="time" className="ly-input ly-input--time" value={v.end} onChange={(e) => edit({ end: e.target.value })} />
           </Field>
         </div>
       )}
-      <Button variant="primary" icon="mdi:check" onClick={() => call("lymow", "set_headlight_schedule", on ? { enable: true, start, end } : { enable: false }, t("Headlight schedule saved"))}>
+      <Button
+        variant="primary"
+        icon="mdi:check"
+        disabled={!draft}
+        onClick={async () => {
+          if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: v.start, end: v.end } : { enable: false }, t("Headlight schedule saved"))) setDraft(null);
+        }}
+      >
         {t("Save")}
       </Button>
     </Card>

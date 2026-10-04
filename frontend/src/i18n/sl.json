@@ -245,6 +245,7 @@
  "The cloud camera isn't available right now.": "Kamera v oblaku trenutno ni na voljo.",
  "The cloud connection failed. Try again.": "Povezava z oblakom ni uspela. Poskusite znova.",
  "The map appears once the mower has sent it.": "Zemljevid se prikaže, ko ga kosilnica pošlje.",
+ "The mower hasn't reported its headlight schedule. Saving here replaces whatever is set in the Lymow app.": "Kosilnica ni sporočila urnika žarometa. Shranjevanje tukaj nadomesti nastavitev v aplikaciji Lymow.",
  "The mower hasn't sent its map yet. Use the refresh button at the top to ask for it.": "Kosilnica še ni poslala svojega zemljevida. Zahtevajte ga z gumbom za osvežitev na vrhu.",
  "The mower is lifted or tilted": "Kosilnica je dvignjena ali nagnjena",
  "The mower isn't reachable on your network. Try the Cloud view.": "Kosilnica v vašem omrežju ni dosegljiva. Poskusite pogled Oblak.",

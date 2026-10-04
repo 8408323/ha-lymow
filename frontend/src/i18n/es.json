@@ -245,6 +245,7 @@
  "The cloud camera isn't available right now.": "La cámara en la nube no está disponible ahora mismo.",
  "The cloud connection failed. Try again.": "La conexión con la nube ha fallado. Inténtalo de nuevo.",
  "The map appears once the mower has sent it.": "El mapa aparecerá cuando el cortacésped lo haya enviado.",
+ "The mower hasn't reported its headlight schedule. Saving here replaces whatever is set in the Lymow app.": "El cortacésped no ha informado de la programación del faro. Guardar aquí sustituye lo que esté configurado en la app de Lymow.",
  "The mower hasn't sent its map yet. Use the refresh button at the top to ask for it.": "El cortacésped aún no ha enviado su mapa. Usa el botón de actualizar de arriba para pedirlo.",
  "The mower is lifted or tilted": "El cortacésped está levantado o inclinado",
  "The mower isn't reachable on your network. Try the Cloud view.": "No se puede contactar con el cortacésped en tu red. Prueba la vista Nube.",

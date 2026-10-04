@@ -245,6 +245,7 @@
  "The cloud camera isn't available right now.": "La caméra cloud n'est pas disponible pour le moment.",
  "The cloud connection failed. Try again.": "La connexion cloud a échoué. Réessayez.",
  "The map appears once the mower has sent it.": "La carte apparaît dès que la tondeuse l'a envoyée.",
+ "The mower hasn't reported its headlight schedule. Saving here replaces whatever is set in the Lymow app.": "La tondeuse n'a pas communiqué la planification de son phare. Enregistrer ici remplace ce qui est réglé dans l'app Lymow.",
  "The mower hasn't sent its map yet. Use the refresh button at the top to ask for it.": "La tondeuse n'a pas encore envoyé sa carte. Utilisez le bouton d'actualisation en haut pour la demander.",
  "The mower is lifted or tilted": "La tondeuse est soulevée ou inclinée",
  "The mower isn't reachable on your network. Try the Cloud view.": "La tondeuse est injoignable sur votre réseau. Essayez la vue Cloud.",

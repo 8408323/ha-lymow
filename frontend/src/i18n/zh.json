@@ -245,6 +245,7 @@
  "The cloud camera isn't available right now.": "云端摄像头暂时不可用。",
  "The cloud connection failed. Try again.": "云端连接失败。请重试。",
  "The map appears once the mower has sent it.": "割草机发送地图后会显示在这里。",
+ "The mower hasn't reported its headlight schedule. Saving here replaces whatever is set in the Lymow app.": "割草机尚未报告前灯计划。在此保存会替换 Lymow 应用中的设置。",
  "The mower hasn't sent its map yet. Use the refresh button at the top to ask for it.": "割草机尚未发送地图。请使用顶部的刷新按钮请求地图。",
  "The mower is lifted or tilted": "割草机被抬起或倾斜",
  "The mower isn't reachable on your network. Try the Cloud view.": "在你的网络中无法连接割草机。请尝试云端视图。",

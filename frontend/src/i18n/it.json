@@ -245,6 +245,7 @@
  "The cloud camera isn't available right now.": "La fotocamera cloud non è disponibile al momento.",
  "The cloud connection failed. Try again.": "La connessione cloud non è riuscita. Riprova.",
  "The map appears once the mower has sent it.": "La mappa comparirà quando il robot l'avrà inviata.",
+ "The mower hasn't reported its headlight schedule. Saving here replaces whatever is set in the Lymow app.": "Il robot non ha comunicato la programmazione del faro. Salvando qui sostituisci quanto impostato nell'app Lymow.",
  "The mower hasn't sent its map yet. Use the refresh button at the top to ask for it.": "Il robot non ha ancora inviato la mappa. Usa il pulsante di aggiornamento in alto per richiederla.",
  "The mower is lifted or tilted": "Il robot è sollevato o inclinato",
  "The mower isn't reachable on your network. Try the Cloud view.": "Il robot non è raggiungibile sulla tua rete. Prova la vista Cloud.",
