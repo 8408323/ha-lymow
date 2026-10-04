@@ -25,6 +25,19 @@ export function SchedulesView() {
   // Editing before the mower has reported its schedules would overwrite them
   // (add_schedule writes the whole list), so everything waits for the reply.
   const loading = !snap || snap.schedules === null;
+  // One schedule change at a time: each service call rewrites the mower's whole
+  // list from the cache, so overlapping edits would undo each other. Controls stay
+  // locked until the call returns and the mower has re-reported its schedules.
+  const [busy, setBusy] = useState(false);
+  const locked = busy || loading;
+  const mutate = async (fn: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
   const schedules = [...(snap?.schedules ?? [])].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute));
 
   return (
@@ -36,23 +49,24 @@ export function SchedulesView() {
           <>
             {schedules.length > 0 && (
               <Button
+                disabled={locked}
                 variant="ghost"
                 icon="mdi:delete-sweep-outline"
                 onClick={async () => {
                   if (await ui.confirm({ title: t("Delete all schedules?"), body: t("The mower stops mowing automatically until you add a new schedule."), confirm: t("Delete all"), danger: true }))
-                    await call("lymow", "clear_schedules", {}, t("All schedules deleted"));
+                    await mutate(() => call("lymow", "clear_schedules", {}, t("All schedules deleted")));
                 }}
               >
                 {t("Clear all")}
               </Button>
             )}
-            <Button variant="primary" icon="mdi:plus" disabled={loading} onClick={() => setAdding(true)}>
+            <Button variant="primary" icon="mdi:plus" disabled={locked} onClick={() => setAdding(true)}>
               {t("Add")}
             </Button>
           </>
         }
       >
-        {adding && !loading && <AddSchedule onDone={() => setAdding(false)} />}
+        {adding && !loading && <AddSchedule onDone={() => setAdding(false)} mutate={mutate} locked={locked} />}
         {loading ? (
           <div className="ly-loading">
             <span className="ly-spinner" /> {t("Loading schedules from the mower…")}
@@ -73,20 +87,22 @@ export function SchedulesView() {
                     {daysText(s.dayOfWeek, t, locale)}
                     {s.isRepeated === false && <span className="ly-muted"> · {t("once")}</span>}
                   </strong>
-                  <span className="ly-muted">{s.zones?.length ? s.zones.map(zoneName).join(", ") : "All zones"}</span>
+                  <span className="ly-muted">{s.zones?.length ? s.zones.map(zoneName).join(", ") : t("All zones")}</span>
                 </div>
                 <Toggle
                   label={t("Schedule active")}
                   checked={!s.isDisabled}
-                  onChange={(on) => call("lymow", "toggle_schedule", { id: s.id, disabled: !on }, on ? t("Schedule turned on") : t("Schedule paused"))}
+                  disabled={locked}
+                  onChange={(on) => mutate(() => call("lymow", "toggle_schedule", { id: s.id, disabled: !on }, on ? t("Schedule turned on") : t("Schedule paused")))}
                 />
                 <Button
                   variant="ghost"
                   icon="mdi:delete-outline"
                   title={t("Delete schedule")}
+                  disabled={locked}
                   onClick={async () => {
-                    if (await ui.confirm({ title: `Delete the ${pad2(s.hour)}:${pad2(s.minute)} schedule?`, confirm: t("Delete"), danger: true }))
-                      await call("lymow", "delete_schedule", { id: s.id }, t("Schedule deleted"));
+                    if (await ui.confirm({ title: t("Delete the {time} schedule?", { time: `${pad2(s.hour)}:${pad2(s.minute)}` }), confirm: t("Delete"), danger: true }))
+                      await mutate(() => call("lymow", "delete_schedule", { id: s.id }, t("Schedule deleted")));
                   }}
                 />
               </li>
@@ -99,7 +115,7 @@ export function SchedulesView() {
   );
 }
 
-function AddSchedule({ onDone }: { onDone: () => void }) {
+function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (fn: () => Promise<unknown>) => Promise<void>; locked: boolean }) {
   const t = useT();
   const { locale } = useI18n();
   const { snap, call } = useMower();
@@ -125,7 +141,7 @@ function AddSchedule({ onDone }: { onDone: () => void }) {
       <Field label={t("Start time")}>
         <input type="time" className="ly-input ly-input--time" value={time} onChange={(e) => setTime(e.target.value)} />
       </Field>
-      <Field label={t("Zones")} hint={zones.length ? undefined : "No zones found on the map yet."}>
+      <Field label={t("Zones")} hint={zones.length ? undefined : t("No zones found on the map yet.")}>
         <div className="ly-chips">
           <Chip on={allZones} onClick={() => setPicked([])} icon="mdi:select-all">
             {t("All zones")}
@@ -145,15 +161,18 @@ function AddSchedule({ onDone }: { onDone: () => void }) {
         <Button
           variant="primary"
           icon="mdi:check"
-          disabled={!days.length || !time || !zones.length}
+          disabled={locked || !days.length || !time || !zones.length}
           onClick={async () => {
             const [hour, minute] = time.split(":").map(Number);
-            const ok = await call(
+            let ok = false;
+            await mutate(async () => {
+              ok = await call(
               "lymow",
               "add_schedule",
               { hour, minute, day_of_week: days, repeated: repeat, disabled: false, zones: allZones ? zones.map((z) => z.hashId) : picked },
               t("Schedule added"),
-            );
+              );
+            });
             if (ok) onDone();
           }}
         >

@@ -323,6 +323,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         coordinator: LymowCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
         await coordinator.async_shutdown()
+        websocket_api.notify_coordinators_changed(hass)
         # Drop the sidebar panel only when the last Lymow entry is gone.
         if not hass.data.get(DOMAIN):
             _remove_panel(hass)

@@ -42,10 +42,13 @@ export function App(props: { narrow: boolean; route: Route; host: HTMLElement })
 
 function Shell({ narrow, route, host }: { narrow: boolean; route: Route; host: HTMLElement }) {
   const t = useT();
-  const devices = useDevices();
+  const [devices, reloadDevices] = useDevices();
   const [thing, setThing] = useState<string>();
   const device = devices?.find((d) => d.thing === thing) ?? devices?.[0];
   const snap = useSnapshot(device?.thing);
+  useEffect(() => {
+    if (snap?.gone) reloadDevices();
+  }, [snap?.gone]);
   const seg = route.path.split("/").filter(Boolean)[0];
   const tab: TabId = (TABS.find((t) => t.id === seg)?.id ?? "overview") as TabId;
 
@@ -56,7 +59,7 @@ function Shell({ narrow, route, host }: { narrow: boolean; route: Route; host: H
   return (
     <div className={cx("ly-app", narrow && "ly-app--narrow")}>
         {device ? (
-          <MowerProvider key={device.thing} device={device} snap={snap}>
+          <MowerProvider key={device.thing} device={device} snap={snap?.gone ? undefined : snap} reloadDevices={reloadDevices}>
             <TopBar narrow={narrow} host={host} devices={devices!} onPick={setThing} />
             <nav className="ly-tabs" aria-label={t("Sections")}>
               {TABS.map((item) => (

@@ -9,6 +9,7 @@ Actions go through the regular ``lymow.*`` services (also over the websocket).
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import voluptuous as vol
@@ -63,13 +64,18 @@ def _find(hass: HomeAssistant, thing: str) -> Any | None:
     return None
 
 
+def _coord(v: Any) -> bool:
+    """A usable map coordinate: finite and within a few km of the dock (ENU metres)."""
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and abs(v) < 1e5
+
+
 def _polygon(points: Any) -> list[dict[str, float]]:
     if not isinstance(points, list):
         return []
     return [
         {"x": float(p["x"]), "y": float(p["y"])}
         for p in points
-        if isinstance(p, dict) and all(isinstance(p.get(k), (int, float)) for k in ("x", "y"))
+        if isinstance(p, dict) and all(_coord(p.get(k)) for k in ("x", "y"))
     ]
 
 
@@ -146,7 +152,13 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
                     "entry_id": entry_id,
                     "thing": thing,
                     "device_id": dev.id if dev else None,
-                    "name": (dev and (dev.name_by_user or dev.name)) or device.get("deviceName") or thing,
+                    # A user's registry rename wins; otherwise the live name (set_device_name
+                    # updates it immediately), then what the device was registered as.
+                    "name": (dev and dev.name_by_user)
+                    or ((coordinator.data or {}).get(thing) or {}).get("deviceName")
+                    or (dev and dev.name)
+                    or device.get("deviceName")
+                    or thing,
                     "entities": entities,
                 }
             )
@@ -180,7 +192,15 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
         # A config-entry reload replaces the coordinator; follow it so an open
         # panel keeps getting live data instead of freezing on the old one.
         new = _find(hass, thing)
-        if new is None or new is state["coordinator"]:
+        if new is state["coordinator"]:
+            return
+        if new is None:
+            # The mower's entry was unloaded: stop streaming a frozen snapshot and
+            # tell the panel, which then reloads its device list.
+            state["unlisten"]()
+            state["unlisten"] = lambda: None
+            rebinders.discard(_rebind)
+            connection.send_message(websocket_api.event_message(msg["id"], {"thing": thing, "gone": True}))
             return
         state["unlisten"]()
         state["coordinator"] = new

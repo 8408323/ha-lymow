@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MapData, Point, Zone } from "../hass";
 import { area, simplify } from "../map/geometry";
 import { MapCanvas, type Kind, type LabelMode } from "../map/MapCanvas";
@@ -479,7 +479,7 @@ function ZoneSettings({ zone }: { zone: Zone }) {
   const [speed, setSpeed] = useState<number>(cfg.moveSpeed ?? 0.5);
   const [spacing, setSpacing] = useState<number>(zone.pathSpacing ?? cfg.pathSpacing ?? 30);
   const [laps, setLaps] = useState<number>(cfg.perimeterMowLaps ?? 1);
-  const initial = useMemo(() => JSON.stringify([cut, speed, spacing, laps]), [zone.hashId]);
+  const [initial, setInitial] = useState(() => JSON.stringify([cut, speed, spacing, laps]));
   const changed = JSON.stringify([cut, speed, spacing, laps]) !== initial;
   return (
     <section className="ly-subsection">
@@ -500,14 +500,16 @@ function ZoneSettings({ zone }: { zone: Zone }) {
         variant="primary"
         icon="mdi:check"
         disabled={!changed}
-        onClick={() =>
-          call(
+        onClick={async () => {
+          const ok = await call(
             "lymow",
             "set_zone_config",
             { zone_hash_id: zone.hashId, cut_height: cut, move_speed: speed, path_spacing: spacing, perimeter_mow_laps: laps },
             t("Zone settings applied"),
-          )
-        }
+          );
+          // What was just saved is the new baseline (the component is keyed per zone).
+          if (ok) setInitial(JSON.stringify([cut, speed, spacing, laps]));
+        }}
       >
         {t("Apply zone settings")}
       </Button>

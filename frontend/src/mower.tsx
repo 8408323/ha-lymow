@@ -17,6 +17,8 @@ interface MowerApi {
   /** Same as call() but returns the service response (start_video_session). */
   callWithResponse<T>(domain: string, service: string, data?: Record<string, unknown>): Promise<T>;
   zoneName(hashId: string): string;
+  /** Re-read the device list (e.g. after renaming the mower). */
+  reloadDevices(): void;
 }
 
 const MowerContext = createContext<MowerApi | null>(null);
@@ -42,7 +44,7 @@ function errorText(e: unknown): string {
   return String(e);
 }
 
-export function MowerProvider({ device, snap, children }: { device: LymowDevice; snap: Snapshot | undefined; children: ReactNode }) {
+export function MowerProvider({ device, snap, reloadDevices, children }: { device: LymowDevice; snap: Snapshot | undefined; reloadDevices: () => void; children: ReactNode }) {
   const getHass = useHassRef();
   const ui = useUi();
   const t = useT();
@@ -52,6 +54,7 @@ export function MowerProvider({ device, snap, children }: { device: LymowDevice;
   const api: MowerApi = {
     device,
     snap,
+    reloadDevices,
     ent: (key) => device.entities[key],
     async call(domain, service, data = {}, success) {
       try {

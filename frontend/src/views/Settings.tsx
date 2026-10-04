@@ -160,20 +160,34 @@ function MowingDefaults() {
 
 function LiveAdjust() {
   const t = useT();
-  const { call } = useMower();
+  const { call, ent } = useMower();
   const mowing = useMowerEntity("mower")?.state === "mowing";
-  const [cut, setCut] = useState(50);
-  const [speed, setSpeed] = useState(0.6);
+  const rtc = useEntity(ent("map"))?.attributes.run_time_config as { cutHeight?: number; moveSpeed?: number } | undefined;
+  // Only send what the user moved: an untouched slider must not overwrite the
+  // running task's value with a default.
+  const [cut, setCut] = useState<number | null>(null);
+  const [speed, setSpeed] = useState<number | null>(null);
+  const changes = { ...(cut !== null && { cut_height: cut }), ...(speed !== null && { move_speed: speed }) };
   return (
     <Card title={t("Adjust the current mow")} icon="mdi:tune-vertical">
       <p className="ly-muted">{mowing ? t("Changes apply right away to the mow in progress.") : t("Only takes effect while the mower is mowing.")}</p>
       <Field label={t("Cutting height")}>
-        <Slider value={cut} min={20} max={100} step={5} unit="mm" onChange={setCut} />
+        <Slider value={cut ?? rtc?.cutHeight ?? 50} min={20} max={100} step={5} unit="mm" onChange={setCut} />
       </Field>
       <Field label={t("Speed")}>
-        <Slider value={speed} min={0.1} max={1.5} step={0.1} unit="m/s" format={(x) => x.toFixed(1)} onChange={setSpeed} />
+        <Slider value={speed ?? rtc?.moveSpeed ?? 0.6} min={0.1} max={1.5} step={0.1} unit="m/s" format={(x) => x.toFixed(1)} onChange={setSpeed} />
       </Field>
-      <Button variant="primary" icon="mdi:send" disabled={!mowing} onClick={() => call("lymow", "set_run_time_config", { cut_height: cut, move_speed: speed }, t("Sent to the mower"))}>
+      <Button
+        variant="primary"
+        icon="mdi:send"
+        disabled={!mowing || !Object.keys(changes).length}
+        onClick={async () => {
+          if (await call("lymow", "set_run_time_config", changes, t("Sent to the mower"))) {
+            setCut(null);
+            setSpeed(null);
+          }
+        }}
+      >
         {t("Apply now")}
       </Button>
     </Card>
@@ -347,7 +361,7 @@ function ActionButtons() {
 
 function Advanced() {
   const t = useT();
-  const { call, device } = useMower();
+  const { call, device, reloadDevices } = useMower();
   const ui = useUi();
   const [name, setName] = useState(device.name);
   const [pin, setPin] = useState("");
@@ -363,7 +377,7 @@ function Advanced() {
         <Field label={t("Mower name")}>
           <div className="ly-inline">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={32} />
-            <Button disabled={!name.trim() || name === device.name} onClick={() => call("lymow", "set_device_name", { name: name.trim() }, t("Name saved"))}>
+            <Button disabled={!name.trim() || name === device.name} onClick={async () => (await call("lymow", "set_device_name", { name: name.trim() }, t("Name saved"))) && reloadDevices()}>
               {t("Rename")}
             </Button>
           </div>

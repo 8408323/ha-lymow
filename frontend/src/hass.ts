@@ -143,6 +143,8 @@ export interface Backup {
 
 export interface Snapshot {
   thing: string;
+  /** Set when the mower's config entry was unloaded; the stream ends. */
+  gone?: boolean;
   map: MapData;
   /** null until the mower has answered the schedule query. */
   schedules: Schedule[] | null;
@@ -150,9 +152,10 @@ export interface Snapshot {
   online: boolean;
 }
 
-export function useDevices(): LymowDevice[] | undefined {
+export function useDevices(): [LymowDevice[] | undefined, () => void] {
   const getHass = useHassRef();
   const [devices, setDevices] = useState<LymowDevice[]>();
+  const [generation, setGeneration] = useState(0);
   useEffect(() => {
     let alive = true;
     const load = () =>
@@ -167,8 +170,8 @@ export function useDevices(): LymowDevice[] | undefined {
       alive = false;
       window.clearTimeout(t);
     };
-  }, []);
-  return devices;
+  }, [generation]);
+  return [devices, () => setGeneration((g) => g + 1)];
 }
 
 export function useSnapshot(thing: string | undefined): Snapshot | undefined {

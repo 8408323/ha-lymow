@@ -54,7 +54,10 @@ def test_snapshot_contents() -> None:
                     "backupTime": 1,
                     "preview": {
                         "goZones": [
-                            {"polygon": [{"x": 1, "y": 2}, {"x": "bad"}], "isEnabled": False},
+                            {
+                                "polygon": [{"x": 1, "y": 2}, {"x": "bad"}, {"x": float("inf"), "y": 0}],
+                                "isEnabled": False,
+                            },
                             7,
                             {"polygon": "x"},
                         ],
@@ -218,7 +221,23 @@ def test_subscription_follows_coordinator_after_reload() -> None:
     assert conn.send_message.call_args.args[0]["event"]["backups"][0]["file"] == "new"
 
     ws.notify_coordinators_changed(hass)  # same coordinator again: no-op
+    assert len(new.listeners) == 1
     hass.data["lymow"] = {}
-    ws.notify_coordinators_changed(hass)  # mower gone: keep the old binding
-    conn.subscriptions[7]()
+    ws.notify_coordinators_changed(hass)  # entry unloaded: stream ends with "gone"
     assert new.listeners == [] and hass.data["lymow_ws_rebinders"] == set()
+    assert conn.send_message.call_args.args[0]["event"] == {"thing": THING, "gone": True}
+    conn.subscriptions[7]()  # unsubscribing afterwards is harmless
+
+
+def test_devices_prefers_live_name_after_rename() -> None:
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": _coordinator({"deviceName": "Renamed"})}}
+    conn = _connection()
+    with (
+        patch.object(ws.er, "async_get", create=True),
+        patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=[]),
+        patch.object(ws.dr, "async_get", create=True) as dr_get,
+    ):
+        dr_get.return_value.async_get_device.return_value = SimpleNamespace(id="d", name="Old", name_by_user=None)
+        ws.ws_devices(hass, conn, {"id": 1})
+    assert conn.send_result.call_args.args[1][0]["name"] == "Renamed"

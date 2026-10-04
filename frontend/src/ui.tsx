@@ -310,6 +310,9 @@ function DialogView({ req, close }: { req: DialogReq; close: (v: string | boolea
         aria-modal="true"
         aria-label={req.title}
         onKeyDown={(e) => {
+          // Keep keys inside the dialog: Escape here must not also trigger the map's shortcuts.
+          e.stopPropagation();
+          e.nativeEvent.stopImmediatePropagation();
           if (e.key === "Escape") close(req.input ? null : false);
           if (e.key === "Enter" && req.input) ok();
         }}
