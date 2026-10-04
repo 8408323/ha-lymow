@@ -158,6 +158,11 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     }
 
 
+def _text(value: Any) -> str | None:
+    """A non-empty string, or None for anything else the cloud might send."""
+    return value if isinstance(value, str) and value else None
+
+
 @websocket_api.websocket_command({vol.Required("type"): "lymow/devices"})
 @callback
 def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]) -> None:
@@ -187,10 +192,10 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
                     "device_id": dev.id if dev else None,
                     # A user's registry rename wins; otherwise the live name (set_device_name
                     # updates it immediately), then what the device was registered as.
-                    "name": (dev and dev.name_by_user)
-                    or ((coordinator.data or {}).get(thing) or {}).get("deviceName")
-                    or (dev and dev.name)
-                    or device.get("deviceName")
+                    "name": _text(dev and dev.name_by_user)
+                    or _text(((coordinator.data or {}).get(thing) or {}).get("deviceName"))
+                    or _text(dev and dev.name)
+                    or _text(device.get("deviceName"))
                     or thing,
                     "entities": entities,
                 }

@@ -261,6 +261,20 @@ def test_devices_prefers_live_name_after_rename() -> None:
     assert conn.send_result.call_args.args[1][0]["name"] == "Renamed"
 
 
+def test_devices_ignores_non_string_live_name() -> None:
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": _coordinator({"deviceName": {"bad": 1}})}}
+    conn = _connection()
+    with (
+        patch.object(ws.er, "async_get", create=True),
+        patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=[]),
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True, return_value=[]),
+    ):
+        ws.ws_devices(hass, conn, {"id": 1})
+    assert conn.send_result.call_args.args[1][0]["name"] == "Lawn"  # registered raw name
+
+
 def test_snapshot_drops_non_finite_map_values() -> None:
     nan, inf = float("nan"), float("inf")
     coord = _coordinator(

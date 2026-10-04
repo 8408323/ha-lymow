@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { entityLabel } from "../entityText";
 import { fireHassEvent, useHass } from "../hass";
 import { useI18n } from "../i18n";
 import { useMower } from "../mower";
@@ -21,8 +22,7 @@ export function DiagnosticsView({ host }: { host: HTMLElement }) {
     .filter(([k, id]) => /^(sensor|binary_sensor|device_tracker)\./.test(id) && k !== "map" && hass.states[id])
     .map(([k, id]) => {
       const e = hass.states[id];
-      const full: string = e.attributes.friendly_name ?? id;
-      const name = full.startsWith(`${device.name} `) ? full.slice(device.name.length + 1) : full;
+      const name = entityLabel(e, device.name, t);
       return { k, id, name, value: formatState(e, t, locale) };
     })
     .filter((r) => !q || `${r.name} ${r.value}`.toLowerCase().includes(q.toLowerCase()))

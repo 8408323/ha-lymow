@@ -96,6 +96,7 @@ export function MapView() {
     setSheetOpen(true);
   };
   const leaveFocus = () => {
+    setAwaitShape(null); // an explicit discard also drops a save still awaiting confirmation
     setFocus(null);
     setEditPts(null);
     setVertex(null);
