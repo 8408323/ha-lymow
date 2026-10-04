@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ENTITY_TEXT, entityLabel } from "../entityText";
 import { useEntity, useHass, useHassRef } from "../hass";
 import { LANGUAGES, useI18n, useT } from "../i18n";
@@ -31,10 +31,53 @@ export function SettingsView() {
       <MowingDefaults />
       <LiveAdjust />
       <Headlight />
+      <Firmware />
       <EntityControls />
       <ActionButtons />
       <Advanced />
     </div>
+  );
+}
+
+function Firmware() {
+  const t = useT();
+  const { call, ent } = useMower();
+  const ui = useUi();
+  const e = useMowerEntity("firmware_update");
+  if (!e) return null;
+  const a = e.attributes;
+  const available = e.state === "on";
+  return (
+    <Card title={t("Firmware")} icon="mdi:cog-refresh">
+      <div className="ly-row">
+        <span>{t("Installed")}</span>
+        <strong>{a.installed_version ?? "–"}</strong>
+      </div>
+      {available && (
+        <div className="ly-row">
+          <span>{t("Available")}</span>
+          <strong>{a.latest_version}</strong>
+        </div>
+      )}
+      {a.release_summary && available && <p className="ly-muted">{a.release_summary}</p>}
+      {a.in_progress ? (
+        <p className="ly-muted">
+          <span className="ly-spinner" /> {t("Updating…")}
+        </p>
+      ) : (
+        <Button
+          variant="primary"
+          icon="mdi:download"
+          disabled={!available}
+          onClick={async () => {
+            if (await ui.confirm({ title: t("Install firmware {v}?", { v: a.latest_version }), body: t("The mower restarts during the update. Keep it charging on the dock."), confirm: t("Install") }))
+              await call("update", "install", { entity_id: ent("firmware_update") }, t("Firmware update started"));
+          }}
+        >
+          {available ? t("Install update") : t("Up to date")}
+        </Button>
+      )}
+    </Card>
   );
 }
 
@@ -101,6 +144,13 @@ function MowingDefaults() {
   // `after`: the map reply time at save. Only a newer reply from the mower counts,
   // not the coordinator's optimistic patch.
   const [pending, setPending] = useState<PendingDefaults | null>(() => pendingDefaults.get(device.thing) ?? null);
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
   useEffect(() => {
     if (pending) pendingDefaults.set(device.thing, pending);
     else pendingDefaults.delete(device.thing);
@@ -131,7 +181,9 @@ function MowingDefaults() {
     if (await call("lymow", "set_task_config", changed, t("Mowing defaults saved"))) {
       setPending(record);
       call("lymow", "query_map"); // ask for the mower's own copy to confirm against
-    } else pendingDefaults.delete(device.thing);
+    } else if (mounted.current) pendingDefaults.delete(device.thing); // the edits are still on screen
+    // Left meanwhile: the record is the only copy, so let the next view restore it now.
+    else pendingDefaults.set(device.thing, { ...record, deadline: 0 });
   };
 
   return (

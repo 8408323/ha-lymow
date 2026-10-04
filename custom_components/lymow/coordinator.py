@@ -808,6 +808,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     **self._mqtt_state.get(thing, {}),
                     "nogoNames": dict(self._nogo_names.get(thing, {})),
                 }
+                if "mapData" in merged:
+                    merged = self._apply_channel_name_overrides(thing, merged)
                 _apply_config_defaults(merged)
                 result[thing] = merged
                 # Fire robotConfig + map queries once per HA session so

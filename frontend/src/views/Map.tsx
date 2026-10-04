@@ -128,17 +128,19 @@ export function MapView() {
   // Back / Escape must not silently throw away a reshaped polygon.
   const requestLeave = async () => {
     if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
+    dropZoneDrafts(device.thing);
     leaveFocus();
   };
   const exitEdit = async () => {
     // The focused zone may have vanished (deleted elsewhere) with work still pending.
     if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
+    dropZoneDrafts(device.thing);
     leaveFocus();
     setMode("browse");
   };
 
   const deleteVertex = () => {
-    if (awaitShape === null && editPts && vertex !== null && editPts.length > 3) {
+    if (awaitShape === null && !saving && editPts && vertex !== null && editPts.length > 3) {
       setEditPts(editPts.filter((_, i) => i !== vertex));
       setVertex(null);
       setDirty(true);
@@ -148,6 +150,7 @@ export function MapView() {
   // After Save, wait for the mower's map reply before treating the shape as stored:
   // refresh the editor from the reported outline, or offer Save again if none comes.
   const [awaitShape, setAwaitShape] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   // Until the mower confirms a saved shape the draft is the only copy, so keep it guarded.
   // Zone settings not yet applied (or awaiting confirmation) count too.
   const [zoneDraft, setZoneDraft] = useState(false);
@@ -189,7 +192,10 @@ export function MapView() {
       guarded
         ? async () => {
             const ok = await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true });
-            if (ok) latest.current.discarded = true; // discarded on purpose: don't stash it
+            if (ok) {
+              latest.current.discarded = true; // discarded on purpose: don't stash it
+              dropZoneDrafts(device.thing);
+            }
             return ok;
           }
         : null,
@@ -247,7 +253,7 @@ export function MapView() {
         selected={mode === "browse" ? selected : undefined}
         focused={focus?.id}
         // Read-only while a save awaits the mower: a new edit would be replaced by its reply.
-        edit={awaitShape === null ? editPts : null}
+        edit={awaitShape === null && !saving ? editPts : null}
         editOutline={outline}
         activeVertex={vertex}
         onVertex={setVertex}
@@ -296,7 +302,8 @@ export function MapView() {
             vertex={vertex}
             onDeleteVertex={deleteVertex}
             onReset={() => startEditShape(focus)}
-            awaiting={awaitShape !== null}
+            awaiting={awaitShape !== null || saving}
+            onSaving={setSaving}
             onSaved={() => {
               savedArea.current = area(outline ?? []);
               savedCentre.current = centre(outline ?? []);
@@ -476,6 +483,7 @@ function EditPanel(p: {
   onDeleteVertex: () => void;
   onReset: () => void;
   onSaved: () => void;
+  onSaving: (on: boolean) => void;
   awaiting: boolean;
   onBack: () => void;
   onClose: () => void;
@@ -545,8 +553,10 @@ function EditPanel(p: {
               disabled={!p.dirty || p.awaiting}
               onClick={async () => {
                 const polygon = p.outline!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
+                p.onSaving(true); // read-only from here: later drags would not be in this save
                 const ok = await call("lymow", focus.kind === "go" ? "update_zone_polygon" : "update_nogo_polygon", { [key]: zone.hashId, polygon }, t("Shape saved"));
                 if (ok) p.onSaved();
+                p.onSaving(false);
               }}
             >
               {t("Save shape")}
@@ -583,18 +593,31 @@ const ZONE_TOGGLES = [
   { key: "turn_off_outer_motor", src: "turnOffOuterMotor", label: "Turn off outer blade at edges" },
 ] as const;
 
+// Unapplied (or unconfirmed) zone settings outlive the view, like shape drafts:
+// leaving through HA's sidebar can't be vetoed.
+const zoneDrafts = new Map<string, { draft: Record<string, number | boolean>; saved: boolean }>();
+function dropZoneDrafts(thing: string) {
+  for (const k of [...zoneDrafts.keys()]) if (k.startsWith(`${thing}:`)) zoneDrafts.delete(k);
+}
+
 function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<string, any> | undefined; onDraft: (pending: boolean) => void }) {
   const t = useT();
   const ui = useUi();
-  const { call } = useMower();
+  const { call, device } = useMower();
+  const draftKey = `${device.thing}:${zone.hashId}`;
+  const kept = zoneDrafts.get(draftKey);
   // Effective value: the zone's own config, else the global default the mower uses.
   const effective = (src: string, fallback: number): number => {
     const own = src === "cutHeight" ? zone.cutHeight ?? zone.zoneConfig?.cutHeight : src === "pathSpacing" ? zone.pathSpacing ?? zone.zoneConfig?.pathSpacing : zone.zoneConfig?.[src];
     return typeof own === "number" ? own : typeof global?.[src] === "number" ? global[src] : fallback;
   };
   // Only fields the user moved are sent, so untouched ones keep inheriting.
-  const [draft, setDraft] = useState<Record<string, number | boolean>>({});
-  const [saved, setSaved] = useState(false);
+  const [draft, setDraft] = useState<Record<string, number | boolean>>(kept?.draft ?? {});
+  const [saved, setSaved] = useState(kept?.saved ?? false);
+  useEffect(() => {
+    if (Object.keys(draft).length) zoneDrafts.set(draftKey, { draft, saved });
+    else zoneDrafts.delete(draftKey);
+  }, [draft, saved]);
   const changed = Object.keys(draft).length > 0;
   useEffect(() => {
     onDraft(changed);

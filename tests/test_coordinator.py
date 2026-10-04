@@ -4269,3 +4269,12 @@ async def test_name_store_tolerates_non_string_thing() -> None:
     await coord.async_load_names()  # must not raise during setup
     assert coord._name_store("nogo", 12345) is not None
     storage.MEMORY.clear()
+
+
+@pytest.mark.asyncio
+async def test_channel_names_survive_a_poll() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._mqtt_state[THING] = {"mapData": {"channels": [{"hashId": "c1"}]}}
+    coord._channel_name_overrides[THING] = {"c1": "Gate"}
+    data = await coord._async_update_data()
+    assert data[THING]["mapData"]["channels"] == [{"hashId": "c1", "name": "Gate"}]
