@@ -134,7 +134,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # init, the others wait for (and fail with) its result. A failure releases the
     # claim so a later setup retries.
     if (init := hass.data.get(_WWW_REGISTERED_KEY)) is not None:
-        await init
+        # Shielded: one entry's setup being cancelled mustn't cancel the shared init.
+        await asyncio.shield(init)
     else:
         init = hass.data[_WWW_REGISTERED_KEY] = asyncio.get_running_loop().create_future()
         try:

@@ -900,7 +900,6 @@ async def test_concurrent_setup_waits_for_shared_www_init() -> None:
     await asyncio.sleep(0)
     assert not second.done()  # waiting on the first, not skipping ahead
     gate.set()
-    for task in (first, second):
-        with pytest.raises(RuntimeError):
-            await task
+    results = await asyncio.gather(first, second, return_exceptions=True)
+    assert all(isinstance(r, RuntimeError) for r in results)
     assert _lymow._WWW_REGISTERED_KEY not in hass.data
