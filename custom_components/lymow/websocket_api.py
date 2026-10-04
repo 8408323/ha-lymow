@@ -21,6 +21,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later
 
 from .const import DOMAIN
+from .coordinator import _is_device_online
 from .sensor import _schedule_to_local, map_payload
 
 # homeassistant.auth.permissions.const.POLICY_READ
@@ -204,7 +205,8 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
         # schedules then: add_schedule writes the full list and would drop the rest.
         "schedules": None if schedules is None else [row for s in schedules if (row := _schedule(s))],
         "backups": [row for b in data.get("backupMapList") or [] if (row := _backup(b))],
-        "online": data.get("deviceState") != "offline",
+        # Same positive signals the coordinator uses; unknown counts as offline.
+        "online": _is_device_online(data),
         # When the mower last sent a map reply (epoch s), for confirming edits.
         "map_received_at": data.get("mapReceivedAt"),
     }

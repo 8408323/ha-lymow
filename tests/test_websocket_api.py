@@ -462,3 +462,10 @@ def test_stream_hides_parts_the_user_cannot_read() -> None:
 def test_snapshot_omits_gps_origin() -> None:
     coord = _coordinator({"mapData": {"gpsOrigin": {"lat": 59.0, "lon": 16.0}}})
     assert "gps_origin" not in ws.snapshot(coord, THING)["map"]
+
+
+def test_snapshot_online_uses_positive_signals() -> None:
+    assert ws.snapshot(_coordinator({}), THING)["online"] is False  # unknown is not online
+    assert ws.snapshot(_coordinator({"deviceState": "ONLINE"}), THING)["online"] is True
+    assert ws.snapshot(_coordinator({"deviceState": "weird", "isOnline": True}), THING)["online"] is True
+    assert ws.snapshot(_coordinator({"deviceState": "offline"}), THING)["online"] is False

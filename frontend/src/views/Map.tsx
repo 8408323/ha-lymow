@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { setLeaveGuard } from "../App";
 import type { MapData, Point, Zone } from "../hass";
-import { area, centre, expand, simplify, type Handle } from "../map/geometry";
+import { area, centre, distToSegment, expand, simplify, type Handle } from "../map/geometry";
 import { MapCanvas, type Kind, type LabelMode } from "../map/MapCanvas";
 import { useT } from "../i18n";
 import { useMower, useMowerEntity, zoneLabel } from "../mower";
@@ -159,6 +159,7 @@ export function MapView() {
   const reportedShape = JSON.stringify(find(focus)?.polygon ?? null);
   const savedArea = useRef(0);
   const savedCentre = useRef<Point>({ x: 0, y: 0 });
+  const savedOutline = useRef<Point[]>([]);
   useEffect(() => {
     if (awaitShape !== null && focus && reportedShape !== awaitShape) {
       setAwaitShape(null);
@@ -168,7 +169,10 @@ export function MapView() {
       const poly = find(focus)?.polygon ?? [];
       const got = area(poly);
       const c = centre(poly);
-      const near = Math.hypot(c.x - savedCentre.current.x, c.y - savedCentre.current.y) <= 1;
+      // …and every reported point lies on (within 0.5 m of) the submitted boundary.
+      const sent = savedOutline.current;
+      const onBoundary = poly.every((q) => sent.some((a, i) => distToSegment(q, a, sent[(i + 1) % sent.length]) <= 0.5));
+      const near = onBoundary && Math.hypot(c.x - savedCentre.current.x, c.y - savedCentre.current.y) <= 1;
       if (near && Math.abs(got - savedArea.current) <= savedArea.current * 0.03) startEditShape(focus);
       else {
         setDirty(true);
@@ -307,6 +311,7 @@ export function MapView() {
             onSaved={() => {
               savedArea.current = area(outline ?? []);
               savedCentre.current = centre(outline ?? []);
+              savedOutline.current = outline ?? [];
               setAwaitShape(reportedShape);
               setDirty(false);
             }}

@@ -103,6 +103,7 @@ function LanguageCard() {
 // mower confirms still restores the edits if it never does.
 type PendingDefaults = { sent: Record<string, unknown>; matched: boolean; after: number; deadline: number };
 const pendingDefaults = new Map<string, PendingDefaults>();
+const unsavedDefaults = new Map<string, Record<string, unknown>>();
 
 function MowingDefaults() {
   const t = useT();
@@ -128,7 +129,12 @@ function MowingDefaults() {
   // Only the fields the user touched: everything else keeps mirroring the mower, so
   // values arriving after an edit (or fallbacks shown before the first map reply)
   // are never sent back as if the user had chosen them.
-  const [edits, setEdits] = useState<Partial<typeof initial>>({});
+  // Unsaved edits outlive the view per mower (tab switch, HA sidebar, other mower).
+  const [edits, setEdits] = useState<Partial<typeof initial>>(() => (unsavedDefaults.get(device.thing) as Partial<typeof initial>) ?? {});
+  useEffect(() => {
+    if (Object.keys(edits).length) unsavedDefaults.set(device.thing, edits);
+    else unsavedDefaults.delete(device.thing);
+  }, [edits]);
   const v = { ...initial, ...edits };
   // Drop edits the mower now reports (saved, or set the same elsewhere).
   useEffect(() => {
