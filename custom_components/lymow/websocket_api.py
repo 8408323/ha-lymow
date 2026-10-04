@@ -214,6 +214,10 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
     @callback
     def _send(_now: Any = None) -> None:
         state["timer"] = None
+        # Permissions can change while subscribed (HA's own forwarders re-check too).
+        if not _can_read(connection, _mower_entity(hass, thing)):
+            _end("unauthorized")
+            return
         snap = snapshot(state["coordinator"], thing)
         # Only forward real changes.
         if snap != state.get("snap"):
@@ -234,6 +238,17 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
             state["timer"] = async_call_later(hass, wait, _send)
 
     @callback
+    def _end(reason: str) -> None:
+        """Stop the stream for good (nothing may follow the final event)."""
+        if state["timer"] is not None:
+            state["timer"]()
+            state["timer"] = None
+        state["unlisten"]()
+        state["unlisten"] = lambda: None
+        rebinders.discard(_rebind)
+        connection.send_message(websocket_api.event_message(msg["id"], {"thing": thing, reason: True}))
+
+    @callback
     def _rebind() -> None:
         # A config-entry reload replaces the coordinator; follow it so an open
         # panel keeps getting live data instead of freezing on the old one.
@@ -243,10 +258,7 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
         if new is None:
             # The mower's entry was unloaded: stop streaming a frozen snapshot and
             # tell the panel, which then reloads its device list.
-            state["unlisten"]()
-            state["unlisten"] = lambda: None
-            rebinders.discard(_rebind)
-            connection.send_message(websocket_api.event_message(msg["id"], {"thing": thing, "gone": True}))
+            _end("gone")
             return
         state["unlisten"]()
         state["coordinator"] = new

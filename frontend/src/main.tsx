@@ -2,7 +2,7 @@
 // HA sets `hass` (on every state change), `narrow`, `route` and `panel`.
 
 import { createRoot, type Root } from "react-dom/client";
-import { App } from "./App";
+import { App, confirmLeave, hasLeaveGuard } from "./App";
 import { HassStore, StoreContext, type Hass } from "./hass";
 import css from "./styles.css?inline";
 
@@ -29,6 +29,22 @@ class LymowPanel extends HTMLElement {
   }
 
   set route(r: Route) {
+    // Browser back/forward changes the route without going through navigate();
+    // give a view with unsaved work the same chance to veto it.
+    const tab = (x: Route) => x.path.split("/").filter(Boolean)[0] ?? "";
+    if (this._route && tab(r) !== tab(this._route) && hasLeaveGuard()) {
+      const prev = this._route;
+      confirmLeave().then((ok) => {
+        if (ok) {
+          this._route = r;
+          this.render();
+        } else {
+          history.pushState(null, "", `${prev.prefix}${prev.path}`);
+          window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
+        }
+      });
+      return;
+    }
     this._route = r;
     this.render();
   }

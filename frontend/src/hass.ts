@@ -147,6 +147,8 @@ export interface Snapshot {
   run_time_config?: { cutHeight?: number; moveSpeed?: number; cutSpeed?: number };
   /** Set when the mower's config entry was unloaded; the stream ends. */
   gone?: boolean;
+  /** Set when the user lost read access to the mower; the stream ends. */
+  unauthorized?: boolean;
   map: MapData;
   /** null until the mower has answered the schedule query. */
   schedules: Schedule[] | null;
@@ -166,9 +168,17 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
     const load = (): Promise<void> =>
       getHass()
         .callWS<LymowDevice[]>({ type: "lymow/devices" })
-        .catch(() => [] as LymowDevice[])
+        .then(
+          (d) => d,
+          () => null, // transport hiccup: keep what we have, try again
+        )
         .then((d) => {
           if (!alive) return;
+          if (d === null) {
+            t = window.setTimeout(load, 5000);
+            setDevices((prev) => prev ?? []);
+            return;
+          }
           setDevices(d);
           // Keep polling until every mower's own entity is registered (setup
           // publishes the coordinator before the platforms finish).

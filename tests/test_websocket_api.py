@@ -340,3 +340,42 @@ def test_pushes_are_throttled_with_a_trailing_send() -> None:
         coord.listeners[0]()  # schedule another
         conn.subscriptions[7]()  # unsubscribing cancels it
         assert later == []
+
+
+def test_stream_ends_when_read_access_is_revoked() -> None:
+    coord = _coordinator({"poseEastM": 1.0})
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": coord}}
+    readable = {"lawn_mower.lawn"}
+    conn = _connection(admin=False, readable=readable)
+    with patch.object(ws.er, "async_get", create=True) as er_get:
+        er_get.return_value.async_get_entity_id.return_value = "lawn_mower.lawn"
+        ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
+        assert conn.send_message.call_count == 1
+        readable.clear()  # admin revokes access
+        coord.data[THING]["poseEastM"] = 2.0
+        coord.listeners and coord.listeners[0]()
+    assert conn.send_message.call_args.args[0]["event"] == {"thing": THING, "unauthorized": True}
+    assert coord.listeners == []
+    count = conn.send_message.call_count
+    ws.notify_coordinators_changed(hass)  # ended streams don't come back
+    assert conn.send_message.call_count == count
+
+
+def test_gone_cancels_a_pending_trailing_send() -> None:
+    coord = _coordinator({"poseEastM": 1.0})
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": coord}}
+    conn = _connection()
+    cancelled: list = []
+    with (
+        patch.object(ws, "_MIN_PUSH_INTERVAL_S", 10.0),
+        patch.object(ws, "async_call_later", lambda _h, _d, _a: lambda: cancelled.append(True)),
+    ):
+        ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
+        coord.data[THING]["poseEastM"] = 2.0
+        coord.listeners[0]()  # schedules a trailing send
+        hass.data["lymow"] = {}
+        ws.notify_coordinators_changed(hass)
+    assert cancelled == [True]
+    assert conn.send_message.call_args.args[0]["event"] == {"thing": THING, "gone": True}

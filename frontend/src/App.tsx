@@ -31,6 +31,8 @@ export function setLeaveGuard(guard: (() => Promise<boolean>) | null) {
   leaveGuard = guard;
 }
 
+export const hasLeaveGuard = () => leaveGuard !== null;
+
 /** Ask the current view whether it's OK to leave (unsaved work). */
 export async function confirmLeave(): Promise<boolean> {
   if (leaveGuard && !(await leaveGuard())) return false;
@@ -62,8 +64,8 @@ function Shell({ narrow, route, host }: { narrow: boolean; route: Route; host: H
   const device = devices?.find((d) => d.thing === thing) ?? devices?.[0];
   const snap = useSnapshot(device?.thing);
   useEffect(() => {
-    if (snap?.gone) reloadDevices();
-  }, [snap?.gone]);
+    if (snap?.gone || snap?.unauthorized) reloadDevices();
+  }, [snap?.gone, snap?.unauthorized]);
   const seg = route.path.split("/").filter(Boolean)[0];
   const tab: TabId = (TABS.find((t) => t.id === seg)?.id ?? "overview") as TabId;
 
@@ -74,7 +76,7 @@ function Shell({ narrow, route, host }: { narrow: boolean; route: Route; host: H
   return (
     <div className={cx("ly-app", narrow && "ly-app--narrow")}>
         {device ? (
-          <MowerProvider key={device.thing} device={device} snap={snap?.gone ? undefined : snap} reloadDevices={reloadDevices}>
+          <MowerProvider key={device.thing} device={device} snap={snap?.gone || snap?.unauthorized ? undefined : snap} reloadDevices={reloadDevices}>
             <TopBar narrow={narrow} host={host} devices={devices!} onPick={async (thing) => (await confirmLeave()) && setThing(thing)} />
             <nav className="ly-tabs" aria-label={t("Sections")}>
               {TABS.map((item) => (
