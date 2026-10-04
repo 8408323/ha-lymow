@@ -13,7 +13,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 
 
 def _make_ha_stubs() -> None:
@@ -3286,6 +3286,51 @@ async def test_async_check_firmware_update_no_patch_when_response_empty() -> Non
     assert result == {}
     assert THING in coord._last_ota_check
     assert "latestVersion" not in coord.data[THING]
+
+
+# ---------------------------------------------------------------------------
+# Voice pack — switch reuses create-ota-job (no cloud read-back)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_async_set_voice_language_creates_voice_pack_job() -> None:
+    coord, _, api = _make_coordinator()
+    coord._region = "eu-west-1"
+    api.create_voice_pack_job = AsyncMock(return_value={"jobId": "VOICE-1"})
+    job_id = await coord.async_set_voice_language(THING, "German")
+    assert job_id == "VOICE-1"
+    # A voice pack is an OTA job keyed by the language display name (type=ChangeLanguage).
+    api.create_voice_pack_job.assert_awaited_once_with(THING, "German")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("response", [{}, {"jobId": ""}, {"jobId": "   "}, {"jobId": ["x"]}, None])
+async def test_async_set_voice_language_raises_without_valid_job_id(response) -> None:
+    coord, _, api = _make_coordinator()
+    coord._region = "eu-west-1"
+    api.create_voice_pack_job = AsyncMock(return_value=response)
+    with pytest.raises(HomeAssistantError, match="no OTA job"):
+        await coord.async_set_voice_language(THING, "Spanish")
+
+
+@pytest.mark.asyncio
+async def test_async_set_voice_language_wraps_api_errors() -> None:
+    coord, _, api = _make_coordinator()
+    coord._region = "eu-west-1"
+    api.create_voice_pack_job = AsyncMock(side_effect=OSError("boom"))
+    with pytest.raises(HomeAssistantError, match="Voice pack switch to German failed"):
+        await coord.async_set_voice_language(THING, "German")
+
+
+@pytest.mark.asyncio
+async def test_async_set_voice_language_rejects_region_without_ota_gateway() -> None:
+    coord, _, api = _make_coordinator()
+    coord._region = "ap-southeast-2"  # no api_ota_job gateway
+    api.create_voice_pack_job = AsyncMock()
+    with pytest.raises(HomeAssistantError, match="not supported in region"):
+        await coord.async_set_voice_language(THING, "German")
+    api.create_voice_pack_job.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

@@ -673,6 +673,23 @@ class TestOtaEndpoints:
         assert data == {"status": "OTA_IN_PROGRESS"}
         assert request.kwargs["params"]["jobId"] == "JOB-123"
 
+    async def test_create_voice_pack_job_sends_language_and_change_language_type(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_CREATE, payload={"jobId": "VOICE-1"})
+            data = await client.create_voice_pack_job("mower-001", "German")
+            request = list(m.requests.values())[0][0]
+        assert data == {"jobId": "VOICE-1"}
+        params = request.kwargs["params"]
+        assert params["objectKey"] == "German"
+        assert params["type"] == "ChangeLanguage"
+        assert params["deviceThingName"] == "mower-001"
+
+    async def test_create_voice_pack_job_raises_on_http_error(self, client):
+        with aioresponses() as m:
+            m.get(RE_OTA_CREATE, status=500)
+            with pytest.raises(aiohttp.ClientResponseError):
+                await client.create_voice_pack_job("mower-001", "German")
+
 
 class TestSigV4Helpers:
     def test_s3_sigv4_headers_returns_expected_keys(self):
