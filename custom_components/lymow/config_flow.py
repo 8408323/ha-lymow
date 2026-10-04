@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import html
 import json
+import re
 import secrets
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -282,7 +283,7 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
             return "cannot_connect"
 
         if not isinstance(devices, list) or not all(
-            isinstance(device, dict) and isinstance(device.get("deviceThingName"), str) for device in devices
+            isinstance(device, dict) and _is_thing_name(device.get("deviceThingName")) for device in devices
         ):
             return "cannot_connect"
         if not devices:
@@ -479,6 +480,11 @@ class LymowOptionsFlow(OptionsFlow):
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
+
+
+def _is_thing_name(value: Any) -> bool:
+    """AWS IoT thing name: 1-128 of [A-Za-z0-9_:-]. Used verbatim in MQTT topics, so no '/', '+' or '#'."""
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_:-]{1,128}", value) is not None
 
 
 def _is_urlsafe_token(value: str, minimum: int, maximum: int) -> bool:

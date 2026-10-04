@@ -258,6 +258,18 @@ class TestLymowAuthRefreshTokens:
             with pytest.raises(ValueError, match="Token refresh failed HTTP 401"):
                 await auth_client.refresh_tokens("refresh-token", "eu-west-1")
 
+    async def test_refresh_tokens_partial_result_is_transient(self, auth_client):
+        with aioresponses() as m:
+            m.post(_COGNITO_IDP_EU, payload={"AuthenticationResult": {"AccessToken": "a"}})
+            with pytest.raises(LymowAuthConnectionError, match="missing required fields"):
+                await auth_client.refresh_tokens("refresh-token", "eu-west-1")
+
+    async def test_cognito_throttling_400_is_transient(self, auth_client):
+        with aioresponses() as m:
+            m.post(_COGNITO_IDP_EU, status=400, body='{"__type":"TooManyRequestsException"}')
+            with pytest.raises(LymowAuthConnectionError):
+                await auth_client._srp_login("u", "p", "eu-west-1", "eu-west-1_6qNPbnrrd", "test-client-id")
+
 
 class TestLymowAuthOAuth:
     async def test_authorize_url_contains_pkce_and_provider_parameters(self, auth_client):

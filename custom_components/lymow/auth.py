@@ -50,8 +50,12 @@ class LymowAuthConnectionError(LymowAuthError):
 
 
 def _http_error(status: int, message: str) -> LymowAuthError:
-    """5xx/408/429 are outages, timeouts or throttling; other 4xx mean the credentials were rejected."""
-    transient = status >= 500 or status in (408, 429)
+    """5xx/408/429 are outages, timeouts or throttling; other 4xx mean the credentials were rejected.
+
+    Cognito reports throttling as HTTP 400 with a TooManyRequests/LimitExceeded
+    ``__type``, so the body (included in ``message``) is checked too."""
+    throttled = "TooManyRequestsException" in message or "LimitExceededException" in message
+    transient = status >= 500 or status in (408, 429) or throttled
     return (LymowAuthConnectionError if transient else LymowAuthError)(message)
 
 
@@ -352,7 +356,10 @@ class LymowAuth:
                 body = await resp.text()
                 raise ValueError(f"Token refresh failed HTTP {resp.status}: {body}")
             data = await resp.json(content_type=None)
-        return data["AuthenticationResult"]
+        result = data.get("AuthenticationResult") if isinstance(data, dict) else None
+        if not isinstance(result, dict) or not all(isinstance(result.get(k), str) for k in ("AccessToken", "IdToken")):
+            raise LymowAuthConnectionError("Token refresh response was missing required fields")
+        return result
 
     async def get_aws_credentials(self, id_token: str, region: str) -> dict[str, Any]:
         """Exchange Cognito IdToken for temporary AWS credentials."""

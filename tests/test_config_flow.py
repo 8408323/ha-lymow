@@ -400,7 +400,9 @@ async def test_google_missing_identity_is_rejected() -> None:
     assert result["errors"] == {"base": "cannot_connect"}
 
 
-@pytest.mark.parametrize("devices", [[], {"unexpected": "shape"}, [None]])
+@pytest.mark.parametrize(
+    "devices", [[], {"unexpected": "shape"}, [None], [{"deviceThingName": "a/#"}], [{"deviceThingName": ""}]]
+)
 async def test_google_rejects_no_devices_or_malformed_device_response(devices: Any) -> None:
     flow = _make_flow()
     await _select_google(flow)
