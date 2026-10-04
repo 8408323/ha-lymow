@@ -31,8 +31,15 @@ export function setLeaveGuard(guard: (() => Promise<boolean>) | null) {
   leaveGuard = guard;
 }
 
+/** Ask the current view whether it's OK to leave (unsaved work). */
+export async function confirmLeave(): Promise<boolean> {
+  if (leaveGuard && !(await leaveGuard())) return false;
+  leaveGuard = null;
+  return true;
+}
+
 export async function navigate(route: Route, tab: TabId) {
-  if (leaveGuard && !(await leaveGuard())) return;
+  if (!(await confirmLeave())) return;
   leaveGuard = null;
   history.pushState(null, "", `${route.prefix}/${tab}`);
   window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
@@ -68,7 +75,7 @@ function Shell({ narrow, route, host }: { narrow: boolean; route: Route; host: H
     <div className={cx("ly-app", narrow && "ly-app--narrow")}>
         {device ? (
           <MowerProvider key={device.thing} device={device} snap={snap?.gone ? undefined : snap} reloadDevices={reloadDevices}>
-            <TopBar narrow={narrow} host={host} devices={devices!} onPick={setThing} />
+            <TopBar narrow={narrow} host={host} devices={devices!} onPick={async (thing) => (await confirmLeave()) && setThing(thing)} />
             <nav className="ly-tabs" aria-label={t("Sections")}>
               {TABS.map((item) => (
                 <a

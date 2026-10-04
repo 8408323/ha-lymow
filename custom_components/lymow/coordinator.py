@@ -1995,21 +1995,25 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         for delay in _BACKUP_REFRESH_OFFSETS_S:
             await asyncio.sleep(delay)
-            self._backup_map_cache.pop(thing_name, None)
-            fields = await self._fetch_backup_map_fields(thing_name)
-            if isinstance(fields, dict) and fields and self.data and thing_name in self.data:
-                merged = {**self.data[thing_name], **fields}
-                self.async_set_updated_data({**self.data, thing_name: merged})
+            await self._async_publish_backups(thing_name)
 
     async def async_delete_backup_map(self, thing_name: str, object_key: str) -> None:
-        """Delete a saved backup map and drop the cached backup snapshot."""
+        """Delete a saved backup map and publish the updated list."""
         await self._client.delete_backup_map(object_key)
-        self._backup_map_cache.pop(thing_name, None)
+        await self._async_publish_backups(thing_name)
 
     async def async_rename_backup_map(self, thing_name: str, object_key: str, name: str) -> None:
-        """Rename a saved backup map and drop the cached backup snapshot."""
+        """Rename a saved backup map and publish the updated list."""
         await self._client.rename_backup_map(object_key, name)
+        await self._async_publish_backups(thing_name)
+
+    async def _async_publish_backups(self, thing_name: str) -> None:
+        """Refetch the backup list now, so listeners (the panel) never act on a
+        renamed/deleted entry until the next 5-minute cache refresh."""
         self._backup_map_cache.pop(thing_name, None)
+        fields = await self._fetch_backup_map_fields(thing_name)
+        if isinstance(fields, dict) and fields and self.data and thing_name in self.data:
+            self.async_set_updated_data({**self.data, thing_name: {**self.data[thing_name], **fields}})
 
     async def _maybe_refresh_ota(self, thing_name: str) -> None:
         """Refresh the OTA snapshot for one device if our cache is stale.

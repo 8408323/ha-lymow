@@ -3490,13 +3490,18 @@ async def test_async_restore_backup_map_requeries() -> None:
     coord.async_query_map.assert_awaited_once_with(THING)
 
 
-async def test_async_delete_backup_map_drops_cache() -> None:
+async def test_async_delete_backup_map_publishes_fresh_list() -> None:
     coord, _, api = _make_coordinator()
     api.delete_backup_map = AsyncMock()
-    coord._backup_map_cache[THING] = ("t", {})
+    api.get_backup_map_list = AsyncMock(return_value=[])
+    coord.data = {THING: {"battery": 50, "backupMapCount": 1}}
+    coord.async_set_updated_data = MagicMock()
+    coord._backup_map_cache[THING] = ("t", {"backupMapCount": 1})
     await coord.async_delete_backup_map(THING, "k")
     api.delete_backup_map.assert_awaited_once_with("k")
-    assert THING not in coord._backup_map_cache
+    api.get_backup_map_list.assert_awaited_once()  # stale cache bypassed
+    pushed = coord.async_set_updated_data.call_args[0][0][THING]
+    assert pushed["backupMapCount"] == 0 and pushed["battery"] == 50
 
 
 async def test_async_backup_map_publishes_and_drops_cache() -> None:
@@ -3548,13 +3553,26 @@ async def test_async_refresh_backups_soon_repolls_and_pushes_updates(monkeypatch
     assert pushed[THING]["battery"] == 50  # existing fields preserved
 
 
-async def test_async_rename_backup_map_drops_cache() -> None:
+async def test_async_rename_backup_map_publishes_fresh_list() -> None:
     coord, _, api = _make_coordinator()
     api.rename_backup_map = AsyncMock()
+    api.get_backup_map_list = AsyncMock(return_value=[{"map_file": "k", "map_name": "Spring"}])
+    coord.data = {THING: {}}
+    coord.async_set_updated_data = MagicMock()
     coord._backup_map_cache[THING] = ("t", {})
     await coord.async_rename_backup_map(THING, "k", "Spring")
     api.rename_backup_map.assert_awaited_once_with("k", "Spring")
-    assert THING not in coord._backup_map_cache
+    pushed = coord.async_set_updated_data.call_args[0][0][THING]
+    assert pushed["backupMapCount"] == 1
+
+
+async def test_publish_backups_skips_unknown_device() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list = AsyncMock(return_value=[])
+    coord.data = {}
+    coord.async_set_updated_data = MagicMock()
+    await coord._async_publish_backups(THING)
+    coord.async_set_updated_data.assert_not_called()
 
 
 async def test_async_rename_device_merges_name() -> None:

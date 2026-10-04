@@ -44,7 +44,8 @@ function useLiveTrail(map: MapData | undefined): Point[] {
     });
   }, [map?.poseEastM, map?.poseNorthM, mowing]);
   useEffect(() => {
-    if (mowing) setTrail([]);
+    // A new mow starts a fresh breadcrumb; when it ends, drop it (the server trail stays).
+    setTrail([]);
   }, [mowing]);
   return trail;
 }
@@ -148,7 +149,7 @@ export function MapView() {
 
   const onPick = (kind: Kind, id: string) => {
     if (mode === "edit") {
-      if (dirty && focus && focus.id !== id) return ui.toast("Save or discard the current shape first", "bad");
+      if (dirty && focus && focus.id !== id) return ui.toast(t("Save or discard the current shape first"), "bad");
       startEditShape({ kind, id });
       return;
     }
@@ -320,7 +321,7 @@ function BrowsePanel(p: {
           block
           disabled={!sel.length}
           onClick={async () => {
-            if (await call("lymow", "start_zone", { zone_hash_ids: sel }, `Mowing ${sel.length} zone${sel.length > 1 ? "s" : ""}`)) p.setSelected(new Set());
+            if (await call("lymow", "start_zone", { zone_hash_ids: sel }, t("Mowing {n} zones", { n: sel.length }))) p.setSelected(new Set());
           }}
         >
           {sel.length ? t("Mow {n} selected", { n: sel.length }) : t("Select zones to mow")}

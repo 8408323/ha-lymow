@@ -159,14 +159,21 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
   const [generation, setGeneration] = useState(0);
   useEffect(() => {
     let alive = true;
-    const load = () =>
+    let t = 0;
+    // Entities register a moment after the entry loads, and a reload can leave the
+    // list empty for a while: refresh once shortly after, then keep polling while empty.
+    const load = (): Promise<void> =>
       getHass()
         .callWS<LymowDevice[]>({ type: "lymow/devices" })
-        .then((d) => alive && setDevices(d))
-        .catch(() => alive && setDevices([]));
-    load();
-    // Entities register a moment after the entry loads; refresh once shortly after.
-    const t = window.setTimeout(load, 4000);
+        .catch(() => [] as LymowDevice[])
+        .then((d) => {
+          if (!alive) return;
+          setDevices(d);
+          if (!d.length) t = window.setTimeout(load, 5000);
+        });
+    load().then(() => {
+      if (alive && !t) t = window.setTimeout(load, 4000);
+    });
     return () => {
       alive = false;
       window.clearTimeout(t);

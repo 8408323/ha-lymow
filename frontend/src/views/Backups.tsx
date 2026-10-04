@@ -1,11 +1,11 @@
 import type { Backup, Point } from "../hass";
 import { bbox, pathD } from "../map/geometry";
-import { useT } from "../i18n";
+import { useI18n, type T } from "../i18n";
 import { useMower } from "../mower";
 import { Button, Card, Empty, Icon, useUi } from "../ui";
 
-function backupName(b: Backup): string {
-  return b.name?.trim() || b.file.split("/").pop()?.replace(/\.pb$/, "") || "Backup";
+function backupName(b: Backup, t: T): string {
+  return b.name?.trim() || b.file.split("/").pop()?.replace(/\.pb$/, "") || t("Backup");
 }
 
 function Thumb({ b }: { b: Backup }) {
@@ -36,7 +36,7 @@ function Thumb({ b }: { b: Backup }) {
 }
 
 export function BackupsView() {
-  const t = useT();
+  const { t, locale } = useI18n();
   const { snap, call } = useMower();
   const ui = useUi();
   const backups = [...(snap?.backups ?? [])].sort((a, b) => (b.backupTime ?? 0) - (a.backupTime ?? 0));
@@ -59,13 +59,13 @@ export function BackupsView() {
         ) : (
           <ul className="ly-list">
             {backups.map((b) => {
-              const name = backupName(b);
+              const name = backupName(b, t);
               return (
                 <li key={b.file} className="ly-list__item">
                   <Thumb b={b} />
                   <div className="ly-backup__info">
                     <strong>{name}</strong>
-                    <span className="ly-muted">{b.backupTime ? new Date(b.backupTime * 1000).toLocaleString() : "Unknown date"}</span>
+                    <span className="ly-muted">{b.backupTime ? new Date(b.backupTime * 1000).toLocaleString(locale) : t("Unknown date")}</span>
                   </div>
                   <div className="ly-btnrow">
                     <Button

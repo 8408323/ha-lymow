@@ -217,8 +217,21 @@ function Headlight() {
     end: a.headlight_end ? shiftClock(a.headlight_end as string, offset) : "23:00",
   };
   const [draft, setDraft] = useState<typeof live | null>(null);
+  // After Save the robot echoes its config later (or never, on some firmware):
+  // keep showing what was sent, and drop the draft once the mower reports it.
+  const [saved, setSaved] = useState(false);
   const v = draft ?? live;
-  const edit = (part: Partial<typeof live>) => setDraft({ ...v, ...part });
+  const edit = (part: Partial<typeof live>) => {
+    setSaved(false);
+    setDraft({ ...v, ...part });
+  };
+  const liveKey = JSON.stringify(live);
+  useEffect(() => {
+    if (draft && JSON.stringify(draft.on ? draft : { ...live, on: false }) === liveKey) {
+      setDraft(null);
+      setSaved(false);
+    }
+  }, [liveKey]);
   return (
     <Card title={t("Headlight")} icon="mdi:car-light-high">
       {!known && <p className="ly-muted">{t("The mower hasn't reported its headlight schedule. Saving here replaces whatever is set in the Lymow app.")}</p>}
@@ -239,9 +252,9 @@ function Headlight() {
       <Button
         variant="primary"
         icon="mdi:check"
-        disabled={!draft}
+        disabled={!draft || saved}
         onClick={async () => {
-          if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) setDraft(null);
+          if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) setSaved(true);
         }}
       >
         {t("Save")}

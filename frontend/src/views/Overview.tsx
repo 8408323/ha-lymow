@@ -136,14 +136,14 @@ function Tile({ k, icon, label, moreInfo }: { k: string; icon: string; label: st
 function RtkTile({ rtk, moreInfo }: { rtk: number | undefined; moreInfo: (k: string) => void }) {
   const t = useT();
   if (rtk === undefined) return null;
-  const r = RTK[rtk] ?? { label: `Status ${rtk}`, tone: "neutral" as const };
-  const label = RTK[rtk] ? t(r.label) : t("Status {n}", { n: rtk });
+  const r = RTK[rtk];
+  const label = r ? t(r.label) : t("Status {n}", { n: rtk });
   return (
     <button type="button" className="ly-tile" onClick={() => moreInfo("rtk_status")}>
       <Icon name="mdi:satellite-variant" />
       <span className="ly-tile__label">{t("Positioning")}</span>
       <span className="ly-tile__value">
-        <Badge tone={r.tone}>{label}</Badge>
+        <Badge tone={r?.tone ?? "neutral"}>{label}</Badge>
       </span>
     </button>
   );
