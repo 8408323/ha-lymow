@@ -182,6 +182,20 @@ except ImportError:
     _ha_exc.ServiceValidationError = _ServiceValidationError  # type: ignore[attr-defined]
     _ha_exc.ConfigEntryAuthFailed = _ConfigEntryAuthFailed  # type: ignore[attr-defined]
     _ha_exc.ConfigEntryNotReady = _ConfigEntryNotReady  # type: ignore[attr-defined]
+
+    class _Unauthorized(_HomeAssistantError):
+        def __init__(
+            self, context=None, user_id=None, entity_id=None, config_entry_id=None, perm_category=None, permission=None
+        ):  # type: ignore[no-untyped-def]
+            super().__init__("Unauthorized")
+            self.entity_id = entity_id
+            self.permission = permission
+
+    class _UnknownUser(_Unauthorized):
+        pass
+
+    _ha_exc.Unauthorized = _Unauthorized  # type: ignore[attr-defined]
+    _ha_exc.UnknownUser = _UnknownUser  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.exceptions", _ha_exc)
 
     # ── homeassistant.config_entries ──────────────────────────────────────────

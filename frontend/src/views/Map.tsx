@@ -23,7 +23,11 @@ function useStored<T>(key: string, initial: T): [T, (v: T) => void] {
     v,
     (n: T) => {
       setV(n);
-      localStorage.setItem(key, JSON.stringify(n));
+      try {
+        localStorage.setItem(key, JSON.stringify(n));
+      } catch {
+        // storage blocked or full: keep it for this session only
+      }
     },
   ];
 }
@@ -110,6 +114,26 @@ export function MapView() {
       setDirty(true);
     }
   };
+
+  // After Save, wait for the mower's map reply before treating the shape as stored:
+  // refresh the editor from the reported outline, or offer Save again if none comes.
+  const [awaitShape, setAwaitShape] = useState<string | null>(null);
+  const reportedShape = JSON.stringify(find(focus)?.polygon ?? null);
+  useEffect(() => {
+    if (awaitShape !== null && focus && reportedShape !== awaitShape) {
+      setAwaitShape(null);
+      startEditShape(focus);
+    }
+  }, [reportedShape]);
+  useEffect(() => {
+    if (awaitShape === null) return;
+    const id = window.setTimeout(() => {
+      setAwaitShape(null);
+      setDirty(true);
+      ui.toast(t("The mower hasn't confirmed the new shape yet. Save again to retry."), "bad");
+    }, 20000);
+    return () => window.clearTimeout(id);
+  }, [awaitShape]);
 
   // Switching tabs would unmount the editor; ask first while a shape is dirty.
   useEffect(() => {
@@ -220,7 +244,11 @@ export function MapView() {
             vertex={vertex}
             onDeleteVertex={deleteVertex}
             onReset={() => startEditShape(focus)}
-            onSaved={() => setDirty(false)}
+            awaiting={awaitShape !== null}
+            onSaved={() => {
+              setAwaitShape(reportedShape);
+              setDirty(false);
+            }}
             onBack={requestLeave}
             onClose={leaveFocus}
           />
@@ -396,6 +424,7 @@ function EditPanel(p: {
   onDeleteVertex: () => void;
   onReset: () => void;
   onSaved: () => void;
+  awaiting: boolean;
   onBack: () => void;
   onClose: () => void;
 }) {
@@ -471,6 +500,11 @@ function EditPanel(p: {
               {t("Delete point")}
             </Button>
           </div>
+          {p.awaiting && (
+            <p className="ly-muted">
+              <span className="ly-spinner" /> {t("Waiting for the mower to confirm the new shape…")}
+            </p>
+          )}
         </section>
       )}
 
@@ -486,6 +520,11 @@ const ZONE_FIELDS = [
   { key: "perimeter_mow_laps", src: "perimeterMowLaps", label: "Perimeter laps", min: 0, max: 3, step: 1, unit: undefined, fallback: 1 },
 ] as const;
 
+const ZONE_TOGGLES = [
+  { key: "safe_margin_mode", src: "safeMarginMode", label: "Keep a safety margin from edges" },
+  { key: "turn_off_outer_motor", src: "turnOffOuterMotor", label: "Turn off outer blade at edges" },
+] as const;
+
 function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any> | undefined }) {
   const t = useT();
   const { call } = useMower();
@@ -495,13 +534,16 @@ function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any
     return typeof own === "number" ? own : typeof global?.[src] === "number" ? global[src] : fallback;
   };
   // Only fields the user moved are sent, so untouched ones keep inheriting.
-  const [draft, setDraft] = useState<Record<string, number>>({});
+  const [draft, setDraft] = useState<Record<string, number | boolean>>({});
   const [saved, setSaved] = useState(false);
   const changed = Object.keys(draft).length > 0;
   // Keep showing what was applied until the map reply carries it, then drop the draft.
-  const reported = ZONE_FIELDS.map((f) => effective(f.src, f.fallback)).join("|");
+  const flag = (src: string): boolean => Boolean(zone.zoneConfig?.[src] ?? global?.[src] ?? false);
+  const reported = [...ZONE_FIELDS.map((f) => effective(f.src, f.fallback)), ...ZONE_TOGGLES.map((f) => flag(f.src))].join("|");
   useEffect(() => {
-    if (saved && ZONE_FIELDS.every((f) => !(f.key in draft) || Math.abs(draft[f.key] - effective(f.src, f.fallback)) < 1e-6)) {
+    const sliders = ZONE_FIELDS.every((f) => !(f.key in draft) || Math.abs((draft[f.key] as number) - effective(f.src, f.fallback)) < 1e-6);
+    const toggles = ZONE_TOGGLES.every((f) => !(f.key in draft) || draft[f.key] === flag(f.src));
+    if (saved && sliders && toggles) {
       setDraft({});
       setSaved(false);
     }
@@ -512,7 +554,7 @@ function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any
       {ZONE_FIELDS.map((f) => (
         <Field key={f.key} label={t(f.label)}>
           <Slider
-            value={draft[f.key] ?? effective(f.src, f.fallback)}
+            value={(draft[f.key] as number | undefined) ?? effective(f.src, f.fallback)}
             min={f.min}
             max={f.max}
             step={f.step}
@@ -524,6 +566,19 @@ function ZoneSettings({ zone, global }: { zone: Zone; global: Record<string, any
             }}
           />
         </Field>
+      ))}
+      {ZONE_TOGGLES.map((f) => (
+        <div className="ly-row" key={f.key}>
+          <span>{t(f.label)}</span>
+          <Toggle
+            label={t(f.label)}
+            checked={(draft[f.key] as boolean | undefined) ?? flag(f.src)}
+            onChange={(v) => {
+              setSaved(false);
+              setDraft({ ...draft, [f.key]: v });
+            }}
+          />
+        </div>
       ))}
       <Button
         variant="primary"

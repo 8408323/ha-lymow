@@ -337,9 +337,10 @@ async def _setup_and_get_handlers(hass: MagicMock, entry: MagicMock, coord: Magi
     return handlers
 
 
-def _make_call(entity_ids: list[str], extra: dict | None = None) -> MagicMock:
+def _make_call(entity_ids: list[str], extra: dict | None = None, user_id: str | None = None) -> MagicMock:
     call = MagicMock()
     call.data = {"entity_id": entity_ids, **(extra or {})}
+    call.context.user_id = user_id
     return call
 
 
@@ -2833,3 +2834,44 @@ async def test_ble_address_option_ignored_for_multi_mower_entry(monkeypatch) -> 
     call = _make_call(["lawn_mower.mower-002"], {"linear": 0.1, "angular": 0.0, "duration": 0.3})
     await handlers["ble_drive"](call)
     coord.async_ble_drive.assert_awaited_once_with("BB:BB", 0.1, 0.0, 0.3)
+
+
+async def test_services_enforce_control_permission_for_non_admins() -> None:
+    from types import SimpleNamespace
+
+    from homeassistant.exceptions import Unauthorized, UnknownUser
+    from lymow.const import DOMAIN
+
+    coord = _make_coord({"mapData": {"goZones": [{"hashId": "z1"}]}})
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.m"
+
+    await async_setup_entry(hass, MagicMock(entry_id="entry-1"), _add)
+    users = {
+        "admin": SimpleNamespace(is_admin=True, permissions=None),
+        "allowed": SimpleNamespace(is_admin=False, permissions=SimpleNamespace(check_entity=lambda eid, p: True)),
+        "denied": SimpleNamespace(is_admin=False, permissions=SimpleNamespace(check_entity=lambda eid, p: False)),
+    }
+    hass.auth.async_get_user = AsyncMock(side_effect=lambda uid: users.get(uid))
+    delete = handlers["delete_zone"]
+
+    await delete(_make_call(["lawn_mower.m"], {"zone_hash_id": "z1"}, user_id="admin"))
+    await delete(_make_call(["lawn_mower.m"], {"zone_hash_id": "z1"}, user_id="allowed"))
+    assert coord.async_delete_zone.await_count == 2
+    with pytest.raises(Unauthorized):
+        await delete(_make_call(["lawn_mower.m"], {"zone_hash_id": "z1"}, user_id="denied"))
+    with pytest.raises(UnknownUser):
+        await delete(_make_call(["lawn_mower.m"], {"zone_hash_id": "z1"}, user_id="ghost"))
+    call = _make_call([], {"zone_hash_id": "z1"}, user_id="denied")
+    call.data["entity_id"] = "lawn_mower.m"  # a single string target is checked too
+    with pytest.raises(Unauthorized):
+        await delete(call)
+    assert coord.async_delete_zone.await_count == 2

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useEntity, useHass, useHassRef, type HassEntity } from "../hass";
-import { LANGUAGES, useI18n, useT } from "../i18n";
+import { LANGUAGES, useI18n, useT, type T } from "../i18n";
 import { shiftClock, tzOffsetMinutes } from "../status";
 import { useMower, useMowerEntity } from "../mower";
 import { Button, Card, Field, Segmented, Select, Slider, TextInput, Toggle, useUi } from "../ui";
@@ -263,9 +263,79 @@ function Headlight() {
   );
 }
 
-function shortName(e: HassEntity, device: string): string {
+// Default English names/options of the integration's entities, translated in the
+// panel. A name the user changed in Home Assistant is shown as-is.
+const ENTITY_TEXT: ReadonlySet<string> = new Set(/* i18n */ [
+  "Abort OTA",
+  "Alerts only",
+  "App presence",
+  "Auto-dock on error",
+  "Back up map",
+  "Camera light",
+  "Camera light off now",
+  "Cancel task",
+  "Charging handbrake",
+  "Clear all zones & channels",
+  "Dock and forget progress",
+  "Exit remote control",
+  "Factory reset",
+  "Find my robot (play sound)",
+  "Find robot beep",
+  "Finish zone recording",
+  "Force stop",
+  "Geofence radius",
+  "Live cut height",
+  "Live cut speed",
+  "Live move speed",
+  "Lock",
+  "Mobile notifications",
+  "Mowing pattern",
+  "Prefer 4G",
+  "RTK auto-pause",
+  "RTK diagnostics",
+  "RTK pause threshold",
+  "Rainy mowing",
+  "Re-advertise Bluetooth",
+  "Recharge & resume",
+  "Recharge threshold",
+  "Reset charging station",
+  "Restore backup map",
+  "Resume threshold",
+  "Return-to-dock route",
+  "Self-check",
+  "Set charging station here",
+  "Sync timezone",
+  "Theft detection",
+  "Theft lock",
+  "Toggle LTE airplane mode",
+  "Vehicle LED",
+  "Voice language",
+  "Volume",
+  "Zone order",
+  "Off",
+  "Low",
+  "Medium",
+  "High",
+  "Custom",
+  "Direct route",
+  "Follow perimeter",
+  "Optimize",
+  "Zigzag",
+  "Adaptive zigzag",
+  "Chessboard",
+  "Perimeter laps only",
+  "English",
+  "French-Canadian",
+  "French-France",
+  "German",
+  "Italian",
+  "Spanish",
+]);
+
+function shortName(e: HassEntity, device: string, t: T): string {
   const n: string = e.attributes.friendly_name ?? e.entity_id;
-  return n.startsWith(`${device} `) ? n.slice(device.length + 1) : n;
+  const short = n.startsWith(`${device} `) ? n.slice(device.length + 1) : n;
+  return ENTITY_TEXT.has(short) ? t(short) : short;
 }
 
 function useEntitiesOf(domains: string[]): [string, string][] {
@@ -281,7 +351,7 @@ function EntityControls() {
   const hass = useHass();
   const { device } = useMower();
   const live = list.filter(([, id]) => hass.states[id]);
-  const sorted = [...live].sort(([, a], [, b]) => shortName(hass.states[a], device.name).localeCompare(shortName(hass.states[b], device.name)));
+  const sorted = [...live].sort(([, a], [, b]) => shortName(hass.states[a], device.name, t).localeCompare(shortName(hass.states[b], device.name, t)));
   return (
     <Card title={t("Mower features")} icon="mdi:toggle-switch-outline" className="ly-card--wide">
       <div className="ly-controls">
@@ -300,7 +370,7 @@ function EntityControl({ id }: { id: string }) {
   const [pending, setPending] = useState<number | null>(null);
   if (!e) return null;
   const domain = id.split(".")[0];
-  const name = shortName(e, device.name);
+  const name = shortName(e, device.name, t);
   const off = e.state === "unavailable";
   if (domain === "switch")
     return (
@@ -316,7 +386,7 @@ function EntityControl({ id }: { id: string }) {
         <Select
           disabled={off}
           value={e.state === "unknown" ? undefined : e.state}
-          options={(e.attributes.options ?? []).map((o: string) => ({ value: o, label: o }))}
+          options={(e.attributes.options ?? []).map((o: string) => ({ value: o, label: ENTITY_TEXT.has(o) ? t(o) : o }))}
           onChange={(o) => call("select", "select_option", { entity_id: id, option: o }, `${name}: ${o}`)}
         />
       </div>
@@ -355,7 +425,7 @@ function ActionButtons() {
   const safe = live.filter(([k]) => !DANGEROUS_BUTTONS.has(k));
   const danger = live.filter(([k]) => DANGEROUS_BUTTONS.has(k));
   const press = async (id: string, dangerous: boolean) => {
-    const name = shortName(hass.states[id], device.name);
+    const name = shortName(hass.states[id], device.name, t);
     if (dangerous && !(await ui.confirm({ title: `${name}?`, body: t("This can't be undone from Home Assistant."), confirm: name, danger: true }))) return;
     await call("button", "press", { entity_id: id }, t("{name} sent", { name }));
   };
@@ -364,7 +434,7 @@ function ActionButtons() {
       <div className="ly-actions">
         {safe.map(([k, id]) => (
           <Button key={k} icon="mdi:gesture-tap" onClick={() => press(id, false)}>
-            {shortName(hass.states[id], device.name)}
+            {shortName(hass.states[id], device.name, t)}
           </Button>
         ))}
       </div>
@@ -374,7 +444,7 @@ function ActionButtons() {
           <div className="ly-actions">
             {danger.map(([k, id]) => (
               <Button key={k} variant="danger" icon="mdi:alert-outline" onClick={() => press(id, true)}>
-                {shortName(hass.states[id], device.name)}
+                {shortName(hass.states[id], device.name, t)}
               </Button>
             ))}
           </div>

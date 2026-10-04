@@ -20,6 +20,8 @@ for (const f of files) {
   for (const m of src.matchAll(/\bt\(\s*("(?:[^"\\]|\\.)*")/g)) keys.add(lit(m[1]));
   if (/status\.ts$|App\.tsx$|Map\.tsx$/.test(f)) for (const m of src.matchAll(/label: ("(?:[^"\\]|\\.)*")/g)) keys.add(lit(m[1]));
   if (/status\.ts$/.test(f)) for (const m of src.matchAll(/^\s+\d+: ("(?:[^"\\]|\\.)*"),?$/gm)) keys.add(lit(m[1]));
+  // String tables marked /* i18n */ [ ... ] are translated through a variable.
+  for (const block of src.matchAll(/\/\* i18n \*\/ \[([\s\S]*?)\]/g)) for (const m of block[1].matchAll(/("(?:[^"\\]|\\.)*")/g)) keys.add(lit(m[1]));
   if (/Diagnostics\.tsx$/.test(f)) for (const m of src.matchAll(/\[("(?:[^"\\]|\\.)*"), \//g)) keys.add(lit(m[1]));
 }
 const sorted = [...keys].sort();

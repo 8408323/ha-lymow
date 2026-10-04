@@ -74,7 +74,13 @@ const STORAGE_KEY = "lymow_language";
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const haTag = useHassLanguage();
-  const [choice, setChoiceState] = useState<string>(() => localStorage.getItem(STORAGE_KEY) ?? "auto");
+  const [choice, setChoiceState] = useState<string>(() => {
+    try {
+      return localStorage.getItem(STORAGE_KEY) ?? "auto";
+    } catch {
+      return "auto"; // storage blocked: follow Home Assistant
+    }
+  });
   const haLanguage = resolveLanguage(haTag);
   const lang = choice === "auto" ? haLanguage : resolveLanguage(choice);
   const value: I18n = {
@@ -83,7 +89,11 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     t: (text, vars) => translate(lang, text, vars),
     choice,
     setChoice(c) {
-      localStorage.setItem(STORAGE_KEY, c);
+      try {
+        localStorage.setItem(STORAGE_KEY, c);
+      } catch {
+        // storage blocked or full: keep the choice for this session only
+      }
       setChoiceState(c);
     },
     haLanguage,

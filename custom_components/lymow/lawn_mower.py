@@ -9,7 +9,7 @@ from homeassistant.components.bluetooth import async_discovered_service_info
 from homeassistant.components.lawn_mower import LawnMowerActivity, LawnMowerEntity, LawnMowerEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse, callback
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import ServiceValidationError, Unauthorized, UnknownUser
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -630,11 +630,35 @@ _BLE_DRIVE_SCHEMA = vol.Schema(
 
 
 _MOWERS_KEY = f"{DOMAIN}_mower_entities"
+# homeassistant.auth.permissions.const.POLICY_CONTROL
+POLICY_CONTROL = "control"
 
 
 def _all_mowers(hass: HomeAssistant) -> dict[str, LymowMower]:
     """Every loaded Lymow mower entity by entity_id, across all config entries."""
     return {e.entity_id: e for ents in hass.data.get(_MOWERS_KEY, {}).values() for e in ents}
+
+
+async def _permitted_mowers(hass: HomeAssistant, call: ServiceCall) -> dict[str, LymowMower]:
+    """Mowers the caller may control, by entity_id.
+
+    These services are registered directly (not as entity services), so Home
+    Assistant doesn't apply entity permissions for us: a non-admin user may only
+    target mowers they have control access to (as HA's entity services enforce)."""
+    mowers = _all_mowers(hass)
+    user_id = call.context.user_id
+    if user_id is None:  # internal call (automation, script)
+        return mowers
+    user = await hass.auth.async_get_user(user_id)
+    if user is None:
+        raise UnknownUser(context=call.context)
+    if user.is_admin:
+        return mowers
+    requested = call.data.get("entity_id") or []
+    for eid in [requested] if isinstance(requested, str) else requested:
+        if eid in mowers and not user.permissions.check_entity(eid, POLICY_CONTROL):
+            raise Unauthorized(context=call.context, entity_id=eid, permission=POLICY_CONTROL)
+    return {eid: e for eid, e in mowers.items() if user.permissions.check_entity(eid, POLICY_CONTROL)}
 
 
 def _owner_entry(hass: HomeAssistant, entity: LymowMower) -> ConfigEntry | None:
@@ -659,7 +683,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     entry.async_on_unload(_forget_mowers)
 
-    def _ble_targets(entity_ids: list[str]) -> list[tuple[LymowMower, str]]:
+    def _ble_targets(entity_map: dict[str, LymowMower], entity_ids: list[str]) -> list[tuple[LymowMower, str]]:
         """One (mower, BLE address) per targeted robot.
 
         Duplicate entity_ids for the same robot are driven once (motions never stack
@@ -667,7 +691,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         i.e. an account that may own several mowers, so it is only trusted when that
         entry has exactly one mower; otherwise each robot is found by its own
         advertised Bluetooth name, so a command can never reach the wrong mower."""
-        entity_map = _all_mowers(hass)
         per_robot: dict[str, LymowMower] = {}
         for eid in entity_ids:
             if (target := entity_map.get(eid)) is not None:
@@ -693,7 +716,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
 
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -710,7 +733,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_delete_channel(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_CHANNEL_HASH_ID]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -728,7 +751,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_delete_nogo_zone(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -747,7 +770,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         zone_hash_ids: list[str] = call.data[_ATTR_ZONE_HASH_IDS]
 
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -758,7 +781,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_pause(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -768,7 +791,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_query_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -781,7 +804,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         # start_mowing sends USER_CTRL_CLEAN (a fresh task); this sends
         # USER_CTRL_RESUME so the robot picks up where it left off.
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -791,7 +814,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_query_schedules(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -803,7 +826,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
         polygon: list[dict] = call.data[_ATTR_POLYGON]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -815,7 +838,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
         polygon: list[dict] = call.data[_ATTR_POLYGON]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -827,7 +850,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
         mm: int = call.data[_ATTR_CUT_HEIGHT_MM]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -839,7 +862,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         page: int = call.data["page"]
         page_size: int = call.data["page_size"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         result: dict[str, list[dict[str, Any]]] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -857,7 +880,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             kwargs["cut_height_mm"] = call.data[_ATTR_CUT_HEIGHT_MM]
         if "channel_lift" in call.data:
             kwargs["channel_lift"] = call.data["channel_lift"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -871,7 +894,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         for k in ("latitude", "longitude", "radius_m", "name", "index"):
             if k in call.data:
                 kwargs[k] = call.data[k]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -890,7 +913,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         for svc_key, proto_key in _TASK_CONFIG_SERVICE_FIELDS.items():
             if svc_key in call.data:
                 update[proto_key] = call.data[svc_key]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -903,7 +926,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         polygon: list[dict] = call.data[_ATTR_POLYGON]
         name: str = call.data[_ATTR_NAME]
         cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -918,7 +941,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         polygon: list[dict] = call.data[_ATTR_POLYGON]
         parent_hash_id: str = call.data.get("parent_zone_hash_id", "")
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -937,7 +960,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         zone1: str = call.data.get("zone1_hash_id", "")
         zone2: str = call.data.get("zone2_hash_id", "")
         cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -955,7 +978,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         hash_ids: list[str] = call.data[_ATTR_ZONE_HASH_IDS]
         name: str = call.data[_ATTR_NAME]
         cut_height: int | None = call.data.get(_ATTR_CUT_HEIGHT_MM)
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -975,7 +998,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         radius_m: float = call.data[_ATTR_RADIUS_M]
         cut_height: int = call.data[_ATTR_CUT_HEIGHT_MM]
         name: str = call.data[_ATTR_NAME]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         new_ids: dict[str, str] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -994,7 +1017,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         cut_p1: dict[str, float] = call.data[_ATTR_CUT_P1]
         cut_p2: dict[str, float] = call.data[_ATTR_CUT_P2]
         names: list[str] = call.data[_ATTR_NAMES]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         split_ids: dict[str, tuple[str, str]] = {}
         for eid in entity_ids:
             entity = entity_map.get(eid)
@@ -1016,7 +1039,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         the credentials' ~15-minute lifetime.
         """
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1028,7 +1051,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     def _make_query_handler(method_name: str):
         async def _handler(call: ServiceCall) -> None:
             entity_ids: list[str] = call.data["entity_id"]
-            entity_map = _all_mowers(hass)
+            entity_map = await _permitted_mowers(hass, call)
             for eid in entity_ids:
                 entity = entity_map.get(eid)
                 if entity is None:
@@ -1040,7 +1063,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_clear_schedules(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1064,7 +1087,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             }
             for s in raw_schedules
         ]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1075,7 +1098,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_add_schedule(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         _require_schedule_zones(call.data["zones"])
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1094,7 +1117,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_delete_schedule(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         schedule_id: int = call.data["id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1106,7 +1129,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         schedule_id: int = call.data["id"]
         disabled: bool = call.data["disabled"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1118,7 +1141,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
         name: str = call.data[_ATTR_NAME]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1130,7 +1153,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_NOGO_HASH_ID]
         name: str = call.data[_ATTR_NAME]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1142,7 +1165,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data["channel_hash_id"]
         name: str = call.data[_ATTR_NAME]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1154,7 +1177,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
         is_enabled: bool = call.data[_ATTR_IS_ENABLED]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1167,7 +1190,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         x: float = call.data[_ATTR_X]
         y: float = call.data[_ATTR_Y]
         theta: float | None = call.data.get("theta")
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1183,7 +1206,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             raise ServiceValidationError("set_task_config: provide at least one parameter to set.")
         if "overwrite_existing" in call.data:
             fields["overwrite_existing"] = call.data["overwrite_existing"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1200,7 +1223,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         }
         if not fields:
             raise ServiceValidationError("set_run_time_config: provide at least one parameter to set.")
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1212,7 +1235,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         preferred: str = call.data[_ATTR_PREFERRED]
         metric_4g = preferred == "4g"
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1231,7 +1254,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         }
         if not any(v is not None for v in rr_kwargs.values()):
             raise ServiceValidationError("set_recharge_resume: provide at least one parameter to set.")
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1246,7 +1269,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         end = call.data.get(_ATTR_HL_END)
         if enable and (start is None or end is None):
             raise ServiceValidationError("set_headlight_schedule: enabling requires both start and end.")
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1257,7 +1280,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_set_pin(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         pin: str = call.data["pin"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1268,7 +1291,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_bind_rtk(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         base_id: str = call.data["base_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1280,7 +1303,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         ssid: str = call.data["ssid"]
         password: str = call.data["password"]
-        for target, address in _ble_targets(entity_ids):
+        for target, address in _ble_targets(await _permitted_mowers(hass, call), entity_ids):
             await target.coordinator.async_set_wifi(address, ssid, password)
 
     async def handle_set_device_settings(call: ServiceCall) -> None:
@@ -1295,7 +1318,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         }
         if not any(v is not None for v in ds_kwargs.values()):
             raise ServiceValidationError("set_device_settings: provide at least one parameter to set.")
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1306,7 +1329,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_set_device_name(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         name: str = call.data[_ATTR_NAME]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1316,7 +1339,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1327,7 +1350,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_restore_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         object_key: str = call.data[_ATTR_OBJECT_KEY]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1338,7 +1361,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     async def handle_delete_backup_map(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         object_key: str = call.data[_ATTR_OBJECT_KEY]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1350,7 +1373,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         entity_ids: list[str] = call.data["entity_id"]
         object_key: str = call.data[_ATTR_OBJECT_KEY]
         name: str = call.data[_ATTR_NAME]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1366,13 +1389,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
         # Each robot is driven once even when targeted several times, so
         # overlapping motions never stack on the same link.
-        for target, address in _ble_targets(entity_ids):
+        for target, address in _ble_targets(await _permitted_mowers(hass, call), entity_ids):
             await target.coordinator.async_ble_drive(address, linear, angular, duration)
 
     async def handle_start_edit_boundary(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
         hash_id: str = call.data[_ATTR_ZONE_HASH_ID]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is None:
@@ -1387,7 +1410,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
 
     async def handle_complete_edit_boundary(call: ServiceCall) -> None:
         entity_ids: list[str] = call.data["entity_id"]
-        entity_map = _all_mowers(hass)
+        entity_map = await _permitted_mowers(hass, call)
         for eid in entity_ids:
             entity = entity_map.get(eid)
             if entity is not None:
