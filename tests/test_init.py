@@ -904,3 +904,23 @@ async def test_concurrent_setup_waits_for_shared_www_init() -> None:
     results = await asyncio.gather(first, second, return_exceptions=True)
     assert all(isinstance(r, RuntimeError) for r in results)
     assert _lymow._WWW_REGISTERED_KEY not in hass.data
+
+
+async def test_setup_drops_malformed_device_records() -> None:
+    """Records without a usable string thing name never reach the coordinator."""
+    hass = _make_hass(www_registered=True)
+    entry = _make_entry(region="eu-west-1")
+    client = _make_client(
+        [{"deviceThingName": "thing-1"}, {"deviceThingName": 5}, {"deviceThingName": ""}, "junk", {"name": "x"}]
+    )
+    coord = _make_coordinator()
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=_make_auth(_make_tokens(), _make_creds())),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=_make_mqtt()) as mqtt_cls,
+        patch("lymow.LymowCoordinator", return_value=coord) as coord_cls,
+    ):
+        await async_setup_entry(hass, entry)
+    assert coord_cls.call_args.args[3] == [{"deviceThingName": "thing-1"}]
+    assert mqtt_cls.call_args is not None

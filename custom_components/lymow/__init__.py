@@ -169,7 +169,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # KVS) work from the first poll; the coordinator refreshes them before expiry.
     client.update_aws_credentials(aws["AccessKeyId"], aws["SecretKey"], aws.get("SessionToken"))
 
-    devices = await client.get_devices()
+    # The cloud's device list is untrusted: keep only records with a usable thing name.
+    devices = [
+        d
+        for d in await client.get_devices()
+        if isinstance(d, dict) and isinstance(d.get("deviceThingName"), str) and 0 < len(d["deviceThingName"]) <= 128
+    ]
     things = [d["deviceThingName"] for d in devices]
 
     cfg = REGION_CONFIG[region]

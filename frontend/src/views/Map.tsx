@@ -369,7 +369,9 @@ function BrowsePanel(p: {
   setShowTrail: (v: boolean) => void;
 }) {
   const t = useT();
-  const { call } = useMower();
+  const { call, snap } = useMower();
+  // Like Overview's Start: an offline mower can't start now (and might later, unexpectedly).
+  const online = snap?.online !== false;
   const ui = useUi();
   const zones = p.map.go_zones ?? [];
   // Only zones still on the map: one deleted elsewhere must not be sent to the mower.
@@ -405,7 +407,7 @@ function BrowsePanel(p: {
           variant="primary"
           icon="mdi:play"
           block
-          disabled={!sel.length}
+          disabled={!sel.length || !online}
           onClick={async () => {
             if (await call("lymow", "start_zone", { zone_hash_ids: sel }, t("Mowing {n} zones", { n: sel.length }))) p.setSelected(new Set());
           }}

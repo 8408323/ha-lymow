@@ -156,6 +156,8 @@ function MowingDefaults() {
     else pendingDefaults.delete(device.thing);
   }, [pending]);
   const receivedAt = snap?.map_received_at ?? 0;
+  const receivedRef = useRef(receivedAt);
+  receivedRef.current = receivedAt;
   const restore = (sent: Record<string, unknown>) => {
     setEdits((e) => ({ ...sent, ...e }));
     setPending(null);
@@ -179,7 +181,10 @@ function MowingDefaults() {
     const record = { sent: changed, matched: false, after: receivedAt, deadline: Date.now() + 30000 };
     pendingDefaults.set(device.thing, record);
     if (await call("lymow", "set_task_config", changed, t("Mowing defaults saved"))) {
-      setPending(record);
+      // Only replies after this point count: one that arrived during the call predates the write.
+      record.after = receivedRef.current;
+      pendingDefaults.set(device.thing, record);
+      setPending({ ...record });
       call("lymow", "query_map"); // ask for the mower's own copy to confirm against
     } else if (mounted.current) pendingDefaults.delete(device.thing); // the edits are still on screen
     // Left meanwhile: the record is the only copy, so let the next view restore it now.
@@ -317,9 +322,13 @@ function LiveAdjust() {
   );
 }
 
+// A headlight save the mower hasn't echoed yet outlives the view (per mower), so
+// leaving Settings doesn't lose what was sent.
+const pendingHeadlight = new Map<string, { on: boolean; start: string; end: string }>();
+
 function Headlight() {
   const t = useT();
-  const { call } = useMower();
+  const { call, device } = useMower();
   const mower = useMowerEntity("mower");
   const a = mower?.attributes ?? {};
   // The robot config arrives over MQTT after load (and some firmware never reports
@@ -333,10 +342,14 @@ function Headlight() {
     start: a.headlight_start ? shiftClock(a.headlight_start as string, offset) : "21:00",
     end: a.headlight_end ? shiftClock(a.headlight_end as string, offset) : "23:00",
   };
-  const [draft, setDraft] = useState<typeof live | null>(null);
+  const [draft, setDraft] = useState<typeof live | null>(() => pendingHeadlight.get(device.thing) ?? null);
   // After Save the robot echoes its config later (or never, on some firmware):
   // keep showing what was sent, and drop the draft once the mower reports it.
-  const [saved, setSaved] = useState(false);
+  const [saved, setSaved] = useState(() => pendingHeadlight.has(device.thing));
+  useEffect(() => {
+    if (saved && draft) pendingHeadlight.set(device.thing, draft);
+    else pendingHeadlight.delete(device.thing);
+  }, [saved, draft]);
   const v = draft ?? live;
   const edit = (part: Partial<typeof live>) => {
     setSaved(false);
@@ -377,7 +390,10 @@ function Headlight() {
         icon="mdi:check"
         disabled={!draft || saved}
         onClick={async () => {
-          if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) setSaved(true);
+          if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) {
+            pendingHeadlight.set(device.thing, v); // recorded even if the view is gone by now
+            setSaved(true);
+          }
         }}
       >
         {t("Save")}
