@@ -73,6 +73,7 @@ try:
     import homeassistant.exceptions  # noqa: F401
     import homeassistant.helpers.aiohttp_client  # noqa: F401
     import homeassistant.helpers.entity_platform  # noqa: F401
+    import homeassistant.helpers.network  # noqa: F401
     import homeassistant.helpers.selector  # noqa: F401
     import homeassistant.helpers.update_coordinator  # noqa: F401
     from homeassistant.components import camera as _ha_camera  # noqa: F401
@@ -329,6 +330,16 @@ except ImportError:
 
     _ha_ac.async_get_clientsession = _async_get_clientsession  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.aiohttp_client", _ha_ac)
+
+    # ── homeassistant.helpers.network ────────────────────────────────────────
+    _ha_net = types.ModuleType("homeassistant.helpers.network")
+
+    class _NoURLAvailableError(Exception):
+        pass
+
+    _ha_net.NoURLAvailableError = _NoURLAvailableError  # type: ignore[attr-defined]
+    _ha_net.get_url = lambda hass: ""  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.network", _ha_net)
 
     # ── homeassistant.helpers.selector ────────────────────────────────────────
     _ha_sel = types.ModuleType("homeassistant.helpers.selector")

@@ -38,6 +38,13 @@ from lymow.const import (
 
 _config_flow_mod = sys.modules["lymow.config_flow"]
 
+
+@pytest.fixture(autouse=True)
+def _ha_url():
+    with patch.object(_config_flow_mod, "get_url", return_value="http://ha.local:8123") as mock:
+        yield mock
+
+
 _PASSWORD_TOKENS = {
     "AccessToken": "access",
     "IdToken": "id-token",
@@ -61,7 +68,6 @@ def _make_flow() -> LymowConfigFlow:
     LymowConfigFlow.__init__(flow)
     flow.hass = MagicMock()
     flow.hass.data = {}
-    flow.hass.config.internal_url = "http://ha.local:8123"
     flow.hass.http.register_view = MagicMock()
     flow.hass.config_entries.async_get_entry = MagicMock(return_value=None)
     flow.hass.config_entries.async_update_entry = MagicMock()
@@ -246,7 +252,7 @@ async def test_google_step_generates_pkce_once_and_registers_view_once() -> None
     flow.hass.http.register_view.assert_called_once_with(LymowOAuthStartView)
 
 
-async def test_google_start_link_uses_internal_url_and_flow_values() -> None:
+async def test_google_start_link_uses_ha_url_and_flow_values() -> None:
     flow = _make_flow()
     result = await _select_google(flow, "ap-east-1")
     url_marker, _ = _schema_field(result, OAUTH_START_URL)
@@ -261,12 +267,11 @@ async def test_google_start_link_uses_internal_url_and_flow_values() -> None:
     }
 
 
-async def test_google_start_link_falls_back_when_internal_url_missing() -> None:
+async def test_google_start_aborts_when_no_ha_url(_ha_url) -> None:
+    _ha_url.side_effect = _config_flow_mod.NoURLAvailableError
     flow = _make_flow()
-    flow.hass.config.internal_url = None
-    result = await _select_google(flow)
-    url_marker, _ = _schema_field(result, OAUTH_START_URL)
-    assert url_marker.default().startswith("http://homeassistant.local:8123/")
+    result = await flow.async_step_user({CONF_AUTH_METHOD: AUTH_METHOD_GOOGLE, CONF_REGION: "eu-west-1"})
+    assert result == {"type": "abort", "reason": "no_url_available"}
 
 
 async def test_google_callback_url_creates_entry_without_password() -> None:
@@ -291,7 +296,7 @@ async def test_google_callback_url_creates_entry_without_password() -> None:
         },
     }
     assert CONF_PASSWORD not in result["data"]
-    flow.async_set_unique_id.assert_awaited_once_with("eu-west-1:stable-identity")
+    flow.async_set_unique_id.assert_awaited_once_with("owner@example.com")
     auth.exchange_oauth_code.assert_awaited_once_with(
         region="eu-west-1",
         code="oauth-code",
@@ -313,6 +318,8 @@ async def test_google_bare_code_with_matching_state_succeeds() -> None:
     ):
         result = await flow.async_step_google({OAUTH_RESULT: "bare-code", OAUTH_STATE: flow._oauth_state})
     assert result["type"] == "create_entry"
+    # No email claim in the ID token → fall back to the Cognito identity.
+    flow.async_set_unique_id.assert_awaited_once_with("eu-west-1:stable-identity")
 
 
 @pytest.mark.parametrize(

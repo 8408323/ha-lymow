@@ -132,8 +132,8 @@ async_unload_entry = _lymow.async_unload_entry  # noqa: E402
 _WWW_REGISTERED_KEY = _lymow._WWW_REGISTERED_KEY  # noqa: E402
 
 # Const values loaded by the conftest  # noqa: E402
-from homeassistant.exceptions import ConfigEntryAuthFailed  # noqa: E402
-from lymow.auth import LymowAuthError  # noqa: E402
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady  # noqa: E402
+from lymow.auth import LymowAuthConnectionError, LymowAuthError  # noqa: E402
 from lymow.const import (  # noqa: E402
     AUTH_METHOD_GOOGLE,
     AUTH_METHOD_PASSWORD,
@@ -384,6 +384,19 @@ async def test_async_setup_entry_revoked_google_token_raises_auth_failed() -> No
     ):
         await async_setup_entry(hass, entry)
     auth.login_region.assert_not_awaited()
+
+
+async def test_async_setup_entry_google_transient_failure_raises_not_ready() -> None:
+    hass = _make_hass()
+    entry = _make_entry(region="eu-west-1", auth_method=AUTH_METHOD_GOOGLE, refresh_token="google-refresh")
+    auth = _make_auth(_make_tokens(), _make_creds())
+    auth.refresh_oauth_tokens.side_effect = LymowAuthConnectionError("timeout")
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=auth),
+        pytest.raises(ConfigEntryNotReady),
+    ):
+        await async_setup_entry(hass, entry)
 
 
 async def test_async_setup_entry_missing_password_credentials_raise_auth_failed() -> None:

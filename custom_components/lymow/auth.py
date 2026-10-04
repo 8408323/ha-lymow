@@ -45,6 +45,10 @@ class LymowAuthError(ValueError):
     """Raised when Cognito authentication fails."""
 
 
+class LymowAuthConnectionError(LymowAuthError):
+    """Raised when Cognito could not be reached or failed server-side (retryable)."""
+
+
 def _pad_hex(n: int) -> str:
     h = hex(n)[2:]
     if len(h) % 2:
@@ -205,13 +209,15 @@ class LymowAuth:
             ) as resp:
                 if not resp.ok:
                     await resp.read()
-                    raise LymowAuthError(f"OAuth token request failed with HTTP {resp.status}")
+                    # 5xx is a Cognito outage; 4xx (e.g. invalid_grant) means the token is bad.
+                    error_cls = LymowAuthConnectionError if resp.status >= 500 else LymowAuthError
+                    raise error_cls(f"OAuth token request failed with HTTP {resp.status}")
                 try:
                     data = await resp.json(content_type=None)
                 except (aiohttp.ContentTypeError, UnicodeDecodeError, ValueError) as exc:
                     raise LymowAuthError("OAuth token response was not valid JSON") from exc
         except (aiohttp.ClientError, TimeoutError) as exc:
-            raise LymowAuthError("OAuth token request could not be completed") from exc
+            raise LymowAuthConnectionError("OAuth token request could not be completed") from exc
 
         access_token = data.get("access_token") if isinstance(data, dict) else None
         id_token = data.get("id_token") if isinstance(data, dict) else None

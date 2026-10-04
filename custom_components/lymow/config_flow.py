@@ -19,6 +19,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.network import NoURLAvailableError, get_url
 from homeassistant.helpers.selector import (
     SelectSelector,
     SelectSelectorConfig,
@@ -171,7 +172,10 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_google(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         self._prepare_oauth()
         self._register_oauth_view()
-        auth_url = self._oauth_start_url()
+        try:
+            auth_url = self._oauth_start_url()
+        except NoURLAvailableError:
+            return self.async_abort(reason="no_url_available")
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -289,10 +293,12 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._reauth_entry is not None:
             return await self._async_update_reauth_entry({**self._reauth_entry.data, **data})
 
-        await self.async_set_unique_id(identity_id)
-        self._abort_if_unique_id_configured()
         email = _jwt_claim(tokens["IdToken"], "email")
-        title = email if isinstance(email, str) and email else f"Lymow Google ({self._region})"
+        has_email = isinstance(email, str) and bool(email)
+        # Key on the email like the password path so one account can't be added twice.
+        await self.async_set_unique_id(email.lower() if has_email else identity_id)
+        self._abort_if_unique_id_configured()
+        title = email if has_email else f"Lymow Google ({self._region})"
         return self.async_create_entry(title=title, data=data)
 
     async def _async_update_reauth_entry(self, data: dict[str, Any]) -> ConfigFlowResult:
@@ -344,7 +350,7 @@ class LymowConfigFlow(ConfigFlow, domain=DOMAIN):
     def _oauth_start_url(self) -> str:
         if self._oauth_state is None or self._pkce_challenge is None:
             raise RuntimeError("OAuth state is missing")
-        base_url = self.hass.config.internal_url or "http://homeassistant.local:8123"
+        base_url = get_url(self.hass)
         query = urlencode(
             {
                 "region": self._region,
@@ -365,6 +371,8 @@ class LymowOAuthStartView(HomeAssistantView):
 
     url = "/api/lymow/oauth/start"
     name = "api:lymow:oauth:start"
+    # Opened in a plain browser tab that carries no HA session. It serves no user
+    # data — only echoes back the validated region/state/challenge parameters.
     requires_auth = False
 
     async def get(self, request: web.Request) -> web.StreamResponse:

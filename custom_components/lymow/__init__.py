@@ -11,11 +11,11 @@ from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import LymowApiClient
-from .auth import LymowAuth, LymowAuthError
+from .auth import LymowAuth, LymowAuthConnectionError, LymowAuthError
 from .const import (
     AUTH_METHOD_GOOGLE,
     AUTH_METHOD_PASSWORD,
@@ -232,6 +232,8 @@ async def _async_authenticate_entry(
             raise ConfigEntryAuthFailed("Google OAuth refresh token is missing")
         try:
             tokens = await auth.refresh_oauth_tokens(refresh_token=refresh_token, region=stored_region)
+        except LymowAuthConnectionError as exc:
+            raise ConfigEntryNotReady(f"Google OAuth token refresh failed: {exc}") from exc
         except LymowAuthError as exc:
             raise ConfigEntryAuthFailed("Google OAuth credentials require reauthentication") from exc
         return tokens, stored_region

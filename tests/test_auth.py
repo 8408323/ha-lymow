@@ -10,8 +10,17 @@ from urllib.parse import parse_qs, urlparse
 import aiohttp
 import pytest
 from aioresponses import aioresponses
-from lymow.auth import N_HEX, LymowAuth, LymowAuthError, SRPClient, _hash_sha256, _hex_hash, _hex_to_long, _pad_hex
-from lymow.const import REGION_CONFIG
+from lymow.auth import (
+    N_HEX,
+    LymowAuth,
+    LymowAuthConnectionError,
+    LymowAuthError,
+    SRPClient,
+    _hash_sha256,
+    _hex_hash,
+    _hex_to_long,
+    _pad_hex,
+)
 
 _COGNITO_IDP_EU = "https://cognito-idp.eu-west-1.amazonaws.com/"
 _COGNITO_IDENTITY_EU = "https://cognito-identity.eu-west-1.amazonaws.com/"
@@ -375,8 +384,18 @@ class TestLymowAuthOAuth:
     async def test_connection_error_raises_auth_error(self, auth_client):
         with aioresponses() as mocked:
             mocked.post(_COGNITO_OAUTH_EU, exception=aiohttp.ClientConnectionError())
-            with pytest.raises(LymowAuthError, match="could not be completed"):
+            with pytest.raises(LymowAuthConnectionError, match="could not be completed"):
                 await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
+
+    async def test_server_error_is_transient_but_4xx_is_not(self, auth_client):
+        with aioresponses() as mocked:
+            mocked.post(_COGNITO_OAUTH_EU, status=503)
+            mocked.post(_COGNITO_OAUTH_EU, status=400)
+            with pytest.raises(LymowAuthConnectionError, match="HTTP 503"):
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
+            with pytest.raises(LymowAuthError, match="HTTP 400") as exc_info:
+                await auth_client.refresh_oauth_tokens(refresh_token="refresh", region="eu-west-1")
+            assert not isinstance(exc_info.value, LymowAuthConnectionError)
 
     async def test_invalid_utf8_raises_auth_error(self, auth_client):
         with aioresponses() as mocked:

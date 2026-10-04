@@ -17,7 +17,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
-from .auth import LymowAuthError
+from .auth import LymowAuthConnectionError, LymowAuthError
 from .bluetooth import LymowBleController
 from .const import (
     AUTH_METHOD_GOOGLE,
@@ -698,6 +698,8 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     refresh_token=self._refresh_token,
                     region=self._region,
                 )
+            except LymowAuthConnectionError as refresh_err:
+                raise UpdateFailed(f"Google OAuth token refresh failed: {refresh_err}") from refresh_err
             except LymowAuthError as refresh_err:
                 raise ConfigEntryAuthFailed("Google OAuth credentials require reauthentication") from refresh_err
         else:

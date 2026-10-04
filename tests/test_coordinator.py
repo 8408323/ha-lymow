@@ -89,7 +89,7 @@ def _load(name: str) -> None:
 
 _load("coordinator")
 
-from lymow.auth import LymowAuthError  # noqa: E402
+from lymow.auth import LymowAuthConnectionError, LymowAuthError  # noqa: E402
 from lymow.const import (  # noqa: E402
     AUTH_METHOD_GOOGLE,
     AUTH_METHOD_PASSWORD,
@@ -327,6 +327,18 @@ async def test_google_refresh_failure_raises_auth_failed_without_srp_fallback() 
         await coord._async_ensure_auth()
     auth.refresh_tokens.assert_not_awaited()
     auth.login_region.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_google_refresh_transient_failure_raises_update_failed() -> None:
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    coord, _, _ = _make_coordinator()
+    auth = _setup_auth(coord, auth_method=AUTH_METHOD_GOOGLE)
+    auth.refresh_oauth_tokens.side_effect = LymowAuthConnectionError("timeout")
+    coord._token_expiry = datetime.now(UTC)
+    with pytest.raises(UpdateFailed):
+        await coord._async_ensure_auth()
 
 
 @pytest.mark.asyncio
