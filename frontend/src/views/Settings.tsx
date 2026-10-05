@@ -466,7 +466,7 @@ function EntityControl({ id, k }: { id: string; k: string }) {
   if (!e) return null;
   const domain = id.split(".")[0];
   const name = entityLabel(e, device.name, t);
-  const off = e.state === "unavailable" || (!NOT_MOWER.has(k) && snap?.online !== true);
+  const off = e.state === "unavailable" || device.can_control === false || (!NOT_MOWER.has(k) && snap?.online !== true);
   if (domain === "switch")
     return (
       <div className="ly-control">

@@ -823,12 +823,10 @@ def map_payload(data: dict[str, Any]) -> dict[str, Any]:
     # rather than wholesale-replace (a y-only update must not drop x/theta).
     map_dock = map_data.get("chargingStation") if isinstance(map_data.get("chargingStation"), dict) else None
     live_dock = data.get("chargingStationLoc") if isinstance(data.get("chargingStationLoc"), dict) else None
-    if map_dock and live_dock:
-        attrs["charging_station"] = {**map_dock, **live_dock}
-    elif live_dock:
-        attrs["charging_station"] = live_dock
-    elif map_dock:
-        attrs["charging_station"] = map_dock
+    dock = {**(map_dock or {}), **(live_dock or {})}
+    # Only a dock with both coordinates is a point the map can draw.
+    if all(isinstance(dock.get(k), (int, float)) and not isinstance(dock.get(k), bool) for k in ("x", "y")):
+        attrs["charging_station"] = dock
     if "globalZoneConfig" in map_data:
         attrs["mowing_settings"] = map_data["globalZoneConfig"]
     if "globalChannelConfig" in map_data:

@@ -77,12 +77,19 @@ function ScheduleList() {
   useEffect(() => {
     if (awaitingAfter === undefined) return;
     // Never lock forever: if the confirming reply was lost, ask the mower again.
-    const t = window.setTimeout(() => {
+    // Unconfirmed after 30 s: ask again, but stay locked until the answer comes in
+    // (a new list clears the wait; acting on the old one could undo the change).
+    // Unlock for good after a second window, or when the mower goes offline.
+    let retried = false;
+    const t = window.setInterval(() => {
+      if (!retried && snapRef.current?.online === true) {
+        retried = true;
+        call("lymow", "query_schedules");
+        return;
+      }
       setAwaitingAfter(undefined);
-      // Unconfirmed after 30 s: ask again, whether the list is unknown or still the old one.
-      if (snapRef.current?.online === true) call("lymow", "query_schedules");
     }, 30000);
-    return () => window.clearTimeout(t);
+    return () => window.clearInterval(t);
   }, [awaitingAfter]);
   // Offline: the write would be queued at the broker and the confirming query never answered.
   // Keeps retrying with backoff (10 s → 60 s) until a list arrives or the mower goes offline.

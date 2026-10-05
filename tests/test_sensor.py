@@ -1782,3 +1782,11 @@ def test_map_payload_tolerates_non_mapping_map_data() -> None:
     from lymow.sensor import map_payload
 
     assert "go_zones" not in map_payload({"mapData": [1]})
+
+
+def test_map_payload_drops_incomplete_charging_station() -> None:
+    from lymow.sensor import map_payload
+
+    assert "charging_station" not in map_payload({"mapData": {"chargingStation": {"theta": 1.0}}})
+    out = map_payload({"mapData": {"chargingStation": {"theta": 1.0}}, "chargingStationLoc": {"x": 1, "y": 2}})
+    assert out["charging_station"] == {"theta": 1.0, "x": 1, "y": 2}

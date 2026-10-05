@@ -179,6 +179,7 @@ function TopBar({ narrow, host, devices, onPick }: { narrow: boolean; host: HTML
         variant="ghost"
         icon="mdi:refresh"
         title={t("Refresh map and schedules from the mower")}
+        disabled={snap?.online !== true || device.can_control === false}
         onClick={async () => {
           await call("lymow", "query_map");
           await call("lymow", "query_schedules", {}, t("Asked the mower for fresh data"));

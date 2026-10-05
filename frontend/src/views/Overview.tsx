@@ -38,7 +38,9 @@ export function OverviewView({ go }: { go: (t: TabId) => void }) {
           </Button>
         }
       >
-        {snap?.map && (snap.map.go_zones?.length || snap.map.charging_station) ? (
+        {snap?.map_hidden ? (
+          <p className="ly-muted">{t("Your Home Assistant user doesn't have access to this mower's map.")}</p>
+        ) : snap?.map && (snap.map.go_zones?.length || snap.map.charging_station) ? (
           <div className="ly-minimap" onClick={() => go("map")} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && go("map")}>
             <MapCanvas map={snap.map} interactive={false} labels="name" />
           </div>
