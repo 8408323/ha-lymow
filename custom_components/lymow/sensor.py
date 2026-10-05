@@ -826,7 +826,8 @@ def map_payload(data: dict[str, Any]) -> dict[str, Any]:
     dock = {**(map_dock or {}), **(live_dock or {})}
     # Only a dock with both coordinates is a point the map can draw.
     if all(_num(dock.get(k)) for k in ("x", "y")):  # finite numbers only
-        attrs["charging_station"] = dock
+        # Other numeric fields (theta, z) must be finite too, or they're left out.
+        attrs["charging_station"] = {k: v for k, v in dock.items() if not isinstance(v, float) or math.isfinite(v)}
     if "globalZoneConfig" in map_data:
         attrs["mowing_settings"] = map_data["globalZoneConfig"]
     if "globalChannelConfig" in map_data:

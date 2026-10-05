@@ -1796,3 +1796,10 @@ def test_map_payload_drops_non_finite_dock() -> None:
     from lymow.sensor import map_payload
 
     assert "charging_station" not in map_payload({"mapData": {"chargingStation": {"x": float("nan"), "y": 1.0}}})
+
+
+def test_map_payload_drops_non_finite_dock_heading() -> None:
+    from lymow.sensor import map_payload
+
+    out = map_payload({"mapData": {"chargingStation": {"x": 1.0, "y": 2.0, "theta": float("inf")}}})
+    assert out["charging_station"] == {"x": 1.0, "y": 2.0}

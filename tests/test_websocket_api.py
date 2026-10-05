@@ -432,6 +432,7 @@ def test_snapshot_drops_malformed_schedules() -> None:
                 {"id": 9, "hour": 1, "minute": 0, "zones": ["z2"]},
                 {"id": 10, "hour": 1, "minute": 0, "zones": ["", "  "]},  # blank ids only
                 {"hour": 1, "minute": 0},  # no id
+                {"id": 2**53, "hour": 1, "minute": 0, "zones": ["z"]},  # not exact in JS
             ]
         }
     )
