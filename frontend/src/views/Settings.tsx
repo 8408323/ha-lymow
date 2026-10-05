@@ -73,7 +73,7 @@ function Firmware() {
         <Button
           variant="primary"
           icon="mdi:download"
-          disabled={!available || blocked(snap, device)}
+          disabled={!available || blocked(snap, device) || !!device.read_only?.includes("firmware_update")}
           onClick={async () => {
             if (await ui.confirm({ title: t("Install firmware {v}?", { v: a.latest_version }), body: t("The mower restarts during the update. Keep it charging on the dock."), confirm: t("Install") }))
               await call("update", "install", { entity_id: ent("firmware_update") }, t("Firmware update started"));
@@ -122,7 +122,7 @@ function MowingDefaults() {
       nogo_mow_laps: ms?.noGoMowLaps ?? 1,
       perimeter_mow_dir: ms?.perimeterMowDir ?? 2,
       obs_dec_mode: ms?.obsDecMode ?? 2,
-      clean_mode: ms?.cleanMode || 1,
+      clean_mode: ms?.cleanMode ?? 1,
       stripe_angle: ms?.stripeAngle ?? -1,
       safe_margin_mode: Boolean(ms?.safeMarginMode),
       turn_off_outer_motor: Boolean(ms?.turnOffOuterMotor),
@@ -211,6 +211,8 @@ function MowingDefaults() {
             value={v.clean_mode}
             onChange={(x) => set("clean_mode", x)}
             options={[
+              // 0 = none set on the mower: shown as such, not as a pattern it doesn't use.
+              ...(v.clean_mode === 0 ? [{ value: 0, label: t("Unknown") }] : []),
               { value: 1, label: t("Zigzag") },
               { value: 2, label: t("Adaptive zigzag") },
               { value: 3, label: t("Chessboard") },
@@ -472,7 +474,7 @@ function EntityControl({ id, k }: { id: string; k: string }) {
   if (!e) return null;
   const domain = id.split(".")[0];
   const name = entityLabel(e, device.name, t);
-  const off = e.state === "unavailable" || device.can_control === false || (!NOT_MOWER.has(k) && snap?.online !== true);
+  const off = e.state === "unavailable" || device.can_control === false || !!device.read_only?.includes(k) || (!NOT_MOWER.has(k) && snap?.online !== true);
   if (domain === "switch")
     return (
       <div className="ly-control">
@@ -505,6 +507,7 @@ function EntityControl({ id, k }: { id: string; k: string }) {
             size="sm"
             icon="mdi:check"
             title={t("Apply")}
+            disabled={off}
             onClick={async () => {
               // Keep the draft if the call failed, so the user doesn't have to redo it.
               const sent = pending;
@@ -538,7 +541,7 @@ function ActionButtons() {
     <Card title={t("Actions")} icon="mdi:gesture-tap-button" className="ly-card--wide">
       <div className="ly-actions">
         {safe.map(([k, id]) => (
-          <Button key={k} icon="mdi:gesture-tap" disabled={off} onClick={() => press(id, false)}>
+          <Button key={k} icon="mdi:gesture-tap" disabled={off || !!device.read_only?.includes(k)} onClick={() => press(id, false)}>
             {entityLabel(hass.states[id], device.name, t)}
           </Button>
         ))}
@@ -548,7 +551,7 @@ function ActionButtons() {
           <summary>{t("Maintenance & reset")}</summary>
           <div className="ly-actions">
             {danger.map(([k, id]) => (
-              <Button key={k} variant="danger" icon="mdi:alert-outline" disabled={off} onClick={() => press(id, true)}>
+              <Button key={k} variant="danger" icon="mdi:alert-outline" disabled={off || !!device.read_only?.includes(k)} onClick={() => press(id, true)}>
                 {entityLabel(hass.states[id], device.name, t)}
               </Button>
             ))}

@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import math
 import time
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
@@ -152,7 +154,22 @@ def _int_in(value: Any, lo: int, hi: int) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and lo <= value <= hi else None
 
 
-def _schedule(sched: Any) -> dict[str, Any] | None:
+def _offset_minutes(coordinator: Any) -> int | None:
+    """Home Assistant's current UTC offset in minutes (None if unknown).
+
+    The mower stores schedule times in UTC with an offset truncated to whole
+    hours, which is wrong for zones like UTC+5:30, so the panel uses HA's own."""
+    name = getattr(getattr(getattr(coordinator, "hass", None), "config", None), "time_zone", None)
+    if not isinstance(name, str):
+        return None
+    try:
+        off = datetime.now(ZoneInfo(name)).utcoffset()
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    return int(off.total_seconds() // 60) if off is not None else None
+
+
+def _schedule(sched: Any, offset_min: int | None = None) -> dict[str, Any] | None:
     """A schedule in local time, or None when the decoded entry is malformed."""
     if not isinstance(sched, dict):
         return None
@@ -169,13 +186,11 @@ def _schedule(sched: Any) -> dict[str, Any] | None:
     )
     if not zones:
         return None  # a zone-less mower schedule mows nothing; don't show it as "All zones"
-    return _schedule_to_local(
-        {
-            **sched,
-            "dayOfWeek": days,
-            "zones": zones,
-        }
-    )
+    row = {**sched, "dayOfWeek": days, "zones": zones}
+    if offset_min is None:
+        return _schedule_to_local(row)
+    day_delta, rem = divmod(hour * 60 + minute + offset_min, 1440)
+    return {**row, "hour": rem // 60, "minute": rem % 60, "dayOfWeek": [(d + day_delta) % 7 for d in days]}
 
 
 # Snapshot parts and the sensor whose read permission guards each (unique-id suffix),
@@ -210,6 +225,7 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
     if not isinstance(data.get("runTimeConfig", {}), dict):
         data = {**data, "runTimeConfig": {}}
     schedules = data.get("schedules")
+    offset = _offset_minutes(coordinator)
     return {
         "thing": thing,
         # gps_origin pins the lawn to real-world coordinates; the panel works in
@@ -222,7 +238,7 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
         # schedules then: add_schedule writes the full list and would drop the rest.
         "schedules": None
         if schedules is None
-        else [row for s in (schedules if isinstance(schedules, list) else []) if (row := _schedule(s))],
+        else [row for s in (schedules if isinstance(schedules, list) else []) if (row := _schedule(s, offset))],
         "backups": [row for b in _list(data.get("backupMapList")) if (row := _backup(b))],
         # Same positive signals the coordinator uses; unknown counts as offline.
         "online": _is_device_online(data),
@@ -284,6 +300,11 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
                     or thing,
                     "entities": entities,
                     # Read-only users get the panel without its actions.
+                    # Linked entities this user may read but not control (each is its
+                    # own permission; mower control doesn't imply it).
+                    "read_only": []
+                    if connection.user.is_admin
+                    else sorted(k for k, v in entities.items() if not connection.user.permissions.check_entity(v, POLICY_CONTROL)),
                     "can_control": connection.user.is_admin
                     or (
                         "mower" in entities

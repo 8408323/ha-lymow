@@ -91,6 +91,8 @@ export interface LymowDevice {
   held?: boolean;
   /** False for users with read but not control access to the mower. */
   can_control?: boolean;
+  /** Entity keys the user may read but not control. */
+  read_only?: string[];
 }
 
 export interface Point {

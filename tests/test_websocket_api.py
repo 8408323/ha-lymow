@@ -132,6 +132,7 @@ def test_devices_maps_entities_by_unique_id_suffix() -> None:
             "device_id": "dev1",
             "name": "Front lawn",
             "entities": {"mower": "lawn_mower.lawn", "battery": "sensor.lawn_battery"},
+            "read_only": [],
             "can_control": True,
         }
     ]
@@ -220,6 +221,7 @@ def test_devices_hidden_from_users_without_read_access() -> None:
     ):
         ws.ws_devices(hass, viewer, {"id": 3})
     assert viewer.send_result.call_args.args[1][0]["can_control"] is False
+    assert viewer.send_result.call_args.args[1][0]["read_only"] == ["mower"]
 
 
 def test_subscribe_rejects_user_without_read_access() -> None:
@@ -587,3 +589,18 @@ def test_rebind_cancels_a_pending_trailing_send() -> None:
 
 def test_snapshot_tolerates_non_mapping_nested_run_time_config() -> None:
     assert ws.snapshot(_coordinator({"mapData": {"runTimeConfig": 1}}), THING)["run_time_config"] == {}
+
+
+def test_schedules_use_home_assistant_offset_for_fractional_zones() -> None:
+    coord = _coordinator(
+        {"schedules": [{"id": 1, "hour": 3, "minute": 30, "timeZone": 5, "dayOfWeek": [1], "zones": ["z"]}]}
+    )
+    coord.hass = SimpleNamespace(config=SimpleNamespace(time_zone="Asia/Kolkata"))  # UTC+5:30, no DST
+    row = ws.snapshot(coord, THING)["schedules"][0]
+    assert (row["hour"], row["minute"], row["dayOfWeek"]) == (9, 0, [1])  # 03:30 UTC → 09:00 local
+    late = _coordinator({"schedules": [{"id": 2, "hour": 20, "minute": 0, "dayOfWeek": [6], "zones": ["z"]}]})
+    late.hass = coord.hass
+    assert ws.snapshot(late, THING)["schedules"][0]["dayOfWeek"] == [0]  # 01:30 next day, Sat → Sun
+    bad = _coordinator({"schedules": [{"id": 3, "hour": 1, "minute": 0, "zones": ["z"]}]})
+    bad.hass = SimpleNamespace(config=SimpleNamespace(time_zone="Not/AZone"))
+    assert ws.snapshot(bad, THING)["schedules"][0]["hour"] == 1  # falls back to the stored offset
