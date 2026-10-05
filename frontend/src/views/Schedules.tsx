@@ -38,11 +38,15 @@ function ScheduleList() {
   // "hidden" is handled by SchedulesView above.
   const snap = raw && raw.schedules === "hidden" ? { ...raw, schedules: null } : (raw as (typeof raw & { schedules: Schedule[] | null }) | undefined);
   const ui = useUi();
-  const [adding, setAdding] = useState(() => scheduleDrafts.has(device.thing));
+  // A submitted draft (`before` set) reopens closed; it's only waiting for confirmation.
+  const [adding, setAdding] = useState(() => {
+    const d = scheduleDrafts.get(device.thing);
+    return !!d && !d.before;
+  });
   // A kept draft whose schedule the mower now reports is done.
   useEffect(() => {
     const d = scheduleDrafts.get(device.thing);
-    if (!d || adding || !snap?.schedules) return;
+    if (!d || (adding && !d.before) || !Array.isArray(snap?.schedules)) return;
     const [h, m] = d.time.split(":").map(Number);
     const same = (a: unknown[] = [], b: unknown[] = []) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
     // A matching row must agree on everything submitted, and be new (not in the list before).

@@ -1776,3 +1776,9 @@ def test_map_payload_drops_malformed_zone_fields_and_segments() -> None:
     )
     assert out["go_zones"] == [{"hashId": "ok"}, {"hashId": "n", "name": "N"}]
     assert out["mow_path"] == {"segments": []}
+
+
+def test_map_payload_tolerates_non_mapping_map_data() -> None:
+    from lymow.sensor import map_payload
+
+    assert "go_zones" not in map_payload({"mapData": [1]})

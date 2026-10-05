@@ -62,8 +62,8 @@ function Hero() {
   const state = mower?.state ?? "unknown";
   const st = mowerState(state);
   const errorText = mower?.attributes.error_description ?? mower?.attributes.error;
-  const { snap } = useMower();
-  const off = state === "unavailable" || snap?.online !== true;
+  const { snap, device } = useMower();
+  const off = state === "unavailable" || snap?.online !== true || device.can_control === false || device.held === true;
 
   const start = () => call("lawn_mower", "start_mowing", {}, t("Mowing started"));
   const pause = () => call("lawn_mower", "pause", {}, t("Paused"));

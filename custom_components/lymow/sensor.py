@@ -798,7 +798,9 @@ def _zones(items: Any) -> list[dict]:
 
 def map_payload(data: dict[str, Any]) -> dict[str, Any]:
     """Map geometry + live pose/progress for one device's coordinator data."""
-    map_data = data.get("mapData") or {}
+    map_data = data.get("mapData")
+    if not isinstance(map_data, dict):
+        map_data = {}  # untrusted: a non-mapping must not break the sensor attributes
     attrs: dict[str, Any] = {}
 
     if "goZones" in map_data:

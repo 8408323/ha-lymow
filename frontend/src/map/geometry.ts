@@ -186,7 +186,11 @@ export function simplify(poly: Point[], max: number): Handle[] {
  * of the boundary. `initial` is the handle set the editor started from: a span
  * that skips one of those had a handle deleted, and stays the straight edge shown.
  */
-export function expand(handles: Handle[], orig: Point[], initial: Handle[]): Point[] {
+export function expand(handles: Handle[], input: Point[], initial: Handle[]): Point[] {
+  // Same closing-duplicate rule as simplify(), so src indices line up and the old
+  // corner isn't re-inserted when the first handle moves.
+  const last = input.length - 1;
+  const orig = last > 0 && input[0].x === input[last].x && input[0].y === input[last].y ? input.slice(0, last) : input;
   const starts = new Set(initial.map((h) => h.src));
   const out: Point[] = [];
   handles.forEach((h, i) => {

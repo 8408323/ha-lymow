@@ -82,4 +82,11 @@ describe("geometry", () => {
     expect(centre(dense).x).toBeCloseTo(5);
     expect(centre(dense).y).toBeCloseTo(5);
   });
+
+  it("expand doesn't re-insert the closing duplicate when the first corner moves", () => {
+    const closed = [...square, square[0]];
+    const h = simplify(closed, 40);
+    const moved = h.map((p, i) => (i === 0 ? { x: 1, y: 1 } : p));
+    expect(expand(moved, closed, h)).toEqual([{ x: 1, y: 1 }, ...square.slice(1)]);
+  });
 });
