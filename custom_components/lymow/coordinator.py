@@ -2351,12 +2351,16 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             )
 
         # Every vertex must be a sane point: a NaN would slip past the area checks below.
-        if any(not isinstance(p, list) or len(p) < 3 or not all(_ok(pt) for pt in p) for p in polygons):
+        # …and every outline must enclose an area (three collinear points don't).
+        if any(
+            not isinstance(p, list) or len(p) < 3 or not all(_ok(pt) for pt in p) or polygon_area(p) <= 0
+            for p in polygons
+        ):
             raise HomeAssistantError("Every zone to merge needs an outline; refresh the map and try again")
-        try:
-            merged_hull = merge_zone_polygons(*polygons)
-        except ValueError as err:
-            raise HomeAssistantError(f"Could not merge zones: {err}") from err
+        # Outlines with area always yield a hull of 3+ points; the check below is the backstop.
+        merged_hull = merge_zone_polygons(*polygons)
+        if len(merged_hull) < 3 or polygon_area(merged_hull) <= 0:
+            raise HomeAssistantError("Could not merge zones: the merged outline has no area")
         # The merged outline is the convex hull: for zones that don't touch it would
         # also take in the ground between them (paths, beds, a house). Refuse unless
         # the hull adds little beyond the zones themselves.

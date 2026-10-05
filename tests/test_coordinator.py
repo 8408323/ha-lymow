@@ -3035,7 +3035,7 @@ async def test_async_merge_zones_raises_when_geometry_fails() -> None:
             }
         }
     }
-    with pytest.raises(HomeAssistantError, match="Could not merge zones"):
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
         await coord.async_merge_zones(THING, ["a", "b"])
 
 
@@ -4392,3 +4392,30 @@ async def test_set_zone_config_tolerates_unhashable_zone_ids() -> None:
     with patch("lymow.protocol.encode_set_zone_config", return_value=b"x") as enc:
         await coord.async_set_zone_config(THING, [{"hashId": "z", "cutHeight": 50}])
     assert enc.call_args.args[0][0]["isEnabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_refuses_collinear_outlines() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    line = [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 2.0, "y": 0.0}]
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": line}, {"hashId": "b", "polygon": line}]}}}
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
+        await coord.async_merge_zones(THING, ["a", "b"])
+    mqtt.async_publish_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_refuses_flat_hull() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    sq = [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}, {"x": 2.0, "y": 2.0}]
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": sq}, {"hashId": "b", "polygon": sq}]}}}
+    with (
+        patch("lymow.geometry.merge_zone_polygons", return_value=sq[:2]),
+        pytest.raises(HomeAssistantError, match="no area"),
+    ):
+        await coord.async_merge_zones(THING, ["a", "b"])
+    mqtt.async_publish_command.assert_not_called()
