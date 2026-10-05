@@ -526,3 +526,38 @@ def test_hidden_schedules_are_marked_not_loading() -> None:
         )
         ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
     assert conn.send_message.call_args.args[0]["event"]["schedules"] == "hidden"
+
+
+def test_devices_use_device_registry_ownership_and_tolerate_missing_mower() -> None:
+    coord = _coordinator()
+    coord.devices = [{"deviceThingName": "abc"}, {"deviceThingName": "abc_battery"}]
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": coord}}
+    reg_entries = [
+        SimpleNamespace(unique_id="abc_battery", entity_id="sensor.a_battery", device_id="devA"),  # abc's sensor
+        SimpleNamespace(unique_id="abc_battery", entity_id="lawn_mower.b", device_id="devB"),
+    ]
+    devs = [
+        SimpleNamespace(id="devA", name="A", name_by_user=None, identifiers={("lymow", "abc")}),
+        SimpleNamespace(id="devB", name="B", name_by_user=None, identifiers={("lymow", "abc_battery")}),
+    ]
+    conn = _connection()  # admin: devices without a registered mower are still listed
+    with (
+        patch.object(ws.er, "async_get", create=True),
+        patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=reg_entries),
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True, return_value=devs),
+    ):
+        ws.ws_devices(hass, conn, {"id": 1})
+    a, b = conn.send_result.call_args.args[1]
+    assert a["entities"] == {"battery": "sensor.a_battery"} and a["can_control"] is True
+    assert b["entities"] == {"mower": "lawn_mower.b"}
+    viewer = _connection(admin=False, readable=set())
+    viewer.user.permissions.check_entity = lambda eid, p: True
+    with (
+        patch.object(ws.er, "async_get", create=True),
+        patch.object(ws.er, "async_entries_for_config_entry", create=True, return_value=reg_entries[:1]),
+        patch.object(ws.dr, "async_get", create=True),
+        patch.object(ws.dr, "async_entries_for_config_entry", create=True, return_value=devs),
+    ):
+        ws.ws_devices(hass, viewer, {"id": 2})  # no mower entity: must not raise

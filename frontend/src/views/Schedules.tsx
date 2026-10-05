@@ -81,7 +81,8 @@ function ScheduleList() {
   }, [awaitingAfter]);
   // Offline: the write would be queued at the broker and the confirming query never answered.
   // Keeps retrying with backoff (10 s → 60 s) until a list arrives or the mower goes offline.
-  const unknown = !!snap && snap.schedules === null && snap.online;
+  // Only users who may control the mower can ask it (the call would just be refused).
+  const unknown = !!snap && snap.schedules === null && snap.online && device.can_control !== false && !device.held;
   useEffect(() => {
     if (!unknown || awaitingAfter !== undefined) return;
     let delay = 10000;

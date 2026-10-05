@@ -249,18 +249,21 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
         for device in coordinator.devices:
             thing = device["deviceThingName"]
             entities: dict[str, str] = {}
+            dev = next((d for d in entry_devices if (DOMAIN, thing) in d.identifiers), None)
             for ent in reg_entries:
                 uid = ent.unique_id or ""
-                if owner(uid) != thing:
+                # The device registry says which mower owns an entity; the unique-id
+                # prefix is only a fallback for entities without a device.
+                ent_dev = getattr(ent, "device_id", None)
+                if (ent_dev and dev and ent_dev != dev.id) or (not (ent_dev and dev) and owner(uid) != thing):
                     continue
-                if uid == thing:
+                if uid == thing and ent.entity_id.startswith("lawn_mower."):
                     entities["mower"] = ent.entity_id
                 elif uid.startswith(f"{thing}_"):
                     entities[uid[len(thing) + 1 :]] = ent.entity_id
             if not _can_read(connection, entities.get("mower")):
                 continue
             entities = {k: v for k, v in entities.items() if _can_read(connection, v)}
-            dev = next((d for d in entry_devices if (DOMAIN, thing) in d.identifiers), None)
             devices.append(
                 {
                     "entry_id": entry_id,
@@ -276,7 +279,10 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
                     "entities": entities,
                     # Read-only users get the panel without its actions.
                     "can_control": connection.user.is_admin
-                    or connection.user.permissions.check_entity(entities["mower"], POLICY_CONTROL),
+                    or (
+                        "mower" in entities
+                        and connection.user.permissions.check_entity(entities["mower"], POLICY_CONTROL)
+                    ),
                 }
             )
     connection.send_result(msg["id"], devices)

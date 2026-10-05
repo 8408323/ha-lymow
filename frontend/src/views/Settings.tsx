@@ -587,7 +587,7 @@ function Advanced() {
         <Field label={t("RTK base station")} hint={t("The ID printed on the base, e.g. LK000000000000.")}>
           <div className="ly-inline">
             <TextInput value={base} placeholder={t("LK…")} onChange={(e) => setBase(e.target.value.trim())} />
-            <Button disabled={!base} onClick={() => call("lymow", "bind_rtk", { base_id: base }, t("Base station bound"))}>
+            <Button disabled={!base || snap?.online !== true} onClick={() => call("lymow", "bind_rtk", { base_id: base }, t("Base station bound"))}>
               {t("Bind")}
             </Button>
           </div>

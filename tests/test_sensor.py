@@ -1763,3 +1763,16 @@ def test_map_payload_tolerates_malformed_rtk_status() -> None:
     assert map_payload({"rtkStatus": "garbage"})["rtkLabel"] == "Unknown"
     assert map_payload({"rtkStatus": 9})["rtkLabel"] == "Unknown (9)"
     assert map_payload({"rtkStatus": 2})["rtkLabel"] == "Fixed"
+
+
+def test_map_payload_drops_malformed_zone_fields_and_segments() -> None:
+    from lymow.sensor import map_payload
+
+    out = map_payload(
+        {
+            "mapData": {"goZones": [{"hashId": 5}, {"hashId": "ok", "name": 7}, {"hashId": "n", "name": "N"}]},
+            "pathData": {"segments": 1},
+        }
+    )
+    assert out["go_zones"] == [{"hashId": "ok"}, {"hashId": "n", "name": "N"}]
+    assert out["mow_path"] == {"segments": []}

@@ -785,7 +785,14 @@ def _zones(items: Any) -> list[dict]:
     """Zone/channel dicts with trimmed polygons; non-dict entries are dropped."""
     if not isinstance(items, list):
         return []
-    return [{**z, "polygon": _trim_poly(z["polygon"])} if "polygon" in z else z for z in items if isinstance(z, dict)]
+    out = []
+    for z in items:
+        # Untrusted: the panel acts on hashId and shows name, so both must be strings.
+        if not isinstance(z, dict) or ("hashId" in z and not isinstance(z["hashId"], str)):
+            continue
+        z = {k: v for k, v in z.items() if k != "name" or isinstance(v, str)}
+        out.append({**z, "polygon": _trim_poly(z["polygon"])} if "polygon" in z else z)
+    return out
 
 
 def map_payload(data: dict[str, Any]) -> dict[str, Any]:
@@ -830,7 +837,9 @@ def map_payload(data: dict[str, Any]) -> dict[str, Any]:
     if path_data:
         # Trim each mow-path segment's points to 4 dp
         segments = path_data.get("segments") if isinstance(path_data, dict) else None
-        trimmed_segments = [_trim_poly(seg) for seg in segments or [] if isinstance(seg, list)]
+        trimmed_segments = [
+            _trim_poly(seg) for seg in (segments if isinstance(segments, list) else []) if isinstance(seg, list)
+        ]
         attrs["mow_path"] = {"segments": trimmed_segments}
 
     # Live robot + RTK position and fix quality
