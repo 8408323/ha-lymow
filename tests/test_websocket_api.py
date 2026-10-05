@@ -428,6 +428,7 @@ def test_snapshot_drops_malformed_schedules() -> None:
                 {"id": 3, "hour": 1, "minute": 0, "dayOfWeek": "mon"},
                 {"id": 8, "hour": 1, "minute": 0, "zones": "z1"},  # zones not a list
                 {"id": 9, "hour": 1, "minute": 0, "zones": ["z2"]},
+                {"id": 10, "hour": 1, "minute": 0, "zones": ["", "  "]},  # blank ids only
                 {"hour": 1, "minute": 0},  # no id
             ]
         }

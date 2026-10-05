@@ -71,4 +71,8 @@ describe("geometry", () => {
     // vertex touching a non-adjacent edge
     expect(isSimplePolygon([{ x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 10 }, { x: 5, y: 0 }, { x: 0, y: 10 }])).toBe(false);
   });
+
+  it("simplify ignores a closing duplicate", () => {
+    expect(simplify([...square, square[0]], 40)).toHaveLength(4);
+  });
 });

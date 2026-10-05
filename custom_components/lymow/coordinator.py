@@ -440,7 +440,14 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         all only updates names in the cached map. An empty map (everything
         deleted) is still taken as is."""
         new = patch["mapData"]
-        zones = [z for k in self._MAP_LISTS for z in new.get(k) or [] if isinstance(z, dict)]
+        if not isinstance(new, dict):
+            return {**patch, "mapData": {}}  # untrusted decode: never iterate a non-mapping
+        zones = [
+            z
+            for k in self._MAP_LISTS
+            for z in (new.get(k) if isinstance(new.get(k), list) else [])
+            if isinstance(z, dict)
+        ]
         if not zones or any(z.get("polygon") for z in zones):
             return patch
         old = ((self.data or {}).get(thing_name) or {}).get("mapData")
@@ -450,7 +457,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         merged = {
             **old,
             **{
-                k: [{**z, "name": names[z["hashId"]]} if z.get("hashId") in names else z for z in old.get(k) or []]
+                k: [
+                    {**z, "name": names[z["hashId"]]} if z.get("hashId") in names else z
+                    for z in (old.get(k) if isinstance(old.get(k), list) else [])
+                ]
                 for k in self._MAP_LISTS
             },
         }

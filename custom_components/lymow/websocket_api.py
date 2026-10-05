@@ -160,7 +160,9 @@ def _schedule(sched: Any) -> dict[str, Any] | None:
         return None
     if not isinstance(days, list) or any(_int_in(d, 0, 6) is None for d in days):
         return None
-    zones = [z for z in sched.get("zones") or [] if isinstance(z, str)] if isinstance(sched.get("zones"), list) else []
+    zones = (
+        [z for z in sched["zones"] if isinstance(z, str) and z.strip()] if isinstance(sched.get("zones"), list) else []
+    )
     if not zones:
         return None  # a zone-less mower schedule mows nothing; don't show it as "All zones"
     return _schedule_to_local(

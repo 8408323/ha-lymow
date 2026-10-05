@@ -316,9 +316,11 @@ function LiveAdjust() {
         icon="mdi:send"
         disabled={!mowing || !Object.keys(changes).length || snap?.online !== true}
         onClick={async () => {
+          const sentCut = cut, sentSpeed = speed;
           if (await call("lymow", "set_run_time_config", changes, t("Sent to the mower"))) {
-            setCut(null);
-            setSpeed(null);
+            // Clear only what was sent; a slider moved during the call keeps its new value.
+            setCut((c) => (c === sentCut ? null : c));
+            setSpeed((s) => (s === sentSpeed ? null : s));
           }
         }}
       >

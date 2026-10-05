@@ -142,7 +142,11 @@ export type Handle = Point & { src?: number };
  * Robot outlines carry hundreds of points; editing needs a handful of handles.
  */
 export function simplify(poly: Point[], max: number): Handle[] {
-  const pts: Handle[] = poly.map((p, src) => ({ x: p.x, y: p.y, src }));
+  // A closing duplicate (last == first) would become a second handle on the same
+  // corner; only the first copy gets one.
+  const last = poly.length - 1;
+  const closed = last > 0 && poly[0].x === poly[last].x && poly[0].y === poly[last].y;
+  const pts: Handle[] = (closed ? poly.slice(0, last) : poly).map((p, src) => ({ x: p.x, y: p.y, src }));
   const tri = (i: number) => {
     const a = pts[(i - 1 + pts.length) % pts.length];
     const b = pts[i];

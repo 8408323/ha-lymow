@@ -4299,3 +4299,10 @@ def test_edit_echo_is_not_stamped() -> None:
     coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}]}}}
     coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "a", "name": "N", "polygon": []}]}})
     assert "mapReceivedAt" not in coord.data[THING]
+
+
+def test_malformed_map_patch_does_not_raise() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}]}}}
+    coord.on_mqtt_state(THING, {"mapData": 1})
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": 1, "nogoZones": [{"hashId": "n"}]}})
