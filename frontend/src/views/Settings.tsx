@@ -562,6 +562,9 @@ function ActionButtons() {
 function Advanced() {
   const t = useT();
   const { call, device, reloadDevices, snap } = useMower();
+  // Name and geofence go through the cloud and Wi-Fi over Bluetooth, so the mower
+  // needn't be online; the user must still be allowed to control it.
+  const mayAct = device.can_control !== false && !device.held;
   const ui = useUi();
   const [name, setName] = useState(device.name);
   useEffect(() => setName(device.name), [device.name]);
@@ -578,7 +581,7 @@ function Advanced() {
         <Field label={t("Mower name")}>
           <div className="ly-inline">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} maxLength={32} />
-            <Button disabled={!name.trim() || name === device.name} onClick={async () => (await call("lymow", "set_device_name", { name: name.trim() }, t("Name saved"))) && reloadDevices()}>
+            <Button disabled={!name.trim() || name === device.name || !mayAct} onClick={async () => (await call("lymow", "set_device_name", { name: name.trim() }, t("Name saved"))) && reloadDevices()}>
               {t("Rename")}
             </Button>
           </div>
@@ -605,7 +608,7 @@ function Advanced() {
             <TextInput value={ssid} placeholder={t("Network name")} onChange={(e) => setSsid(e.target.value)} />
             <TextInput type="password" value={pw} placeholder={t("Password")} onChange={(e) => setPw(e.target.value)} />
             <Button
-              disabled={!ssid}
+              disabled={!ssid || !mayAct}
               onClick={async () => {
                 if (await ui.confirm({ title: t("Connect the mower to “{ssid}”?", { ssid }), body: t("Its current Wi-Fi settings are replaced. If the details are wrong the mower can go offline."), confirm: t("Connect") }))
                   await call("lymow", "set_wifi", { ssid, password: pw }, t("Wi-Fi details sent"));
@@ -619,7 +622,7 @@ function Advanced() {
           <div className="ly-inline ly-inline--wrap">
             <TextInput type="number" step="0.000001" placeholder={t("Latitude")} value={lat} onChange={(e) => setLat(e.target.value)} />
             <TextInput type="number" step="0.000001" placeholder={t("Longitude")} value={lon} onChange={(e) => setLon(e.target.value)} />
-            <Button disabled={!lat || !lon} onClick={() => call("lymow", "set_geofence", { latitude: Number(lat), longitude: Number(lon) }, t("Geofence saved"))}>
+            <Button disabled={!lat || !lon || !mayAct} onClick={() => call("lymow", "set_geofence", { latitude: Number(lat), longitude: Number(lon) }, t("Geofence saved"))}>
               {t("Save")}
             </Button>
           </div>

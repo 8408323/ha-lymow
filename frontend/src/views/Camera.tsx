@@ -41,7 +41,7 @@ export function CameraView() {
         }
       >
         <div className="ly-stage" ref={stageRef}>
-          {source === "cloud" && camId ? (
+          {source === "cloud" && camId && device.can_control !== false ? (
             <CloudStream onStatus={setStatus} />
           ) : !cam ? (
             <StageMsg icon="mdi:cctv-off" text={t("The camera entity isn't available.")} />
