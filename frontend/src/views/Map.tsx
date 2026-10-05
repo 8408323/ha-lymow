@@ -140,7 +140,7 @@ export function MapView() {
   };
 
   const deleteVertex = () => {
-    if (awaitShape === null && !saving && editPts && vertex !== null && editPts.length > 3) {
+    if (awaitShape === null && !saving && device.can_control !== false && editPts && vertex !== null && editPts.length > 3) {
       setEditPts(editPts.filter((_, i) => i !== vertex));
       setVertex(null);
       setDirty(true);
@@ -263,7 +263,7 @@ export function MapView() {
         selected={mode === "browse" ? selected : undefined}
         focused={focus?.id}
         // Read-only while a save awaits the mower: a new edit would be replaced by its reply.
-        edit={awaitShape === null && !saving ? editPts : null}
+        edit={awaitShape === null && !saving && device.can_control !== false ? editPts : null}
         editOutline={outline}
         activeVertex={vertex}
         onVertex={setVertex}
