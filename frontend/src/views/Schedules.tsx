@@ -19,8 +19,24 @@ function daysText(days: number[] | undefined, t: T, locale: string): string {
 
 export function SchedulesView() {
   const t = useT();
+  const { snap } = useMower();
+  // Hidden by permissions (no read access to the schedules sensor): say so instead
+  // of waiting on a list that can never become visible.
+  if (snap?.schedules === "hidden")
+    return (
+      <Empty icon="mdi:lock-outline" title={t("Schedules not available")}>
+        {t("Your Home Assistant user doesn't have access to this mower's schedules.")}
+      </Empty>
+    );
+  return <ScheduleList />;
+}
+
+function ScheduleList() {
+  const t = useT();
   const { locale } = useI18n();
-  const { snap, call, zoneName, device } = useMower();
+  const { snap: raw, call, zoneName, device } = useMower();
+  // "hidden" is handled by SchedulesView above.
+  const snap = raw && raw.schedules === "hidden" ? { ...raw, schedules: null } : (raw as (typeof raw & { schedules: Schedule[] | null }) | undefined);
   const ui = useUi();
   const [adding, setAdding] = useState(() => scheduleDrafts.has(device.thing));
   // A kept draft whose schedule the mower now reports is done.
@@ -248,7 +264,7 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
             if (ok) {
               // Rows already present can't be the confirmation of this new one.
               const d = scheduleDrafts.get(device.thing);
-              if (d) scheduleDrafts.set(device.thing, { ...d, before: (snap?.schedules ?? []).map((x) => x.id) });
+              if (d) scheduleDrafts.set(device.thing, { ...d, before: (Array.isArray(snap?.schedules) ? snap.schedules : []).map((x) => x.id) });
               onDone();
             }
           }}

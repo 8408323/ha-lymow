@@ -513,3 +513,16 @@ def test_snapshot_survives_non_list_sections_and_far_points() -> None:
 def test_snapshot_tolerates_non_mapping_map_data() -> None:
     snap = ws.snapshot(_coordinator({"mapData": [1, 2], "runTimeConfig": 5}), THING)
     assert snap["run_time_config"] == {} and isinstance(snap["map"], dict)
+
+
+def test_hidden_schedules_are_marked_not_loading() -> None:
+    coord = _coordinator({"schedules": [{"id": 1, "hour": 1, "minute": 0, "zones": ["z"]}]})
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": coord}}
+    conn = _connection(admin=False, readable={"lawn_mower.lawn"})
+    with patch.object(ws.er, "async_get", create=True) as er_get:
+        er_get.return_value.async_get_entity_id.side_effect = lambda d, _x, uid: (
+            "lawn_mower.lawn" if d == "lawn_mower" else f"{d}.{uid}"
+        )
+        ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
+    assert conn.send_message.call_args.args[0]["event"]["schedules"] == "hidden"

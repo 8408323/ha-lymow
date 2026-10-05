@@ -155,7 +155,7 @@ export interface Snapshot {
   unauthorized?: boolean;
   map: MapData;
   /** null until the mower has answered the schedule query. */
-  schedules: Schedule[] | null;
+  schedules: Schedule[] | null | "hidden";
   backups: Backup[];
   online: boolean;
   /** Epoch seconds of the mower's latest map reply. */

@@ -46,7 +46,7 @@ export function OverviewView({ go }: { go: (t: TabId) => void }) {
           <p className="ly-muted">{t("The map appears once the mower has sent it.")}</p>
         )}
       </Card>
-      <NextSchedule schedules={snap?.schedules} go={go} />
+      {snap?.schedules !== "hidden" && <NextSchedule schedules={snap?.schedules} go={go} />}
     </div>
   );
 }

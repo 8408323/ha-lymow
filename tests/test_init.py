@@ -932,3 +932,18 @@ async def test_setup_drops_malformed_device_records() -> None:
         await async_setup_entry(hass, entry)
     assert coord_cls.call_args.args[3] == [{"deviceThingName": "thing-1"}]
     assert mqtt_cls.call_args is not None
+
+
+async def test_panel_init_retry_skips_steps_already_done() -> None:
+    """A retry after a failure part-way through doesn't register the route twice."""
+    hass = _make_hass(www_registered=False)
+    hass.http.async_register_static_paths = AsyncMock()
+    with (
+        patch.object(_lymow.websocket_api, "async_register") as ws_reg,
+        patch.object(_lymow, "_remove_legacy_lovelace", AsyncMock(side_effect=[RuntimeError("boom"), None])),
+    ):
+        with pytest.raises(RuntimeError):
+            await _lymow._async_init_panel(hass)
+        await _lymow._async_init_panel(hass)
+    ws_reg.assert_called_once()
+    hass.http.async_register_static_paths.assert_awaited_once()

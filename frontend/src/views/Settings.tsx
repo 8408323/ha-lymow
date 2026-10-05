@@ -535,7 +535,7 @@ function ActionButtons() {
 
 function Advanced() {
   const t = useT();
-  const { call, device, reloadDevices } = useMower();
+  const { call, device, reloadDevices, snap } = useMower();
   const ui = useUi();
   const [name, setName] = useState(device.name);
   useEffect(() => setName(device.name), [device.name]);
@@ -561,7 +561,7 @@ function Advanced() {
           <div className="ly-inline">
             <TextInput type={showPin ? "text" : "password"} inputMode="numeric" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
             <Button variant="ghost" icon={showPin ? "mdi:eye-off-outline" : "mdi:eye-outline"} title={showPin ? t("Hide PIN") : t("Show PIN")} onClick={() => setShowPin(!showPin)} />
-            <Button disabled={!/^\d{4}$/.test(pin)} onClick={async () => (await call("lymow", "set_pin", { pin }, t("PIN changed"))) && setPin("")}>
+            <Button disabled={!/^\d{4}$/.test(pin) || snap?.online !== true} onClick={async () => (await call("lymow", "set_pin", { pin }, t("PIN changed"))) && setPin("")}>
               {t("Set PIN")}
             </Button>
           </div>

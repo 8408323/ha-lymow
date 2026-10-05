@@ -38,6 +38,7 @@ from .mqtt import LymowMqttClient
 
 _LOGGER = logging.getLogger(__name__)
 _WWW_REGISTERED_KEY = f"{DOMAIN}_www_registered"
+_PANEL_STEPS_KEY = f"{DOMAIN}_panel_steps"
 _WWW_SERVED_KEY = f"{DOMAIN}_www_served"
 _PANEL_REGISTERED_KEY = f"{DOMAIN}_panel_registered"
 _PANEL_URL_PATH = "lymow"
@@ -119,12 +120,19 @@ async def _remove_legacy_lovelace(hass: HomeAssistant) -> None:
 
 
 async def _async_init_panel(hass: HomeAssistant) -> None:
-    websocket_api.async_register(hass)
+    # Each step is recorded once done, so a retry after a failure or cancellation
+    # part-way through never registers the same command or route twice.
+    done: set[str] = hass.data.setdefault(_PANEL_STEPS_KEY, set())
+    if "ws" not in done:
+        websocket_api.async_register(hass)
+        done.add("ws")
     www_path = Path(__file__).parent / "www"
     if www_path.is_dir():
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
-        )
+        if "static" not in done:
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(url_path=f"/custom_components/{DOMAIN}", path=str(www_path), cache_headers=False)]
+            )
+            done.add("static")
         await _remove_legacy_lovelace(hass)
         # Remember that the panel's JS is actually being served this run, so we
         # only ever register the panel when its module_url resolves.
