@@ -69,7 +69,8 @@ function Shell({ narrow, route, host }: { narrow: boolean; route: Route; host: H
   const device = devices?.find((d) => d.thing === thing) ?? devices?.[0];
   const snap = useSnapshot(device?.thing);
   useEffect(() => {
-    if (snap?.gone || snap?.unauthorized) reloadDevices();
+    if (snap?.unauthorized) reloadDevices(snap.thing);
+    else if (snap?.gone) reloadDevices();
   }, [snap?.gone, snap?.unauthorized]);
   const seg = route.path.split("/").filter(Boolean)[0];
   const tab: TabId = (TABS.find((t) => t.id === seg)?.id ?? "overview") as TabId;

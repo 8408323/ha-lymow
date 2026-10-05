@@ -48,10 +48,22 @@ export function area(poly: Point[]): number {
   return Math.abs(a) / 2;
 }
 
-/** Vertex average; enough to tell whether two outlines sit in the same place. */
+/** Area centroid: the same for a dense and a thinned copy of one outline (unlike a vertex average). */
 export function centre(poly: Point[]): Point {
-  if (!poly.length) return { x: 0, y: 0 };
-  return { x: poly.reduce((s, p) => s + p.x, 0) / poly.length, y: poly.reduce((s, p) => s + p.y, 0) / poly.length };
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const p = poly[i], q = poly[(i + 1) % poly.length];
+    const f = p.x * q.y - q.x * p.y;
+    a += f;
+    cx += (p.x + q.x) * f;
+    cy += (p.y + q.y) * f;
+  }
+  if (Math.abs(a) < 1e-9) {
+    // Degenerate (no area): fall back to the vertex average.
+    if (!poly.length) return { x: 0, y: 0 };
+    return { x: poly.reduce((s, p) => s + p.x, 0) / poly.length, y: poly.reduce((s, p) => s + p.y, 0) / poly.length };
+  }
+  return { x: cx / (3 * a), y: cy / (3 * a) };
 }
 
 /** A usable boundary: non-zero area and no edge crossing a non-adjacent edge. */

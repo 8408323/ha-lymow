@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { area, expand, isSimplePolygon, labelPoint, niceLength, pathD, pointInPolygon, polylineLength, rotate, simplify } from "./geometry";
+import { area, centre, expand, isSimplePolygon, labelPoint, niceLength, pathD, pointInPolygon, polylineLength, rotate, simplify } from "./geometry";
 
 const square = [
   { x: 0, y: 0 },
@@ -74,5 +74,12 @@ describe("geometry", () => {
 
   it("simplify ignores a closing duplicate", () => {
     expect(simplify([...square, square[0]], 40)).toHaveLength(4);
+  });
+
+  it("centre is the area centroid, independent of point density", () => {
+    const dense = [...square.slice(0, 1), { x: 1, y: 0 }, { x: 2, y: 0 }, { x: 3, y: 0 }, ...square.slice(1)];
+    expect(centre(square)).toEqual({ x: 5, y: 5 });
+    expect(centre(dense).x).toBeCloseTo(5);
+    expect(centre(dense).y).toBeCloseTo(5);
   });
 });

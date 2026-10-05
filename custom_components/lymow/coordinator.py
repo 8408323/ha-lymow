@@ -2324,9 +2324,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         missing = [h for h in hash_ids if h not in existing]
         if missing:
             raise HomeAssistantError(f"Zone(s) not found in map: {missing}")
-        polygons = [p for p in (existing[h].get("polygon") or [] for h in hash_ids) if p]
-        if not polygons:
-            raise HomeAssistantError("None of the requested zones have a polygon to merge")
+        polygons = [existing[h].get("polygon") for h in hash_ids]
+        # Every zone needs an outline: one without would be deleted without being merged.
+        if any(not isinstance(p, list) or len(p) < 3 for p in polygons):
+            raise HomeAssistantError("Every zone to merge needs an outline; refresh the map and try again")
         try:
             merged_hull = merge_zone_polygons(*polygons)
         except ValueError as err:

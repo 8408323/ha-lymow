@@ -3012,7 +3012,7 @@ async def test_async_merge_zones_raises_when_no_polygons() -> None:
             }
         }
     }
-    with pytest.raises(HomeAssistantError, match="None of the requested zones have a polygon"):
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
         await coord.async_merge_zones(THING, ["a", "b"])
 
 
@@ -3027,8 +3027,9 @@ async def test_async_merge_zones_raises_when_geometry_fails() -> None:
         THING: {
             "mapData": {
                 "goZones": [
-                    {"hashId": "a", "polygon": [{"x": 0.0, "y": 0.0}]},
-                    {"hashId": "b", "polygon": [{"x": 0.0, "y": 0.0}]},
+                    # Three points each, but all the same: no hull can be formed.
+                    {"hashId": "a", "polygon": [{"x": 0.0, "y": 0.0}] * 3},
+                    {"hashId": "b", "polygon": [{"x": 0.0, "y": 0.0}] * 3},
                 ],
                 "nogoZones": [],
             }
@@ -4312,3 +4313,15 @@ def test_channel_overrides_tolerate_non_list_channels() -> None:
     coord, _, _ = _make_coordinator()
     coord._channel_name_overrides[THING] = {"c": "G"}
     assert coord._apply_channel_name_overrides(THING, {"mapData": {"channels": 1}})["mapData"]["channels"] == []
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_refuses_when_one_zone_has_no_outline() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    sq = [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}, {"x": 2.0, "y": 2.0}]
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": sq}, {"hashId": "b"}]}}}
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
+        await coord.async_merge_zones(THING, ["a", "b"])
+    mqtt.async_publish_command.assert_not_called()  # nothing deleted

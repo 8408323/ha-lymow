@@ -164,7 +164,7 @@ export interface Snapshot {
 
 const EMPTY_GRACE_MS = 60000;
 
-export function useDevices(): [LymowDevice[] | undefined, () => void] {
+export function useDevices(): [LymowDevice[] | undefined, (revoked?: string) => void] {
   const getHass = useHassRef();
   const [devices, setDevices] = useState<LymowDevice[]>();
   const [generation, setGeneration] = useState(0);
@@ -216,7 +216,18 @@ export function useDevices(): [LymowDevice[] | undefined, () => void] {
       window.clearTimeout(t);
     };
   }, [generation]);
-  return [devices, () => setGeneration((g) => g + 1)];
+  return [
+    devices,
+    (revoked?: string) => {
+      // Access revoked: no reload grace, the mower must disappear right away.
+      if (revoked) {
+        known.current = known.current.filter((x) => x.thing !== revoked);
+        missingSince.delete(revoked);
+        setDevices((d) => d?.filter((x) => x.thing !== revoked));
+      }
+      setGeneration((g) => g + 1);
+    },
+  ];
 }
 
 export function useSnapshot(thing: string | undefined): Snapshot | undefined {
