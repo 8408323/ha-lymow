@@ -39,6 +39,13 @@ export function BackupsView() {
   const { t, locale } = useI18n();
   const { snap, call } = useMower();
   const ui = useUi();
+  // Hidden by permissions: never offer backups a user can't see (they'd pile up unseen).
+  if (snap?.backups === "hidden")
+    return (
+      <Empty icon="mdi:lock-outline" title={t("Backups not available")}>
+        {t("Your Home Assistant user doesn't have access to this mower's map backups.")}
+      </Empty>
+    );
   const backups = [...(snap?.backups ?? [])].sort((a, b) => (b.backupTime ?? 0) - (a.backupTime ?? 0));
   return (
     <div className="ly-grid ly-grid--narrow">

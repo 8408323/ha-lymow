@@ -108,7 +108,9 @@ export function Slider({
   unit,
   onChange,
   format,
+  disabled,
 }: {
+  disabled?: boolean;
   value: number;
   min: number;
   max: number;
@@ -126,6 +128,7 @@ export function Slider({
         max={max}
         step={step}
         value={value}
+        disabled={disabled}
         style={{ "--pct": `${pct}%` } as any}
         onChange={(e) => onChange(Number(e.target.value))}
       />

@@ -179,7 +179,7 @@ _GUARDED = (
     ("run_time_config", "map", {}),  # also a map-sensor attribute
     ("map_received_at", "map", None),
     ("schedules", "schedules", "hidden"),  # not None: that means "still loading"
-    ("backups", "backup_maps", []),
+    ("backups", "backup_maps", "hidden"),  # not []: that reads as "no backups yet"
 )
 
 

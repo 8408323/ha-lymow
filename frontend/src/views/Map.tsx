@@ -127,13 +127,13 @@ export function MapView() {
   };
   // Back / Escape must not silently throw away a reshaped polygon.
   const requestLeave = async () => {
-    if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
+    if (guarded && !(await ui.confirm({ title: t("Discard your unsaved changes (shape and zone settings)?"), confirm: t("Discard"), danger: true }))) return;
     dropZoneDrafts(device.thing, latest.current.focus?.id);
     leaveFocus();
   };
   const exitEdit = async () => {
     // The focused zone may have vanished (deleted elsewhere) with work still pending.
-    if (guarded && !(await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true }))) return;
+    if (guarded && !(await ui.confirm({ title: t("Discard your unsaved changes (shape and zone settings)?"), confirm: t("Discard"), danger: true }))) return;
     dropZoneDrafts(device.thing, latest.current.focus?.id);
     leaveFocus();
     setMode("browse");
@@ -195,7 +195,7 @@ export function MapView() {
     setLeaveGuard(
       guarded
         ? async () => {
-            const ok = await ui.confirm({ title: t("Discard your changes to this shape?"), confirm: t("Discard"), danger: true });
+            const ok = await ui.confirm({ title: t("Discard your unsaved changes (shape and zone settings)?"), confirm: t("Discard"), danger: true });
             if (ok) {
               latest.current.discarded = true; // discarded on purpose: don't stash it
               dropZoneDrafts(device.thing, latest.current.focus?.id);

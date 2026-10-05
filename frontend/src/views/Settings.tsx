@@ -434,22 +434,37 @@ function EntityControls() {
     <Card title={t("Mower features")} icon="mdi:toggle-switch-outline" className="ly-card--wide">
       <div className="ly-controls">
         {sorted.map(([k, id]) => (
-          <EntityControl key={k} id={id} />
+          <EntityControl key={k} k={k} id={id} />
         ))}
       </div>
     </Card>
   );
 }
 
-function EntityControl({ id }: { id: string }) {
+// Controls handled by the Lymow cloud or by Home Assistant itself work while the
+// mower is offline; every other control is a command to the mower.
+const NOT_MOWER = new Set([
+  "theftDetectionSwitch",
+  "theftLock",
+  "findRobotSwitch",
+  "mobileNotificationSwitch",
+  "alerts_only",
+  "geofence_radius",
+  "rtk_auto_pause",
+  "rtk_pause_threshold",
+  "app_presence",
+  "rtk_diagnostics_poll",
+]);
+
+function EntityControl({ id, k }: { id: string; k: string }) {
   const t = useT();
   const e = useEntity(id);
-  const { device, call } = useMower();
+  const { device, call, snap } = useMower();
   const [pending, setPending] = useState<number | null>(null);
   if (!e) return null;
   const domain = id.split(".")[0];
   const name = entityLabel(e, device.name, t);
-  const off = e.state === "unavailable";
+  const off = e.state === "unavailable" || (!NOT_MOWER.has(k) && snap?.online !== true);
   if (domain === "switch")
     return (
       <div className="ly-control">
@@ -475,7 +490,7 @@ function EntityControl({ id }: { id: string }) {
     <div className="ly-control ly-control--stack">
       <span>{name}</span>
       <div className="ly-control__num">
-        <Slider value={Number.isFinite(val) ? val : a.min} min={a.min} max={a.max} step={a.step} unit={a.unit_of_measurement} onChange={setPending} />
+        <Slider value={Number.isFinite(val) ? val : a.min} min={a.min} max={a.max} step={a.step} unit={a.unit_of_measurement} onChange={setPending} disabled={off} />
         {pending !== null && pending !== Number(e.state) && (
           <Button
             variant="primary"
@@ -484,7 +499,10 @@ function EntityControl({ id }: { id: string }) {
             title={t("Apply")}
             onClick={async () => {
               // Keep the draft if the call failed, so the user doesn't have to redo it.
-              if (await call("number", "set_value", { entity_id: id, value: pending }, t("{name} set to {value}", { name, value: pending }))) setPending(null);
+              const sent = pending;
+              // Clear only if not moved again meanwhile (that newer value wasn't sent).
+              if (await call("number", "set_value", { entity_id: id, value: sent }, t("{name} set to {value}", { name, value: sent })))
+                setPending((p) => (p === sent ? null : p));
             }}
           />
         )}

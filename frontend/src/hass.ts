@@ -156,7 +156,7 @@ export interface Snapshot {
   map: MapData;
   /** null until the mower has answered the schedule query. */
   schedules: Schedule[] | null | "hidden";
-  backups: Backup[];
+  backups: Backup[] | "hidden";
   online: boolean;
   /** Epoch seconds of the mower's latest map reply. */
   map_received_at?: number | null;
