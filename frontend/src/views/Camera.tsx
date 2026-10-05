@@ -58,7 +58,7 @@ export function CameraView() {
           {t("Live streams over your home network. Snapshots use less bandwidth. Cloud works from anywhere but takes a few seconds to connect.")}
         </p>
       </Card>
-      <DriveCard />
+      {device.can_control !== false && <DriveCard />}
     </div>
   );
 }

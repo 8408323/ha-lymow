@@ -1725,7 +1725,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # user switched off. Fill it in from the cached map.
         map_data = (self.data or {}).get(thing_name, {}).get("mapData")
         zones = map_data.get("goZones") if isinstance(map_data, dict) else None
-        cached = {z.get("hashId"): z for z in (zones if isinstance(zones, list) else []) if isinstance(z, dict)}
+        cached = {
+            z["hashId"]: z
+            for z in (zones if isinstance(zones, list) else [])
+            if isinstance(z, dict) and isinstance(z.get("hashId"), str) and z["hashId"].strip()
+        }
         updates = [
             u if "isEnabled" in u else {**u, "isEnabled": cached.get(u.get("hashId"), {}).get("isEnabled", True)}
             for u in updates

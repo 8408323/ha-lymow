@@ -4382,3 +4382,13 @@ async def test_async_merge_zones_refuses_non_finite_vertices() -> None:
     with pytest.raises(HomeAssistantError, match="needs an outline"):
         await coord.async_merge_zones(THING, ["a", "b"])
     mqtt.async_publish_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_zone_config_tolerates_unhashable_zone_ids() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": []}, {"hashId": "z", "isEnabled": False}]}}}
+    coord.async_query_map = AsyncMock()
+    with patch("lymow.protocol.encode_set_zone_config", return_value=b"x") as enc:
+        await coord.async_set_zone_config(THING, [{"hashId": "z", "cutHeight": 50}])
+    assert enc.call_args.args[0][0]["isEnabled"] is False

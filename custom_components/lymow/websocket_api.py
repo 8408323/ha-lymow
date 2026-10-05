@@ -304,7 +304,11 @@ def ws_devices(hass: HomeAssistant, connection: websocket_api.ActiveConnection, 
                     # own permission; mower control doesn't imply it).
                     "read_only": []
                     if connection.user.is_admin
-                    else sorted(k for k, v in entities.items() if not connection.user.permissions.check_entity(v, POLICY_CONTROL)),
+                    else sorted(
+                        k
+                        for k, v in entities.items()
+                        if not connection.user.permissions.check_entity(v, POLICY_CONTROL)
+                    ),
                     "can_control": connection.user.is_admin
                     or (
                         "mower" in entities
