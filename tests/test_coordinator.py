@@ -10,7 +10,7 @@ import sys
 import types
 from datetime import UTC, datetime
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
@@ -2914,7 +2914,7 @@ _TWO_SQUARES = {
             "hashId": "beta",
             "cutHeight": 50,
             "isEnabled": True,
-            "polygon": [{"x": 5.0, "y": 0.0}, {"x": 7.0, "y": 0.0}, {"x": 7.0, "y": 2.0}, {"x": 5.0, "y": 2.0}],
+            "polygon": [{"x": 2.0, "y": 0.0}, {"x": 4.0, "y": 0.0}, {"x": 4.0, "y": 2.0}, {"x": 2.0, "y": 2.0}],
         },
     ],
     "nogoZones": [
@@ -3012,7 +3012,7 @@ async def test_async_merge_zones_raises_when_no_polygons() -> None:
             }
         }
     }
-    with pytest.raises(HomeAssistantError, match="None of the requested zones have a polygon"):
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
         await coord.async_merge_zones(THING, ["a", "b"])
 
 
@@ -3027,14 +3027,15 @@ async def test_async_merge_zones_raises_when_geometry_fails() -> None:
         THING: {
             "mapData": {
                 "goZones": [
-                    {"hashId": "a", "polygon": [{"x": 0.0, "y": 0.0}]},
-                    {"hashId": "b", "polygon": [{"x": 0.0, "y": 0.0}]},
+                    # Three points each, but all the same: no hull can be formed.
+                    {"hashId": "a", "polygon": [{"x": 0.0, "y": 0.0}] * 3},
+                    {"hashId": "b", "polygon": [{"x": 0.0, "y": 0.0}] * 3},
                 ],
                 "nogoZones": [],
             }
         }
     }
-    with pytest.raises(HomeAssistantError, match="Could not merge zones"):
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
         await coord.async_merge_zones(THING, ["a", "b"])
 
 
@@ -3490,13 +3491,18 @@ async def test_async_restore_backup_map_requeries() -> None:
     coord.async_query_map.assert_awaited_once_with(THING)
 
 
-async def test_async_delete_backup_map_drops_cache() -> None:
+async def test_async_delete_backup_map_publishes_fresh_list() -> None:
     coord, _, api = _make_coordinator()
     api.delete_backup_map = AsyncMock()
-    coord._backup_map_cache[THING] = ("t", {})
+    api.get_backup_map_list = AsyncMock(return_value=[])
+    coord.data = {THING: {"battery": 50, "backupMapCount": 1}}
+    coord.async_set_updated_data = MagicMock()
+    coord._backup_map_cache[THING] = ("t", {"backupMapCount": 1})
     await coord.async_delete_backup_map(THING, "k")
     api.delete_backup_map.assert_awaited_once_with("k")
-    assert THING not in coord._backup_map_cache
+    api.get_backup_map_list.assert_awaited_once()  # stale cache bypassed
+    pushed = coord.async_set_updated_data.call_args[0][0][THING]
+    assert pushed["backupMapCount"] == 0 and pushed["battery"] == 50
 
 
 async def test_async_backup_map_publishes_and_drops_cache() -> None:
@@ -3548,13 +3554,26 @@ async def test_async_refresh_backups_soon_repolls_and_pushes_updates(monkeypatch
     assert pushed[THING]["battery"] == 50  # existing fields preserved
 
 
-async def test_async_rename_backup_map_drops_cache() -> None:
+async def test_async_rename_backup_map_publishes_fresh_list() -> None:
     coord, _, api = _make_coordinator()
     api.rename_backup_map = AsyncMock()
+    api.get_backup_map_list = AsyncMock(return_value=[{"map_file": "k", "map_name": "Spring"}])
+    coord.data = {THING: {}}
+    coord.async_set_updated_data = MagicMock()
     coord._backup_map_cache[THING] = ("t", {})
     await coord.async_rename_backup_map(THING, "k", "Spring")
     api.rename_backup_map.assert_awaited_once_with("k", "Spring")
-    assert THING not in coord._backup_map_cache
+    pushed = coord.async_set_updated_data.call_args[0][0][THING]
+    assert pushed["backupMapCount"] == 1
+
+
+async def test_publish_backups_skips_unknown_device() -> None:
+    coord, _, api = _make_coordinator()
+    api.get_backup_map_list = AsyncMock(return_value=[])
+    coord.data = {}
+    coord.async_set_updated_data = MagicMock()
+    await coord._async_publish_backups(THING)
+    coord.async_set_updated_data.assert_not_called()
 
 
 async def test_async_rename_device_merges_name() -> None:
@@ -3663,30 +3682,28 @@ async def test_async_rename_zone_updates_optimistic_cache_when_present() -> None
 
 
 @pytest.mark.asyncio
-async def test_async_rename_nogo_zone_targets_nogo_field_and_updates_cache() -> None:
-    from lymow.protocol import _decode_fields, _first
+async def test_nogo_names_are_kept_in_ha_storage_and_survive_restart() -> None:
+    from homeassistant.helpers import storage
 
     coord, mqtt, _ = _make_coordinator()
-    # Seed coordinator cache with one nogo zone so we can verify the optimistic rename.
-    coord.data = {
-        THING: {
-            "mapData": {"goZones": [], "nogoZones": [{"hashId": "ngabcdef", "name": "Old"}]},
-        }
-    }
-    await coord.async_rename_nogo_zone(THING, "ngabcdef", "Flower bed")
+    coord.data = {THING: {"mapData": {"nogoZones": [{"hashId": "ngabcdef"}]}}}
+    await coord.async_rename_nogo_zone(THING, "ngabcdef", "  Flower bed ")
+    mqtt.async_publish_command.assert_not_called()  # the mower keeps no no-go names
+    assert coord.data[THING]["nogoNames"] == {"ngabcdef": "Flower bed"}
+    assert storage.MEMORY[f"lymow.nogo_names.{THING}"] == {"ngabcdef": "Flower bed"}
 
-    thing, pb = mqtt.async_publish_command.await_args.args
-    assert thing == THING
-    f = _decode_fields(pb)
-    assert _first(f, 5) == 9  # USER_CTRL_MODIFY_ZONE_INFO
-    pb_map = _decode_fields(_first(f, 12))
-    # The nogo rename must land in PbMap.nogoZones (field 2), not goZones (field 1)
-    assert _first(pb_map, 1) is None
-    bi = _decode_fields(_first(_decode_fields(_first(pb_map, 2)), 1))
-    assert _first(bi, 2).decode() == "Flower bed"
-    assert _first(bi, 3).decode() == "ngabcdef"
-    # Coordinator cache updated optimistically
-    assert coord.data[THING]["mapData"]["nogoZones"][0]["name"] == "Flower bed"
+    # A fresh coordinator (HA restart) loads the names and merges them into polls.
+    storage.MEMORY[f"lymow.nogo_names.{THING}"]["bad"] = 5
+    again, _, _ = _make_coordinator()
+    await again.async_load_names()
+    assert again._nogo_names == {THING: {"ngabcdef": "Flower bed"}}
+    assert (await again._async_update_data())[THING]["nogoNames"] == {"ngabcdef": "Flower bed"}
+
+    await coord.async_rename_nogo_zone(THING, "ngabcdef", "")  # clearing
+    assert storage.MEMORY[f"lymow.nogo_names.{THING}"] == {}
+    coord.data = None
+    await coord.async_rename_nogo_zone(THING, "x", "Y")  # no data yet: still stored
+    storage.MEMORY.clear()
 
 
 @pytest.mark.asyncio
@@ -4107,3 +4124,298 @@ async def test_async_complete_edit_boundary_publishes_and_requeries_map() -> Non
     await coord.async_complete_edit_boundary(THING)
     mqtt.async_publish_command.assert_awaited_once_with(THING, encode_complete_zone_partition())
     coord.async_query_map.assert_awaited_once_with(THING)
+
+
+async def test_async_merge_zones_refuses_zones_that_do_not_touch() -> None:
+    """The hull of two separated squares would swallow the gap between them."""
+    import copy
+
+    apart = copy.deepcopy(_TWO_SQUARES)
+    apart["goZones"][1]["polygon"] = [
+        {"x": 5.0, "y": 0.0},
+        {"x": 7.0, "y": 0.0},
+        {"x": 7.0, "y": 2.0},
+        {"x": 5.0, "y": 2.0},
+    ]
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": apart}}
+    with pytest.raises(HomeAssistantError, match="add ground outside them"):
+        await coord.async_merge_zones(THING, ["alpha", "beta"])
+    mqtt.async_publish_command.assert_not_called()
+
+
+async def test_async_merge_zones_refuses_large_zones_with_a_strip_between() -> None:
+    """Two 100 m squares 1 m apart pass the 5 % area check; contact must still be required."""
+    zones = {
+        "goZones": [
+            {
+                "hashId": "alpha",
+                "polygon": [
+                    {"x": 0.0, "y": 0.0},
+                    {"x": 100.0, "y": 0.0},
+                    {"x": 100.0, "y": 100.0},
+                    {"x": 0.0, "y": 100.0},
+                ],
+            },
+            {
+                "hashId": "beta",
+                "polygon": [
+                    {"x": 101.0, "y": 0.0},
+                    {"x": 201.0, "y": 0.0},
+                    {"x": 201.0, "y": 100.0},
+                    {"x": 101.0, "y": 100.0},
+                ],
+            },
+        ]
+    }
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": zones}}
+    with pytest.raises(HomeAssistantError, match="add ground outside them"):
+        await coord.async_merge_zones(THING, ["alpha", "beta"])
+    mqtt.async_publish_command.assert_not_called()
+
+
+async def test_async_merge_zones_refuses_overlapping_zones_whose_hull_adds_ground() -> None:
+    """Diagonally offset squares: summed areas equal the hull, but the union is 25 m² smaller."""
+    sq = lambda x, y: [{"x": x, "y": y}, {"x": x + 10, "y": y}, {"x": x + 10, "y": y + 10}, {"x": x, "y": y + 10}]  # noqa: E731
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {
+        THING: {
+            "mapData": {"goZones": [{"hashId": "alpha", "polygon": sq(0, 0)}, {"hashId": "beta", "polygon": sq(5, 5)}]}
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="add ground outside them"):
+        await coord.async_merge_zones(THING, ["alpha", "beta"])
+    mqtt.async_publish_command.assert_not_called()
+
+
+async def test_async_set_zone_config_preserves_disabled_state() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "z1", "isEnabled": False}]}}}
+    coord.async_query_map = AsyncMock()
+    with patch("lymow.protocol.encode_set_zone_config", return_value=b"x") as enc:
+        await coord.async_set_zone_config(THING, [{"hashId": "z1", "cutHeight": 50}, {"hashId": "zz", "cutHeight": 40}])
+    sent = enc.call_args.args[0]
+    assert sent[0]["isEnabled"] is False  # kept off
+    assert sent[1]["isEnabled"] is True  # unknown zone defaults to enabled
+
+
+def test_map_edit_echo_keeps_cached_outlines() -> None:
+    coord, _, _ = _make_coordinator()
+    full = {
+        "goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}, {"hashId": "b", "polygon": [{"x": 1, "y": 1}]}],
+        "nogoZones": [{"hashId": "n", "polygon": [{"x": 2, "y": 2}]}],
+        "channels": [],
+    }
+    coord.data = {THING: {"mapData": full}}
+    # Rename echo: only the edited zone, no outline.
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "a", "name": "Front", "polygon": []}, "junk"]}})
+    m = coord.data[THING]["mapData"]
+    assert [z["hashId"] for z in m["goZones"]] == ["a", "b"] and m["goZones"][0]["name"] == "Front"
+    assert m["goZones"][0]["polygon"] == [{"x": 0, "y": 0}] and len(m["nogoZones"]) == 1
+    # A real map (with geometry) replaces it; an empty map is taken as is.
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "c", "polygon": [{"x": 5, "y": 5}]}]}})
+    assert [z["hashId"] for z in coord.data[THING]["mapData"]["goZones"]] == ["c"]
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": []}})
+    assert coord.data[THING]["mapData"]["goZones"] == []
+    # Nothing cached yet: the echo is stored as received.
+    coord.data = None
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "a", "polygon": []}]}})
+
+
+@pytest.mark.asyncio
+async def test_channel_names_persist_and_can_be_cleared() -> None:
+    from homeassistant.helpers import storage
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"channels": [{"hashId": "c1"}, {"hashId": "c2", "name": "Keep"}]}}}
+    await coord.async_rename_channel(THING, "c1", "Gate")
+    assert storage.MEMORY[f"lymow.channel_names.{THING}"] == {"c1": "Gate"}
+    again, _, _ = _make_coordinator()
+    await again.async_load_names()
+    assert again._channel_name_overrides == {THING: {"c1": "Gate"}}
+    await coord.async_rename_channel(THING, "c1", " ")
+    assert coord.data[THING]["mapData"]["channels"] == [{"hashId": "c1"}, {"hashId": "c2", "name": "Keep"}]
+    assert storage.MEMORY[f"lymow.channel_names.{THING}"] == {}
+    storage.MEMORY.clear()
+
+
+def test_map_replies_are_stamped() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {}}
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": []}})
+    stamp = coord.data[THING]["mapReceivedAt"]
+    assert isinstance(stamp, float) and stamp > 0
+    coord.on_mqtt_state(THING, {"battery": 50})  # not a map reply: stamp unchanged
+    assert coord.data[THING]["mapReceivedAt"] == stamp
+
+
+@pytest.mark.asyncio
+async def test_name_store_key_is_safe_for_hostile_thing_names() -> None:
+    from homeassistant.helpers import storage
+
+    coord, _, _ = _make_coordinator()
+    await coord.async_rename_channel("../../etc/x", "c1", "Gate")
+    (key,) = [k for k in storage.MEMORY if "channel_names" in k]
+    assert "/" not in key and ".." not in key.split("channel_names.")[1].replace("_", "")
+    assert key.startswith("lymow.channel_names.______etc_x_")
+    storage.MEMORY.clear()
+
+
+@pytest.mark.asyncio
+async def test_name_store_tolerates_non_string_thing() -> None:
+    from homeassistant.helpers import storage
+
+    coord, _, _ = _make_coordinator(devices=[{"deviceThingName": 12345}])
+    await coord.async_load_names()  # must not raise during setup
+    assert coord._name_store("nogo", 12345) is not None
+    storage.MEMORY.clear()
+
+
+@pytest.mark.asyncio
+async def test_channel_names_survive_a_poll() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._mqtt_state[THING] = {"mapData": {"channels": [{"hashId": "c1"}]}}
+    coord._channel_name_overrides[THING] = {"c1": "Gate"}
+    data = await coord._async_update_data()
+    assert data[THING]["mapData"]["channels"] == [{"hashId": "c1", "name": "Gate"}]
+
+
+@pytest.mark.asyncio
+async def test_cleared_channel_name_does_not_return_from_cache() -> None:
+    from homeassistant.helpers import storage
+
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"channels": [{"hashId": "c1"}]}}}
+    await coord.async_rename_channel(THING, "c1", "Gate")
+    coord.on_mqtt_state(THING, {"mapData": {"channels": [{"hashId": "c1"}, "junk"]}})  # cache now holds the name
+    await coord.async_rename_channel(THING, "c1", "")
+    data = await coord._async_update_data()
+    assert data[THING]["mapData"]["channels"] == [{"hashId": "c1"}]
+    storage.MEMORY.clear()
+
+
+def test_edit_echo_is_not_stamped() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}]}}}
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": "a", "name": "N", "polygon": []}]}})
+    assert "mapReceivedAt" not in coord.data[THING]
+
+
+def test_malformed_map_patch_does_not_raise() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}]}}}
+    coord.on_mqtt_state(THING, {"mapData": 1})
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": 1, "nogoZones": [{"hashId": "n"}]}})
+
+
+def test_channel_overrides_tolerate_non_list_channels() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._channel_name_overrides[THING] = {"c": "G"}
+    assert coord._apply_channel_name_overrides(THING, {"mapData": {"channels": 1}})["mapData"]["channels"] == []
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_refuses_when_one_zone_has_no_outline() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    sq = [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}, {"x": 2.0, "y": 2.0}]
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": sq}, {"hashId": "b"}]}}}
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
+        await coord.async_merge_zones(THING, ["a", "b"])
+    mqtt.async_publish_command.assert_not_called()  # nothing deleted
+
+
+def test_edit_echo_with_unhashable_ids_does_not_raise() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}, {"hashId": ["x"]}]}}}
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": ["x"], "name": "N", "polygon": []}]}})
+
+
+@pytest.mark.asyncio
+async def test_backup_refresh_sleeps_the_gap_between_offsets() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._async_publish_backups = AsyncMock()
+    slept: list = []
+
+    async def _sleep(s):
+        slept.append(s)
+
+    with patch("lymow.coordinator.asyncio.sleep", _sleep):
+        await coord._async_refresh_backups_soon(THING)
+    assert slept == [8, 12, 25] and coord._async_publish_backups.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_set_zone_config_tolerates_scalar_zone_rows() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [1, {"hashId": "z", "isEnabled": False}]}}}
+    coord.async_query_map = AsyncMock()
+    with patch("lymow.protocol.encode_set_zone_config", return_value=b"x") as enc:
+        await coord.async_set_zone_config(THING, [{"hashId": "z", "cutHeight": 50}])
+    assert enc.call_args.args[0][0]["isEnabled"] is False
+
+
+def test_channel_overrides_skip_unhashable_ids() -> None:
+    coord, _, _ = _make_coordinator()
+    out = coord._apply_channel_name_overrides(THING, {"mapData": {"channels": [{"hashId": [], "name": "x"}]}})
+    assert out["mapData"]["channels"] == [{"hashId": []}]
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_refuses_non_finite_vertices() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    sq = [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}, {"x": 2.0, "y": 2.0}]
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [
+                    {"hashId": "a", "polygon": sq},
+                    {"hashId": "b", "polygon": [*sq, {"x": float("nan"), "y": 0.0}]},
+                ]
+            }
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
+        await coord.async_merge_zones(THING, ["a", "b"])
+    mqtt.async_publish_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_set_zone_config_tolerates_unhashable_zone_ids() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": []}, {"hashId": "z", "isEnabled": False}]}}}
+    coord.async_query_map = AsyncMock()
+    with patch("lymow.protocol.encode_set_zone_config", return_value=b"x") as enc:
+        await coord.async_set_zone_config(THING, [{"hashId": "z", "cutHeight": 50}])
+    assert enc.call_args.args[0][0]["isEnabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_refuses_collinear_outlines() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    line = [{"x": 0.0, "y": 0.0}, {"x": 1.0, "y": 0.0}, {"x": 2.0, "y": 0.0}]
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": line}, {"hashId": "b", "polygon": line}]}}}
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
+        await coord.async_merge_zones(THING, ["a", "b"])
+    mqtt.async_publish_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_refuses_flat_hull() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    sq = [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}, {"x": 2.0, "y": 2.0}]
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": sq}, {"hashId": "b", "polygon": sq}]}}}
+    with (
+        patch("lymow.geometry.merge_zone_polygons", return_value=sq[:2]),
+        pytest.raises(HomeAssistantError, match="no area"),
+    ):
+        await coord.async_merge_zones(THING, ["a", "b"])
+    mqtt.async_publish_command.assert_not_called()

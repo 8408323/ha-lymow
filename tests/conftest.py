@@ -70,6 +70,7 @@ try:
         "homeassistant.components.switch",
         "homeassistant.components.text",
         "homeassistant.components.update",
+        "homeassistant.components.websocket_api",
         "homeassistant.config_entries",
         "homeassistant.core",
         "homeassistant.exceptions",
@@ -86,6 +87,7 @@ try:
     _load_lymow_module("entity")
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
+    _load_lymow_module("websocket_api")
     _load_lymow_module("number")
     _load_lymow_module("select")
     _load_lymow_module("switch")
@@ -180,6 +182,20 @@ except ImportError:
     _ha_exc.ServiceValidationError = _ServiceValidationError  # type: ignore[attr-defined]
     _ha_exc.ConfigEntryAuthFailed = _ConfigEntryAuthFailed  # type: ignore[attr-defined]
     _ha_exc.ConfigEntryNotReady = _ConfigEntryNotReady  # type: ignore[attr-defined]
+
+    class _Unauthorized(_HomeAssistantError):
+        def __init__(
+            self, context=None, user_id=None, entity_id=None, config_entry_id=None, perm_category=None, permission=None
+        ):  # type: ignore[no-untyped-def]
+            super().__init__("Unauthorized")
+            self.entity_id = entity_id
+            self.permission = permission
+
+    class _UnknownUser(_Unauthorized):
+        pass
+
+    _ha_exc.Unauthorized = _Unauthorized  # type: ignore[attr-defined]
+    _ha_exc.UnknownUser = _UnknownUser  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.exceptions", _ha_exc)
 
     # ── homeassistant.config_entries ──────────────────────────────────────────
@@ -205,6 +221,23 @@ except ImportError:
     # ── homeassistant.helpers (namespace) ────────────────────────────────────
     _ha_helpers = types.ModuleType("homeassistant.helpers")
     sys.modules.setdefault("homeassistant.helpers", _ha_helpers)
+
+    # ── homeassistant.helpers.storage — in-memory Store keyed by storage key ─
+    _ha_storage = types.ModuleType("homeassistant.helpers.storage")
+    _ha_storage.MEMORY = {}  # type: ignore[attr-defined]
+
+    class _Store:
+        def __init__(self, hass, version, key):
+            self.key = key
+
+        async def async_load(self):
+            return _ha_storage.MEMORY.get(self.key)
+
+        async def async_save(self, data):
+            _ha_storage.MEMORY[self.key] = data
+
+    _ha_storage.Store = _Store  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.helpers.storage", _ha_storage)
 
     # ── homeassistant.util (namespace) + dt subset ───────────────────────────
     import datetime as _dt
@@ -280,6 +313,7 @@ except ImportError:
         return lambda: None  # no-op unsubscribe; tests patch this when they assert on it
 
     _ha_ev.async_track_time_interval = _async_track_time_interval  # type: ignore[attr-defined]
+    _ha_ev.async_call_later = lambda hass, delay, action: lambda: None  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.helpers.event", _ha_ev)
 
     # ── homeassistant.helpers.restore_state ───────────────────────────────────
@@ -413,6 +447,23 @@ except ImportError:
     _ha_http.HomeAssistantView = _HomeAssistantView  # type: ignore[attr-defined]
     _ha_http.StaticPathConfig = _StaticPathConfig  # type: ignore[attr-defined]
     sys.modules.setdefault("homeassistant.components.http", _ha_http)
+
+    # ── homeassistant.components.websocket_api ───────────────────────────────
+    _ha_ws = types.ModuleType("homeassistant.components.websocket_api")
+
+    def _websocket_command(schema):  # type: ignore[no-untyped-def]
+        def _wrap(fn):  # type: ignore[no-untyped-def]
+            fn._ws_schema = schema
+            return fn
+
+        return _wrap
+
+    _ha_ws.websocket_command = _websocket_command  # type: ignore[attr-defined]
+    _ha_ws.async_register_command = lambda hass, handler: None  # type: ignore[attr-defined]
+    _ha_ws.event_message = lambda iden, event: {"id": iden, "type": "event", "event": event}  # type: ignore[attr-defined]
+    _ha_ws.ActiveConnection = object  # type: ignore[attr-defined]
+    sys.modules.setdefault("homeassistant.components.websocket_api", _ha_ws)
+    _ha_comp.websocket_api = _ha_ws  # type: ignore[attr-defined]
 
     # ── homeassistant.components.lawn_mower ───────────────────────────────────
     _ha_lm = types.ModuleType("homeassistant.components.lawn_mower")
@@ -654,6 +705,7 @@ except ImportError:
     _load_lymow_module("entity")
     _load_lymow_module("config_flow")
     _load_lymow_module("sensor")
+    _load_lymow_module("websocket_api")
     _load_lymow_module("number")
     _load_lymow_module("switch")
     _load_lymow_module("text")

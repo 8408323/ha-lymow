@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -760,12 +762,115 @@ class LymowRtkSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         return attrs
 
 
+def _num(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def _trim_poly(points: Any) -> list[dict]:
+    """Round polygon coordinates to 4 decimal places (~1 cm precision in ENU metres).
+
+    Keeps the map sensor under HA's 16 kB attribute limit even for large maps.
+    Malformed points (from a corrupt MQTT frame) are skipped rather than raising,
+    so one bad point can't take down the map sensor or the panel's feed.
+    """
+    if not isinstance(points, list):
+        return []
+    return [
+        {"x": round(p["x"], 4), "y": round(p["y"], 4)}
+        for p in points
+        if isinstance(p, dict) and _num(p.get("x")) and _num(p.get("y"))
+    ]
+
+
+def _zones(items: Any) -> list[dict]:
+    """Zone/channel dicts with trimmed polygons; non-dict entries are dropped."""
+    if not isinstance(items, list):
+        return []
+    out = []
+    for z in items:
+        # Untrusted: the panel acts on hashId and shows name, so both must be strings.
+        # Every exposed row needs a usable id: the panel selects, renames and deletes by it.
+        if not isinstance(z, dict) or not isinstance(z.get("hashId"), str) or not z["hashId"].strip():
+            continue
+        z = {k: v for k, v in z.items() if k != "name" or isinstance(v, str)}
+        out.append({**z, "polygon": _trim_poly(z["polygon"])} if "polygon" in z else z)
+    return out
+
+
+def map_payload(data: dict[str, Any]) -> dict[str, Any]:
+    """Map geometry + live pose/progress for one device's coordinator data."""
+    map_data = data.get("mapData")
+    if not isinstance(map_data, dict):
+        map_data = {}  # untrusted: a non-mapping must not break the sensor attributes
+    attrs: dict[str, Any] = {}
+
+    if "goZones" in map_data:
+        # Filter out stale empty zone entries (no hashId) that accumulate when
+        # MQTT delivers repeated partial map responses without full zone data
+        attrs["go_zones"] = [z for z in _zones(map_data["goZones"]) if z.get("hashId")]
+    if "nogoZones" in map_data:
+        # Names given in HA (see async_rename_nogo_zone) win over anything the map carries.
+        names = data.get("nogoNames") or {}
+        attrs["nogo_zones"] = [
+            {**z, "name": names[z["hashId"]]} if z.get("hashId") in names else z for z in _zones(map_data["nogoZones"])
+        ]
+    if "channels" in map_data:
+        attrs["channels"] = _zones(map_data["channels"])
+    if "gpsOrigin" in map_data:
+        attrs["gps_origin"] = map_data["gpsOrigin"]
+    # Charging station: map-derived dock (last QUERY_MAP) is the base; a live
+    # PbOutput.f24 update (chargingStationLoc) overlays fresher fields on top.
+    # The live message may carry only x/y without theta, so merge field-by-field
+    # rather than wholesale-replace (a y-only update must not drop x/theta).
+    map_dock = map_data.get("chargingStation") if isinstance(map_data.get("chargingStation"), dict) else None
+    live_dock = data.get("chargingStationLoc") if isinstance(data.get("chargingStationLoc"), dict) else None
+    dock = {**(map_dock or {}), **(live_dock or {})}
+    # Only a dock with both coordinates is a point the map can draw.
+    if all(_num(dock.get(k)) for k in ("x", "y")):  # finite numbers only
+        # Other numeric fields (theta, z) must be finite too, or they're left out.
+        attrs["charging_station"] = {k: v for k, v in dock.items() if not isinstance(v, float) or math.isfinite(v)}
+    if "globalZoneConfig" in map_data:
+        attrs["mowing_settings"] = map_data["globalZoneConfig"]
+    if "globalChannelConfig" in map_data:
+        attrs["channel_config"] = map_data["globalChannelConfig"]
+    if "runTimeConfig" in map_data:
+        attrs["run_time_config"] = map_data["runTimeConfig"]
+
+    path_data = data.get("pathData")
+    if path_data:
+        # Trim each mow-path segment's points to 4 dp
+        segments = path_data.get("segments") if isinstance(path_data, dict) else None
+        trimmed_segments = [
+            _trim_poly(seg) for seg in (segments if isinstance(segments, list) else []) if isinstance(seg, list)
+        ]
+        attrs["mow_path"] = {"segments": trimmed_segments}
+
+    # Live robot + RTK position and fix quality
+    for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM", "rtkStatus", "workStatus"):
+        val = data.get(key)
+        if val is not None:
+            attrs[key] = val
+
+    rtk_raw = data.get("rtkStatus")
+    if rtk_raw is not None:
+        _RTK_LABELS = {0: "No fix", 1: "Float fix", 2: "Fixed", 3: "RTK fixed"}
+        # Malformed values must not break the map payload (and with it the panel stream).
+        code = rtk_raw if isinstance(rtk_raw, int) and not isinstance(rtk_raw, bool) else None
+        attrs["rtkLabel"] = _RTK_LABELS.get(code, f"Unknown ({rtk_raw})" if code is not None else "Unknown")
+    # Live mow progress so the card status bar shows % without needing a separate entity
+    for key in ("mowProgress", "mowStripCount", "totalTaskAreaM2"):
+        val = data.get(key)
+        if val is not None:
+            attrs[key] = val
+    return attrs
+
+
 class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     """Sensor that exposes the full mowing map (zone polygons, GPS origin) as attributes.
 
     The state value is the number of go-zones currently loaded.  The
-    extra_state_attributes contain the full JSON-serialisable map data that the
-    ``lymow-map-card`` Lovelace card reads to draw the SVG map.
+    extra_state_attributes contain the full JSON-serialisable map data (the same
+    payload the Lymow panel receives over its websocket subscription).
 
     This sensor is enabled by default so the card works out of the box, but the
     attribute payload can be large; users may disable it if it causes issues.
@@ -781,16 +886,6 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         self._attr_name = "Map"
         self._attr_icon = "mdi:map"
 
-    @staticmethod
-    def _trim_poly(points: list[dict]) -> list[dict]:
-        """Round polygon coordinates to 4 decimal places (~1 cm precision in ENU metres).
-
-        Full float64 precision uses ~18 chars per coordinate; 4 dp uses ~7 chars,
-        cutting polygon size by ~60% and keeping the map sensor under HA's 16 kB
-        attribute limit even for large multi-zone maps.
-        """
-        return [{"x": round(p["x"], 4), "y": round(p["y"], 4)} for p in points]
-
     @property
     def native_value(self) -> int | None:
         """Number of go-zones loaded, or None if map data is not yet available."""
@@ -802,77 +897,52 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Full map data for the Lovelace card."""
-        map_data = (self.coordinator.data.get(self._thing_name) or {}).get("mapData") or {}
-        data = self.coordinator.data.get(self._thing_name) or {}
-        attrs: dict[str, Any] = {}
-
-        if "goZones" in map_data:
-            # Filter out stale empty zone entries (no hashId) that accumulate when
-            # MQTT delivers repeated partial map responses without full zone data
-            valid_zones = [z for z in map_data["goZones"] if z.get("hashId")]
-            attrs["go_zones"] = [
-                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z for z in valid_zones
-            ]
-        if "nogoZones" in map_data:
-            attrs["nogo_zones"] = [
-                {**z, "polygon": self._trim_poly(z["polygon"])} if "polygon" in z else z for z in map_data["nogoZones"]
-            ]
-        if "channels" in map_data:
-            attrs["channels"] = [
-                {**ch, "polygon": self._trim_poly(ch["polygon"])} if "polygon" in ch else ch
-                for ch in map_data["channels"]
-            ]
-        if "gpsOrigin" in map_data:
-            attrs["gps_origin"] = map_data["gpsOrigin"]
-        # Charging station: map-derived dock (last QUERY_MAP) is the base; a live
-        # PbOutput.f24 update (chargingStationLoc) overlays fresher fields on top.
-        # The live message may carry only x/y without theta, so merge field-by-field
-        # rather than wholesale-replace (a y-only update must not drop x/theta).
-        map_dock = map_data.get("chargingStation") if isinstance(map_data.get("chargingStation"), dict) else None
-        live_dock = data.get("chargingStationLoc") if isinstance(data.get("chargingStationLoc"), dict) else None
-        if map_dock and live_dock:
-            attrs["charging_station"] = {**map_dock, **live_dock}
-        elif live_dock:
-            attrs["charging_station"] = live_dock
-        elif map_dock:
-            attrs["charging_station"] = map_dock
-        if "globalZoneConfig" in map_data:
-            attrs["mowing_settings"] = map_data["globalZoneConfig"]
-        if "globalChannelConfig" in map_data:
-            attrs["channel_config"] = map_data["globalChannelConfig"]
-        if "runTimeConfig" in map_data:
-            attrs["run_time_config"] = map_data["runTimeConfig"]
-
-        path_data = (self.coordinator.data.get(self._thing_name) or {}).get("pathData")
-        if path_data:
-            # Trim each mow-path segment's points to 4 dp
-            trimmed_segments = [self._trim_poly(seg) for seg in path_data.get("segments", [])]
-            attrs["mow_path"] = {"segments": trimmed_segments}
-
-        # Live robot + RTK position and fix quality
-        for key in ("poseEastM", "poseNorthM", "poseThetaRad", "rtkEastM", "rtkNorthM", "rtkStatus", "workStatus"):
-            val = data.get(key)
-            if val is not None:
-                attrs[key] = val
-
-        rtk_raw = data.get("rtkStatus")
-        if rtk_raw is not None:
-            _RTK_LABELS = {0: "No fix", 1: "Float fix", 2: "Fixed", 3: "RTK fixed"}
-            attrs["rtkLabel"] = _RTK_LABELS.get(int(rtk_raw), f"Unknown ({rtk_raw})")
-        # Live mow progress so the card status bar shows % without needing a separate entity
-        for key in ("mowProgress", "mowStripCount", "totalTaskAreaM2"):
-            val = data.get(key)
-            if val is not None:
-                attrs[key] = val
-        return attrs
+        """Full map data (same payload the panel receives over the websocket)."""
+        return map_payload(self.coordinator.data.get(self._thing_name) or {})
 
 
-def _schedule_to_local(sched: dict[str, Any]) -> dict[str, Any]:
-    """Copy a decoded schedule with hour/minute/dayOfWeek shifted from stored UTC to local (via timeZone)."""
+def _zone_offsets(coordinator: Any) -> list[int] | None:
+    """Home Assistant's UTC offsets in minutes over the year (current first; one or
+    two values with DST), or None if the time zone is unknown.
+
+    The mower stores schedule times in UTC with an offset truncated to whole hours,
+    which loses the :30 of zones like UTC+5:30; these supply it."""
+    name = getattr(getattr(getattr(coordinator, "hass", None), "config", None), "time_zone", None)
+    if not isinstance(name, str):
+        return None
+    try:
+        zone = ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    now = datetime.now(zone)
+    out: list[int] = []
+    for when in (now, now + timedelta(days=182)):
+        off = when.utcoffset()
+        if off is not None and (m := int(off.total_seconds() // 60)) not in out:
+            out.append(m)
+    return out or None
+
+
+def _fraction(stored_hours: int, offsets: list[int]) -> int:
+    """Minutes the stored whole-hour offset dropped: those of the zone offset that
+    truncates to it (so DST in zones like Lord Howe, 10:30 ↔ 11:00, is handled)."""
+    for m in offsets:
+        if int(m / 60) == stored_hours:
+            return m - stored_hours * 60
+    return 0
+
+
+def _schedule_to_local(sched: dict[str, Any], offsets: list[int] | None = None) -> dict[str, Any]:
+    """Copy a decoded schedule with hour/minute/dayOfWeek shifted from stored UTC to
+    local time: the stored whole-hour ``timeZone`` plus, when Home Assistant's zone
+    offsets are known, the fractional minutes the wire format can't carry."""
     out = dict(sched)
     offset = int(sched.get("timeZone", 0) or 0)
-    day_delta, out["hour"] = divmod(int(sched.get("hour", 0)) + offset, 24)
+    extra = _fraction(offset, offsets) if offsets else 0
+    day_delta, rem = divmod(
+        int(sched.get("hour", 0)) * 60 + int(sched.get("minute", 0) or 0) + offset * 60 + extra, 1440
+    )
+    out["hour"], out["minute"] = rem // 60, rem % 60
     days = sched.get("dayOfWeek")
     if days:
         out["dayOfWeek"] = [(int(d) + day_delta) % 7 for d in days]
@@ -906,7 +976,8 @@ class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         schedules = (self.coordinator.data.get(self._thing_name) or {}).get("schedules") or []
-        return {"schedules": [_schedule_to_local(s) for s in schedules]}
+        offsets = _zone_offsets(self.coordinator)
+        return {"schedules": [_schedule_to_local(s, offsets) for s in schedules]}
 
 
 class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):

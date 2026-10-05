@@ -1,0 +1,719 @@
+import { useEffect, useRef, useState } from "react";
+import { setLeaveGuard } from "../App";
+import type { MapData, Point, Zone } from "../hass";
+import { area, centre, distToSegment, expand, isSimplePolygon, simplify, type Handle } from "../map/geometry";
+import { MapCanvas, type Kind, type LabelMode } from "../map/MapCanvas";
+import { useT } from "../i18n";
+import { useMower, useMowerEntity, zoneLabel } from "../mower";
+import { MOWING_WORK_STATUS, RTK, WORK_STATUS, num } from "../status";
+import { Badge, Button, Empty, Field, Icon, Segmented, Slider, Toggle, cx, useUi } from "../ui";
+
+const MAX_HANDLES = 40;
+
+function useStored<T>(key: string, initial: T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? initial : (JSON.parse(raw) as T);
+    } catch {
+      return initial;
+    }
+  });
+  return [
+    v,
+    (n: T) => {
+      setV(n);
+      try {
+        localStorage.setItem(key, JSON.stringify(n));
+      } catch {
+        // storage blocked or full: keep it for this session only
+      }
+    },
+  ];
+}
+
+/** Client-side trail of the robot's pose during the current mow (complements the server trail). */
+function useLiveTrail(map: MapData | undefined): Point[] {
+  const [trail, setTrail] = useState<Point[]>([]);
+  const mowing = map?.workStatus !== undefined && MOWING_WORK_STATUS.has(map.workStatus);
+  useEffect(() => {
+    if (!mowing) return;
+    const x = map?.poseEastM;
+    const y = map?.poseNorthM;
+    if (x === undefined || y === undefined) return;
+    setTrail((t) => {
+      const last = t[t.length - 1];
+      if (last && Math.hypot(last.x - x, last.y - y) < 0.05) return t;
+      return [...t, { x, y }].slice(-2000);
+    });
+  }, [map?.poseEastM, map?.poseNorthM, mowing]);
+  useEffect(() => {
+    // A new mow starts a fresh breadcrumb; when it ends, drop it (the server trail stays).
+    setTrail([]);
+  }, [mowing]);
+  return trail;
+}
+
+interface Focus {
+  kind: Kind;
+  id: string;
+}
+
+// Unsaved shape kept when the panel is torn down (e.g. leaving via HA's sidebar,
+// which a custom panel can't veto); restored when the map opens again.
+const stashes = new Map<string, { focus: Focus; pts: Handle[]; base: { orig: Point[]; initial: Handle[] } | null }>();
+
+export function MapView() {
+  const t = useT();
+  const { snap, device } = useMower();
+  const ui = useUi();
+  const map = snap?.map;
+  const [mode, setMode] = useState<"browse" | "edit">("browse");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [focus, setFocus] = useState<Focus | null>(null);
+  const [editPts, setEditPts] = useState<Handle[] | null>(null);
+  const [editBase, setEditBase] = useState<{ orig: Point[]; initial: Handle[] } | null>(null);
+  const [dirty, setDirty] = useState(false);
+  const [vertex, setVertex] = useState<number | null>(null);
+  const [rotation, setRotation] = useStored("lymow_rotation", 0);
+  const [labels, setLabels] = useStored<LabelMode>("lymow_labels", "name");
+  const [showTrail, setShowTrail] = useStored("lymow_trail", true);
+  const [sheetOpen, setSheetOpen] = useState(true);
+  const trail = useLiveTrail(map);
+  const latest = useRef({ dirty, focus, editPts, editBase, pendingSave: false, discarded: false });
+  useEffect(() => {
+    const s = stashes.get(device.thing);
+    if (s) {
+      stashes.delete(device.thing);
+      setMode("edit");
+      setFocus(s.focus);
+      setEditPts(s.pts);
+      setEditBase(s.base);
+      setDirty(true);
+      ui.toast(t("Restored your unsaved shape."));
+    }
+    return () => {
+      const l = latest.current;
+      // A save still awaiting the mower is the only copy too: keep it for a retry.
+      if ((l.dirty || l.pendingSave) && !l.discarded && l.focus && l.editPts) stashes.set(device.thing, { focus: l.focus, pts: l.editPts, base: l.editBase });
+    };
+  }, []);
+
+  const go = map?.go_zones ?? [];
+  const nogo = map?.nogo_zones ?? [];
+  const channels = map?.channels ?? [];
+  const find = (f: Focus | null): Zone | undefined =>
+    f ? (f.kind === "go" ? go : f.kind === "nogo" ? nogo : channels).find((z) => z.hashId === f.id) : undefined;
+  const focused = find(focus);
+  const outline = editPts && editBase ? expand(editPts, editBase.orig, editBase.initial) : editPts;
+
+  const startEditShape = (f: Focus) => {
+    setFocus(f);
+    setVertex(null);
+    setDirty(false);
+    const z = find(f);
+    // No-go outlines can't be changed yet: the mower ignores the edit (#290).
+    const handles = f.kind === "go" && z?.polygon ? simplify(z.polygon, MAX_HANDLES) : null;
+    setEditPts(handles);
+    setEditBase(handles && z?.polygon ? { orig: z.polygon, initial: handles } : null);
+    setSheetOpen(true);
+  };
+  const leaveFocus = () => {
+    setAwaitShape(null); // an explicit discard also drops a save still awaiting confirmation
+    setFocus(null);
+    setEditPts(null);
+    setVertex(null);
+    setDirty(false);
+  };
+  // Back / Escape must not silently throw away a reshaped polygon.
+  const requestLeave = async () => {
+    if (guarded && !(await ui.confirm({ title: t("Discard your unsaved changes (shape and zone settings)?"), confirm: t("Discard"), danger: true }))) return;
+    dropZoneDrafts(device.thing, latest.current.focus?.id);
+    leaveFocus();
+  };
+  const exitEdit = async () => {
+    // The focused zone may have vanished (deleted elsewhere) with work still pending.
+    if (guarded && !(await ui.confirm({ title: t("Discard your unsaved changes (shape and zone settings)?"), confirm: t("Discard"), danger: true }))) return;
+    dropZoneDrafts(device.thing, latest.current.focus?.id);
+    leaveFocus();
+    setMode("browse");
+  };
+
+  const deleteVertex = () => {
+    if (awaitShape === null && !saving && device.can_control !== false && editPts && vertex !== null && editPts.length > 3) {
+      setEditPts(editPts.filter((_, i) => i !== vertex));
+      setVertex(null);
+      setDirty(true);
+    }
+  };
+
+  // After Save, wait for the mower's map reply before treating the shape as stored:
+  // refresh the editor from the reported outline, or offer Save again if none comes.
+  const [awaitShape, setAwaitShape] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Until the mower confirms a saved shape the draft is the only copy, so keep it guarded.
+  // Zone settings not yet applied (or awaiting confirmation) count too.
+  const [zoneDraft, setZoneDraft] = useState(false);
+  const guarded = dirty || awaitShape !== null || zoneDraft;
+  latest.current = { ...latest.current, dirty, focus, editPts, editBase, pendingSave: awaitShape !== null };
+  const reportedShape = JSON.stringify(find(focus)?.polygon ?? null);
+  const savedArea = useRef(0);
+  const savedCentre = useRef<Point>({ x: 0, y: 0 });
+  const savedOutline = useRef<Point[]>([]);
+  useEffect(() => {
+    if (awaitShape !== null && focus && reportedShape !== awaitShape) {
+      setAwaitShape(null);
+      // The mower thins the outline a little, so compare areas, not points. A clearly
+      // different shape (normalised or changed elsewhere) keeps the draft for a retry.
+      // Also where it lies: the centre must be within a metre of what was sent.
+      const poly = find(focus)?.polygon ?? [];
+      const got = area(poly);
+      const c = centre(poly);
+      // …and every reported point lies on (within 0.5 m of) the submitted boundary.
+      const sent = savedOutline.current;
+      const onBoundary = poly.every((q) => sent.some((a, i) => distToSegment(q, a, sent[(i + 1) % sent.length]) <= 0.5));
+      const near = onBoundary && Math.hypot(c.x - savedCentre.current.x, c.y - savedCentre.current.y) <= 1;
+      if (near && Math.abs(got - savedArea.current) <= savedArea.current * 0.03) startEditShape(focus);
+      else {
+        setDirty(true);
+        ui.toast(t("The mower reported a different shape than the one saved. Check it and save again."), "bad");
+      }
+    }
+  }, [reportedShape, awaitShape]); // also when armed: the reply can beat the service call
+  useEffect(() => {
+    if (awaitShape === null) return;
+    const id = window.setTimeout(() => {
+      setAwaitShape(null);
+      setDirty(true);
+      ui.toast(t("The mower hasn't confirmed the new shape yet. Save again to retry."), "bad");
+    }, 20000);
+    return () => window.clearTimeout(id);
+  }, [awaitShape]);
+
+  // Switching tabs would unmount the editor; ask first while a shape is dirty.
+  useEffect(() => {
+    setLeaveGuard(
+      guarded
+        ? async () => {
+            const ok = await ui.confirm({ title: t("Discard your unsaved changes (shape and zone settings)?"), confirm: t("Discard"), danger: true });
+            if (ok) {
+              latest.current.discarded = true; // discarded on purpose: don't stash it
+              dropZoneDrafts(device.thing, latest.current.focus?.id);
+            }
+            return ok;
+          }
+        : null,
+    );
+    return () => setLeaveGuard(null);
+  }, [guarded]);
+
+  // Keyboard: Esc steps back, Delete removes the selected vertex, E enters edit mode.
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e: KeyboardEvent) => {
+    const t = e.composedPath()[0] as HTMLElement;
+    if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) return;
+    if (e.key === "Escape") focus ? requestLeave() : mode === "edit" ? exitEdit() : setSelected(new Set());
+    else if ((e.key === "Delete" || e.key === "Backspace") && vertex !== null) deleteVertex();
+    else if (e.key === "e" && mode === "browse" && device.can_control !== false) setMode("edit");
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keyRef.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  if (snap?.map_hidden)
+    return (
+      <Empty icon="mdi:lock-outline" title={t("Map not available")}>
+        {t("Your Home Assistant user doesn't have access to this mower's map.")}
+      </Empty>
+    );
+  if (!map) {
+    return (
+      <div className="ly-loading">
+        <span className="ly-spinner" /> {t("Loading map…")}
+      </div>
+    );
+  }
+  if (!go.length && !map.charging_station) {
+    return (
+      <Empty icon="mdi:map-search-outline" title={t("No map yet")}>
+        {t("The mower hasn't sent its map yet. Use the refresh button at the top to ask for it.")}
+      </Empty>
+    );
+  }
+
+  const onPick = (kind: Kind, id: string) => {
+    if (mode === "edit") {
+      if (guarded && focus) return focus.id === id ? undefined : ui.toast(t("Save or discard the current shape first"), "bad");
+      startEditShape({ kind, id });
+      return;
+    }
+    if (kind !== "go") return;
+    const next = new Set(selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    setSelected(next);
+    setSheetOpen(true);
+  };
+
+  return (
+    <div className={cx("ly-mapview", !sheetOpen && "ly-mapview--collapsed")}>
+      <MapCanvas
+        map={map}
+        selected={mode === "browse" ? selected : undefined}
+        focused={focus?.id}
+        // Read-only while a save awaits the mower: a new edit would be replaced by its reply.
+        edit={awaitShape === null && !saving && device.can_control !== false ? editPts : null}
+        editOutline={outline}
+        activeVertex={vertex}
+        onVertex={setVertex}
+        onEditChange={(p) => {
+          setEditPts(p);
+          setDirty(true);
+        }}
+        onPick={onPick}
+        onBackground={() => (mode === "edit" ? !guarded && leaveFocus() : setSelected(new Set()))}
+        // Moving the dock (and switching zones on/off) goes through the map-sync
+        // command, which the mower ignores (#291), so the panel doesn't offer it.
+        trail={trail}
+        labels={labels}
+        showTrail={showTrail}
+        rotation={rotation}
+        onRotation={setRotation}
+        overlay={<MapStatus map={map} />}
+        className="ly-mapview__canvas"
+      />
+      <aside className="ly-sheet" aria-label={mode === "edit" ? t("Map editor") : t("Zones")}>
+        <button type="button" className="ly-sheet__grip" onClick={() => setSheetOpen(!sheetOpen)} aria-label={sheetOpen ? t("Collapse panel") : t("Expand panel")}>
+          <span />
+        </button>
+        {mode === "browse" ? (
+          <BrowsePanel
+            map={map}
+            selected={selected}
+            setSelected={setSelected}
+            onEdit={() => {
+              setSelected(new Set());
+              setMode("edit");
+            }}
+            labels={labels}
+            setLabels={setLabels}
+            showTrail={showTrail}
+            setShowTrail={setShowTrail}
+          />
+        ) : focus && focused ? (
+          <EditPanel
+            focus={focus}
+            zone={focused}
+            index={(focus.kind === "go" ? go : focus.kind === "nogo" ? nogo : channels).indexOf(focused)}
+            editPts={editPts}
+            outline={outline}
+            dirty={dirty}
+            vertex={vertex}
+            onDeleteVertex={deleteVertex}
+            onReset={() => startEditShape(focus)}
+            awaiting={awaitShape !== null || saving}
+            onSaving={setSaving}
+            onSaved={() => {
+              savedArea.current = area(outline ?? []);
+              savedCentre.current = centre(outline ?? []);
+              savedOutline.current = outline ?? [];
+              setAwaitShape(reportedShape);
+              setDirty(false);
+            }}
+            onBack={requestLeave}
+            onClose={leaveFocus}
+            onZoneDraft={setZoneDraft}
+          />
+        ) : (
+          <div className="ly-sheet__body">
+            <h2 className="ly-sheet__title">
+              <Icon name="mdi:pencil-ruler" /> {t("Edit map")}
+            </h2>
+            <ol className="ly-steps">
+              <li>{t("Tap a zone, no-go area or channel to edit it.")}</li>
+              <li>{t("Drag the white points to reshape, tap the small dots on an edge to add a point.")}</li>
+            </ol>
+            <p className="ly-muted">{t("New zones are created by driving the mower around them in the Lymow app; the robot can't create them from a drawing.")}</p>
+            <Button variant="primary" icon="mdi:check" block onClick={exitEdit}>
+              {t("Done editing")}
+            </Button>
+          </div>
+        )}
+      </aside>
+    </div>
+  );
+}
+
+function MapStatus({ map }: { map: MapData }) {
+  const t = useT();
+  const battery = num(useMowerEntity("battery")?.state);
+  const ws = map.workStatus;
+  const rtk = map.rtkStatus !== undefined ? RTK[map.rtkStatus] : undefined;
+  const mowing = ws !== undefined && MOWING_WORK_STATUS.has(ws);
+  return (
+    <div className="ly-map__status">
+      {ws !== undefined && (
+        <Badge tone={mowing ? "good" : ws === 7 || ws === 13 ? "bad" : ws === 3 || ws === 10 ? "warn" : "info"} icon="mdi:robot-mower">
+          {WORK_STATUS[ws] ? t(WORK_STATUS[ws]) : t("Status {n}", { n: ws })}
+        </Badge>
+      )}
+      {mowing && map.mowProgress !== undefined && <Badge icon="mdi:grass">{Math.round(map.mowProgress)}%</Badge>}
+      {battery !== undefined && <Badge icon="mdi:battery">{Math.round(battery)}%</Badge>}
+      {rtk && (
+        <Badge tone={rtk.tone} icon="mdi:satellite-variant">
+          {t(rtk.label)}
+        </Badge>
+      )}
+    </div>
+  );
+}
+
+function BrowsePanel(p: {
+  map: MapData;
+  selected: Set<string>;
+  setSelected: (s: Set<string>) => void;
+  onEdit: () => void;
+  labels: LabelMode;
+  setLabels: (l: LabelMode) => void;
+  showTrail: boolean;
+  setShowTrail: (v: boolean) => void;
+}) {
+  const t = useT();
+  const { call, snap, device } = useMower();
+  // Like Overview's Start: an offline mower can't start now (and might later,
+  // unexpectedly); read-only users can't act at all.
+  const online = snap?.online === true && device.can_control !== false;
+  const ui = useUi();
+  const zones = p.map.go_zones ?? [];
+  // Only zones still on the map: one deleted elsewhere must not be sent to the mower.
+  const sel = [...p.selected].filter((id) => zones.some((z) => z.hashId === id));
+  const toggle = (id: string) => {
+    const next = new Set(p.selected);
+    next.has(id) ? next.delete(id) : next.add(id);
+    p.setSelected(next);
+  };
+  return (
+    <div className="ly-sheet__body">
+      <h2 className="ly-sheet__title">
+        <Icon name="mdi:texture-box" /> {t("Zones")}
+        <span className="ly-muted">{zones.length}</span>
+      </h2>
+      <p className="ly-muted">{t("Tap zones on the map or in the list to choose what to mow.")}</p>
+      <ul className="ly-zones">
+        {zones.map((z, i) => (
+          <li key={z.hashId} className={cx("ly-zone", p.selected.has(z.hashId) && "ly-zone--sel", z.isEnabled === false && "ly-zone--off")}>
+            <button type="button" className="ly-zone__pick" onClick={() => toggle(z.hashId)} aria-pressed={p.selected.has(z.hashId)}>
+              <span className="ly-check">{p.selected.has(z.hashId) && <Icon name="mdi:check" size={14} />}</span>
+              <span className="ly-zone__name">{zoneLabel(z, i, t)}</span>
+              <span className="ly-zone__meta">
+                {Math.round(z.area ?? area(z.polygon ?? []))} m² · {z.cutHeight ?? z.zoneConfig?.cutHeight ?? "–"} mm
+              </span>
+            </button>
+            {z.isEnabled === false && <span className="ly-muted">{t("Off")}</span>}
+          </li>
+        ))}
+      </ul>
+      <div className="ly-stack">
+        <Button
+          variant="primary"
+          icon="mdi:play"
+          block
+          disabled={!sel.length || !online}
+          onClick={async () => {
+            if (await call("lymow", "start_zone", { zone_hash_ids: sel }, t("Mowing {n} zones", { n: sel.length }))) p.setSelected(new Set());
+          }}
+        >
+          {sel.length ? t("Mow {n} selected", { n: sel.length }) : t("Select zones to mow")}
+        </Button>
+        {sel.length >= 2 && (
+          <Button
+            icon="mdi:vector-union"
+            block
+            disabled={!online}
+            onClick={async () => {
+              const ok = await ui.confirm({
+                title: t("Merge {n} zones?", { n: sel.length }),
+                body: t("They become one zone that keeps the first zone's ID and settings. Schedules that pointed at the other zones need to be updated."),
+                confirm: t("Merge"),
+              });
+              if (ok && (await call("lymow", "merge_zones", { zone_hash_ids: sel }, t("Zones merged")))) p.setSelected(new Set());
+            }}
+          >
+            {t("Merge selected")}
+          </Button>
+        )}
+        <Button icon="mdi:pencil-ruler" block onClick={p.onEdit} disabled={device.can_control === false}>
+          {t("Edit map")}
+        </Button>
+      </div>
+      <details className="ly-details">
+        <summary>{t("Display")}</summary>
+        <Field label={t("Labels")}>
+          <Segmented
+            value={p.labels}
+            onChange={p.setLabels}
+            options={[
+              { value: "name", label: t("Name") },
+              { value: "area", label: t("Area") },
+              { value: "both", label: t("Both") },
+              { value: "none", label: t("None") },
+            ]}
+          />
+        </Field>
+        <div className="ly-row">
+          <span>{t("Show mowing trail")}</span>
+          <Toggle checked={p.showTrail} onChange={p.setShowTrail} label={t("Show mowing trail")} />
+        </div>
+        <ul className="ly-legend">
+          <li>
+            <i className="lg-go" /> {t("Zone")}
+          </li>
+          <li>
+            <i className="lg-off" /> {t("Disabled zone")}
+          </li>
+          <li>
+            <i className="lg-nogo" /> {t("No-go area")}
+          </li>
+          <li>
+            <i className="lg-ch" /> {t("Channel")}
+          </li>
+          <li>
+            <i className="lg-mowed" /> {t("Mowed")}
+          </li>
+        </ul>
+      </details>
+    </div>
+  );
+}
+
+function EditPanel(p: {
+  focus: Focus;
+  zone: Zone;
+  index: number;
+  editPts: Point[] | null;
+  outline: Point[] | null;
+  dirty: boolean;
+  vertex: number | null;
+  onDeleteVertex: () => void;
+  onReset: () => void;
+  onSaved: () => void;
+  onSaving: (on: boolean) => void;
+  awaiting: boolean;
+  onBack: () => void;
+  onClose: () => void;
+  onZoneDraft: (pending: boolean) => void;
+}) {
+  const t = useT();
+  const { call, snap, device } = useMower();
+  const ui = useUi();
+  const { focus, zone } = p;
+  const texts = {
+    go: { rename: t("Rename zone"), removed: t("The zone is removed from the mower's map. Restoring a map backup can bring it back, but its no-go areas may not return.") },
+    nogo: { rename: t("Rename no-go area"), removed: t("The no-go area is removed from the mower's map. Restoring a map backup doesn't always bring no-go areas back, so only delete it if you're sure.") },
+    ch: { rename: t("Rename channel"), removed: t("The channel is removed from the mower's map. You can bring it back by restoring a map backup.") },
+  }[focus.kind];
+  const title = focus.kind === "go" ? zoneLabel(zone, p.index, t) : zone.name?.trim() || (focus.kind === "nogo" ? t("No-go area") : t("Channel"));
+  const key = focus.kind === "go" ? "zone_hash_id" : focus.kind === "nogo" ? "nogo_hash_id" : "channel_hash_id";
+  const svc = focus.kind === "go" ? "zone" : focus.kind === "nogo" ? "nogo_zone" : "channel";
+  // No-go and channel names live in Home Assistant, so they can also be cleared.
+  const haName = focus.kind !== "go";
+  const valid = !p.outline || isSimplePolygon(p.outline);
+
+  return (
+    <div className="ly-sheet__body">
+      <h2 className="ly-sheet__title">
+        <Button variant="ghost" icon="mdi:arrow-left" title={t("Back")} onClick={p.onBack} />
+        {title}
+      </h2>
+      <div className="ly-btnrow">
+        <Button
+          icon="mdi:rename-outline"
+          disabled={device.can_control === false || (!haName && snap?.online !== true)}
+          onClick={async () => {
+            const name = await ui.prompt({ title: texts.rename, label: t("Name"), value: zone.name ?? "", placeholder: title, maxLength: 40, allowEmpty: haName });
+            if (name !== null && (name || haName)) await call("lymow", `rename_${svc}`, { [key]: zone.hashId, name }, t("Renamed"));
+          }}
+        >
+          {t("Rename")}
+        </Button>
+        <Button
+          variant="danger"
+          icon="mdi:delete-outline"
+          disabled={snap?.online !== true || device.can_control === false}
+          onClick={async () => {
+            const ok = await ui.confirm({
+              title: t("Delete {name}?", { name: title }),
+              body: texts.removed,
+              confirm: t("Delete"),
+              danger: true,
+            });
+            if (ok && (await call("lymow", `delete_${svc}`, { [key]: zone.hashId }, t("Deleted")))) p.onClose();
+          }}
+        >
+          {t("Delete")}
+        </Button>
+      </div>
+
+      {focus.kind === "nogo" && (
+        <p className="ly-muted">{t("The mower doesn't accept changes to a no-go area's shape yet. Its name is kept in Home Assistant.")}</p>
+      )}
+      {p.editPts && !valid && <p className="ly-muted">{t("The outline crosses itself or has no area. Move the points so the edges don't cross.")}</p>}
+      {p.editPts && (
+        <section className="ly-subsection">
+          <h3>{t("Shape")}</h3>
+          <p className="ly-muted">
+            {t("Drag the points to reshape. Tap a small dot on an edge to add a point. Select a point and press Delete to remove it. Edges you don't touch keep their full detail.")}
+          </p>
+          <div className="ly-btnrow">
+            <Button
+              variant="primary"
+              icon="mdi:content-save-outline"
+              disabled={!p.dirty || p.awaiting || snap?.online !== true || device.can_control === false || !valid}
+              onClick={async () => {
+                const polygon = p.outline!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
+                p.onSaving(true); // read-only from here: later drags would not be in this save
+                const ok = await call("lymow", focus.kind === "go" ? "update_zone_polygon" : "update_nogo_polygon", { [key]: zone.hashId, polygon }, t("Shape saved"));
+                if (ok) p.onSaved();
+                p.onSaving(false);
+              }}
+            >
+              {t("Save shape")}
+            </Button>
+            <Button icon="mdi:undo" disabled={!p.dirty} onClick={p.onReset}>
+              {t("Discard")}
+            </Button>
+            <Button icon="mdi:vector-point-minus" disabled={p.vertex === null || p.editPts.length <= 3} onClick={p.onDeleteVertex}>
+              {t("Delete point")}
+            </Button>
+          </div>
+          {p.awaiting && (
+            <p className="ly-muted">
+              <span className="ly-spinner" /> {t("Waiting for the mower to confirm the new shape…")}
+            </p>
+          )}
+        </section>
+      )}
+
+      {focus.kind === "go" && <ZoneSettings key={zone.hashId} zone={zone} global={snap?.map.mowing_settings} onDraft={p.onZoneDraft} />}
+    </div>
+  );
+}
+
+const ZONE_FIELDS = [
+  { key: "cut_height", src: "cutHeight", label: "Cutting height", min: 20, max: 100, step: 5, unit: "mm", fallback: 40 },
+  { key: "move_speed", src: "moveSpeed", label: "Speed", min: 0.1, max: 1.5, step: 0.05, unit: "m/s", fallback: 0.5 },
+  { key: "path_spacing", src: "pathSpacing", label: "Path spacing", min: 20, max: 40, step: 1, unit: "cm", fallback: 30 },
+  { key: "perimeter_mow_laps", src: "perimeterMowLaps", label: "Perimeter laps", min: 0, max: 3, step: 1, unit: undefined, fallback: 1 },
+] as const;
+
+const ZONE_TOGGLES = [
+  { key: "safe_margin_mode", src: "safeMarginMode", label: "Keep a safety margin from edges" },
+  { key: "turn_off_outer_motor", src: "turnOffOuterMotor", label: "Turn off outer blade at edges" },
+] as const;
+
+// Unapplied (or unconfirmed) zone settings outlive the view, like shape drafts:
+// leaving through HA's sidebar can't be vetoed.
+const zoneDrafts = new Map<string, { draft: Record<string, number | boolean>; saved: boolean; until?: number }>();
+/** Drop the kept settings draft of the zone being discarded (only that one). */
+function dropZoneDrafts(thing: string, zoneId: string | undefined) {
+  if (zoneId) zoneDrafts.delete(`${thing}:${zoneId}`);
+}
+
+function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<string, any> | undefined; onDraft: (pending: boolean) => void }) {
+  const t = useT();
+  const ui = useUi();
+  const { call, device, snap } = useMower();
+  const draftKey = `${device.thing}:${zone.hashId}`;
+  const kept = zoneDrafts.get(draftKey);
+  // Effective value: the zone's own config, else the global default the mower uses.
+  const effective = (src: string, fallback: number): number => {
+    const own = src === "cutHeight" ? zone.cutHeight ?? zone.zoneConfig?.cutHeight : src === "pathSpacing" ? zone.pathSpacing ?? zone.zoneConfig?.pathSpacing : zone.zoneConfig?.[src];
+    return typeof own === "number" ? own : typeof global?.[src] === "number" ? global[src] : fallback;
+  };
+  // Only fields the user moved are sent, so untouched ones keep inheriting.
+  const [draft, setDraft] = useState<Record<string, number | boolean>>(kept?.draft ?? {});
+  const [saved, setSaved] = useState(kept?.saved ?? false);
+  useEffect(() => {
+    if (Object.keys(draft).length) zoneDrafts.set(draftKey, { draft, saved, until: zoneDrafts.get(draftKey)?.until });
+    else zoneDrafts.delete(draftKey);
+  }, [draft, saved]);
+  const changed = Object.keys(draft).length > 0;
+  useEffect(() => {
+    onDraft(changed);
+    return () => onDraft(false);
+  }, [changed]);
+  // Keep showing what was applied until the map reply carries it, then drop the draft.
+  const flag = (src: string): boolean => Boolean(zone.zoneConfig?.[src] ?? global?.[src] ?? false);
+  const reported = [...ZONE_FIELDS.map((f) => effective(f.src, f.fallback)), ...ZONE_TOGGLES.map((f) => flag(f.src))].join("|");
+  useEffect(() => {
+    const sliders = ZONE_FIELDS.every((f) => !(f.key in draft) || Math.abs((draft[f.key] as number) - effective(f.src, f.fallback)) < 1e-6);
+    const toggles = ZONE_TOGGLES.every((f) => !(f.key in draft) || draft[f.key] === flag(f.src));
+    if (saved && sliders && toggles) {
+      setDraft({});
+      setSaved(false);
+    }
+  }, [reported, saved]); // also when Apply returns after the reply already arrived
+  // No matching reply (rejected, normalised or lost): keep the draft but let the user retry.
+  useEffect(() => {
+    if (!saved) return;
+    // Absolute deadline kept with the draft, so time spent away counts.
+    const until = zoneDrafts.get(draftKey)?.until ?? Date.now() + 20000;
+    const id = window.setTimeout(() => {
+      setSaved(false);
+      ui.toast(t("The mower hasn't confirmed these settings yet. Apply again to retry."), "bad");
+    }, Math.max(0, until - Date.now()));
+    return () => window.clearTimeout(id);
+  }, [saved]);
+  return (
+    <section className="ly-subsection">
+      <h3>{t("Mowing settings for this zone")}</h3>
+      {ZONE_FIELDS.map((f) => (
+        <Field key={f.key} label={t(f.label)}>
+          <Slider
+            value={(draft[f.key] as number | undefined) ?? effective(f.src, f.fallback)}
+            min={f.min}
+            max={f.max}
+            step={f.step}
+            unit={f.unit}
+            format={f.key === "move_speed" ? (v) => v.toFixed(2) : undefined}
+            onChange={(v) => {
+              setSaved(false);
+              setDraft({ ...draft, [f.key]: v });
+            }}
+          />
+        </Field>
+      ))}
+      {ZONE_TOGGLES.map((f) => (
+        <div className="ly-row" key={f.key}>
+          <span>{t(f.label)}</span>
+          <Toggle
+            label={t(f.label)}
+            checked={(draft[f.key] as boolean | undefined) ?? flag(f.src)}
+            onChange={(v) => {
+              setSaved(false);
+              setDraft({ ...draft, [f.key]: v });
+            }}
+          />
+        </div>
+      ))}
+      <Button
+        variant="primary"
+        icon="mdi:check"
+        disabled={!changed || saved || snap?.online !== true || device.can_control === false}
+        onClick={async () => {
+          if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) {
+            // Recorded even if the view is gone by now, unless a newer draft replaced it.
+            const cur = zoneDrafts.get(draftKey);
+            if (!cur || JSON.stringify(cur.draft) === JSON.stringify(draft)) {
+              zoneDrafts.set(draftKey, { draft, saved: true, until: Date.now() + 20000 });
+              setSaved(true);
+            }
+          }
+        }}
+      >
+        {t("Apply zone settings")}
+      </Button>
+    </section>
+  );
+}

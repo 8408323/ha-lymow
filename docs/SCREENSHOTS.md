@@ -1,26 +1,28 @@
 # Screenshots
 
-All views of the example dashboard ([`examples/dashboard.yaml`](../examples/dashboard.yaml)).
+The **Lymow** sidebar panel (see the README for what each section does).
 
-## Overview — map card + live status
+## Overview
 
-![Dashboard overview](screenshots/dashboard-overview-cropped.png)
+![Overview](screenshots/panel-overview.png)
+
+## Map
+
+Tap zones to mow or merge them; **Edit map** reshapes zones and renames or deletes zones, no-go areas and channels.
+
+![Map](screenshots/panel-map.png)
+
+## Camera & drive
+
+![Camera and drive](screenshots/panel-camera.png)
+
+## Map backups
+
+![Map backups](screenshots/panel-backups.png)
 
 ## Settings
 
-![Settings](screenshots/dashboard-settings-cropped.png)
-
-## Backups
-
-![Backups](screenshots/dashboard-backups-cropped.png)
-
-## Schedules
-
-![Schedules](screenshots/dashboard-schedules-cropped.png)
-
-## RTK diagnostics
-
-![RTK diagnostics](screenshots/rtk-diagnostics-cropped.png)
+![Settings](screenshots/panel-settings.png)
 
 ## Integration setup
 

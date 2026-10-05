@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
+import math
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -15,6 +18,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, HomeAssistantError
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import LymowApiClient
@@ -247,6 +251,14 @@ _OTA_TERMINAL_STATUSES = frozenset(
 )
 
 
+# Merging zones may grow the area by at most this fraction (hull slack for zones
+# that share an edge); more means the zones are apart and the gap would be added.
+_MERGE_MAX_EXTRA_AREA = 0.05
+# Zones closer than this (metres) count as touching: mapped neighbours rarely
+# share an edge exactly.
+_MERGE_TOUCH_TOLERANCE_M = 0.3
+
+
 class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     """Coordinator that merges REST polling with live MQTT state.
 
@@ -272,6 +284,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._mqtt = mqtt_client
         self.devices = devices
         self._mqtt_state: dict[str, dict[str, Any]] = {}
+        # No-go zone names live in HA only (the mower and app have no names for
+        # them), persisted per mower: {thing: {hashId: name}}.
+        self._nogo_names: dict[str, dict[str, str]] = {}
         # Track work status per device to detect important transitions.
         self._prev_work_status: dict[str, int] = {}
         # Track online state so on_mqtt_online only fires the persistent-notification
@@ -390,6 +405,12 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # A QUERY_SCHEDULES reply carries the full schedule list in one message
         # (decoded into "schedules"); other pushes omit the key, leaving it intact.
         if "mapData" in patch:
+            # Stamp real map replies, so the panel can tell the mower's answer from
+            # an optimistic local patch.
+            absorbed = self._absorb_edit_echo(thing_name, patch)
+            # Only full map replies are stamped: an echo merged into the cache carries
+            # the cache's (possibly optimistic) settings, so it can't confirm a save.
+            patch = absorbed if absorbed is not patch else {**patch, "mapReceivedAt": time.time()}
             patch = self._apply_channel_name_overrides(thing_name, patch)
         # Cache non-empty pathData so the map card can show last-mow coverage
         # even after the robot docks (robot stops sending path data when docked).
@@ -409,15 +430,64 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         self._check_work_status_transition(thing_name, patch)
         self._check_rtk_guard(thing_name, patch)
 
-    def _apply_channel_name_overrides(self, thing_name: str, patch: dict[str, Any]) -> dict[str, Any]:
-        """Re-apply HA-side channel name overrides to a mapData patch before storing."""
-        overrides = self._channel_name_overrides.get(thing_name)
-        if not overrides:
+    _MAP_LISTS = ("goZones", "nogoZones", "channels")
+
+    def _absorb_edit_echo(self, thing_name: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Keep the cached map when the mower only echoes an edit.
+
+        After a rename the mower sends a map reply listing just the edited zone,
+        without any outline. Taken as a full map it would wipe every zone until
+        the next query, so a reply that names zones but carries no geometry at
+        all only updates names in the cached map. An empty map (everything
+        deleted) is still taken as is."""
+        new = patch["mapData"]
+        if not isinstance(new, dict):
+            return {**patch, "mapData": {}}  # untrusted decode: never iterate a non-mapping
+        zones = [
+            z
+            for k in self._MAP_LISTS
+            for z in (new.get(k) if isinstance(new.get(k), list) else [])
+            if isinstance(z, dict)
+        ]
+        if not zones or any(z.get("polygon") for z in zones):
             return patch
+        old = ((self.data or {}).get(thing_name) or {}).get("mapData")
+        if not old:
+            return patch
+        names = {
+            z["hashId"]: z["name"]
+            for z in zones
+            if isinstance(z.get("hashId"), str) and z["hashId"].strip() and isinstance(z.get("name"), str) and z["name"]
+        }
+        merged = {
+            **old,
+            **{
+                k: [
+                    {**z, "name": names[z["hashId"]]}
+                    if isinstance(z, dict) and isinstance(z.get("hashId"), str) and z["hashId"] in names
+                    else z
+                    for z in (old.get(k) if isinstance(old.get(k), list) else [])
+                ]
+                for k in self._MAP_LISTS
+            },
+        }
+        return {**patch, "mapData": merged}
+
+    def _apply_channel_name_overrides(self, thing_name: str, patch: dict[str, Any]) -> dict[str, Any]:
+        """Re-apply HA-side channel names to a mapData patch before storing.
+
+        Channels have no name on the mower, so the overrides are the only source:
+        a channel without one gets no name (a cleared name must not come back
+        from an earlier cached copy)."""
+        overrides = self._channel_name_overrides.get(thing_name) or {}
         map_data = patch["mapData"]
-        channels = map_data.get("channels", [])
+        channels = map_data.get("channels") if isinstance(map_data.get("channels"), list) else []
         new_channels = [
-            {**ch, "name": overrides[ch["hashId"]]} if ch.get("hashId") in overrides else ch for ch in channels
+            {**ch, "name": overrides[ch["hashId"]]}
+            if isinstance(ch.get("hashId"), str) and ch["hashId"] in overrides
+            else {k: v for k, v in ch.items() if k != "name"}
+            for ch in channels
+            if isinstance(ch, dict)
         ]
         return {**patch, "mapData": {**map_data, "channels": new_channels}}
 
@@ -762,7 +832,10 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                     **backup_fields,
                     **self._ota_state.get(thing, {}),
                     **self._mqtt_state.get(thing, {}),
+                    "nogoNames": dict(self._nogo_names.get(thing, {})),
                 }
+                if "mapData" in merged:
+                    merged = self._apply_channel_name_overrides(thing, merged)
                 _apply_config_defaults(merged)
                 result[thing] = merged
                 # Fire robotConfig + map queries once per HA session so
@@ -1066,27 +1139,57 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             new_device = {**self.data[thing_name], "mapData": new_map}
             self.async_set_updated_data({**self.data, thing_name: new_device})
 
-    async def async_rename_nogo_zone(self, thing_name: str, hash_id: str, name: str) -> None:
-        """Rename a no-go zone by hashId — mirrors async_rename_zone but targets PbMap.nogoZones."""
-        from .protocol import encode_rename_nogo_zone
+    def _name_store(self, kind: str, thing: str) -> Store:
+        # The thing name comes from the cloud and ends up in a .storage file name:
+        # keep only safe characters and add a short hash so distinct names can't collide.
+        thing = str(thing)  # the device list is untrusted; never let a bad type break setup
+        safe = re.sub(r"[^A-Za-z0-9_-]", "_", thing)[:64]
+        digest = hashlib.sha256(thing.encode()).hexdigest()[:8]
+        key = f"{DOMAIN}.{kind}_names.{safe}" if safe == thing else f"{DOMAIN}.{kind}_names.{safe}_{digest}"
+        return Store(self.hass, 1, key)
 
-        await self._mqtt.async_publish_command(thing_name, encode_rename_nogo_zone(hash_id, name))
+    def _names(self, kind: str) -> dict[str, dict[str, str]]:
+        return self._nogo_names if kind == "nogo" else self._channel_name_overrides
+
+    async def async_load_names(self) -> None:
+        """Load the HA-side no-go zone and channel names for every mower of this entry."""
+        for device in self.devices:
+            thing = device["deviceThingName"]
+            for kind in ("nogo", "channel"):
+                stored = await self._name_store(kind, thing).async_load()
+                if isinstance(stored, dict):
+                    self._names(kind)[thing] = {str(k): v for k, v in stored.items() if isinstance(v, str) and v}
+
+    async def _async_set_name(self, kind: str, thing_name: str, hash_id: str, name: str) -> str:
+        """Store (or with an empty name, clear) an HA-side name; returns the stored name."""
+        names = self._names(kind).setdefault(thing_name, {})
+        name = name.strip()
+        if name:
+            names[hash_id] = name
+        else:
+            names.pop(hash_id, None)
+        await self._name_store(kind, thing_name).async_save(dict(names))
+        return name
+
+    async def async_rename_nogo_zone(self, thing_name: str, hash_id: str, name: str) -> None:
+        """Name a no-go zone. Kept in HA storage: the mower doesn't keep no-go names
+        (the app can't name them), so nothing is sent. An empty name clears it."""
+        await self._async_set_name("nogo", thing_name, hash_id, name)
+        names = self._nogo_names[thing_name]
         if self.data and thing_name in self.data:
-            map_data = self.data[thing_name].get("mapData", {})
-            new_zones = [
-                {**z, "name": name} if z.get("hashId") == hash_id else z for z in map_data.get("nogoZones", [])
-            ]
-            new_map = {**map_data, "nogoZones": new_zones}
-            new_device = {**self.data[thing_name], "mapData": new_map}
-            self.async_set_updated_data({**self.data, thing_name: new_device})
+            self.async_set_updated_data({**self.data, thing_name: {**self.data[thing_name], "nogoNames": dict(names)}})
 
     async def async_rename_channel(self, thing_name: str, hash_id: str, name: str) -> None:
-        """Assign a display name to a channel (HA-side only; no protobuf name field)."""
-        self._channel_name_overrides.setdefault(thing_name, {})[hash_id] = name
+        """Name a channel. HA-side only (channels have no name field on the mower),
+        persisted in HA storage; an empty name clears it."""
+        name = await self._async_set_name("channel", thing_name, hash_id, name)
         if self.data and thing_name in self.data:
             map_data = self.data[thing_name].get("mapData", {})
             new_channels = [
-                {**ch, "name": name} if ch.get("hashId") == hash_id else ch for ch in map_data.get("channels", [])
+                ({**ch, "name": name} if name else {k: v for k, v in ch.items() if k != "name"})
+                if ch.get("hashId") == hash_id
+                else ch
+                for ch in map_data.get("channels", [])
             ]
             new_map = {**map_data, "channels": new_channels}
             new_device = {**self.data[thing_name], "mapData": new_map}
@@ -1617,6 +1720,20 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
 
         if not updates:
             raise HomeAssistantError("set_zone_config: at least one zone update is required")
+        # The wire record always carries isEnabled (an omitted value encodes as
+        # enabled), so a settings-only update would silently re-enable a zone the
+        # user switched off. Fill it in from the cached map.
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        zones = map_data.get("goZones") if isinstance(map_data, dict) else None
+        cached = {
+            z["hashId"]: z
+            for z in (zones if isinstance(zones, list) else [])
+            if isinstance(z, dict) and isinstance(z.get("hashId"), str) and z["hashId"].strip()
+        }
+        updates = [
+            u if "isEnabled" in u else {**u, "isEnabled": cached.get(u.get("hashId"), {}).get("isEnabled", True)}
+            for u in updates
+        ]
         await self._mqtt.async_publish_command(thing_name, encode_set_zone_config(updates))
         await self.async_query_map(thing_name)
 
@@ -1993,23 +2110,30 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         without waiting out the 5-min list cache (the backend lists it only once the
         snapshot has uploaded). Each poll forces a fresh fetch and pushes an update."""
 
-        for delay in _BACKUP_REFRESH_OFFSETS_S:
-            await asyncio.sleep(delay)
-            self._backup_map_cache.pop(thing_name, None)
-            fields = await self._fetch_backup_map_fields(thing_name)
-            if isinstance(fields, dict) and fields and self.data and thing_name in self.data:
-                merged = {**self.data[thing_name], **fields}
-                self.async_set_updated_data({**self.data, thing_name: merged})
+        # The offsets are measured from the create, so sleep only the gap to each.
+        previous = 0
+        for offset in _BACKUP_REFRESH_OFFSETS_S:
+            await asyncio.sleep(offset - previous)
+            previous = offset
+            await self._async_publish_backups(thing_name)
 
     async def async_delete_backup_map(self, thing_name: str, object_key: str) -> None:
-        """Delete a saved backup map and drop the cached backup snapshot."""
+        """Delete a saved backup map and publish the updated list."""
         await self._client.delete_backup_map(object_key)
-        self._backup_map_cache.pop(thing_name, None)
+        await self._async_publish_backups(thing_name)
 
     async def async_rename_backup_map(self, thing_name: str, object_key: str, name: str) -> None:
-        """Rename a saved backup map and drop the cached backup snapshot."""
+        """Rename a saved backup map and publish the updated list."""
         await self._client.rename_backup_map(object_key, name)
+        await self._async_publish_backups(thing_name)
+
+    async def _async_publish_backups(self, thing_name: str) -> None:
+        """Refetch the backup list now, so listeners (the panel) never act on a
+        renamed/deleted entry until the next 5-minute cache refresh."""
         self._backup_map_cache.pop(thing_name, None)
+        fields = await self._fetch_backup_map_fields(thing_name)
+        if isinstance(fields, dict) and fields and self.data and thing_name in self.data:
+            self.async_set_updated_data({**self.data, thing_name: {**self.data[thing_name], **fields}})
 
     async def _maybe_refresh_ota(self, thing_name: str) -> None:
         """Refresh the OTA snapshot for one device if our cache is stale.
@@ -2203,7 +2327,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         Raises ``HomeAssistantError`` if the map isn't loaded, fewer than 2 zones
         are requested, or any requested zone is missing from the cached map.
         """
-        from .geometry import merge_zone_polygons
+        from .geometry import merge_zone_polygons, polygon_area, polygons_touch, union_area
 
         if len(hash_ids) < 2:
             raise HomeAssistantError(f"async_merge_zones needs at least 2 zones, got {len(hash_ids)}")
@@ -2214,13 +2338,50 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         missing = [h for h in hash_ids if h not in existing]
         if missing:
             raise HomeAssistantError(f"Zone(s) not found in map: {missing}")
-        polygons = [p for p in (existing[h].get("polygon") or [] for h in hash_ids) if p]
-        if not polygons:
-            raise HomeAssistantError("None of the requested zones have a polygon to merge")
-        try:
-            merged_hull = merge_zone_polygons(*polygons)
-        except ValueError as err:
-            raise HomeAssistantError(f"Could not merge zones: {err}") from err
+        polygons = [existing[h].get("polygon") for h in hash_ids]
+
+        # Every zone needs an outline: one without would be deleted without being merged.
+        def _ok(pt: Any) -> bool:
+            return isinstance(pt, dict) and all(
+                isinstance(pt.get(k), (int, float))
+                and not isinstance(pt.get(k), bool)
+                and math.isfinite(pt[k])
+                and abs(pt[k]) < 1e5
+                for k in ("x", "y")
+            )
+
+        # Every vertex must be a sane point: a NaN would slip past the area checks below.
+        # …and every outline must enclose an area (three collinear points don't).
+        if any(
+            not isinstance(p, list) or len(p) < 3 or not all(_ok(pt) for pt in p) or polygon_area(p) <= 0
+            for p in polygons
+        ):
+            raise HomeAssistantError("Every zone to merge needs an outline; refresh the map and try again")
+        # Outlines with area always yield a hull of 3+ points; the check below is the backstop.
+        merged_hull = merge_zone_polygons(*polygons)
+        if len(merged_hull) < 3 or polygon_area(merged_hull) <= 0:
+            raise HomeAssistantError("Could not merge zones: the merged outline has no area")
+        # The merged outline is the convex hull: for zones that don't touch it would
+        # also take in the ground between them (paths, beds, a house). Refuse unless
+        # the hull adds little beyond the zones themselves.
+        # Every zone must also reach the others (directly or via a chain), so two
+        # long zones with a strip of lawn between them can't slip under the area check.
+        reached = {0}
+        frontier = [0]
+        while frontier:
+            i = frontier.pop()
+            for j in range(len(polygons)):
+                if j not in reached and polygons_touch(polygons[i], polygons[j], _MERGE_TOUCH_TOLERANCE_M):
+                    reached.add(j)
+                    frontier.append(j)
+        # Against the union, not the sum of areas: overlapping zones would otherwise
+        # hide the hull's extra ground behind the double-counted overlap.
+        inputs_area = union_area(polygons)
+        if len(reached) < len(polygons) or polygon_area(merged_hull) > inputs_area * (1 + _MERGE_MAX_EXTRA_AREA):
+            raise HomeAssistantError(
+                "Merging these zones would add ground outside them to the mowing area (the merged outline is "
+                "their convex hull). Merge only zones that share an edge and together form a convex shape."
+            )
 
         keeper = hash_ids[0]
         await self._mqtt.async_publish_command(thing_name, encode_set_zone_polygon(keeper, merged_hull))

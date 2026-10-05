@@ -13,10 +13,12 @@ from __future__ import annotations
 # ---------------------------------------------------------------------------
 # Minimal HA stubs so __init__.py can import without the HA stack
 # ---------------------------------------------------------------------------
+import asyncio
 import importlib.util
 import os
 import sys
 import types
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -193,7 +195,9 @@ def _make_hass(www_registered: bool = False) -> MagicMock:
     hass = MagicMock()
     hass.data = {}
     if www_registered:
-        hass.data[_WWW_REGISTERED_KEY] = True
+        done = asyncio.get_event_loop().create_future()
+        done.set_result(None)
+        hass.data[_WWW_REGISTERED_KEY] = done
     hass.http.async_register_static_paths = AsyncMock()
     hass.config_entries.async_forward_entry_setups = AsyncMock()
     hass.config_entries.async_unload_platforms = AsyncMock(return_value=True)
@@ -206,6 +210,7 @@ def _make_hass(www_registered: bool = False) -> MagicMock:
 def _make_coordinator() -> MagicMock:
     coord = MagicMock()
     coord.async_config_entry_first_refresh = AsyncMock()
+    coord.async_load_names = AsyncMock()
     coord.async_query_all_maps = AsyncMock()
     coord.async_query_all_schedules = AsyncMock()
     coord.async_query_all_robot_configs = AsyncMock()
@@ -495,7 +500,7 @@ async def test_async_setup_entry_registers_www_once() -> None:
 
     # www was not yet registered, so async_register_static_paths should have been called
     hass.http.async_register_static_paths.assert_awaited_once()
-    assert hass.data[_WWW_REGISTERED_KEY] is True
+    assert hass.data[_WWW_REGISTERED_KEY].done()
 
 
 async def test_async_setup_entry_skips_www_when_already_registered() -> None:
@@ -763,7 +768,7 @@ async def test_async_setup_entry_skips_static_paths_when_www_dir_missing() -> No
     assert result is True
     hass.http.async_register_static_paths.assert_not_awaited()
     # The www-registered key is still set so we don't re-check the dir each setup.
-    assert hass.data[_WWW_REGISTERED_KEY] is True
+    assert hass.data[_WWW_REGISTERED_KEY].done()
     # No JS served → no panel registered (would be a broken sidebar entry).
     assert _PANEL_REGISTERED_KEY not in hass.data
 
@@ -815,89 +820,130 @@ async def test_async_setup_entry_reregisters_panel_after_reload() -> None:
 
 def test_card_url_uses_manifest_version_when_readable() -> None:
     """Readable manifest.json yields a ?v=<version> cache-buster from its version field."""
-    url = _lymow._card_url("lymow-map-card.js")
-    assert url.startswith(f"/custom_components/{DOMAIN}/lymow-map-card.js?v=")
+    url = _lymow._card_url("lymow-panel.js")
+    assert url.startswith(f"/custom_components/{DOMAIN}/lymow-panel.js?v=")
     # The version comes straight from the real manifest, not the "0" fallback.
     assert not url.endswith("?v=0")
 
 
-def _stub_lovelace_resources_module() -> None:
-    """Inject a stub homeassistant.components.lovelace.resources with ResourceStorageCollection."""
-    import types as _types
-
-    if "homeassistant.components.lovelace" not in sys.modules:
-        sys.modules["homeassistant.components.lovelace"] = _types.ModuleType("homeassistant.components.lovelace")
-    mod = _types.ModuleType("homeassistant.components.lovelace.resources")
-
-    class ResourceStorageCollection:  # noqa: D401 - stub class, attr presence is all that matters
-        pass
-
-    mod.ResourceStorageCollection = ResourceStorageCollection
-    sys.modules["homeassistant.components.lovelace.resources"] = mod
-
-
-async def test_ensure_lovelace_resources_updates_and_creates() -> None:
-    """Stale ?v= entries are updated in-place; missing card files are created."""
-    _stub_lovelace_resources_module()
-
+def _resources(items):
     resources = MagicMock()
     resources.async_load = AsyncMock()
-    resources.async_update_item = AsyncMock()
-    resources.async_create_item = AsyncMock()
-    # Existing items: one stale (map card with old version → update branch),
-    # one already current (camera card → no-op), plus an unrelated resource.
-    current_map_url = _lymow._card_url("lymow-map-card.js")
-    stale_map_url = f"/custom_components/{DOMAIN}/lymow-map-card.js?v=old"
-    current_camera_url = _lymow._card_url("lymow-camera-card.js")
-    resources.async_items = MagicMock(
-        return_value=[
-            {"id": "res-map", "url": stale_map_url},
-            {"id": "res-cam", "url": current_camera_url},
+    resources.async_delete_item = AsyncMock()
+    resources.async_items = MagicMock(return_value=items)
+    return resources
+
+
+@pytest.mark.parametrize("as_dict", [True, False])
+async def test_remove_legacy_lovelace_deletes_only_lymow_resources(as_dict) -> None:
+    """Resources for the removed per-card JS files are deleted; unrelated ones stay."""
+    resources = _resources(
+        [
+            {"id": "res-map", "url": f"/custom_components/{DOMAIN}/lymow-map-card.js?v=0.6.0"},
             {"id": "res-other", "url": "/local/unrelated.js?v=1"},
         ]
     )
-
     hass = MagicMock()
-    hass.data = {"lovelace": {"resources": resources}}
-
-    await _lymow._ensure_lovelace_resources(hass)
-
-    # Stale map card → updated in-place to the current version.
-    resources.async_update_item.assert_awaited_once_with("res-map", {"res_type": "module", "url": current_map_url})
-    # The cards with no existing entry are created (camera already current).
-    created_urls = {call.args[0]["url"] for call in resources.async_create_item.await_args_list}
-    assert _lymow._card_url("lymow-control-card.js") in created_urls
-    assert _lymow._card_url("lymow-drive-card.js") in created_urls
-    assert _lymow._card_url("lymow-schedule-card.js") in created_urls
-    assert _lymow._card_url("lymow-backup-card.js") in created_urls
-    assert _lymow._card_url("lymow-settings-card.js") in created_urls
-    assert current_camera_url not in created_urls
-    assert current_map_url not in created_urls
+    lovelace = {"resources": resources, "dashboards": {}}
+    hass.data = {"lovelace": lovelace if as_dict else SimpleNamespace(**lovelace)}
+    with patch.object(_lymow.persistent_notification, "async_create") as notify:
+        await _lymow._remove_legacy_lovelace(hass)
+    resources.async_delete_item.assert_awaited_once_with("res-map")
+    notify.assert_not_called()
 
 
-async def test_ensure_lovelace_resources_returns_when_lovelace_missing() -> None:
-    """No 'lovelace' in hass.data → early return, no resource calls."""
-    _stub_lovelace_resources_module()
+async def test_remove_legacy_lovelace_notifies_about_old_dashboard() -> None:
+    hass = MagicMock()
+    hass.data = {"lovelace": SimpleNamespace(resources=None, dashboards={"lymow-mower": object()})}
+    with patch.object(_lymow.persistent_notification, "async_create") as notify:
+        await _lymow._remove_legacy_lovelace(hass)
+    notify.assert_called_once()
+    assert notify.call_args.kwargs["notification_id"] == "lymow_legacy_dashboard"
+
+
+async def test_remove_legacy_lovelace_noop_without_lovelace() -> None:
     hass = MagicMock()
     hass.data = {}
-    # Must not raise; nothing to do.
-    await _lymow._ensure_lovelace_resources(hass)
+    await _lymow._remove_legacy_lovelace(hass)  # must not raise
 
 
-async def test_ensure_lovelace_resources_returns_when_resources_missing() -> None:
-    """'lovelace' present but no resources collection → early return."""
-    _stub_lovelace_resources_module()
-    hass = MagicMock()
-    hass.data = {"lovelace": {"resources": None}}
-    await _lymow._ensure_lovelace_resources(hass)
-
-
-async def test_ensure_lovelace_resources_swallows_errors() -> None:
-    """An exception inside the block is swallowed (add_extra_js_url is the fallback)."""
-    _stub_lovelace_resources_module()
-    resources = MagicMock()
+async def test_remove_legacy_lovelace_swallows_errors() -> None:
+    resources = _resources([])
     resources.async_load = AsyncMock(side_effect=RuntimeError("boom"))
     hass = MagicMock()
     hass.data = {"lovelace": {"resources": resources}}
-    # Must not raise despite the failing async_load.
-    await _lymow._ensure_lovelace_resources(hass)
+    await _lymow._remove_legacy_lovelace(hass)  # must not raise
+
+
+async def test_www_registration_rolls_back_on_failure() -> None:
+    """A failing static-path registration releases the once-per-run claim so a later setup retries."""
+    hass = _make_hass(www_registered=False)
+    hass.http.async_register_static_paths = AsyncMock(side_effect=RuntimeError("boom"))
+    entry = _make_entry()
+    with pytest.raises(RuntimeError):
+        await async_setup_entry(hass, entry)
+    assert _lymow._WWW_REGISTERED_KEY not in hass.data
+
+
+async def test_concurrent_setup_waits_for_shared_www_init() -> None:
+    """A second entry set up while the first is still initialising shares its result."""
+    hass = _make_hass(www_registered=False)
+    gate = asyncio.Event()
+
+    async def _slow(_paths):
+        await gate.wait()
+        raise RuntimeError("boom")
+
+    hass.http.async_register_static_paths = _slow
+    first = asyncio.ensure_future(async_setup_entry(hass, _make_entry()))
+    await asyncio.sleep(0)
+    second = asyncio.ensure_future(async_setup_entry(hass, _make_entry()))
+    await asyncio.sleep(0)
+    assert not second.done()  # waiting on the first, not skipping ahead
+    gate.set()
+    results = await asyncio.gather(first, second, return_exceptions=True)
+    assert all(isinstance(r, RuntimeError) for r in results)
+    assert _lymow._WWW_REGISTERED_KEY not in hass.data
+
+
+async def test_setup_drops_malformed_device_records() -> None:
+    """Records without a usable string thing name never reach the coordinator."""
+    hass = _make_hass(www_registered=True)
+    entry = _make_entry(region="eu-west-1")
+    client = _make_client(
+        [
+            {"deviceThingName": "thing-1"},
+            {"deviceThingName": 5},
+            {"deviceThingName": ""},
+            {"deviceThingName": "a/#"},
+            {"deviceThingName": "a b"},
+            "junk",
+            {"name": "x"},
+        ]
+    )
+    coord = _make_coordinator()
+    with (
+        patch("lymow.async_get_clientsession", return_value=MagicMock()),
+        patch("lymow.LymowAuth", return_value=_make_auth(_make_tokens(), _make_creds())),
+        patch("lymow.LymowApiClient", return_value=client),
+        patch("lymow.LymowMqttClient", return_value=_make_mqtt()) as mqtt_cls,
+        patch("lymow.LymowCoordinator", return_value=coord) as coord_cls,
+    ):
+        await async_setup_entry(hass, entry)
+    assert coord_cls.call_args.args[3] == [{"deviceThingName": "thing-1"}]
+    assert mqtt_cls.call_args is not None
+
+
+async def test_panel_init_retry_skips_steps_already_done() -> None:
+    """A retry after a failure part-way through doesn't register the route twice."""
+    hass = _make_hass(www_registered=False)
+    hass.http.async_register_static_paths = AsyncMock()
+    with (
+        patch.object(_lymow.websocket_api, "async_register") as ws_reg,
+        patch.object(_lymow, "_remove_legacy_lovelace", AsyncMock(side_effect=[RuntimeError("boom"), None])),
+    ):
+        with pytest.raises(RuntimeError):
+            await _lymow._async_init_panel(hass)
+        await _lymow._async_init_panel(hass)
+    ws_reg.assert_called_once()
+    hass.http.async_register_static_paths.assert_awaited_once()

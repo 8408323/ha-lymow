@@ -1744,3 +1744,62 @@ def test_rtsp_url_sensor_is_diagnostic_and_disabled_by_default() -> None:
     assert e._attr_unique_id == f"{THING}_rtsp_url"
     assert e.entity_category == EntityCategory.DIAGNOSTIC
     assert e._attr_entity_registry_enabled_default is False
+
+
+def test_map_payload_overlays_ha_nogo_names() -> None:
+    from lymow.sensor import map_payload
+
+    data = {
+        "mapData": {"nogoZones": [{"hashId": "a", "name": "robot"}, {"hashId": "b"}, {"name": "no id"}]},
+        "nogoNames": {"a": "Flower bed"},
+    }
+    names = [z.get("name") for z in map_payload(data)["nogo_zones"]]
+    assert names == ["Flower bed", None]  # the row without an id is dropped
+
+
+def test_map_payload_tolerates_malformed_rtk_status() -> None:
+    from lymow.sensor import map_payload
+
+    assert map_payload({"rtkStatus": "garbage"})["rtkLabel"] == "Unknown"
+    assert map_payload({"rtkStatus": 9})["rtkLabel"] == "Unknown (9)"
+    assert map_payload({"rtkStatus": 2})["rtkLabel"] == "Fixed"
+
+
+def test_map_payload_drops_malformed_zone_fields_and_segments() -> None:
+    from lymow.sensor import map_payload
+
+    out = map_payload(
+        {
+            "mapData": {"goZones": [{"hashId": 5}, {"hashId": "ok", "name": 7}, {"hashId": "n", "name": "N"}]},
+            "pathData": {"segments": 1},
+        }
+    )
+    assert out["go_zones"] == [{"hashId": "ok"}, {"hashId": "n", "name": "N"}]
+    assert out["mow_path"] == {"segments": []}
+
+
+def test_map_payload_tolerates_non_mapping_map_data() -> None:
+    from lymow.sensor import map_payload
+
+    assert "go_zones" not in map_payload({"mapData": [1]})
+
+
+def test_map_payload_drops_incomplete_charging_station() -> None:
+    from lymow.sensor import map_payload
+
+    assert "charging_station" not in map_payload({"mapData": {"chargingStation": {"theta": 1.0}}})
+    out = map_payload({"mapData": {"chargingStation": {"theta": 1.0}}, "chargingStationLoc": {"x": 1, "y": 2}})
+    assert out["charging_station"] == {"theta": 1.0, "x": 1, "y": 2}
+
+
+def test_map_payload_drops_non_finite_dock() -> None:
+    from lymow.sensor import map_payload
+
+    assert "charging_station" not in map_payload({"mapData": {"chargingStation": {"x": float("nan"), "y": 1.0}}})
+
+
+def test_map_payload_drops_non_finite_dock_heading() -> None:
+    from lymow.sensor import map_payload
+
+    out = map_payload({"mapData": {"chargingStation": {"x": 1.0, "y": 2.0, "theta": float("inf")}}})
+    assert out["charging_station"] == {"x": 1.0, "y": 2.0}

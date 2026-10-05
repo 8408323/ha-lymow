@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from lymow.geometry import convex_hull, merge_zone_polygons, polygon_area
+from lymow.geometry import convex_hull, merge_zone_polygons, polygon_area, polygons_touch, union_area
 
 
 def _pt(x: float, y: float) -> dict[str, float]:
@@ -249,3 +249,25 @@ def test_polygon_area_rejects_non_finite_coordinates() -> None:
     # A malformed float32 decode can yield NaN/Inf; the area must stay finite (0.0), not propagate.
     assert polygon_area([_pt(0, 0), _pt(float("nan"), 0), _pt(1, 1)]) == 0.0
     assert polygon_area([_pt(0, 0), _pt(float("inf"), 0), _pt(1, 1)]) == 0.0
+
+
+def _rect(x0: float, y0: float, x1: float, y1: float) -> list[dict[str, float]]:
+    return [_pt(x0, y0), _pt(x1, y0), _pt(x1, y1), _pt(x0, y1)]
+
+
+def test_polygons_touch() -> None:
+    a = _rect(0, 0, 100, 100)
+    assert polygons_touch(a, _rect(100, 0, 200, 100), 0.3)  # shared edge
+    assert polygons_touch(a, _rect(100.2, 0, 200, 100), 0.3)  # within tolerance
+    assert not polygons_touch(a, _rect(101, 0, 200, 100), 0.3)  # 1 m strip between
+    assert polygons_touch(a, _rect(10, 10, 20, 20), 0.3)  # contained
+    assert polygons_touch(_rect(0, 4, 10, 6), _rect(4, 0, 6, 10), 0.0)  # plus sign: edges cross, no vertex inside
+    assert polygons_touch(_rect(0, 0, 1, 1), [_pt(1, 1), _pt(1, 1), _pt(2, 2)], 0.0)  # degenerate edge
+
+
+def test_union_area_counts_overlap_once() -> None:
+    assert union_area([]) == 0.0
+    assert union_area([_rect(0, 0, 10, 10)]) == pytest.approx(100)
+    assert union_area([_rect(0, 0, 10, 10), _rect(10, 0, 20, 10)]) == pytest.approx(200)
+    assert union_area([_rect(0, 0, 10, 10), _rect(5, 5, 15, 15)]) == pytest.approx(175, rel=0.01)
+    assert union_area([_rect(0, 0, 10, 10), _rect(2, 2, 4, 4)]) == pytest.approx(100)  # contained

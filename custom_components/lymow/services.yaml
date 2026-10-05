@@ -634,8 +634,9 @@ rename_zone:
 rename_nogo_zone:
   name: Rename no-go zone
   description: >
-    Rename a no-go zone on the robot's map (USER_CTRL_MODIFY_ZONE_INFO,
-    targets PbMap.nogoZones instead of goZones).
+    Name a no-go zone. The mower and the Lymow app don't keep no-go names, so
+    the name is stored in Home Assistant (persists across restarts) and shown
+    in the panel and the map sensor. An empty name clears it.
   target:
     entity:
       integration: lymow
@@ -1246,9 +1247,9 @@ pin_and_go:
 rename_channel:
   name: Rename channel
   description: >
-    Assign a display name to a channel. Channel names have no protobuf field on
-    the robot, so the name is stored HA-side and re-applied on each map update.
-    The map card also persists names in localStorage for browser-side continuity.
+    Name a channel. Channels have no name on the mower, so the name is stored
+    in Home Assistant (persists across restarts) and re-applied on each map
+    update. An empty name clears it.
   target:
     entity:
       integration: lymow

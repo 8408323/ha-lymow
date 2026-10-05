@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from homeassistant.components.lawn_mower import LawnMowerActivity
@@ -337,9 +337,10 @@ async def _setup_and_get_handlers(hass: MagicMock, entry: MagicMock, coord: Magi
     return handlers
 
 
-def _make_call(entity_ids: list[str], extra: dict | None = None) -> MagicMock:
+def _make_call(entity_ids: list[str], extra: dict | None = None, user_id: str | None = None) -> MagicMock:
     call = MagicMock()
     call.data = {"entity_id": entity_ids, **(extra or {})}
+    call.context.user_id = user_id
     return call
 
 
@@ -2725,3 +2726,199 @@ async def test_handle_move_charging_station_unknown_entity_skips() -> None:
     call = _make_call(["lawn_mower.other"], {"x": 1.0, "y": 2.0})
     await handlers["move_charging_station"](call)
     coord.async_move_charging_station.assert_not_called()
+
+
+async def test_services_reach_mowers_of_every_config_entry() -> None:
+    """Services are domain-wide and the last entry's registration wins, so a handler
+    registered by entry B must still command a mower that belongs to entry A."""
+    from lymow.const import DOMAIN
+
+    coord_a = _make_coord({"mapData": {"goZones": [{"hashId": "z1"}]}})
+    coord_b = _make_coord()
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-a": coord_a, "entry-b": coord_b}}
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entity_id):
+        def _inner(entities):
+            for e in entities:
+                e.entity_id = entity_id
+
+        return _inner
+
+    entry_a, entry_b = MagicMock(entry_id="entry-a"), MagicMock(entry_id="entry-b")
+    await async_setup_entry(hass, entry_a, _add("lawn_mower.a"))
+    await async_setup_entry(hass, entry_b, _add("lawn_mower.b"))
+
+    await handlers["delete_zone"](_make_call(["lawn_mower.a"], {"zone_hash_id": "z1"}))
+    coord_a.async_delete_zone.assert_awaited_once_with(THING, "z1")
+    coord_b.async_delete_zone.assert_not_called()
+
+    # Unloading entry A drops its mowers from the shared registry.
+    for cb in [c.args[0] for c in entry_a.async_on_unload.call_args_list]:
+        cb()
+    await handlers["delete_zone"](_make_call(["lawn_mower.a"], {"zone_hash_id": "z1"}))
+    coord_a.async_delete_zone.assert_awaited_once()
+
+
+async def test_ble_drive_runs_once_per_robot() -> None:
+    """ble_drive drives each robot once, using its single-mower entry's BLE address."""
+    from types import SimpleNamespace
+
+    from lymow.const import CONF_BLE_ADDRESS, DOMAIN
+
+    coord_a, coord_b = _make_coord(), _make_coord()
+    coord_b.devices = [{"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
+    coord_b.data = {"mower-002": {}}
+    coord_a.async_ble_drive = AsyncMock()
+    coord_b.async_ble_drive = AsyncMock()
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-a": coord_a, "entry-b": coord_b}}
+    entry_a = MagicMock(entry_id="entry-a", options={CONF_BLE_ADDRESS: "AA:AA"})
+    entry_b = MagicMock(entry_id="entry-b", options={CONF_BLE_ADDRESS: "BB:BB"})
+    hass.config_entries.async_get_entry = {"entry-a": entry_a, "entry-b": entry_b}.get
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entity_id, entry_id):
+        def _inner(entities):
+            for e in entities:
+                e.entity_id = entity_id
+                e.registry_entry = SimpleNamespace(config_entry_id=entry_id)
+
+        return _inner
+
+    await async_setup_entry(hass, entry_a, _add("lawn_mower.a", "entry-a"))
+    await async_setup_entry(hass, entry_b, _add("lawn_mower.b", "entry-b"))
+
+    call = _make_call(
+        ["lawn_mower.a", "lawn_mower.b", "lawn_mower.a"], {"linear": 0.2, "angular": 0.0, "duration": 0.3}
+    )
+    await handlers["ble_drive"](call)
+    coord_a.async_ble_drive.assert_awaited_once_with("AA:AA", 0.2, 0.0, 0.3)
+    coord_b.async_ble_drive.assert_awaited_once_with("BB:BB", 0.2, 0.0, 0.3)
+
+
+async def test_ble_address_option_ignored_for_multi_mower_entry(monkeypatch) -> None:
+    """An account-level BLE address is ambiguous with two mowers: discover each by name."""
+    from types import SimpleNamespace
+
+    import lymow.lawn_mower as lm
+    from lymow.const import CONF_BLE_ADDRESS, DOMAIN
+
+    coord = _make_coord()
+    coord.devices = [DEVICE, {"deviceThingName": "mower-002", "deviceName": "Mower 2"}]
+    coord.data = {THING: {"deviceBluetooth": "Lymow_A"}, "mower-002": {"deviceBluetooth": "Lymow_B"}}
+    coord.async_ble_drive = AsyncMock()
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    entry = MagicMock(entry_id="entry-1", options={CONF_BLE_ADDRESS: "AA:AA"})
+    hass.config_entries.async_get_entry = {"entry-1": entry}.get
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+    monkeypatch.setattr(lm, "_discover_ble_address", lambda _hass, name: {"Lymow_B": "BB:BB"}.get(name))
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = f"lawn_mower.{e._thing_name}"
+            e.registry_entry = SimpleNamespace(config_entry_id="entry-1")
+
+    await async_setup_entry(hass, entry, _add)
+    call = _make_call(["lawn_mower.mower-002"], {"linear": 0.1, "angular": 0.0, "duration": 0.3})
+    await handlers["ble_drive"](call)
+    coord.async_ble_drive.assert_awaited_once_with("BB:BB", 0.1, 0.0, 0.3)
+
+
+async def test_services_enforce_control_permission_for_non_admins() -> None:
+    from types import SimpleNamespace
+
+    from homeassistant.exceptions import Unauthorized, UnknownUser
+    from lymow.const import DOMAIN
+
+    coord = _make_coord({"mapData": {"goZones": [{"hashId": "z1"}]}})
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.m"
+
+    await async_setup_entry(hass, MagicMock(entry_id="entry-1"), _add)
+    users = {
+        "admin": SimpleNamespace(is_admin=True, permissions=None),
+        "allowed": SimpleNamespace(is_admin=False, permissions=SimpleNamespace(check_entity=lambda eid, p: True)),
+        "denied": SimpleNamespace(is_admin=False, permissions=SimpleNamespace(check_entity=lambda eid, p: False)),
+    }
+    hass.auth.async_get_user = AsyncMock(side_effect=lambda uid: users.get(uid))
+    delete = handlers["delete_zone"]
+
+    await delete(_make_call(["lawn_mower.m"], {"zone_hash_id": "z1"}, user_id="admin"))
+    await delete(_make_call(["lawn_mower.m"], {"zone_hash_id": "z1"}, user_id="allowed"))
+    assert coord.async_delete_zone.await_count == 2
+    with pytest.raises(Unauthorized):
+        await delete(_make_call(["lawn_mower.m"], {"zone_hash_id": "z1"}, user_id="denied"))
+    with pytest.raises(UnknownUser):
+        await delete(_make_call(["lawn_mower.m"], {"zone_hash_id": "z1"}, user_id="ghost"))
+    call = _make_call([], {"zone_hash_id": "z1"}, user_id="denied")
+    call.data["entity_id"] = "lawn_mower.m"  # a single string target is checked too
+    with pytest.raises(Unauthorized):
+        await delete(call)
+    assert coord.async_delete_zone.await_count == 2
+
+
+async def test_start_video_session_needs_camera_read_for_non_admins() -> None:
+    from types import SimpleNamespace
+
+    from homeassistant.exceptions import Unauthorized, UnknownUser
+    from lymow.const import DOMAIN
+
+    lawn_mower = sys.modules["lymow.lawn_mower"]
+    coord = _make_coord()
+    coord.devices = [DEVICE]
+    coord.async_start_video_session = AsyncMock(return_value={"channelARN": "arn"})
+    hass = MagicMock()
+    hass.data = {DOMAIN: {"entry-1": coord}}
+    handlers: dict = {}
+    hass.services.async_register.side_effect = lambda domain, service, handler, schema=None, supports_response=False: (
+        handlers.__setitem__(service, handler)
+    )
+
+    def _add(entities):
+        for e in entities:
+            e.entity_id = "lawn_mower.m"
+
+    await async_setup_entry(hass, MagicMock(entry_id="entry-1"), _add)
+    may = lambda allowed: SimpleNamespace(  # noqa: E731
+        is_admin=False, permissions=SimpleNamespace(check_entity=lambda eid, p: eid in allowed)
+    )
+    users = {
+        "admin": SimpleNamespace(is_admin=True, permissions=None),
+        "viewer": may({"lawn_mower.m", "camera.cam"}),
+        "no_cam": may({"lawn_mower.m"}),
+    }
+    hass.auth.async_get_user = AsyncMock(side_effect=lambda uid: users.get(uid))
+    start = handlers["start_video_session"]
+    with patch.object(lawn_mower.er, "async_get", create=True) as er_get:
+        er_get.return_value.async_get_entity_id.return_value = "camera.cam"
+        for uid in (None, "admin", "viewer"):
+            assert await start(_make_call(["lawn_mower.m"], user_id=uid)) == {"channelARN": "arn"}
+        with pytest.raises(Unauthorized):
+            await start(_make_call(["lawn_mower.m"], user_id="no_cam"))
+        er_get.return_value.async_get_entity_id.return_value = None  # no camera entity
+        with pytest.raises(Unauthorized):
+            await start(_make_call(["lawn_mower.m"], user_id="viewer"))
+    users.pop("viewer")
+    hass.auth.async_get_user = AsyncMock(side_effect=[users["no_cam"], None])  # removed between checks
+    with pytest.raises(UnknownUser):
+        await start(_make_call(["lawn_mower.m"], user_id="no_cam"))
