@@ -51,7 +51,7 @@ function ScheduleList() {
     const same = (a: unknown[] = [], b: unknown[] = []) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
     // A matching row must agree on everything submitted, and be new (not in the list before).
     const match = (s: Schedule) =>
-      s.hour === h && s.minute === m && same(s.dayOfWeek, d.days) && (s.isRepeated ?? true) === d.repeat && !s.isDisabled && (d.picked.length === 0 || same(s.zones, d.picked));
+      s.hour === h && s.minute === m && same(s.dayOfWeek, d.days) && (s.isRepeated ?? true) === d.repeat && !s.isDisabled && same(s.zones, d.sentZones ?? d.picked);
     if (snap.schedules.some((s) => match(s) && !(d.before ?? []).includes(s.id)))
       scheduleDrafts.delete(device.thing);
   }, [snap?.schedules, adding]);
@@ -196,7 +196,7 @@ function ScheduleList() {
 }
 
 // A half-filled add form outlives the view per mower (tab switch, HA sidebar, other mower).
-type ScheduleDraft = { days: number[]; time: string; picked: string[]; repeat: boolean; before?: number[] };
+type ScheduleDraft = { days: number[]; time: string; picked: string[]; repeat: boolean; before?: number[]; sentZones?: string[] };
 const scheduleDrafts = new Map<string, ScheduleDraft>();
 
 function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (fn: () => Promise<boolean>) => Promise<void>; locked: boolean }) {
@@ -262,12 +262,13 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
           disabled={locked || !days.length || !time || !zones.length || lostZones}
           onClick={async () => {
             const [hour, minute] = time.split(":").map(Number);
+            const sentZones = allZones ? zones.map((z) => z.hashId) : live;
             let ok = false;
             await mutate(async () => {
               ok = await call(
               "lymow",
               "add_schedule",
-              { hour, minute, day_of_week: days, repeated: repeat, disabled: false, zones: allZones ? zones.map((z) => z.hashId) : live },
+              { hour, minute, day_of_week: days, repeated: repeat, disabled: false, zones: sentZones },
               t("Schedule added"),
               );
               return ok;
@@ -277,7 +278,8 @@ function AddSchedule({ onDone, mutate, locked }: { onDone: () => void; mutate: (
             if (ok) {
               // Rows already present can't be the confirmation of this new one.
               const d = scheduleDrafts.get(device.thing);
-              if (d) scheduleDrafts.set(device.thing, { ...d, before: (Array.isArray(snap?.schedules) ? snap.schedules : []).map((x) => x.id) });
+              // Keep the zones actually sent ("All zones" expands to every zone) to confirm against.
+              if (d) scheduleDrafts.set(device.thing, { ...d, before: (Array.isArray(snap?.schedules) ? snap.schedules : []).map((x) => x.id), sentZones });
               onDone();
             }
           }}

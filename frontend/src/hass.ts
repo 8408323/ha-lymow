@@ -240,19 +240,23 @@ export function useSnapshot(thing: string | undefined): Snapshot | undefined {
   // Bumped to resubscribe: after the mower's entry reloads (the old stream ends
   // with `gone`) or while it isn't set up yet (subscribe fails with not_found).
   const [attempt, setAttempt] = useState(0);
+  // Consecutive failures for the backoff; a normal snapshot resets it, so an old
+  // reload doesn't make later ones wait longer.
+  const failures = useRef(0);
   useEffect(() => {
     if (!thing) return;
     let unsub: (() => Promise<void>) | undefined;
     let alive = true;
     let retry = 0;
     const again = () => {
-      if (alive) retry = window.setTimeout(() => setAttempt((a) => a + 1), Math.min(30000, 2000 * 2 ** Math.min(attempt, 4)) /* capped backoff */);
+      if (alive) retry = window.setTimeout(() => setAttempt((a) => a + 1), Math.min(30000, 2000 * 2 ** Math.min(failures.current++, 4)) /* capped backoff */);
     };
     getHass()
       .connection.subscribeMessage<Snapshot>(
         (s) => {
           if (!alive) return;
           setSnap(s);
+          if (!s.gone && !s.unauthorized) failures.current = 0;
           // Access can be restored later; keep retrying (slowly) like a reload.
           if (s.gone || s.unauthorized) again();
         },

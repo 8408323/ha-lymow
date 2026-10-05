@@ -615,5 +615,16 @@ def test_schedules_keep_stored_hour_offset_across_dst() -> None:
         {"schedules": [{"id": 1, "hour": 7, "minute": 0, "timeZone": 2, "dayOfWeek": [1], "zones": ["z"]}]}
     )
     coord.hass = SimpleNamespace(config=SimpleNamespace(time_zone="Europe/Stockholm"))
-    with patch.object(ws, "_offset_minutes", return_value=60):
+    with patch.object(ws, "_zone_offsets", return_value=[60, 120]):
         assert ws.snapshot(coord, THING)["schedules"][0]["hour"] == 9
+
+
+def test_schedules_lord_howe_fraction_follows_stored_hour() -> None:
+    # Created at 09:00 in standard time (UTC+10:30): stored 22:30 with timeZone 10.
+    coord = _coordinator(
+        {"schedules": [{"id": 1, "hour": 22, "minute": 30, "timeZone": 10, "dayOfWeek": [1], "zones": ["z"]}]}
+    )
+    with patch.object(ws, "_zone_offsets", return_value=[660, 630]):  # now in DST (11:00)
+        row = ws.snapshot(coord, THING)["schedules"][0]
+    assert (row["hour"], row["minute"]) == (9, 0)
+    assert ws._fraction(3, [60]) == 0  # no matching offset: no fraction
