@@ -1790,3 +1790,9 @@ def test_map_payload_drops_incomplete_charging_station() -> None:
     assert "charging_station" not in map_payload({"mapData": {"chargingStation": {"theta": 1.0}}})
     out = map_payload({"mapData": {"chargingStation": {"theta": 1.0}}, "chargingStationLoc": {"x": 1, "y": 2}})
     assert out["charging_station"] == {"theta": 1.0, "x": 1, "y": 2}
+
+
+def test_map_payload_drops_non_finite_dock() -> None:
+    from lymow.sensor import map_payload
+
+    assert "charging_station" not in map_payload({"mapData": {"chargingStation": {"x": float("nan"), "y": 1.0}}})

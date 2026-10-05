@@ -825,7 +825,7 @@ def map_payload(data: dict[str, Any]) -> dict[str, Any]:
     live_dock = data.get("chargingStationLoc") if isinstance(data.get("chargingStationLoc"), dict) else None
     dock = {**(map_dock or {}), **(live_dock or {})}
     # Only a dock with both coordinates is a point the map can draw.
-    if all(isinstance(dock.get(k), (int, float)) and not isinstance(dock.get(k), bool) for k in ("x", "y")):
+    if all(_num(dock.get(k)) for k in ("x", "y")):  # finite numbers only
         attrs["charging_station"] = dock
     if "globalZoneConfig" in map_data:
         attrs["mowing_settings"] = map_data["globalZoneConfig"]

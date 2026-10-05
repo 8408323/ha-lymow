@@ -4355,3 +4355,9 @@ async def test_set_zone_config_tolerates_scalar_zone_rows() -> None:
     with patch("lymow.protocol.encode_set_zone_config", return_value=b"x") as enc:
         await coord.async_set_zone_config(THING, [{"hashId": "z", "cutHeight": 50}])
     assert enc.call_args.args[0][0]["isEnabled"] is False
+
+
+def test_channel_overrides_skip_unhashable_ids() -> None:
+    coord, _, _ = _make_coordinator()
+    out = coord._apply_channel_name_overrides(THING, {"mapData": {"channels": [{"hashId": [], "name": "x"}]}})
+    assert out["mapData"]["channels"] == [{"hashId": []}]

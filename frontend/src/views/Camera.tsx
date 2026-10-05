@@ -8,7 +8,7 @@ type Source = "lan" | "snap" | "cloud";
 
 export function CameraView() {
   const t = useT();
-  const { ent } = useMower();
+  const { ent, device } = useMower();
   const camId = ent("camera");
   const cam = useEntity(camId);
   const [source, setSource] = useState<Source>("lan");
@@ -32,7 +32,8 @@ export function CameraView() {
               options={[
                 { value: "lan", label: t("Live"), icon: "mdi:lan" },
                 { value: "snap", label: t("Snapshots"), icon: "mdi:camera-burst" },
-                { value: "cloud", label: t("Cloud"), icon: "mdi:cloud-outline" },
+                // The cloud stream needs read access to the camera entity (and control).
+                ...(camId && device.can_control !== false ? [{ value: "cloud" as const, label: t("Cloud"), icon: "mdi:cloud-outline" }] : []),
               ]}
             />
             <Button variant="ghost" icon="mdi:fullscreen" title={t("Full screen")} onClick={() => stageRef.current?.requestFullscreen?.()} />
@@ -40,7 +41,7 @@ export function CameraView() {
         }
       >
         <div className="ly-stage" ref={stageRef}>
-          {source === "cloud" ? (
+          {source === "cloud" && camId ? (
             <CloudStream onStatus={setStatus} />
           ) : !cam ? (
             <StageMsg icon="mdi:cctv-off" text={t("The camera entity isn't available.")} />

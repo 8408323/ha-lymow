@@ -483,7 +483,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         channels = map_data.get("channels") if isinstance(map_data.get("channels"), list) else []
         new_channels = [
             {**ch, "name": overrides[ch["hashId"]]}
-            if ch.get("hashId") in overrides
+            if isinstance(ch.get("hashId"), str) and ch["hashId"] in overrides
             else {k: v for k, v in ch.items() if k != "name"}
             for ch in channels
             if isinstance(ch, dict)

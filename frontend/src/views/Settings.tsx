@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ENTITY_TEXT, entityLabel } from "../entityText";
-import { useEntity, useHass, useHassRef } from "../hass";
+import { useEntity, useHass, useHassRef, type LymowDevice, type Snapshot } from "../hass";
 import { LANGUAGES, useI18n, useT } from "../i18n";
 import { shiftClock, tzOffsetMinutes } from "../status";
 import { useMower, useMowerEntity } from "../mower";
@@ -37,6 +37,11 @@ export function SettingsView() {
       <Advanced />
     </div>
   );
+}
+
+/** Mower commands need a confirmed-online mower and a user allowed to control it. */
+function blocked(snap: Snapshot | undefined, device: LymowDevice): boolean {
+  return snap?.online !== true || device.can_control === false || !!device.held;
 }
 
 function Firmware() {
@@ -277,7 +282,7 @@ function MowingDefaults() {
         </div>
       </div>
       <div className="ly-btnrow">
-        <Button variant="primary" icon="mdi:check" disabled={!Object.keys(changed).length || (pending !== null && !pending.matched) || snap?.online !== true} onClick={save}>
+        <Button variant="primary" icon="mdi:check" disabled={!Object.keys(changed).length || (pending !== null && !pending.matched) || blocked(snap, device)} onClick={save}>
           {t("Save changes")}
         </Button>
         <Button variant="ghost" icon="mdi:undo" disabled={!Object.keys(changed).length} onClick={() => setEdits({})}>
@@ -285,8 +290,8 @@ function MowingDefaults() {
         </Button>
         <span className="ly-spacer" />
         <span className="ly-muted">{t("Cutting height")}</span>
-        <Button icon="mdi:arrow-up-bold" title={t("Raise cutting height")} disabled={snap?.online !== true} onClick={() => call("lymow", "set_task_config", { raise_cut_height: true }, t("Raising cutting height"))} />
-        <Button icon="mdi:arrow-down-bold" title={t("Lower cutting height")} disabled={snap?.online !== true} onClick={() => call("lymow", "set_task_config", { lower_cut_height: true }, t("Lowering cutting height"))} />
+        <Button icon="mdi:arrow-up-bold" title={t("Raise cutting height")} disabled={blocked(snap, device)} onClick={() => call("lymow", "set_task_config", { raise_cut_height: true }, t("Raising cutting height"))} />
+        <Button icon="mdi:arrow-down-bold" title={t("Lower cutting height")} disabled={blocked(snap, device)} onClick={() => call("lymow", "set_task_config", { lower_cut_height: true }, t("Lowering cutting height"))} />
       </div>
     </Card>
   );
@@ -294,7 +299,7 @@ function MowingDefaults() {
 
 function LiveAdjust() {
   const t = useT();
-  const { call, snap } = useMower();
+  const { call, snap, device } = useMower();
   const mowing = useMowerEntity("mower")?.state === "mowing";
   const rtc = snap?.run_time_config;
   // Only send what the user moved: an untouched slider must not overwrite the
@@ -314,7 +319,7 @@ function LiveAdjust() {
       <Button
         variant="primary"
         icon="mdi:send"
-        disabled={!mowing || !Object.keys(changes).length || snap?.online !== true}
+        disabled={!mowing || !Object.keys(changes).length || blocked(snap, device)}
         onClick={async () => {
           const sentCut = cut, sentSpeed = speed;
           if (await call("lymow", "set_run_time_config", changes, t("Sent to the mower"))) {
@@ -401,7 +406,7 @@ function Headlight() {
       <Button
         variant="primary"
         icon="mdi:check"
-        disabled={!draft || saved || snap?.online !== true}
+        disabled={!draft || saved || blocked(snap, device)}
         onClick={async () => {
           if (await call("lymow", "set_headlight_schedule", v.on ? { enable: true, start: shiftClock(v.start, -offset), end: shiftClock(v.end, -offset) } : { enable: false }, t("Headlight schedule saved"))) {
             // Recorded even if the view is gone by now, unless a newer edit replaced it.
@@ -519,7 +524,7 @@ function ActionButtons() {
   const list = useEntitiesOf(["button"]);
   const hass = useHass();
   const { device, call, snap } = useMower();
-  const off = snap?.online !== true; // mower commands; HA would report "sent" for an offline mower
+  const off = blocked(snap, device); // mower commands; HA would report "sent" for an offline mower
   const ui = useUi();
   const live = list.filter(([, id]) => hass.states[id]);
   const safe = live.filter(([k]) => !DANGEROUS_BUTTONS.has(k));
@@ -582,7 +587,7 @@ function Advanced() {
           <div className="ly-inline">
             <TextInput type={showPin ? "text" : "password"} inputMode="numeric" maxLength={4} value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} />
             <Button variant="ghost" icon={showPin ? "mdi:eye-off-outline" : "mdi:eye-outline"} title={showPin ? t("Hide PIN") : t("Show PIN")} onClick={() => setShowPin(!showPin)} />
-            <Button disabled={!/^\d{4}$/.test(pin) || snap?.online !== true} onClick={async () => (await call("lymow", "set_pin", { pin }, t("PIN changed"))) && setPin("")}>
+            <Button disabled={!/^\d{4}$/.test(pin) || blocked(snap, device)} onClick={async () => (await call("lymow", "set_pin", { pin }, t("PIN changed"))) && setPin("")}>
               {t("Set PIN")}
             </Button>
           </div>
@@ -590,7 +595,7 @@ function Advanced() {
         <Field label={t("RTK base station")} hint={t("The ID printed on the base, e.g. LK000000000000.")}>
           <div className="ly-inline">
             <TextInput value={base} placeholder={t("LK…")} onChange={(e) => setBase(e.target.value.trim())} />
-            <Button disabled={!base || snap?.online !== true} onClick={() => call("lymow", "bind_rtk", { base_id: base }, t("Base station bound"))}>
+            <Button disabled={!base || blocked(snap, device)} onClick={() => call("lymow", "bind_rtk", { base_id: base }, t("Base station bound"))}>
               {t("Bind")}
             </Button>
           </div>
