@@ -599,9 +599,21 @@ def test_schedules_use_home_assistant_offset_for_fractional_zones() -> None:
     coord.hass = SimpleNamespace(config=SimpleNamespace(time_zone="Asia/Kolkata"))  # UTC+5:30, no DST
     row = ws.snapshot(coord, THING)["schedules"][0]
     assert (row["hour"], row["minute"], row["dayOfWeek"]) == (9, 0, [1])  # 03:30 UTC → 09:00 local
-    late = _coordinator({"schedules": [{"id": 2, "hour": 20, "minute": 0, "dayOfWeek": [6], "zones": ["z"]}]})
+    late = _coordinator(
+        {"schedules": [{"id": 2, "hour": 20, "minute": 0, "timeZone": 5, "dayOfWeek": [6], "zones": ["z"]}]}
+    )
     late.hass = coord.hass
     assert ws.snapshot(late, THING)["schedules"][0]["dayOfWeek"] == [0]  # 01:30 next day, Sat → Sun
     bad = _coordinator({"schedules": [{"id": 3, "hour": 1, "minute": 0, "zones": ["z"]}]})
     bad.hass = SimpleNamespace(config=SimpleNamespace(time_zone="Not/AZone"))
     assert ws.snapshot(bad, THING)["schedules"][0]["hour"] == 1  # falls back to the stored offset
+
+
+def test_schedules_keep_stored_hour_offset_across_dst() -> None:
+    # Created at 09:00 in summer (UTC+2): stored 07:00 with timeZone 2. In winter HA is UTC+1.
+    coord = _coordinator(
+        {"schedules": [{"id": 1, "hour": 7, "minute": 0, "timeZone": 2, "dayOfWeek": [1], "zones": ["z"]}]}
+    )
+    coord.hass = SimpleNamespace(config=SimpleNamespace(time_zone="Europe/Stockholm"))
+    with patch.object(ws, "_offset_minutes", return_value=60):
+        assert ws.snapshot(coord, THING)["schedules"][0]["hour"] == 9

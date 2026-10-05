@@ -189,7 +189,11 @@ def _schedule(sched: Any, offset_min: int | None = None) -> dict[str, Any] | Non
     row = {**sched, "dayOfWeek": days, "zones": zones}
     if offset_min is None:
         return _schedule_to_local(row)
-    day_delta, rem = divmod(hour * 60 + minute + offset_min, 1440)
+    # The stored whole-hour offset is what the schedule was created with (it keeps a
+    # recurring schedule stable across DST); HA's zone only adds the fractional part
+    # the wire format can't carry (e.g. the :30 of UTC+5:30).
+    frac = offset_min - int(offset_min / 60) * 60
+    day_delta, rem = divmod(hour * 60 + minute + tz * 60 + frac, 1440)
     return {**row, "hour": rem // 60, "minute": rem % 60, "dayOfWeek": [(d + day_delta) % 7 for d in days]}
 
 
