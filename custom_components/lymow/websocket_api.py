@@ -354,6 +354,9 @@ def ws_subscribe(hass: HomeAssistant, connection: websocket_api.ActiveConnection
             _end("gone")
             return
         state["unlisten"]()
+        if state["timer"] is not None:  # an old trailing send must not outlive the rebind
+            state["timer"]()
+            state["timer"] = None
         state["coordinator"] = new
         state["unlisten"] = new.async_add_listener(_push)
         _send()

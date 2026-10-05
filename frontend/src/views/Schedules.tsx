@@ -95,7 +95,7 @@ function ScheduleList() {
     ask();
     return () => window.clearTimeout(id);
   }, [unknown, awaitingAfter !== undefined]);
-  const locked = busy || loading || awaitingAfter !== undefined || snap?.online === false;
+  const locked = busy || loading || awaitingAfter !== undefined || snap?.online !== true;
   const mutate = async (fn: () => Promise<boolean>) => {
     const before = snap?.schedules;
     setBusy(true);

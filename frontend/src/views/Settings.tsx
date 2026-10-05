@@ -277,7 +277,7 @@ function MowingDefaults() {
         </div>
       </div>
       <div className="ly-btnrow">
-        <Button variant="primary" icon="mdi:check" disabled={!Object.keys(changed).length || (pending !== null && !pending.matched) || snap?.online === false} onClick={save}>
+        <Button variant="primary" icon="mdi:check" disabled={!Object.keys(changed).length || (pending !== null && !pending.matched) || snap?.online !== true} onClick={save}>
           {t("Save changes")}
         </Button>
         <Button variant="ghost" icon="mdi:undo" disabled={!Object.keys(changed).length} onClick={() => setEdits({})}>
@@ -285,8 +285,8 @@ function MowingDefaults() {
         </Button>
         <span className="ly-spacer" />
         <span className="ly-muted">{t("Cutting height")}</span>
-        <Button icon="mdi:arrow-up-bold" title={t("Raise cutting height")} disabled={snap?.online === false} onClick={() => call("lymow", "set_task_config", { raise_cut_height: true }, t("Raising cutting height"))} />
-        <Button icon="mdi:arrow-down-bold" title={t("Lower cutting height")} disabled={snap?.online === false} onClick={() => call("lymow", "set_task_config", { lower_cut_height: true }, t("Lowering cutting height"))} />
+        <Button icon="mdi:arrow-up-bold" title={t("Raise cutting height")} disabled={snap?.online !== true} onClick={() => call("lymow", "set_task_config", { raise_cut_height: true }, t("Raising cutting height"))} />
+        <Button icon="mdi:arrow-down-bold" title={t("Lower cutting height")} disabled={snap?.online !== true} onClick={() => call("lymow", "set_task_config", { lower_cut_height: true }, t("Lowering cutting height"))} />
       </div>
     </Card>
   );

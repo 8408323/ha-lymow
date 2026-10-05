@@ -788,7 +788,8 @@ def _zones(items: Any) -> list[dict]:
     out = []
     for z in items:
         # Untrusted: the panel acts on hashId and shows name, so both must be strings.
-        if not isinstance(z, dict) or ("hashId" in z and not isinstance(z["hashId"], str)):
+        # Every exposed row needs a usable id: the panel selects, renames and deletes by it.
+        if not isinstance(z, dict) or not isinstance(z.get("hashId"), str) or not z["hashId"].strip():
             continue
         z = {k: v for k, v in z.items() if k != "name" or isinstance(v, str)}
         out.append({**z, "polygon": _trim_poly(z["polygon"])} if "polygon" in z else z)

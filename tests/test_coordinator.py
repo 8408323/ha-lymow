@@ -4306,3 +4306,9 @@ def test_malformed_map_patch_does_not_raise() -> None:
     coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}]}}}
     coord.on_mqtt_state(THING, {"mapData": 1})
     coord.on_mqtt_state(THING, {"mapData": {"goZones": 1, "nogoZones": [{"hashId": "n"}]}})
+
+
+def test_channel_overrides_tolerate_non_list_channels() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._channel_name_overrides[THING] = {"c": "G"}
+    assert coord._apply_channel_name_overrides(THING, {"mapData": {"channels": 1}})["mapData"]["channels"] == []

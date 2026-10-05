@@ -376,7 +376,7 @@ function BrowsePanel(p: {
   const t = useT();
   const { call, snap } = useMower();
   // Like Overview's Start: an offline mower can't start now (and might later, unexpectedly).
-  const online = snap?.online !== false;
+  const online = snap?.online === true;
   const ui = useUi();
   const zones = p.map.go_zones ?? [];
   // Only zones still on the map: one deleted elsewhere must not be sent to the mower.
@@ -522,7 +522,7 @@ function EditPanel(p: {
       <div className="ly-btnrow">
         <Button
           icon="mdi:rename-outline"
-          disabled={!haName && snap?.online === false}
+          disabled={!haName && snap?.online !== true}
           onClick={async () => {
             const name = await ui.prompt({ title: texts.rename, label: t("Name"), value: zone.name ?? "", placeholder: title, maxLength: 40, allowEmpty: haName });
             if (name !== null && (name || haName)) await call("lymow", `rename_${svc}`, { [key]: zone.hashId, name }, t("Renamed"));
@@ -533,7 +533,7 @@ function EditPanel(p: {
         <Button
           variant="danger"
           icon="mdi:delete-outline"
-          disabled={snap?.online === false}
+          disabled={snap?.online !== true}
           onClick={async () => {
             const ok = await ui.confirm({
               title: t("Delete {name}?", { name: title }),
@@ -562,7 +562,7 @@ function EditPanel(p: {
             <Button
               variant="primary"
               icon="mdi:content-save-outline"
-              disabled={!p.dirty || p.awaiting || snap?.online === false || !valid}
+              disabled={!p.dirty || p.awaiting || snap?.online !== true || !valid}
               onClick={async () => {
                 const polygon = p.outline!.map((q) => ({ x: +q.x.toFixed(4), y: +q.y.toFixed(4) }));
                 p.onSaving(true); // read-only from here: later drags would not be in this save
@@ -693,7 +693,7 @@ function ZoneSettings({ zone, global, onDraft }: { zone: Zone; global: Record<st
       <Button
         variant="primary"
         icon="mdi:check"
-        disabled={!changed || saved || snap?.online === false}
+        disabled={!changed || saved || snap?.online !== true}
         onClick={async () => {
           if (await call("lymow", "set_zone_config", { zone_hash_id: zone.hashId, ...draft }, t("Zone settings applied"))) {
             // Recorded even if the view is gone by now, unless a newer draft replaced it.

@@ -63,7 +63,7 @@ function Hero() {
   const st = mowerState(state);
   const errorText = mower?.attributes.error_description ?? mower?.attributes.error;
   const { snap } = useMower();
-  const off = state === "unavailable" || snap?.online === false;
+  const off = state === "unavailable" || snap?.online !== true;
 
   const start = () => call("lawn_mower", "start_mowing", {}, t("Mowing started"));
   const pause = () => call("lawn_mower", "pause", {}, t("Paused"));
@@ -109,7 +109,7 @@ function Hero() {
           </Button>
         )}
         {state !== "docked" && state !== "returning" && !off && (
-          <Button variant="secondary" size="lg" icon="mdi:home-import-outline" onClick={dock}>
+          <Button variant="secondary" size="lg" icon="mdi:home-import-outline" onClick={dock} disabled={off}>
             {t("Dock")}
           </Button>
         )}

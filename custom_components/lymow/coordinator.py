@@ -474,7 +474,7 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         from an earlier cached copy)."""
         overrides = self._channel_name_overrides.get(thing_name) or {}
         map_data = patch["mapData"]
-        channels = map_data.get("channels", [])
+        channels = map_data.get("channels") if isinstance(map_data.get("channels"), list) else []
         new_channels = [
             {**ch, "name": overrides[ch["hashId"]]}
             if ch.get("hashId") in overrides

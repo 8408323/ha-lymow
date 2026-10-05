@@ -562,3 +562,23 @@ def test_devices_use_device_registry_ownership_and_tolerate_missing_mower() -> N
         patch.object(ws.dr, "async_entries_for_config_entry", create=True, return_value=devs),
     ):
         ws.ws_devices(hass, viewer, {"id": 2})  # no mower entity: must not raise
+
+
+def test_rebind_cancels_a_pending_trailing_send() -> None:
+    coord = _coordinator({"poseEastM": 1.0})
+    hass = MagicMock()
+    hass.data = {"lymow": {"entry1": coord}}
+    conn = _connection()
+    cancelled: list = []
+    with (
+        patch.object(ws, "_MIN_PUSH_INTERVAL_S", 10.0),
+        patch.object(ws, "async_call_later", lambda _h, _d, _a: lambda: cancelled.append(True)),
+    ):
+        ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
+        coord.data[THING]["poseEastM"] = 2.0
+        coord.listeners[0]()  # schedules a trailing send
+        hass.data["lymow"]["entry1"] = _coordinator({"poseEastM": 3.0})
+        ws.notify_coordinators_changed(hass)
+    assert cancelled == [True]
+    hass.data["lymow"] = {}
+    ws.notify_coordinators_changed(hass)

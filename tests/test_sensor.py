@@ -1754,7 +1754,7 @@ def test_map_payload_overlays_ha_nogo_names() -> None:
         "nogoNames": {"a": "Flower bed"},
     }
     names = [z.get("name") for z in map_payload(data)["nogo_zones"]]
-    assert names == ["Flower bed", None, "no id"]
+    assert names == ["Flower bed", None]  # the row without an id is dropped
 
 
 def test_map_payload_tolerates_malformed_rtk_status() -> None:
