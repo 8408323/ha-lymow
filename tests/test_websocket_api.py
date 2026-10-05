@@ -627,4 +627,21 @@ def test_schedules_lord_howe_fraction_follows_stored_hour() -> None:
     with patch.object(ws, "_zone_offsets", return_value=[660, 630]):  # now in DST (11:00)
         row = ws.snapshot(coord, THING)["schedules"][0]
     assert (row["hour"], row["minute"]) == (9, 0)
-    assert ws._fraction(3, [60]) == 0  # no matching offset: no fraction
+    from lymow.sensor import _fraction
+
+    assert _fraction(3, [60]) == 0  # no matching offset: no fraction
+
+
+def test_schedules_sensor_uses_the_same_fractional_offset() -> None:
+    from lymow.sensor import LymowSchedulesSensor
+
+    coord = MagicMock()
+    coord.data = {
+        THING: {"schedules": [{"id": 1, "hour": 3, "minute": 30, "timeZone": 5, "dayOfWeek": [1], "zones": ["z"]}]}
+    }
+    coord.hass = SimpleNamespace(config=SimpleNamespace(time_zone="Asia/Kolkata"))
+    sensor = LymowSchedulesSensor.__new__(LymowSchedulesSensor)
+    sensor.coordinator = coord
+    sensor._thing_name = THING
+    row = sensor.extra_state_attributes["schedules"][0]
+    assert (row["hour"], row["minute"]) == (9, 0)

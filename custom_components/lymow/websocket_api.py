@@ -11,9 +11,7 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
@@ -24,7 +22,7 @@ from homeassistant.helpers.event import async_call_later
 
 from .const import DOMAIN
 from .coordinator import _is_device_online
-from .sensor import _schedule_to_local, map_payload
+from .sensor import _schedule_to_local, _zone_offsets, map_payload
 
 # homeassistant.auth.permissions.const.POLICY_READ
 POLICY_READ = "read"
@@ -154,37 +152,6 @@ def _int_in(value: Any, lo: int, hi: int) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) and lo <= value <= hi else None
 
 
-def _zone_offsets(coordinator: Any) -> list[int] | None:
-    """Home Assistant's UTC offsets in minutes over the year (current first; one or
-    two values with DST), or None if the time zone is unknown.
-
-    The mower stores schedule times in UTC with an offset truncated to whole hours,
-    which loses the :30 of zones like UTC+5:30; these supply it."""
-    name = getattr(getattr(getattr(coordinator, "hass", None), "config", None), "time_zone", None)
-    if not isinstance(name, str):
-        return None
-    try:
-        zone = ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        return None
-    now = datetime.now(zone)
-    out: list[int] = []
-    for when in (now, now + timedelta(days=182)):
-        off = when.utcoffset()
-        if off is not None and (m := int(off.total_seconds() // 60)) not in out:
-            out.append(m)
-    return out or None
-
-
-def _fraction(stored_hours: int, offsets: list[int]) -> int:
-    """Minutes the stored whole-hour offset dropped: those of the zone offset that
-    truncates to it (so DST in zones like Lord Howe, 10:30 ↔ 11:00, is handled)."""
-    for m in offsets:
-        if int(m / 60) == stored_hours:
-            return m - stored_hours * 60
-    return 0
-
-
 def _schedule(sched: Any, offsets: list[int] | None = None) -> dict[str, Any] | None:
     """A schedule in local time, or None when the decoded entry is malformed."""
     if not isinstance(sched, dict):
@@ -203,13 +170,10 @@ def _schedule(sched: Any, offsets: list[int] | None = None) -> dict[str, Any] | 
     if not zones:
         return None  # a zone-less mower schedule mows nothing; don't show it as "All zones"
     row = {**sched, "dayOfWeek": days, "zones": zones}
-    if offsets is None:
-        return _schedule_to_local(row)
     # The stored whole-hour offset is what the schedule was created with (it keeps a
     # recurring schedule stable across DST); HA's zone only adds the fractional part
     # the wire format can't carry (e.g. the :30 of UTC+5:30).
-    day_delta, rem = divmod(hour * 60 + minute + tz * 60 + _fraction(tz, offsets), 1440)
-    return {**row, "hour": rem // 60, "minute": rem % 60, "dayOfWeek": [(d + day_delta) % 7 for d in days]}
+    return _schedule_to_local(row, offsets)
 
 
 # Snapshot parts and the sensor whose read permission guards each (unique-id suffix),

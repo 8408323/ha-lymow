@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -900,11 +901,48 @@ class LymowMapSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
         return map_payload(self.coordinator.data.get(self._thing_name) or {})
 
 
-def _schedule_to_local(sched: dict[str, Any]) -> dict[str, Any]:
-    """Copy a decoded schedule with hour/minute/dayOfWeek shifted from stored UTC to local (via timeZone)."""
+def _zone_offsets(coordinator: Any) -> list[int] | None:
+    """Home Assistant's UTC offsets in minutes over the year (current first; one or
+    two values with DST), or None if the time zone is unknown.
+
+    The mower stores schedule times in UTC with an offset truncated to whole hours,
+    which loses the :30 of zones like UTC+5:30; these supply it."""
+    name = getattr(getattr(getattr(coordinator, "hass", None), "config", None), "time_zone", None)
+    if not isinstance(name, str):
+        return None
+    try:
+        zone = ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    now = datetime.now(zone)
+    out: list[int] = []
+    for when in (now, now + timedelta(days=182)):
+        off = when.utcoffset()
+        if off is not None and (m := int(off.total_seconds() // 60)) not in out:
+            out.append(m)
+    return out or None
+
+
+def _fraction(stored_hours: int, offsets: list[int]) -> int:
+    """Minutes the stored whole-hour offset dropped: those of the zone offset that
+    truncates to it (so DST in zones like Lord Howe, 10:30 ↔ 11:00, is handled)."""
+    for m in offsets:
+        if int(m / 60) == stored_hours:
+            return m - stored_hours * 60
+    return 0
+
+
+def _schedule_to_local(sched: dict[str, Any], offsets: list[int] | None = None) -> dict[str, Any]:
+    """Copy a decoded schedule with hour/minute/dayOfWeek shifted from stored UTC to
+    local time: the stored whole-hour ``timeZone`` plus, when Home Assistant's zone
+    offsets are known, the fractional minutes the wire format can't carry."""
     out = dict(sched)
     offset = int(sched.get("timeZone", 0) or 0)
-    day_delta, out["hour"] = divmod(int(sched.get("hour", 0)) + offset, 24)
+    extra = _fraction(offset, offsets) if offsets else 0
+    day_delta, rem = divmod(
+        int(sched.get("hour", 0)) * 60 + int(sched.get("minute", 0) or 0) + offset * 60 + extra, 1440
+    )
+    out["hour"], out["minute"] = rem // 60, rem % 60
     days = sched.get("dayOfWeek")
     if days:
         out["dayOfWeek"] = [(int(d) + day_delta) % 7 for d in days]
@@ -938,7 +976,8 @@ class LymowSchedulesSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         schedules = (self.coordinator.data.get(self._thing_name) or {}).get("schedules") or []
-        return {"schedules": [_schedule_to_local(s) for s in schedules]}
+        offsets = _zone_offsets(self.coordinator)
+        return {"schedules": [_schedule_to_local(s, offsets) for s in schedules]}
 
 
 class LymowPoseHeadingSensor(CoordinatorEntity[LymowCoordinator], SensorEntity):
