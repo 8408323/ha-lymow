@@ -4331,3 +4331,27 @@ def test_edit_echo_with_unhashable_ids_does_not_raise() -> None:
     coord, _, _ = _make_coordinator()
     coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}, {"hashId": ["x"]}]}}}
     coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": ["x"], "name": "N", "polygon": []}]}})
+
+
+@pytest.mark.asyncio
+async def test_backup_refresh_sleeps_the_gap_between_offsets() -> None:
+    coord, _, _ = _make_coordinator()
+    coord._async_publish_backups = AsyncMock()
+    slept: list = []
+
+    async def _sleep(s):
+        slept.append(s)
+
+    with patch("lymow.coordinator.asyncio.sleep", _sleep):
+        await coord._async_refresh_backups_soon(THING)
+    assert slept == [8, 12, 25] and coord._async_publish_backups.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_set_zone_config_tolerates_scalar_zone_rows() -> None:
+    coord, mqtt, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [1, {"hashId": "z", "isEnabled": False}]}}}
+    coord.async_query_map = AsyncMock()
+    with patch("lymow.protocol.encode_set_zone_config", return_value=b"x") as enc:
+        await coord.async_set_zone_config(THING, [{"hashId": "z", "cutHeight": 50}])
+    assert enc.call_args.args[0][0]["isEnabled"] is False

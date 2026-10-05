@@ -70,6 +70,10 @@ def _find(hass: HomeAssistant, thing: str) -> Any | None:
     return None
 
 
+def _dict(v: Any) -> dict:
+    return v if isinstance(v, dict) else {}
+
+
 def _list(v: Any) -> list:
     return v if isinstance(v, list) else []
 
@@ -213,9 +217,7 @@ def snapshot(coordinator: Any, thing: str) -> dict[str, Any]:
         "map": _finite({k: v for k, v in map_payload(data).items() if k != "gps_origin"}),
         # Live run-time overrides: the map reply's copy, overlaid by the values the
         # coordinator mirrors after a successful set_run_time_config.
-        "run_time_config": _finite(
-            {**((data.get("mapData") or {}).get("runTimeConfig") or {}), **(data.get("runTimeConfig") or {})}
-        ),
+        "run_time_config": _finite({**_dict(data["mapData"].get("runTimeConfig")), **_dict(data.get("runTimeConfig"))}),
         # None = not received yet (a query is in flight). The panel must not edit
         # schedules then: add_schedule writes the full list and would drop the rest.
         "schedules": None

@@ -214,7 +214,7 @@ export function MapView() {
     if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) return;
     if (e.key === "Escape") focus ? requestLeave() : mode === "edit" ? exitEdit() : setSelected(new Set());
     else if ((e.key === "Delete" || e.key === "Backspace") && vertex !== null) deleteVertex();
-    else if (e.key === "e" && mode === "browse") setMode("edit");
+    else if (e.key === "e" && mode === "browse" && device.can_control !== false) setMode("edit");
   };
   useEffect(() => {
     const h = (e: KeyboardEvent) => keyRef.current(e);
@@ -380,9 +380,10 @@ function BrowsePanel(p: {
   setShowTrail: (v: boolean) => void;
 }) {
   const t = useT();
-  const { call, snap } = useMower();
-  // Like Overview's Start: an offline mower can't start now (and might later, unexpectedly).
-  const online = snap?.online === true;
+  const { call, snap, device } = useMower();
+  // Like Overview's Start: an offline mower can't start now (and might later,
+  // unexpectedly); read-only users can't act at all.
+  const online = snap?.online === true && device.can_control !== false;
   const ui = useUi();
   const zones = p.map.go_zones ?? [];
   // Only zones still on the map: one deleted elsewhere must not be sent to the mower.
@@ -442,7 +443,7 @@ function BrowsePanel(p: {
             {t("Merge selected")}
           </Button>
         )}
-        <Button icon="mdi:pencil-ruler" block onClick={p.onEdit}>
+        <Button icon="mdi:pencil-ruler" block onClick={p.onEdit} disabled={device.can_control === false}>
           {t("Edit map")}
         </Button>
       </div>

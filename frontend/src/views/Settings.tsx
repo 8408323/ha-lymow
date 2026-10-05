@@ -367,7 +367,8 @@ function Headlight() {
   };
   const liveKey = JSON.stringify(live);
   useEffect(() => {
-    if (draft && JSON.stringify(draft.on ? draft : { ...live, on: false }) === liveKey) {
+    // Only a reported state can confirm; the fallback "off" when unknown can't.
+    if (draft && known && JSON.stringify(draft.on ? draft : { ...live, on: false }) === liveKey) {
       setDraft(null);
       setSaved(false);
     }

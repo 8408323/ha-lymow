@@ -37,7 +37,8 @@ function Thumb({ b }: { b: Backup }) {
 
 export function BackupsView() {
   const { t, locale } = useI18n();
-  const { snap, call } = useMower();
+  const { snap, call, device } = useMower();
+  const canAct = device.can_control !== false; // read-only users see the list only
   const ui = useUi();
   // Hidden by permissions: never offer backups a user can't see (they'd pile up unseen).
   if (snap?.backups === "hidden")
@@ -53,7 +54,7 @@ export function BackupsView() {
         title={t("Map backups")}
         icon="mdi:cloud-sync-outline"
         actions={
-          <Button variant="primary" icon="mdi:cloud-upload-outline" disabled={snap?.online !== true} onClick={() => call("lymow", "backup_map", {}, t("Backup requested — it shows up here within a few minutes"))}>
+          <Button variant="primary" icon="mdi:cloud-upload-outline" disabled={snap?.online !== true || !canAct} onClick={() => call("lymow", "backup_map", {}, t("Backup requested — it shows up here within a few minutes"))}>
             {t("Back up now")}
           </Button>
         }
@@ -76,6 +77,7 @@ export function BackupsView() {
                   </div>
                   <div className="ly-btnrow">
                     <Button
+                      disabled={!canAct}
                       icon="mdi:backup-restore"
                       onClick={async () => {
                         if (await ui.confirm({ title: t("Restore “{name}”?", { name }), body: t("The mower's current map is replaced by this backup. No-go areas are not always restored — check them on the map afterwards before mowing."), confirm: t("Restore"), danger: true }))
@@ -85,6 +87,7 @@ export function BackupsView() {
                       {t("Restore")}
                     </Button>
                     <Button
+                      disabled={!canAct}
                       variant="ghost"
                       icon="mdi:rename-outline"
                       title={t("Rename")}
@@ -94,6 +97,7 @@ export function BackupsView() {
                       }}
                     />
                     <Button
+                      disabled={!canAct}
                       variant="ghost"
                       icon="mdi:delete-outline"
                       title={t("Delete")}

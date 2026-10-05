@@ -583,3 +583,7 @@ def test_rebind_cancels_a_pending_trailing_send() -> None:
     assert cancelled == [True]
     hass.data["lymow"] = {}
     ws.notify_coordinators_changed(hass)
+
+
+def test_snapshot_tolerates_non_mapping_nested_run_time_config() -> None:
+    assert ws.snapshot(_coordinator({"mapData": {"runTimeConfig": 1}}), THING)["run_time_config"] == {}

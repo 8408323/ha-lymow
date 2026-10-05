@@ -1722,9 +1722,9 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         # The wire record always carries isEnabled (an omitted value encodes as
         # enabled), so a settings-only update would silently re-enable a zone the
         # user switched off. Fill it in from the cached map.
-        cached = {
-            z.get("hashId"): z for z in ((self.data or {}).get(thing_name, {}).get("mapData") or {}).get("goZones", [])
-        }
+        map_data = (self.data or {}).get(thing_name, {}).get("mapData")
+        zones = map_data.get("goZones") if isinstance(map_data, dict) else None
+        cached = {z.get("hashId"): z for z in (zones if isinstance(zones, list) else []) if isinstance(z, dict)}
         updates = [
             u if "isEnabled" in u else {**u, "isEnabled": cached.get(u.get("hashId"), {}).get("isEnabled", True)}
             for u in updates
@@ -2105,8 +2105,11 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         without waiting out the 5-min list cache (the backend lists it only once the
         snapshot has uploaded). Each poll forces a fresh fetch and pushes an update."""
 
-        for delay in _BACKUP_REFRESH_OFFSETS_S:
-            await asyncio.sleep(delay)
+        # The offsets are measured from the create, so sleep only the gap to each.
+        previous = 0
+        for offset in _BACKUP_REFRESH_OFFSETS_S:
+            await asyncio.sleep(offset - previous)
+            previous = offset
             await self._async_publish_backups(thing_name)
 
     async def async_delete_backup_map(self, thing_name: str, object_key: str) -> None:

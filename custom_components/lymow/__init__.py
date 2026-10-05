@@ -236,13 +236,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _LOGGER.debug("Lymow setup complete: %d device(s) in region %s", len(devices), region)
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
-    websocket_api.notify_coordinators_changed(hass)
 
     # Reload the entry when options change so edits (e.g. the camera RTSP
     # path/port) take effect without a manual reload.
     entry.async_on_unload(entry.add_update_listener(partial(_async_reload_entry, options=dict(entry.options))))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Announce the new coordinator only now: before the platforms exist the mower
+    # entity isn't in the service registry, so panel calls would silently do nothing.
+    websocket_api.notify_coordinators_changed(hass)
 
     # Register the sidebar panel here — only once setup has succeeded (so a failed
     # setup leaves no orphan panel) and only when the JS is served. Running on every
