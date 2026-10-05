@@ -160,6 +160,8 @@ export interface Snapshot {
   online: boolean;
   /** Epoch seconds of the mower's latest map reply. */
   map_received_at?: number | null;
+  /** The user may not read the map sensor; `map` is empty. */
+  map_hidden?: boolean;
 }
 
 const EMPTY_GRACE_MS = 60000;

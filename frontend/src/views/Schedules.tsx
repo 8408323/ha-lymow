@@ -79,7 +79,8 @@ function ScheduleList() {
     // Never lock forever: if the confirming reply was lost, ask the mower again.
     const t = window.setTimeout(() => {
       setAwaitingAfter(undefined);
-      if (snapRef.current?.schedules === null) call("lymow", "query_schedules"); // latest, not the armed render's
+      // Unconfirmed after 30 s: ask again, whether the list is unknown or still the old one.
+      if (snapRef.current?.online === true) call("lymow", "query_schedules");
     }, 30000);
     return () => window.clearTimeout(t);
   }, [awaitingAfter]);
@@ -99,7 +100,7 @@ function ScheduleList() {
     ask();
     return () => window.clearTimeout(id);
   }, [unknown, awaitingAfter !== undefined]);
-  const locked = busy || loading || awaitingAfter !== undefined || snap?.online !== true;
+  const locked = busy || loading || awaitingAfter !== undefined || snap?.online !== true || device.can_control === false;
   const mutate = async (fn: () => Promise<boolean>) => {
     const before = snap?.schedules;
     setBusy(true);

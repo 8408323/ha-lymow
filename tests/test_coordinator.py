@@ -4325,3 +4325,9 @@ async def test_async_merge_zones_refuses_when_one_zone_has_no_outline() -> None:
     with pytest.raises(HomeAssistantError, match="needs an outline"):
         await coord.async_merge_zones(THING, ["a", "b"])
     mqtt.async_publish_command.assert_not_called()  # nothing deleted
+
+
+def test_edit_echo_with_unhashable_ids_does_not_raise() -> None:
+    coord, _, _ = _make_coordinator()
+    coord.data = {THING: {"mapData": {"goZones": [{"hashId": "a", "polygon": [{"x": 0, "y": 0}]}, {"hashId": ["x"]}]}}}
+    coord.on_mqtt_state(THING, {"mapData": {"goZones": [{"hashId": ["x"], "name": "N", "polygon": []}]}})

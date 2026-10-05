@@ -453,12 +453,18 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         old = ((self.data or {}).get(thing_name) or {}).get("mapData")
         if not old:
             return patch
-        names = {z["hashId"]: z["name"] for z in zones if z.get("hashId") and z.get("name")}
+        names = {
+            z["hashId"]: z["name"]
+            for z in zones
+            if isinstance(z.get("hashId"), str) and z["hashId"].strip() and isinstance(z.get("name"), str) and z["name"]
+        }
         merged = {
             **old,
             **{
                 k: [
-                    {**z, "name": names[z["hashId"]]} if z.get("hashId") in names else z
+                    {**z, "name": names[z["hashId"]]}
+                    if isinstance(z, dict) and isinstance(z.get("hashId"), str) and z["hashId"] in names
+                    else z
                     for z in (old.get(k) if isinstance(old.get(k), list) else [])
                 ]
                 for k in self._MAP_LISTS

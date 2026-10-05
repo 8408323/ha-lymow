@@ -193,6 +193,8 @@ def _redact(hass: HomeAssistant, connection: websocket_api.ActiveConnection, thi
     for key, suffix, empty in _GUARDED:
         if not _can_read(connection, reg.async_get_entity_id("sensor", DOMAIN, f"{thing}_{suffix}")):
             out[key] = empty
+            if key == "map":
+                out["map_hidden"] = True  # {} alone would read as "no map yet"
     return out
 
 

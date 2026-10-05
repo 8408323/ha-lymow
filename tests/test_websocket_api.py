@@ -457,7 +457,8 @@ def test_stream_hides_parts_the_user_cannot_read() -> None:
         er_get.return_value.async_get_entity_id.side_effect = lookup
         ws.ws_subscribe(hass, conn, {"id": 7, "thing": THING})
     event = conn.send_message.call_args.args[0]["event"]
-    assert event["map"] == {} and event["backups"] == "hidden" and event["run_time_config"] == {}
+    assert event["map"] == {} and event["map_hidden"] is True
+    assert event["backups"] == "hidden" and event["run_time_config"] == {}
     assert event["map_received_at"] is None
     assert event["schedules"][0]["minute"] == 0
 

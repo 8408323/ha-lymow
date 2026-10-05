@@ -222,6 +222,12 @@ export function MapView() {
     return () => window.removeEventListener("keydown", h);
   }, []);
 
+  if (snap?.map_hidden)
+    return (
+      <Empty icon="mdi:lock-outline" title={t("Map not available")}>
+        {t("Your Home Assistant user doesn't have access to this mower's map.")}
+      </Empty>
+    );
   if (!map) {
     return (
       <div className="ly-loading">
