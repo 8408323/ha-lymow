@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import re
 import time
 import uuid
@@ -2334,8 +2335,19 @@ class LymowCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         if missing:
             raise HomeAssistantError(f"Zone(s) not found in map: {missing}")
         polygons = [existing[h].get("polygon") for h in hash_ids]
+
         # Every zone needs an outline: one without would be deleted without being merged.
-        if any(not isinstance(p, list) or len(p) < 3 for p in polygons):
+        def _ok(pt: Any) -> bool:
+            return isinstance(pt, dict) and all(
+                isinstance(pt.get(k), (int, float))
+                and not isinstance(pt.get(k), bool)
+                and math.isfinite(pt[k])
+                and abs(pt[k]) < 1e5
+                for k in ("x", "y")
+            )
+
+        # Every vertex must be a sane point: a NaN would slip past the area checks below.
+        if any(not isinstance(p, list) or len(p) < 3 or not all(_ok(pt) for pt in p) for p in polygons):
             raise HomeAssistantError("Every zone to merge needs an outline; refresh the map and try again")
         try:
             merged_hull = merge_zone_polygons(*polygons)

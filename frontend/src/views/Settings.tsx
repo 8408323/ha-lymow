@@ -46,7 +46,7 @@ function blocked(snap: Snapshot | undefined, device: LymowDevice): boolean {
 
 function Firmware() {
   const t = useT();
-  const { call, ent } = useMower();
+  const { call, ent, snap, device } = useMower();
   const ui = useUi();
   const e = useMowerEntity("firmware_update");
   if (!e) return null;
@@ -73,7 +73,7 @@ function Firmware() {
         <Button
           variant="primary"
           icon="mdi:download"
-          disabled={!available}
+          disabled={!available || blocked(snap, device)}
           onClick={async () => {
             if (await ui.confirm({ title: t("Install firmware {v}?", { v: a.latest_version }), body: t("The mower restarts during the update. Keep it charging on the dock."), confirm: t("Install") }))
               await call("update", "install", { entity_id: ent("firmware_update") }, t("Firmware update started"));

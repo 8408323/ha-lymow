@@ -4361,3 +4361,24 @@ def test_channel_overrides_skip_unhashable_ids() -> None:
     coord, _, _ = _make_coordinator()
     out = coord._apply_channel_name_overrides(THING, {"mapData": {"channels": [{"hashId": [], "name": "x"}]}})
     assert out["mapData"]["channels"] == [{"hashId": []}]
+
+
+@pytest.mark.asyncio
+async def test_async_merge_zones_refuses_non_finite_vertices() -> None:
+    from homeassistant.exceptions import HomeAssistantError
+
+    coord, mqtt, _ = _make_coordinator()
+    sq = [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}, {"x": 2.0, "y": 2.0}]
+    coord.data = {
+        THING: {
+            "mapData": {
+                "goZones": [
+                    {"hashId": "a", "polygon": sq},
+                    {"hashId": "b", "polygon": [*sq, {"x": float("nan"), "y": 0.0}]},
+                ]
+            }
+        }
+    }
+    with pytest.raises(HomeAssistantError, match="needs an outline"):
+        await coord.async_merge_zones(THING, ["a", "b"])
+    mqtt.async_publish_command.assert_not_called()
